@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.StarBorder
@@ -110,6 +111,12 @@ fun TopBar(
                 modifier = Modifier.weight(1f),
             )
             if (state.screen == Screen.Browse) {
+                IconButton(onClick = viewModel::openBackupDialog) {
+                    Icon(
+                        imageVector = Icons.Outlined.CloudUpload,
+                        contentDescription = "백업 및 복원",
+                    )
+                }
                 IconButton(onClick = viewModel::openHistory) {
                     Icon(
                         imageVector = Icons.Outlined.History,
@@ -123,12 +130,20 @@ fun TopBar(
                     )
                 }
             }
-            if (state.screen == Screen.History && state.historyItems.isNotEmpty()) {
-                IconButton(onClick = viewModel::clearAllHistory) {
+            if (state.screen == Screen.History) {
+                IconButton(onClick = viewModel::openBackupDialog) {
                     Icon(
-                        imageVector = Icons.Outlined.Delete,
-                        contentDescription = "기록 전체 삭제",
+                        imageVector = Icons.Outlined.CloudUpload,
+                        contentDescription = "백업 및 복원",
                     )
+                }
+                if (state.historyItems.isNotEmpty()) {
+                    IconButton(onClick = viewModel::clearAllHistory) {
+                        Icon(
+                            imageVector = Icons.Outlined.Delete,
+                            contentDescription = "기록 전체 삭제",
+                        )
+                    }
                 }
             }
             if (state.screen == Screen.Series) {

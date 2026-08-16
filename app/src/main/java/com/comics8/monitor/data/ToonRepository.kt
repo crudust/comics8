@@ -1,5 +1,6 @@
 package com.comics8.monitor.data
 
+import com.comics8.monitor.data.local.AppDatabase
 import com.comics8.monitor.data.local.FavoriteDao
 import com.comics8.monitor.data.local.FavoriteToon
 import com.comics8.monitor.data.local.ReadEpisode
@@ -20,6 +21,7 @@ class ToonRepository(
     private val readerSettingDao: ReaderSettingDao,
     private val readEpisodeDao: ReadEpisodeDao,
     private val readHistoryDao: ReadHistoryDao,
+    private val database: AppDatabase? = null,
     private val now: () -> Long = { System.currentTimeMillis() },
 ) {
     suspend fun loadListing(catalog: Catalog, page: Int): ListingPage = withContext(Dispatchers.IO) {
@@ -228,6 +230,21 @@ class ToonRepository(
 
     suspend fun clearHistory() = withContext(Dispatchers.IO) {
         readHistoryDao.clearAll()
+    }
+
+    suspend fun exportBackupJson(): String = withContext(Dispatchers.IO) {
+        val db = database ?: error("데이터베이스를 찾을 수 없습니다.")
+        BackupManager.createBackupJson(db)
+    }
+
+    suspend fun importBackupJson(jsonString: String): BackupRestoreResult = withContext(Dispatchers.IO) {
+        val db = database ?: error("데이터베이스를 찾을 수 없습니다.")
+        BackupManager.restoreBackupJson(db, jsonString)
+    }
+
+    suspend fun getBackupStats(): BackupStats = withContext(Dispatchers.IO) {
+        val db = database ?: return@withContext BackupStats()
+        BackupManager.getStats(db)
     }
 
     private fun notifyKey(item: ToonItem): String = "${item.id}|${item.updatedAt.orEmpty()}"

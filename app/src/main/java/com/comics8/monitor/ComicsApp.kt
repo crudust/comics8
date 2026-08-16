@@ -28,6 +28,7 @@ class ComicsApp : Application(), ImageLoaderFactory {
             db.readerSettingDao(),
             db.readEpisodeDao(),
             db.readHistoryDao(),
+            database = db,
         )
         RefreshWorker.enqueue(this)
     }

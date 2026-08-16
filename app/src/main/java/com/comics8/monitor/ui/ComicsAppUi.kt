@@ -32,6 +32,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.comics8.monitor.data.Catalog
 import com.comics8.monitor.data.ViewMode
 import com.comics8.monitor.ui.browse.ListingGrid
+import com.comics8.monitor.ui.components.BackupDialog
 import com.comics8.monitor.ui.components.ErrorPane
 import com.comics8.monitor.ui.components.LoadingPane
 import com.comics8.monitor.ui.components.PageJumpDialog
@@ -152,6 +153,13 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                         viewModel.goToPage(page)
                     }
                 },
+            )
+        }
+        if (state.showBackupDialog) {
+            BackupDialog(
+                state = state,
+                viewModel = viewModel,
+                onDismiss = viewModel::closeBackupDialog,
             )
         }
     }

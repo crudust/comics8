@@ -50,6 +50,9 @@ interface FavoriteDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(item: FavoriteToon)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(items: List<FavoriteToon>)
+
     @Query("DELETE FROM favorites WHERE id = :id")
     suspend fun delete(id: String)
 }
@@ -82,8 +85,14 @@ interface ReaderSettingDao {
     @Query("SELECT * FROM reader_settings WHERE toonId = :toonId")
     suspend fun getSetting(toonId: String): ReaderSetting?
 
+    @Query("SELECT * FROM reader_settings")
+    suspend fun all(): List<ReaderSetting>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun saveSetting(setting: ReaderSetting)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun saveAll(settings: List<ReaderSetting>)
 }
 
 @Entity(tableName = "read_episodes", primaryKeys = ["toonId", "wrId"])
@@ -102,11 +111,17 @@ interface ReadEpisodeDao {
     @Query("SELECT * FROM read_episodes WHERE toonId = :toonId AND wrId = :wrId")
     suspend fun getReadEpisode(toonId: String, wrId: String): ReadEpisode?
 
+    @Query("SELECT * FROM read_episodes")
+    suspend fun all(): List<ReadEpisode>
+
     @Query("SELECT wrId FROM read_episodes WHERE toonId = :toonId")
     suspend fun getReadWrIds(toonId: String): List<String>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun markRead(item: ReadEpisode)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun markReadAll(items: List<ReadEpisode>)
 
     @Query("UPDATE read_episodes SET lastPage = :page WHERE toonId = :toonId AND wrId = :wrId")
     suspend fun updateLastPage(toonId: String, wrId: String, page: Int)
@@ -143,6 +158,9 @@ interface ReadHistoryDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(item: ReadHistory)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(items: List<ReadHistory>)
 
     @Query("DELETE FROM read_history WHERE toonId = :toonId")
     suspend fun delete(toonId: String)

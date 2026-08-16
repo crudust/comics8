@@ -2,9 +2,11 @@ package com.comics8.monitor.ui
 
 import android.app.Application
 import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.comics8.monitor.ComicsApp
+import com.comics8.monitor.data.BackupStats
 import com.comics8.monitor.data.Catalog
 import com.comics8.monitor.data.EpisodeItem
 import com.comics8.monitor.data.ReadDirection
@@ -50,6 +52,10 @@ data class ListingUiState(
     val seriesHistory: ReadHistory? = null,
     val historyItems: List<ReadHistory> = emptyList(),
     val historyLoading: Boolean = false,
+    val showBackupDialog: Boolean = false,
+    val backupStats: BackupStats? = null,
+    val backupMessage: String? = null,
+    val backupProcessing: Boolean = false,
 ) {
     val isSearch: Boolean get() = searchQuery != null
 
@@ -468,6 +474,85 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                     items = updatedItems,
                     seriesHistory = null,
                 )
+            }
+        }
+    }
+
+    fun openBackupDialog() {
+        _state.update { it.copy(showBackupDialog = true, backupMessage = null) }
+        viewModelScope.launch {
+            val stats = repository.getBackupStats()
+            _state.update { it.copy(backupStats = stats) }
+        }
+    }
+
+    fun closeBackupDialog() {
+        _state.update { it.copy(showBackupDialog = false, backupMessage = null) }
+    }
+
+    fun exportBackup(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            _state.update { it.copy(backupProcessing = true, backupMessage = null) }
+            try {
+                val json = repository.exportBackupJson()
+                context.contentResolver.openOutputStream(uri)?.use { output ->
+                    output.write(json.toByteArray(Charsets.UTF_8))
+                }
+                val stats = repository.getBackupStats()
+                _state.update {
+                    it.copy(
+                        backupProcessing = false,
+                        backupStats = stats,
+                        backupMessage = "✅ 백업 파일 저장이 완료되었습니다.",
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(
+                        backupProcessing = false,
+                        backupMessage = "❌ 백업 저장 실패: ${e.localizedMessage ?: "알 수 없는 오류"}",
+                    )
+                }
+            }
+        }
+    }
+
+    fun importBackup(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            _state.update { it.copy(backupProcessing = true, backupMessage = null) }
+            try {
+                val json = context.contentResolver.openInputStream(uri)?.use { input ->
+                    input.bufferedReader(Charsets.UTF_8).readText()
+                } ?: error("파일을 읽을 수 없습니다.")
+
+                val result = repository.importBackupJson(json)
+                if (result.success) {
+                    val stats = repository.getBackupStats()
+                    loadPage(page = _state.value.page, replace = true)
+                    val updatedHistory = repository.getHistory()
+                    _state.update {
+                        it.copy(
+                            backupProcessing = false,
+                            backupStats = stats,
+                            historyItems = updatedHistory,
+                            backupMessage = "✅ 복원 완료: 즐겨찾기 ${result.favoriteCount}개, 읽음 기록 ${result.historyCount}개",
+                        )
+                    }
+                } else {
+                    _state.update {
+                        it.copy(
+                            backupProcessing = false,
+                            backupMessage = "❌ ${result.message}",
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(
+                        backupProcessing = false,
+                        backupMessage = "❌ 복원 실패: ${e.localizedMessage ?: "알 수 없는 오류"}",
+                    )
+                }
             }
         }
     }
