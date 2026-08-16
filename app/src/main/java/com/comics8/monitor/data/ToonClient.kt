@@ -23,6 +23,14 @@ class ToonClient(
         }
     }
 
+    /**
+     * Fetches an episode page and extracts the image URLs to display in a reader.
+     */
+    fun fetchImages(url: String): List<String> {
+        val html = fetch(url)
+        return HtmlParsers.parseImages(html, ComicSite.ORIGIN)
+    }
+
     companion object {
         const val USER_AGENT =
             "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"

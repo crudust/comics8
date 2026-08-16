@@ -40,6 +40,36 @@ object HtmlParsers {
         return EpisodePage(items = items, currentPage = current, lastPage = lastPage)
     }
 
+    /**
+     * Parses an episode page and extracts the comic image URLs.
+     * Handles both standard <img> tags and CSS background‑image styles.
+     */
+    fun parseImages(html: String, baseUri: String = ComicSite.ORIGIN): List<String> {
+        val doc = Jsoup.parse(html, baseUri)
+        val urls = LinkedHashSet<String>()
+
+        doc.select("img").forEach { img ->
+            val url = when {
+                img.hasAttr("data-src") -> img.attr("abs:data-src")
+                img.hasAttr("data-original") -> img.attr("abs:data-original")
+                else -> img.attr("abs:src")
+            }
+            if (url.isNotBlank() && isImageUrl(url)) {
+                urls.add(url)
+            }
+        }
+
+        doc.select("[style*='background']").forEach { el ->
+            val bg = extractBackgroundUrl(el.attr("style")) ?: return@forEach
+            val absBg = ComicSite.absUrl(bg, baseUri)
+            if (isImageUrl(absBg)) {
+                urls.add(absBg)
+            }
+        }
+
+        return urls.toList()
+    }
+
     internal fun extractBackgroundUrl(style: String?): String? {
         if (style.isNullOrBlank()) return null
         return bgUrlRegex.find(style)?.groupValues?.get(2)?.trim()?.trim('\'', '"')
@@ -114,5 +144,14 @@ object HtmlParsers {
             thumbUrl = rawThumb?.let { ComicSite.absUrl(it, baseUri) },
             href = href,
         )
+    }
+
+    private fun isImageUrl(url: String): Boolean {
+        val lower = url.lowercase()
+        return lower.contains(".jpg") ||
+            lower.contains(".jpeg") ||
+            lower.contains(".png") ||
+            lower.contains(".webp") ||
+            lower.contains(".gif")
     }
 }
