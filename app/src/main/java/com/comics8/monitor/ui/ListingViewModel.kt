@@ -1,6 +1,7 @@
 package com.comics8.monitor.ui
 
 import android.app.Application
+import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.comics8.monitor.ComicsApp
@@ -65,7 +66,38 @@ sealed interface Screen {
 
 class ListingViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = (application as ComicsApp).repository
-    private val _state = MutableStateFlow(ListingUiState())
+    private val prefs = application.getSharedPreferences("comics_reader_prefs", Context.MODE_PRIVATE)
+
+    var singleViewPreference: ViewMode
+        get() = try {
+            val name = prefs.getString("single_view_mode", ViewMode.SCROLL.name)
+            if (name == ViewMode.PAGE.name) ViewMode.PAGE else ViewMode.SCROLL
+        } catch (_: Exception) {
+            ViewMode.SCROLL
+        }
+        private set(value) {
+            prefs.edit().putString("single_view_mode", value.name).apply()
+        }
+
+    var globalReadDirection: ReadDirection
+        get() = try {
+            val name = prefs.getString("read_direction", ReadDirection.RIGHT_TO_LEFT.name)
+            if (name == ReadDirection.LEFT_TO_RIGHT.name) ReadDirection.LEFT_TO_RIGHT else ReadDirection.RIGHT_TO_LEFT
+        } catch (_: Exception) {
+            ReadDirection.RIGHT_TO_LEFT
+        }
+        private set(value) {
+            prefs.edit().putString("read_direction", value.name).apply()
+        }
+
+    private var currentScreenWidthDp: Int = 0
+
+    private val _state = MutableStateFlow(
+        ListingUiState(
+            viewMode = ViewMode.SCROLL,
+            readDirection = ReadDirection.RIGHT_TO_LEFT,
+        ),
+    )
     val state: StateFlow<ListingUiState> = _state.asStateFlow()
 
     private var listJob: Job? = null
@@ -73,6 +105,12 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     private var readerJob: Job? = null
 
     init {
+        _state.update {
+            it.copy(
+                viewMode = singleViewPreference,
+                readDirection = globalReadDirection,
+            )
+        }
         refresh(force = true)
     }
 
@@ -186,7 +224,20 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         _state.update { it.copy(showPageJump = show) }
     }
 
+    fun updateScreenWidthDp(widthDp: Int) {
+        currentScreenWidthDp = widthDp
+        val targetMode = if (widthDp >= 600) ViewMode.DUAL else singleViewPreference
+        _state.update {
+            it.copy(
+                viewMode = targetMode,
+                readDirection = globalReadDirection,
+            )
+        }
+    }
+
     fun openSeries(item: ToonItem) {
+        episodeJob?.cancel()
+        val targetMode = if (currentScreenWidthDp >= 600) ViewMode.DUAL else singleViewPreference
         _state.update {
             it.copy(
                 screen = Screen.Series,
@@ -196,19 +247,16 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 episodeLastPage = 1,
                 episodeError = null,
                 seriesFavorited = false,
+                viewMode = targetMode,
+                readDirection = globalReadDirection,
             )
         }
         loadEpisodes(item, 1)
         viewModelScope.launch {
             val favorited = repository.isFavorite(item.id)
-            val savedSetting = repository.getReaderSetting(item.id)
             _state.update { current ->
                 if (current.series?.id == item.id) {
-                    current.copy(
-                        seriesFavorited = favorited,
-                        viewMode = savedSetting?.first ?: current.viewMode,
-                        readDirection = savedSetting?.second ?: current.readDirection,
-                    )
+                    current.copy(seriesFavorited = favorited)
                 } else {
                     current
                 }
@@ -353,21 +401,15 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setViewMode(mode: ViewMode) {
-        _state.update { it.copy(viewMode = mode) }
-        val series = _state.value.series ?: return
-        val dir = _state.value.readDirection
-        viewModelScope.launch {
-            repository.saveReaderSetting(series.id, mode, dir)
+        if (mode == ViewMode.SCROLL || mode == ViewMode.PAGE) {
+            singleViewPreference = mode
         }
+        _state.update { it.copy(viewMode = mode) }
     }
 
     fun setReadDirection(direction: ReadDirection) {
+        globalReadDirection = direction
         _state.update { it.copy(readDirection = direction) }
-        val series = _state.value.series ?: return
-        val mode = _state.value.viewMode
-        viewModelScope.launch {
-            repository.saveReaderSetting(series.id, mode, direction)
-        }
     }
 
     fun goToEpisodePage(page: Int) {
