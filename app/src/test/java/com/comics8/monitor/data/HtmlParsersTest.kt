@@ -56,6 +56,47 @@ class HtmlParsersTest {
         assertThat(url).isEqualTo("//11toon8.com/data/toon_category/1.webp")
     }
 
+    @Test
+    fun parseImagesFromJsArray() {
+        val html = """
+            <html>
+            <script>
+            var img_list = [
+                "//www.pl3040.com/kr//01/7883/1827530/1.jpg",
+                "//www.pl3040.com/kr//01/7883/1827530/2.jpg",
+                "//www.pl3040.com/kr//01/7883/1827530/3.jpg"
+            ];
+            </script>
+            </html>
+        """.trimIndent()
+
+        val images = HtmlParsers.parseImages(html, ComicSite.ORIGIN)
+        assertThat(images).hasSize(3)
+        assertThat(images[0]).isEqualTo("https://www.pl3040.com/kr//01/7883/1827530/1.jpg")
+        assertThat(images[1]).isEqualTo("https://www.pl3040.com/kr//01/7883/1827530/2.jpg")
+        assertThat(images[2]).isEqualTo("https://www.pl3040.com/kr//01/7883/1827530/3.jpg")
+    }
+
+    @Test
+    fun parseImagesFromDomElements() {
+        val html = """
+            <html>
+            <body>
+            <div id="scroll-list" class="view-content">
+                <img src="/data/1.jpg">
+                <img data-src="/data/2.webp">
+                <img src="/toonfile/toonres/img/192x192.jpg">
+            </div>
+            </body>
+            </html>
+        """.trimIndent()
+
+        val images = HtmlParsers.parseImages(html, ComicSite.ORIGIN)
+        assertThat(images).hasSize(2)
+        assertThat(images[0]).isEqualTo("http://103.204.13.68:8904/data/1.jpg")
+        assertThat(images[1]).isEqualTo("http://103.204.13.68:8904/data/2.webp")
+    }
+
     private fun readFixture(name: String): String =
         checkNotNull(javaClass.classLoader?.getResourceAsStream(name)).bufferedReader().readText()
 }

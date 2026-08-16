@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -27,6 +28,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -39,6 +41,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -46,6 +49,7 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -89,7 +93,9 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
         }
     }
 
-    if (state.screen == Screen.Series) {
+    if (state.screen == Screen.Reader) {
+        BackHandler { viewModel.closeReader() }
+    } else if (state.screen == Screen.Series) {
         BackHandler { viewModel.closeSeries() }
     } else if (state.isSearch) {
         BackHandler { viewModel.selectCatalog(state.catalog) }
@@ -104,6 +110,7 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
             Column(Modifier.fillMaxSize()) {
                 TopBar(state = state, viewModel = viewModel)
                 when {
+                    state.screen == Screen.Reader -> ReaderPane(state, viewModel)
                     state.screen == Screen.Series -> SeriesPane(state, viewModel)
                     state.loading && state.items.isEmpty() -> LoadingPane()
                     state.error != null && state.items.isEmpty() -> ErrorPane(state.error!!) {
@@ -173,16 +180,20 @@ private fun TopBar(state: ListingUiState, viewModel: ListingViewModel) {
             .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            if (state.screen == Screen.Series) {
+            if (state.screen == Screen.Reader) {
+                IconButton(onClick = viewModel::closeReader) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "뒤로")
+                }
+            } else if (state.screen == Screen.Series) {
                 IconButton(onClick = viewModel::closeSeries) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "뒤로")
                 }
             }
             Text(
-                text = if (state.screen == Screen.Series) {
-                    state.series?.title.orEmpty()
-                } else {
-                    "Comics8"
+                text = when (state.screen) {
+                    Screen.Reader -> state.currentEpisode?.title.orEmpty().ifBlank { "만화 보기" }
+                    Screen.Series -> state.series?.title.orEmpty()
+                    Screen.Browse -> "Comics8"
                 },
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
@@ -247,10 +258,10 @@ private fun TopBar(state: ListingUiState, viewModel: ListingViewModel) {
                 }
             }
         }
-        val showPager = if (state.screen == Screen.Series) {
-            state.episodeLastPage > 1
-        } else {
-            !state.isSearch && state.catalog.paginated && state.lastPage > 1
+        val showPager = when (state.screen) {
+            Screen.Series -> state.episodeLastPage > 1
+            Screen.Browse -> !state.isSearch && state.catalog.paginated && state.lastPage > 1
+            Screen.Reader -> false
         }
         if (showPager) {
             val page = if (state.screen == Screen.Series) state.episodePage else state.page
@@ -465,7 +476,10 @@ private fun SeriesPane(state: ListingUiState, viewModel: ListingViewModel) {
                 modifier = Modifier.fillMaxSize(),
             ) {
                 items(state.episodes, key = { it.wrId }) { episode ->
-                    EpisodeRow(episode)
+                    EpisodeRow(
+                        episode = episode,
+                        onClick = { viewModel.openEpisode(episode) },
+                    )
                 }
             }
         }
@@ -473,13 +487,17 @@ private fun SeriesPane(state: ListingUiState, viewModel: ListingViewModel) {
 }
 
 @Composable
-private fun EpisodeRow(episode: EpisodeItem) {
+private fun EpisodeRow(
+    episode: EpisodeItem,
+    onClick: () -> Unit,
+) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
             .background(MaterialTheme.colorScheme.surface)
+            .clickable(onClick = onClick)
             .padding(8.dp),
     ) {
         Box(
@@ -507,6 +525,7 @@ private fun EpisodeRow(episode: EpisodeItem) {
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
             )
             if (!episode.date.isNullOrBlank()) {
                 Text(
@@ -514,6 +533,104 @@ private fun EpisodeRow(episode: EpisodeItem) {
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+        }
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+            contentDescription = "회차 보기",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            modifier = Modifier
+                .padding(end = 4.dp)
+                .size(18.dp),
+        )
+    }
+}
+
+@Composable
+private fun ReaderPane(state: ListingUiState, viewModel: ListingViewModel) {
+    when {
+        state.readerLoading && state.readerImages.isEmpty() -> LoadingPane()
+        state.readerError != null && state.readerImages.isEmpty() ->
+            ErrorPane(state.readerError) { viewModel.refresh() }
+        state.readerImages.isEmpty() ->
+            ErrorPane(
+                message = "불러올 이미지가 없습니다.",
+                actionLabel = "회차 목록으로",
+            ) {
+                viewModel.closeReader()
+            }
+        else -> {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background),
+            ) {
+                itemsIndexed(state.readerImages, key = { index, url -> "$index-$url" }) { index, imageUrl ->
+                    AsyncImage(
+                        model = imageUrl,
+                        contentDescription = "페이지 ${index + 1}",
+                        contentScale = ContentScale.FillWidth,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .wrapContentHeight(),
+                    )
+                }
+                item {
+                    ReaderFooter(
+                        state = state,
+                        onPrev = viewModel::openPrevEpisode,
+                        onNext = viewModel::openNextEpisode,
+                        onClose = viewModel::closeReader,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReaderFooter(
+    state: ListingUiState,
+    onPrev: () -> Unit,
+    onNext: () -> Unit,
+    onClose: () -> Unit,
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 24.dp),
+    ) {
+        Text(
+            text = "${state.currentEpisode?.title.orEmpty()} (총 ${state.readerImages.size}장)",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 12.dp),
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            OutlinedButton(
+                onClick = onPrev,
+                enabled = state.hasPrevEpisode,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("이전화")
+            }
+            Button(
+                onClick = onClose,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("목록")
+            }
+            OutlinedButton(
+                onClick = onNext,
+                enabled = state.hasNextEpisode,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("다음화")
             }
         }
     }

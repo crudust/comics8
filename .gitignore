@@ -13,3 +13,4 @@
 .kotlin
 app/release
 app/debug
+.aider*

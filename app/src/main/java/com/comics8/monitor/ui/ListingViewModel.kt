@@ -35,13 +35,27 @@ data class ListingUiState(
     val searchQuery: String? = null,
     val searchExpanded: Boolean = false,
     val seriesFavorited: Boolean = false,
+    val currentEpisode: EpisodeItem? = null,
+    val readerImages: List<String> = emptyList(),
+    val readerLoading: Boolean = false,
+    val readerError: String? = null,
 ) {
     val isSearch: Boolean get() = searchQuery != null
+
+    val currentEpisodeIndex: Int
+        get() = currentEpisode?.let { ep -> episodes.indexOfFirst { it.wrId == ep.wrId } } ?: -1
+
+    val hasNextEpisode: Boolean
+        get() = currentEpisodeIndex in 1 until episodes.size
+
+    val hasPrevEpisode: Boolean
+        get() = currentEpisodeIndex in 0 until (episodes.size - 1)
 }
 
 sealed interface Screen {
     data object Browse : Screen
     data object Series : Screen
+    data object Reader : Screen
 }
 
 class ListingViewModel(application: Application) : AndroidViewModel(application) {
@@ -51,6 +65,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
     private var listJob: Job? = null
     private var episodeJob: Job? = null
+    private var readerJob: Job? = null
 
     init {
         refresh(force = true)
@@ -62,6 +77,8 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             _state.value.screen == Screen.Browse &&
             !_state.value.isSearch
         ) return
+        readerJob?.cancel()
+        episodeJob?.cancel()
         _state.update {
             it.copy(
                 catalog = catalog,
@@ -74,6 +91,9 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 error = null,
                 searchQuery = null,
                 searchExpanded = false,
+                currentEpisode = null,
+                readerImages = emptyList(),
+                readerError = null,
             )
         }
         loadPage(1, replace = true)
@@ -99,6 +119,8 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     fun submitSearch() {
         val query = _state.value.searchInput.trim()
         if (query.isEmpty()) return
+        readerJob?.cancel()
+        episodeJob?.cancel()
         _state.update {
             it.copy(
                 searchQuery = query,
@@ -110,6 +132,9 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 error = null,
                 page = 1,
                 lastPage = 1,
+                currentEpisode = null,
+                readerImages = emptyList(),
+                readerError = null,
             )
         }
         runSearch(query, asRefresh = false)
@@ -117,6 +142,11 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
     fun refresh(force: Boolean = false) {
         val current = _state.value
+        if (current.screen == Screen.Reader) {
+            val episode = current.currentEpisode ?: return
+            loadReaderImages(episode, asRefresh = true)
+            return
+        }
         if (current.screen == Screen.Series) {
             val series = current.series ?: return
             loadEpisodes(series, current.episodePage, asRefresh = true)
@@ -203,6 +233,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun closeSeries() {
+        readerJob?.cancel()
         episodeJob?.cancel()
         val catalog = _state.value.catalog
         val searching = _state.value.isSearch
@@ -214,10 +245,55 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 episodeError = null,
                 showPageJump = false,
                 seriesFavorited = false,
+                currentEpisode = null,
+                readerImages = emptyList(),
+                readerError = null,
             )
         }
         if (catalog == Catalog.FAVORITE && !searching) {
             loadPage(1, replace = true)
+        }
+    }
+
+    fun openEpisode(episode: EpisodeItem) {
+        _state.update {
+            it.copy(
+                screen = Screen.Reader,
+                currentEpisode = episode,
+                readerImages = emptyList(),
+                readerLoading = true,
+                readerError = null,
+            )
+        }
+        loadReaderImages(episode)
+    }
+
+    fun closeReader() {
+        readerJob?.cancel()
+        _state.update {
+            it.copy(
+                screen = Screen.Series,
+                currentEpisode = null,
+                readerImages = emptyList(),
+                readerLoading = false,
+                readerError = null,
+            )
+        }
+    }
+
+    fun openNextEpisode() {
+        val current = _state.value
+        val idx = current.currentEpisodeIndex
+        if (idx in 1 until current.episodes.size) {
+            openEpisode(current.episodes[idx - 1])
+        }
+    }
+
+    fun openPrevEpisode() {
+        val current = _state.value
+        val idx = current.currentEpisodeIndex
+        if (idx in 0 until (current.episodes.size - 1)) {
+            openEpisode(current.episodes[idx + 1])
         }
     }
 
@@ -337,6 +413,40 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                         episodeLoading = false,
                         refreshing = false,
                         episodeError = humanError("회차를 불러오지 못했습니다.", e),
+                    )
+                }
+            }
+        }
+    }
+
+    private fun loadReaderImages(episode: EpisodeItem, asRefresh: Boolean = false) {
+        readerJob?.cancel()
+        readerJob = viewModelScope.launch {
+            _state.update {
+                it.copy(
+                    readerLoading = it.readerImages.isEmpty() || !asRefresh,
+                    readerError = null,
+                    refreshing = asRefresh,
+                )
+            }
+            try {
+                val images = repository.loadImages(episode)
+                _state.update {
+                    it.copy(
+                        readerImages = images,
+                        readerLoading = false,
+                        refreshing = false,
+                        readerError = null,
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(
+                        readerLoading = false,
+                        refreshing = false,
+                        readerError = humanError("만화 이미지를 불러오지 못했습니다.", e),
                     )
                 }
             }

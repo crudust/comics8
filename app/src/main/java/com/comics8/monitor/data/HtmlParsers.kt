@@ -40,29 +40,58 @@ object HtmlParsers {
         return EpisodePage(items = items, currentPage = current, lastPage = lastPage)
     }
 
+    private val jsImgArrayRegex = Regex(
+        """(?:var|let|const)\s+(?:img_list|img_list_2|data_list|arr_img|images)\s*=\s*\[(.*?)\]""",
+        setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE),
+    )
+    private val jsStringUrlRegex = Regex(
+        """["']([^"']+\.(?:jpg|jpeg|png|webp|gif)(?:\?[^"']*)?)["']""",
+        RegexOption.IGNORE_CASE,
+    )
+
     /**
      * Parses an episode page and extracts the comic image URLs.
-     * Handles both standard <img> tags and CSS background‑image styles.
+     * Handles JavaScript array definitions (var img_list = [...]), standard <img> tags,
+     * and CSS background‑image styles.
      */
     fun parseImages(html: String, baseUri: String = ComicSite.ORIGIN): List<String> {
-        val doc = Jsoup.parse(html, baseUri)
         val urls = LinkedHashSet<String>()
 
-        doc.select("img").forEach { img ->
+        // 1. Check JavaScript image arrays (e.g. var img_list = [...])
+        for (match in jsImgArrayRegex.findAll(html)) {
+            val arrayBody = match.groupValues[1]
+            for (urlMatch in jsStringUrlRegex.findAll(arrayBody)) {
+                val rawUrl = urlMatch.groupValues[1].trim()
+                if (rawUrl.isNotBlank() && isImageUrl(rawUrl)) {
+                    urls.add(ComicSite.absUrl(rawUrl, baseUri))
+                }
+            }
+            if (urls.isNotEmpty()) {
+                return urls.toList()
+            }
+        }
+
+        // 2. Check DOM elements in viewer containers
+        val doc = Jsoup.parse(html, baseUri)
+        val viewerContainer = doc.selectFirst("#scroll-list, .view-content, .scroll-viewer, #page-list, #contents-wrapper")
+        val searchRoot = viewerContainer ?: doc
+
+        searchRoot.select("img").forEach { img ->
             val url = when {
                 img.hasAttr("data-src") -> img.attr("abs:data-src")
                 img.hasAttr("data-original") -> img.attr("abs:data-original")
+                img.hasAttr("data-lazy") -> img.attr("abs:data-lazy")
                 else -> img.attr("abs:src")
             }
-            if (url.isNotBlank() && isImageUrl(url)) {
+            if (url.isNotBlank() && isComicImageUrl(url)) {
                 urls.add(url)
             }
         }
 
-        doc.select("[style*='background']").forEach { el ->
+        searchRoot.select("[style*='background']").forEach { el ->
             val bg = extractBackgroundUrl(el.attr("style")) ?: return@forEach
             val absBg = ComicSite.absUrl(bg, baseUri)
-            if (isImageUrl(absBg)) {
+            if (isComicImageUrl(absBg)) {
                 urls.add(absBg)
             }
         }
@@ -153,5 +182,12 @@ object HtmlParsers {
             lower.contains(".png") ||
             lower.contains(".webp") ||
             lower.contains(".gif")
+    }
+
+    private fun isComicImageUrl(url: String): Boolean {
+        if (!isImageUrl(url)) return false
+        val lower = url.lowercase()
+        val ignoreKeywords = listOf("icon-", "favicon", "192x192", "/toonfile/toonres/", "logo", "banner", "avatar")
+        return ignoreKeywords.none { lower.contains(it) }
     }
 }

@@ -38,6 +38,15 @@ class ToonRepository(
         parsed
     }
 
+    suspend fun loadImages(episode: EpisodeItem): List<String> = withContext(Dispatchers.IO) {
+        val html = client.fetch(episode.href)
+        val parsed = HtmlParsers.parseImages(html, ComicSite.ORIGIN)
+        if (parsed.isEmpty()) {
+            error("만화 이미지를 불러오지 못했습니다.")
+        }
+        parsed
+    }
+
     suspend fun search(query: String): List<ToonItem> = withContext(Dispatchers.IO) {
         val q = query.trim()
         if (q.isEmpty()) return@withContext emptyList()

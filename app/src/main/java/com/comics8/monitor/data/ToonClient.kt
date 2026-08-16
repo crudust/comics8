@@ -46,7 +46,7 @@ class ToonClient(
             if (!response.isSuccessful) {
                 error("HTTP ${response.code}")
             }
-            return response.body?.bytes().orEmpty()
+            return response.body?.bytes() ?: ByteArray(0)
         }
     }
 
