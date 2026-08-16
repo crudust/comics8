@@ -4,6 +4,8 @@ import com.comics8.monitor.data.local.FavoriteDao
 import com.comics8.monitor.data.local.FavoriteToon
 import com.comics8.monitor.data.local.ReadEpisode
 import com.comics8.monitor.data.local.ReadEpisodeDao
+import com.comics8.monitor.data.local.ReadHistory
+import com.comics8.monitor.data.local.ReadHistoryDao
 import com.comics8.monitor.data.local.ReaderSetting
 import com.comics8.monitor.data.local.ReaderSettingDao
 import com.comics8.monitor.data.local.SeenDao
@@ -17,12 +19,14 @@ class ToonRepository(
     private val favoriteDao: FavoriteDao,
     private val readerSettingDao: ReaderSettingDao,
     private val readEpisodeDao: ReadEpisodeDao,
+    private val readHistoryDao: ReadHistoryDao,
     private val now: () -> Long = { System.currentTimeMillis() },
 ) {
     suspend fun loadListing(catalog: Catalog, page: Int): ListingPage = withContext(Dispatchers.IO) {
         if (catalog == Catalog.FAVORITE) {
+            val favs = favoriteDao.all().map { it.toItem().copy(isFavorite = true) }
             return@withContext ListingPage(
-                items = favoriteDao.all().map { it.toItem().copy(isFavorite = true) },
+                items = applyFlags(favs),
                 currentPage = 1,
                 lastPage = 1,
             )
@@ -102,6 +106,12 @@ class ToonRepository(
         val unseen = favoriteItems.filter { item ->
             existing[item.id]?.notifiedKey != notifyKey(item)
         }
+        unseen.forEach { item ->
+            try {
+                readHistoryDao.incrementTotal(item.id, 1)
+            } catch (_: Exception) {
+            }
+        }
         markSeen(page.items)
         return unseen
     }
@@ -113,11 +123,18 @@ class ToonRepository(
         val existing = if (total == 0) emptyMap() else {
             seenDao.byIds(items.map { it.id }).associateBy { it.id }
         }
+        val historyMap = try {
+            readHistoryDao.all().associateBy { it.toonId }
+        } catch (_: Exception) {
+            emptyMap()
+        }
         return items.map { item ->
             val prev = existing[item.id]
+            val history = historyMap[item.id]
             item.copy(
                 isNew = total > 0 && prev == null,
                 isFavorite = item.id in favoriteIds,
+                readProgress = history?.let { "${it.lastReadOrder}/${it.totalEpisodes}" },
             )
         }
     }
@@ -191,6 +208,26 @@ class ToonRepository(
 
     suspend fun saveEpisodePage(toonId: String, wrId: String, page: Int) = withContext(Dispatchers.IO) {
         readEpisodeDao.updateLastPage(toonId, wrId, page)
+    }
+
+    suspend fun getReadEpisode(toonId: String, wrId: String): ReadEpisode? = withContext(Dispatchers.IO) {
+        readEpisodeDao.getReadEpisode(toonId, wrId)
+    }
+
+    suspend fun getHistory(): List<ReadHistory> = withContext(Dispatchers.IO) {
+        readHistoryDao.all()
+    }
+
+    suspend fun saveHistory(history: ReadHistory) = withContext(Dispatchers.IO) {
+        readHistoryDao.upsert(history)
+    }
+
+    suspend fun deleteHistory(toonId: String) = withContext(Dispatchers.IO) {
+        readHistoryDao.delete(toonId)
+    }
+
+    suspend fun clearHistory() = withContext(Dispatchers.IO) {
+        readHistoryDao.clearAll()
     }
 
     private fun notifyKey(item: ToonItem): String = "${item.id}|${item.updatedAt.orEmpty()}"

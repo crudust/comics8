@@ -99,6 +99,9 @@ interface ReadEpisodeDao {
     @Query("SELECT * FROM read_episodes WHERE toonId = :toonId")
     suspend fun getReadEpisodes(toonId: String): List<ReadEpisode>
 
+    @Query("SELECT * FROM read_episodes WHERE toonId = :toonId AND wrId = :wrId")
+    suspend fun getReadEpisode(toonId: String, wrId: String): ReadEpisode?
+
     @Query("SELECT wrId FROM read_episodes WHERE toonId = :toonId")
     suspend fun getReadWrIds(toonId: String): List<String>
 
@@ -109,9 +112,57 @@ interface ReadEpisodeDao {
     suspend fun updateLastPage(toonId: String, wrId: String, page: Int)
 }
 
+@Entity(
+    tableName = "read_history",
+    indices = [Index("lastReadAt")],
+)
+data class ReadHistory(
+    @PrimaryKey val toonId: String,
+    val toonTitle: String,
+    val toonThumbUrl: String,
+    val toonHref: String,
+    val lastWrId: String,
+    val lastEpisodeTitle: String,
+    val lastEpisodeHref: String,
+    val lastReadOrder: Int,
+    val totalEpisodes: Int,
+    val lastReadAt: Long,
+    val nextWrId: String? = null,
+    val nextEpisodeTitle: String? = null,
+    val nextEpisodeHref: String? = null,
+    val hasNew: Boolean = false,
+)
+
+@Dao
+interface ReadHistoryDao {
+    @Query("SELECT * FROM read_history ORDER BY lastReadAt DESC")
+    suspend fun all(): List<ReadHistory>
+
+    @Query("SELECT * FROM read_history WHERE toonId = :toonId")
+    suspend fun get(toonId: String): ReadHistory?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(item: ReadHistory)
+
+    @Query("DELETE FROM read_history WHERE toonId = :toonId")
+    suspend fun delete(toonId: String)
+
+    @Query("DELETE FROM read_history")
+    suspend fun clearAll()
+
+    @Query("UPDATE read_history SET totalEpisodes = totalEpisodes + :amount, hasNew = 1 WHERE toonId = :toonId")
+    suspend fun incrementTotal(toonId: String, amount: Int = 1)
+}
+
 @Database(
-    entities = [SeenToon::class, FavoriteToon::class, ReaderSetting::class, ReadEpisode::class],
-    version = 6,
+    entities = [
+        SeenToon::class,
+        FavoriteToon::class,
+        ReaderSetting::class,
+        ReadEpisode::class,
+        ReadHistory::class,
+    ],
+    version = 7,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -119,4 +170,5 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun favoriteDao(): FavoriteDao
     abstract fun readerSettingDao(): ReaderSettingDao
     abstract fun readEpisodeDao(): ReadEpisodeDao
+    abstract fun readHistoryDao(): ReadHistoryDao
 }

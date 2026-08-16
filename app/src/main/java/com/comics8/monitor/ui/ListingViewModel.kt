@@ -10,6 +10,7 @@ import com.comics8.monitor.data.EpisodeItem
 import com.comics8.monitor.data.ReadDirection
 import com.comics8.monitor.data.ToonItem
 import com.comics8.monitor.data.ViewMode
+import com.comics8.monitor.data.local.ReadHistory
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,6 +47,9 @@ data class ListingUiState(
     val viewMode: ViewMode = ViewMode.SCROLL,
     val readDirection: ReadDirection = ReadDirection.RIGHT_TO_LEFT,
     val scrollToTopTrigger: Int = 0,
+    val seriesHistory: ReadHistory? = null,
+    val historyItems: List<ReadHistory> = emptyList(),
+    val historyLoading: Boolean = false,
 ) {
     val isSearch: Boolean get() = searchQuery != null
 
@@ -53,16 +57,17 @@ data class ListingUiState(
         get() = currentEpisode?.let { ep -> episodes.indexOfFirst { it.wrId == ep.wrId } } ?: -1
 
     val hasNextEpisode: Boolean
-        get() = currentEpisodeIndex in 1 until episodes.size
+        get() = (currentEpisodeIndex in 1 until episodes.size) || (currentEpisodeIndex == 0 && episodePage > 1)
 
     val hasPrevEpisode: Boolean
-        get() = currentEpisodeIndex in 0 until (episodes.size - 1)
+        get() = (currentEpisodeIndex in 0 until (episodes.size - 1)) || (currentEpisodeIndex == episodes.size - 1 && episodePage < episodeLastPage)
 }
 
 sealed interface Screen {
     data object Browse : Screen
     data object Series : Screen
     data object Reader : Screen
+    data object History : Screen
 }
 
 class ListingViewModel(application: Application) : AndroidViewModel(application) {
@@ -269,6 +274,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             it.copy(
                 screen = Screen.Series,
                 series = item,
+                seriesHistory = null,
                 episodes = emptyList(),
                 episodePage = 1,
                 episodeLastPage = 1,
@@ -281,9 +287,13 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         loadEpisodes(item, 1)
         viewModelScope.launch {
             val favorited = repository.isFavorite(item.id)
+            val history = repository.getHistory().firstOrNull { it.toonId == item.id }
             _state.update { current ->
                 if (current.series?.id == item.id) {
-                    current.copy(seriesFavorited = favorited)
+                    current.copy(
+                        seriesFavorited = favorited,
+                        seriesHistory = history,
+                    )
                 } else {
                     current
                 }
@@ -321,6 +331,69 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun resumeSeries() {
+        val current = _state.value
+        val series = current.series ?: return
+        val hist = current.seriesHistory ?: run {
+            openFirstEpisode()
+            return
+        }
+        viewModelScope.launch {
+            val readEp = repository.getReadEpisode(series.id, hist.lastWrId)
+            val lastSavedPage = readEp?.lastPage ?: 0
+            if (lastSavedPage > 0) {
+                reopenHistoryEpisode(hist, startPage = lastSavedPage)
+            } else {
+                continueHistoryEpisode(hist)
+            }
+        }
+    }
+
+    fun openFirstEpisode() {
+        val current = _state.value
+        val series = current.series ?: return
+        val lastPage = current.episodeLastPage
+        if (lastPage <= 1) {
+            val firstEp = current.episodes.lastOrNull()
+            if (firstEp != null) {
+                openEpisode(firstEp)
+            } else {
+                viewModelScope.launch {
+                    try {
+                        val result = repository.loadEpisodes(series, 1)
+                        _state.update {
+                            it.copy(
+                                episodes = result.items,
+                                episodePage = result.currentPage,
+                                episodeLastPage = result.lastPage,
+                            )
+                        }
+                        result.items.lastOrNull()?.let { openEpisode(it) }
+                    } catch (_: Exception) {
+                    }
+                }
+            }
+        } else {
+            viewModelScope.launch {
+                try {
+                    val result = repository.loadEpisodes(series, lastPage)
+                    _state.update {
+                        it.copy(
+                            episodes = result.items,
+                            episodePage = result.currentPage,
+                            episodeLastPage = result.lastPage,
+                        )
+                    }
+                    val firstEp = result.items.lastOrNull()
+                    if (firstEp != null) {
+                        openEpisode(firstEp)
+                    }
+                } catch (_: Exception) {
+                }
+            }
+        }
+    }
+
     fun closeSeries() {
         readerJob?.cancel()
         episodeJob?.cancel()
@@ -330,6 +403,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             it.copy(
                 screen = Screen.Browse,
                 series = null,
+                seriesHistory = null,
                 episodes = emptyList(),
                 episodeError = null,
                 showPageJump = false,
@@ -344,14 +418,270 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun openHistory() {
+        readerJob?.cancel()
+        episodeJob?.cancel()
+        _state.update {
+            it.copy(
+                screen = Screen.History,
+                historyLoading = true,
+            )
+        }
+        loadHistory()
+    }
+
+    fun closeHistory() {
+        _state.update { it.copy(screen = Screen.Browse) }
+    }
+
+    fun loadHistory() {
+        viewModelScope.launch {
+            _state.update { it.copy(historyLoading = it.historyItems.isEmpty()) }
+            val items = repository.getHistory()
+            _state.update { it.copy(historyItems = items, historyLoading = false) }
+        }
+    }
+
+    fun deleteHistory(toonId: String) {
+        viewModelScope.launch {
+            repository.deleteHistory(toonId)
+            _state.update { current ->
+                val updatedItems = current.items.map {
+                    if (it.id == toonId) it.copy(readProgress = null) else it
+                }
+                current.copy(
+                    historyItems = current.historyItems.filter { it.toonId != toonId },
+                    items = updatedItems,
+                    seriesHistory = if (current.series?.id == toonId) null else current.seriesHistory,
+                )
+            }
+        }
+    }
+
+    fun clearAllHistory() {
+        viewModelScope.launch {
+            repository.clearHistory()
+            _state.update { current ->
+                val updatedItems = current.items.map { it.copy(readProgress = null) }
+                current.copy(
+                    historyItems = emptyList(),
+                    items = updatedItems,
+                    seriesHistory = null,
+                )
+            }
+        }
+    }
+
+    fun reopenHistoryEpisode(item: ReadHistory, startPage: Int = 0) {
+        val toon = ToonItem(
+            id = item.toonId,
+            title = item.toonTitle,
+            thumbUrl = item.toonThumbUrl,
+            href = item.toonHref,
+            genre = "",
+            updatedAt = null,
+        )
+        episodeJob?.cancel()
+        readerJob?.cancel()
+        val targetMode = if (currentScreenWidthDp >= 600) ViewMode.DUAL else singleViewPreference
+        _state.update {
+            it.copy(
+                screen = Screen.Reader,
+                series = toon,
+                episodes = emptyList(),
+                readerLoading = true,
+                readerError = null,
+                readerImages = emptyList(),
+                viewMode = targetMode,
+                readDirection = globalReadDirection,
+            )
+        }
+        viewModelScope.launch {
+            try {
+                val pageToFetch = if (startPage == 0) {
+                    val readEp = repository.getReadEpisode(item.toonId, item.lastWrId)
+                    readEp?.lastPage ?: 0
+                } else startPage
+
+                val predictedPage = if (item.totalEpisodes > item.lastReadOrder && item.totalEpisodes > 100) {
+                    ((item.totalEpisodes - item.lastReadOrder) / 100 + 1).coerceAtLeast(1)
+                } else 1
+
+                var epPage = repository.loadEpisodes(toon, predictedPage)
+                var targetEp = epPage.items.firstOrNull { it.wrId == item.lastWrId }
+                var actualPage = predictedPage
+
+                if (targetEp == null && predictedPage != 1) {
+                    epPage = repository.loadEpisodes(toon, 1)
+                    targetEp = epPage.items.firstOrNull { it.wrId == item.lastWrId }
+                    actualPage = 1
+                }
+
+                _state.update {
+                    it.copy(
+                        episodes = epPage.items,
+                        episodePage = actualPage,
+                        episodeLastPage = epPage.lastPage,
+                    )
+                }
+
+                val epToOpen = (targetEp ?: EpisodeItem(
+                    wrId = item.lastWrId,
+                    title = item.lastEpisodeTitle,
+                    date = null,
+                    thumbUrl = null,
+                    href = item.lastEpisodeHref,
+                    lastReadPage = pageToFetch,
+                )).copy(lastReadPage = pageToFetch)
+                openEpisode(epToOpen)
+            } catch (_: Exception) {
+                val fallback = EpisodeItem(
+                    wrId = item.lastWrId,
+                    title = item.lastEpisodeTitle,
+                    date = null,
+                    thumbUrl = null,
+                    href = item.lastEpisodeHref,
+                    lastReadPage = startPage,
+                )
+                openEpisode(fallback)
+            }
+        }
+    }
+
+    fun continueHistoryEpisode(item: ReadHistory) {
+        val toon = ToonItem(
+            id = item.toonId,
+            title = item.toonTitle,
+            thumbUrl = item.toonThumbUrl,
+            href = item.toonHref,
+            genre = "",
+            updatedAt = null,
+        )
+        episodeJob?.cancel()
+        readerJob?.cancel()
+        val targetMode = if (currentScreenWidthDp >= 600) ViewMode.DUAL else singleViewPreference
+        _state.update {
+            it.copy(
+                screen = Screen.Reader,
+                series = toon,
+                episodes = emptyList(),
+                readerLoading = true,
+                readerError = null,
+                readerImages = emptyList(),
+                viewMode = targetMode,
+                readDirection = globalReadDirection,
+            )
+        }
+        viewModelScope.launch {
+            try {
+                val nextOrder = item.lastReadOrder + 1
+                val predictedPage = if (item.totalEpisodes > nextOrder && item.totalEpisodes > 100) {
+                    ((item.totalEpisodes - nextOrder) / 100 + 1).coerceAtLeast(1)
+                } else 1
+
+                var epPage = repository.loadEpisodes(toon, predictedPage)
+                var lastIdx = epPage.items.indexOfFirst { it.wrId == item.lastWrId }
+                var actualPage = predictedPage
+
+                if (lastIdx < 0 && predictedPage != 1) {
+                    epPage = repository.loadEpisodes(toon, 1)
+                    lastIdx = epPage.items.indexOfFirst { it.wrId == item.lastWrId }
+                    actualPage = 1
+                }
+
+                _state.update {
+                    it.copy(
+                        episodes = epPage.items,
+                        episodePage = actualPage,
+                        episodeLastPage = epPage.lastPage,
+                    )
+                }
+
+                val nextEp = when {
+                    lastIdx > 0 -> epPage.items[lastIdx - 1]
+                    lastIdx == 0 && actualPage > 1 -> {
+                        try {
+                            val prevEpPage = repository.loadEpisodes(toon, actualPage - 1)
+                            _state.update {
+                                it.copy(
+                                    episodes = prevEpPage.items,
+                                    episodePage = actualPage - 1,
+                                    episodeLastPage = prevEpPage.lastPage,
+                                )
+                            }
+                            prevEpPage.items.lastOrNull() ?: epPage.items[0]
+                        } catch (_: Exception) {
+                            epPage.items[0]
+                        }
+                    }
+                    lastIdx == 0 -> epPage.items[0]
+                    else -> {
+                        if (!item.nextWrId.isNullOrBlank()) {
+                            epPage.items.firstOrNull { it.wrId == item.nextWrId } ?: epPage.items.firstOrNull()
+                        } else {
+                            epPage.items.firstOrNull()
+                        }
+                    }
+                }
+
+                if (nextEp != null) {
+                    openEpisode(nextEp)
+                } else {
+                    val fallback = EpisodeItem(
+                        wrId = item.lastWrId,
+                        title = item.lastEpisodeTitle,
+                        date = null,
+                        thumbUrl = null,
+                        href = item.lastEpisodeHref,
+                        lastReadPage = 0,
+                    )
+                    openEpisode(fallback)
+                }
+            } catch (_: Exception) {
+                val fallback = EpisodeItem(
+                    wrId = item.lastWrId,
+                    title = item.lastEpisodeTitle,
+                    date = null,
+                    thumbUrl = null,
+                    href = item.lastEpisodeHref,
+                    lastReadPage = 0,
+                )
+                openEpisode(fallback)
+            }
+        }
+    }
+
     fun openEpisode(episode: EpisodeItem) {
-        val series = _state.value.series
+        val current = _state.value
+        val series = current.series
         val nowMs = System.currentTimeMillis()
-        _state.update { current ->
-            val updatedEpisodes = current.episodes.map {
+        val episodes = current.episodes
+        val idx = episodes.indexOfFirst { it.wrId == episode.wrId }
+        val lastPage = current.episodeLastPage.coerceAtLeast(1)
+        val currentPage = current.episodePage.coerceIn(1, lastPage)
+        val pageSize = 100
+
+        val totalEpCount = if (lastPage <= 1) {
+            episodes.size.coerceAtLeast(1)
+        } else if (currentPage == lastPage && episodes.isNotEmpty()) {
+            (lastPage - 1) * pageSize + episodes.size
+        } else {
+            lastPage * pageSize
+        }
+
+        val calculatedOrder = if (idx >= 0 && episodes.isNotEmpty()) {
+            val olderCount = (lastPage - currentPage) * pageSize
+            val onPageOrder = (episodes.size - idx).coerceAtLeast(1)
+            (olderCount + onPageOrder).coerceIn(1, totalEpCount)
+        } else null
+
+        val nextEp = if (idx in 1 until episodes.size) episodes[idx - 1] else null
+
+        _state.update { curr ->
+            val updatedEpisodes = curr.episodes.map {
                 if (it.wrId == episode.wrId) it.copy(isRead = true, readAt = nowMs) else it
             }
-            current.copy(
+            curr.copy(
                 screen = Screen.Reader,
                 currentEpisode = episode.copy(isRead = true, readAt = nowMs),
                 episodes = updatedEpisodes,
@@ -364,6 +694,42 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         if (series != null) {
             viewModelScope.launch {
                 repository.markEpisodeRead(series.id, episode.wrId, episode.lastReadPage)
+                val existingHistory = repository.getHistory().firstOrNull { it.toonId == series.id }
+
+                val finalOrder = calculatedOrder
+                    ?: existingHistory?.lastReadOrder
+                    ?: 1
+
+                val candidateTotal = if (totalEpCount > 1) totalEpCount else (existingHistory?.totalEpisodes ?: 1)
+                val finalTotal = maxOf(candidateTotal, finalOrder, existingHistory?.totalEpisodes ?: 1)
+
+                val progressText = "$finalOrder/$finalTotal"
+                val savedHistory = ReadHistory(
+                    toonId = series.id,
+                    toonTitle = series.title,
+                    toonThumbUrl = series.thumbUrl,
+                    toonHref = series.href,
+                    lastWrId = episode.wrId,
+                    lastEpisodeTitle = episode.title,
+                    lastEpisodeHref = episode.href,
+                    lastReadOrder = finalOrder,
+                    totalEpisodes = finalTotal,
+                    lastReadAt = nowMs,
+                    nextWrId = nextEp?.wrId ?: existingHistory?.nextWrId,
+                    nextEpisodeTitle = nextEp?.title ?: existingHistory?.nextEpisodeTitle,
+                    nextEpisodeHref = nextEp?.href ?: existingHistory?.nextEpisodeHref,
+                    hasNew = false,
+                )
+                repository.saveHistory(savedHistory)
+                _state.update { curr ->
+                    val updatedItems = curr.items.map { item ->
+                        if (item.id == series.id) item.copy(readProgress = progressText) else item
+                    }
+                    curr.copy(
+                        items = updatedItems,
+                        seriesHistory = if (curr.series?.id == series.id) savedHistory else curr.seriesHistory,
+                    )
+                }
             }
         }
     }
@@ -416,14 +782,53 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         val idx = current.currentEpisodeIndex
         if (idx in 1 until current.episodes.size) {
             openEpisode(current.episodes[idx - 1])
+        } else if (idx == 0 && current.episodePage > 1 && series != null) {
+            val prevPageNum = current.episodePage - 1
+            viewModelScope.launch {
+                try {
+                    val result = repository.loadEpisodes(series, prevPageNum)
+                    _state.update {
+                        it.copy(
+                            episodes = result.items,
+                            episodePage = result.currentPage,
+                            episodeLastPage = result.lastPage,
+                        )
+                    }
+                    val target = result.items.lastOrNull()
+                    if (target != null) {
+                        openEpisode(target)
+                    }
+                } catch (_: Exception) {
+                }
+            }
         }
     }
 
     fun openPrevEpisode() {
         val current = _state.value
+        val series = current.series
         val idx = current.currentEpisodeIndex
         if (idx in 0 until (current.episodes.size - 1)) {
             openEpisode(current.episodes[idx + 1])
+        } else if (idx == current.episodes.size - 1 && current.episodePage < current.episodeLastPage && series != null) {
+            val nextPageNum = current.episodePage + 1
+            viewModelScope.launch {
+                try {
+                    val result = repository.loadEpisodes(series, nextPageNum)
+                    _state.update {
+                        it.copy(
+                            episodes = result.items,
+                            episodePage = result.currentPage,
+                            episodeLastPage = result.lastPage,
+                        )
+                    }
+                    val target = result.items.firstOrNull()
+                    if (target != null) {
+                        openEpisode(target)
+                    }
+                } catch (_: Exception) {
+                }
+            }
         }
     }
 
@@ -546,6 +951,34 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                         refreshing = false,
                         episodeError = null,
                     )
+                }
+                if (result.items.isNotEmpty()) {
+                    val lastP = result.lastPage.coerceAtLeast(1)
+                    val currP = result.currentPage.coerceIn(1, lastP)
+                    val pageSize = 100
+                    val totalCalculated = if (lastP <= 1) {
+                        result.items.size
+                    } else if (currP == lastP) {
+                        (lastP - 1) * pageSize + result.items.size
+                    } else {
+                        lastP * pageSize
+                    }
+                    val existing = repository.getHistory().firstOrNull { it.toonId == item.id }
+                    if (existing != null && (existing.totalEpisodes < totalCalculated || existing.lastReadOrder > existing.totalEpisodes)) {
+                        val hasNew = existing.lastReadOrder < totalCalculated
+                        val updated = existing.copy(
+                            totalEpisodes = maxOf(existing.totalEpisodes, totalCalculated),
+                            hasNew = hasNew,
+                        )
+                        repository.saveHistory(updated)
+                        val progressText = "${updated.lastReadOrder}/${updated.totalEpisodes}"
+                        _state.update { curr ->
+                            val updatedItems = curr.items.map { row ->
+                                if (row.id == item.id) row.copy(readProgress = progressText) else row
+                            }
+                            curr.copy(items = updatedItems)
+                        }
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e

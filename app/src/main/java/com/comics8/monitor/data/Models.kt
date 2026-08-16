@@ -10,6 +10,7 @@ data class ToonItem(
     val ranking: String? = null,
     val isNew: Boolean = false,
     val isFavorite: Boolean = false,
+    val readProgress: String? = null,
 ) {
     val subtitle: String
         get() = when {

@@ -36,6 +36,7 @@ import com.comics8.monitor.ui.components.ErrorPane
 import com.comics8.monitor.ui.components.LoadingPane
 import com.comics8.monitor.ui.components.PageJumpDialog
 import com.comics8.monitor.ui.components.TopBar
+import com.comics8.monitor.ui.history.HistoryPane
 import com.comics8.monitor.ui.reader.ReaderPane
 import com.comics8.monitor.ui.series.SeriesPane
 
@@ -49,30 +50,29 @@ private fun Context.findActivity(): Activity? = when (this) {
 @Composable
 fun ComicsAppUi(viewModel: ListingViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val context = LocalContext.current
-    val activity = remember(context) { context.findActivity() }
     val configuration = LocalConfiguration.current
     val screenWidthDp = configuration.screenWidthDp
+    val isReader = state.screen == Screen.Reader
 
     LaunchedEffect(screenWidthDp) {
         viewModel.updateScreenWidthDp(screenWidthDp)
     }
 
-    val isReader = state.screen == Screen.Reader
-
-    DisposableEffect(state.screen) {
-        val window = activity?.window
-        val controller = window?.let { WindowCompat.getInsetsController(it, it.decorView) }
-
-        if (state.screen == Screen.Reader) {
-            controller?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            controller?.hide(WindowInsetsCompat.Type.systemBars())
+    val context = LocalContext.current
+    val activity = remember(context) { context.findActivity() }
+    val window = activity?.window
+    DisposableEffect(isReader, window) {
+        if (window == null) return@DisposableEffect onDispose { }
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        if (isReader) {
+            controller.hide(WindowInsetsCompat.Type.systemBars())
         } else {
-            controller?.show(WindowInsetsCompat.Type.systemBars())
+            controller.show(WindowInsetsCompat.Type.systemBars())
         }
 
         onDispose {
-            controller?.show(WindowInsetsCompat.Type.systemBars())
+            controller.show(WindowInsetsCompat.Type.systemBars())
         }
     }
 
@@ -89,6 +89,8 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
         BackHandler { viewModel.closeReader() }
     } else if (state.screen == Screen.Series) {
         BackHandler { viewModel.closeSeries() }
+    } else if (state.screen == Screen.History) {
+        BackHandler { viewModel.closeHistory() }
     } else if (state.isSearch) {
         BackHandler { viewModel.selectCatalog(state.catalog) }
     }
@@ -99,13 +101,20 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
         } else {
             PullToRefreshBox(
                 isRefreshing = state.refreshing,
-                onRefresh = { viewModel.refresh() },
+                onRefresh = {
+                    if (state.screen == Screen.History) {
+                        viewModel.loadHistory()
+                    } else {
+                        viewModel.refresh()
+                    }
+                },
                 modifier = Modifier.fillMaxSize(),
             ) {
                 Column(Modifier.fillMaxSize()) {
                     TopBar(state = state, viewModel = viewModel)
                     when {
                         state.screen == Screen.Series -> SeriesPane(state = state, viewModel = viewModel)
+                        state.screen == Screen.History -> HistoryPane(state = state, viewModel = viewModel)
                         state.loading && state.items.isEmpty() -> LoadingPane()
                         state.error != null && state.items.isEmpty() -> ErrorPane(
                             message = state.error!!,

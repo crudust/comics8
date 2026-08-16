@@ -7,11 +7,14 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -21,10 +24,13 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ChromeReaderMode
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -33,6 +39,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -84,12 +91,17 @@ fun TopBar(
                 IconButton(onClick = viewModel::closeSeries) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "뒤로")
                 }
+            } else if (state.screen == Screen.History) {
+                IconButton(onClick = viewModel::closeHistory) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "뒤로")
+                }
             }
             Text(
                 text = when (state.screen) {
                     Screen.Reader -> state.currentEpisode?.title.orEmpty().ifBlank { "만화 보기" }
                     Screen.Series -> state.series?.title.orEmpty()
                     Screen.Browse -> "Comics8"
+                    Screen.History -> "히스토리"
                 },
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
@@ -98,6 +110,12 @@ fun TopBar(
                 modifier = Modifier.weight(1f),
             )
             if (state.screen == Screen.Browse) {
+                IconButton(onClick = viewModel::openHistory) {
+                    Icon(
+                        imageVector = Icons.Outlined.History,
+                        contentDescription = "히스토리",
+                    )
+                }
                 IconButton(onClick = viewModel::toggleSearchBar) {
                     Icon(
                         imageVector = if (state.searchExpanded) Icons.Default.Close else Icons.Default.Search,
@@ -105,7 +123,53 @@ fun TopBar(
                     )
                 }
             }
+            if (state.screen == Screen.History && state.historyItems.isNotEmpty()) {
+                IconButton(onClick = viewModel::clearAllHistory) {
+                    Icon(
+                        imageVector = Icons.Outlined.Delete,
+                        contentDescription = "기록 전체 삭제",
+                    )
+                }
+            }
             if (state.screen == Screen.Series) {
+                val hist = state.seriesHistory
+                if (hist != null) {
+                    TextButton(
+                        onClick = viewModel::resumeSeries,
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.PlayArrow,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(2.dp))
+                        Text(
+                            text = "이어보기 (${hist.lastReadOrder}/${hist.totalEpisodes})",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                } else {
+                    TextButton(
+                        onClick = viewModel::openFirstEpisode,
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.PlayArrow,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(2.dp))
+                        Text(
+                            text = "처음부터",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
                 IconButton(onClick = viewModel::toggleFavorite) {
                     Icon(
                         imageVector = if (state.seriesFavorited) Icons.Filled.Star else Icons.Outlined.StarBorder,
@@ -287,6 +351,7 @@ fun TopBar(
             Screen.Series -> state.episodeLastPage > 1
             Screen.Browse -> !state.isSearch && state.catalog.paginated && state.lastPage > 1
             Screen.Reader -> false
+            Screen.History -> false
         }
         if (showPager) {
             val page = if (state.screen == Screen.Series) state.episodePage else state.page

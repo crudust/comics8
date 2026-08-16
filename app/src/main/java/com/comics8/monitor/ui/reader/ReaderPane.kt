@@ -118,6 +118,13 @@ private fun ReaderScrollPane(
         }
     }
 
+    LaunchedEffect(state.readerImages, state.currentEpisode?.lastReadPage) {
+        val target = state.currentEpisode?.lastReadPage ?: 0
+        if (state.readerImages.isNotEmpty() && target > 0) {
+            listState.scrollToItem(target.coerceIn(0, state.readerImages.size - 1))
+        }
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -241,6 +248,13 @@ private fun ReaderSinglePagePane(
     LaunchedEffect(pagerState.currentPage) {
         if (state.readerImages.isNotEmpty()) {
             viewModel.savePage(pagerState.currentPage)
+        }
+    }
+
+    LaunchedEffect(state.readerImages, state.currentEpisode?.lastReadPage) {
+        val target = state.currentEpisode?.lastReadPage ?: 0
+        if (state.readerImages.isNotEmpty() && target > 0) {
+            pagerState.scrollToPage(target.coerceIn(0, state.readerImages.size - 1))
         }
     }
 
@@ -492,6 +506,21 @@ private fun ReaderDualPagePane(
                 null -> 0
             }
             viewModel.savePage(firstPageIndex)
+        }
+    }
+
+    LaunchedEffect(spreads, state.currentEpisode?.lastReadPage) {
+        val target = state.currentEpisode?.lastReadPage ?: 0
+        if (spreads.isNotEmpty() && target > 0) {
+            val idx = spreads.indexOfFirst { spread ->
+                when (spread) {
+                    is DualSpread.Single -> spread.index >= target
+                    is DualSpread.Dual -> spread.secondIndex >= target
+                }
+            }
+            if (idx in 0 until totalSpreads) {
+                pagerState.scrollToPage(idx)
+            }
         }
     }
 
