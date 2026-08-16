@@ -31,6 +31,25 @@ class ToonClient(
         return HtmlParsers.parseImages(html, ComicSite.ORIGIN)
     }
 
+    /**
+     * Downloads raw bytes for an image URL.
+     */
+    fun fetchBytes(url: String): ByteArray {
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", USER_AGENT)
+            .header("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
+            .header("Referer", ComicSite.ORIGIN)
+            .get()
+            .build()
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                error("HTTP ${response.code}")
+            }
+            return response.body?.bytes().orEmpty()
+        }
+    }
+
     companion object {
         const val USER_AGENT =
             "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
