@@ -88,7 +88,7 @@ class ToonRepository(
                 updatedAt = item.updatedAt,
                 firstSeenAt = prev?.firstSeenAt ?: nowMs,
                 lastSeenAt = nowMs,
-                notifiedKey = notifyKey(item),
+                notifiedKey = prev?.notifiedKey.orEmpty(),
             )
         }
         seenDao.upsertAll(rows)
@@ -99,22 +99,52 @@ class ToonRepository(
         if (favoriteIds.isEmpty()) return emptyList()
 
         val page = loadListing(Catalog.LATEST, 1)
-        val favoriteItems = page.items.filter { it.id in favoriteIds }
-        if (favoriteItems.isEmpty()) {
-            markSeen(page.items)
-            return emptyList()
+        val candidates = page.items.filter { it.id in favoriteIds }
+        if (candidates.isEmpty()) return emptyList()
+
+        val existing = seenDao.byIds(candidates.map { it.id }).associateBy { it.id }
+        val unseen = candidates.filter { item ->
+            val currentKey = notifyKey(item)
+            if (existing[item.id]?.notifiedKey == currentKey) {
+                return@filter false
+            }
+
+            val wrId = Regex("""wr_id=(\d+)""").find(item.href)?.groupValues?.get(1)
+            if (wrId != null) {
+                val readEp = readEpisodeDao.getReadEpisode(item.id, wrId)
+                if (readEp != null) {
+                    return@filter false
+                }
+                val history = readHistoryDao.get(item.id)
+                if (history != null && history.lastWrId == wrId) {
+                    return@filter false
+                }
+            }
+
+            true
         }
-        val existing = seenDao.byIds(favoriteItems.map { it.id }).associateBy { it.id }
-        val unseen = favoriteItems.filter { item ->
-            existing[item.id]?.notifiedKey != notifyKey(item)
-        }
+
         unseen.forEach { item ->
             try {
                 readHistoryDao.incrementTotal(item.id, 1)
             } catch (_: Exception) {
             }
         }
-        markSeen(page.items)
+
+        val nowMs = now()
+        val updatedSeen = candidates.map { item ->
+            val prev = existing[item.id]
+            SeenToon(
+                id = item.id,
+                title = item.title,
+                updatedAt = item.updatedAt,
+                firstSeenAt = prev?.firstSeenAt ?: nowMs,
+                lastSeenAt = nowMs,
+                notifiedKey = notifyKey(item),
+            )
+        }
+        seenDao.upsertAll(updatedSeen)
+
         return unseen
     }
 
