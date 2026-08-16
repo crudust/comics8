@@ -66,8 +66,8 @@ fun main() {
         val state by viewModel.state.collectAsState()
 
         val windowState = rememberWindowState(
-            width = 1200.dp,
-            height = 800.dp,
+            width = 1280.dp,
+            height = 900.dp,
             placement = if (state.isFullscreen) WindowPlacement.Fullscreen else WindowPlacement.Floating,
         )
 

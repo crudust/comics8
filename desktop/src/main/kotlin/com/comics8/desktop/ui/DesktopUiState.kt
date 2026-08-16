@@ -41,7 +41,7 @@ data class DesktopUiState(
     val imageAspectRatios: Map<Int, Float> = emptyMap(),
     val readerLoading: Boolean = false,
     val readerError: String? = null,
-    val viewMode: ViewMode = ViewMode.SCROLL,
+    val viewMode: ViewMode = ViewMode.DUAL,
     val readDirection: ReadDirection = ReadDirection.RIGHT_TO_LEFT,
     val seriesHistory: ReadHistoryRecord? = null,
     val historyItems: List<ReadHistoryRecord> = emptyList(),

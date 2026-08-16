@@ -657,6 +657,10 @@ class DesktopViewModel(
         loadReaderImages(episode)
         if (series != null) {
             scope.launch {
+                val savedSetting = repository.getReaderSetting(series.id)
+                if (savedSetting != null) {
+                    _state.update { it.copy(viewMode = savedSetting.first, readDirection = savedSetting.second) }
+                }
                 repository.markEpisodeRead(series.id, episode.wrId, episode.lastReadPage)
                 val existingHistory = repository.getHistory().firstOrNull { it.toonId == series.id }
 
@@ -797,10 +801,20 @@ class DesktopViewModel(
 
     fun setViewMode(mode: ViewMode) {
         _state.update { it.copy(viewMode = mode) }
+        val series = _state.value.series ?: return
+        val direction = _state.value.readDirection
+        scope.launch {
+            repository.saveReaderSetting(series.id, mode, direction)
+        }
     }
 
     fun setReadDirection(direction: ReadDirection) {
         _state.update { it.copy(readDirection = direction) }
+        val series = _state.value.series ?: return
+        val mode = _state.value.viewMode
+        scope.launch {
+            repository.saveReaderSetting(series.id, mode, direction)
+        }
     }
 
     fun recordImageAspectRatio(index: Int, width: Int, height: Int) {

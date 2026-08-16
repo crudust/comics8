@@ -1,11 +1,19 @@
 package com.comics8.desktop.ui.reader
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -29,6 +37,8 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -36,7 +46,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -213,6 +227,10 @@ private fun ReaderSingleView(
         )
     }
     var controlsVisible by remember { mutableStateOf(false) }
+    var nextPromptVisible by remember { mutableStateOf(false) }
+    var prevPromptVisible by remember { mutableStateOf(false) }
+    var promptJob by remember { mutableStateOf<Job?>(null) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(state.readerImages, state.currentEpisode?.lastReadPage) {
         val target = state.currentEpisode?.lastReadPage ?: 0
@@ -231,19 +249,55 @@ private fun ReaderSingleView(
     val currentImage = state.readerImages.getOrNull(currentPage)
     val isR2L = state.readDirection == ReadDirection.RIGHT_TO_LEFT
 
-    val goNext = {
+    val onAdvance = {
+        controlsVisible = false
         if (currentPage < totalPages - 1) {
+            nextPromptVisible = false
+            prevPromptVisible = false
             currentPage++
-        } else if (state.hasNextEpisode) {
-            viewModel.openNextEpisode()
+        } else {
+            if (nextPromptVisible) {
+                nextPromptVisible = false
+                if (state.hasNextEpisode) {
+                    viewModel.openNextEpisode()
+                } else {
+                    viewModel.closeReader()
+                }
+            } else {
+                nextPromptVisible = true
+                prevPromptVisible = false
+                promptJob?.cancel()
+                promptJob = scope.launch {
+                    delay(3000)
+                    nextPromptVisible = false
+                }
+            }
         }
     }
 
-    val goPrev = {
+    val onRetreat = {
+        controlsVisible = false
         if (currentPage > 0) {
+            nextPromptVisible = false
+            prevPromptVisible = false
             currentPage--
-        } else if (state.hasPrevEpisode) {
-            viewModel.openPrevEpisode()
+        } else {
+            if (prevPromptVisible) {
+                prevPromptVisible = false
+                if (state.hasPrevEpisode) {
+                    viewModel.openPrevEpisode()
+                } else {
+                    viewModel.closeReader()
+                }
+            } else {
+                prevPromptVisible = true
+                nextPromptVisible = false
+                promptJob?.cancel()
+                promptJob = scope.launch {
+                    delay(3000)
+                    prevPromptVisible = false
+                }
+            }
         }
     }
 
@@ -254,15 +308,15 @@ private fun ReaderSingleView(
                 if (event.type == KeyEventType.KeyDown) {
                     when (event.key) {
                         Key.DirectionRight -> {
-                            if (isR2L) goPrev() else goNext()
+                            if (isR2L) onRetreat() else onAdvance()
                             true
                         }
                         Key.DirectionLeft -> {
-                            if (isR2L) goNext() else goPrev()
+                            if (isR2L) onAdvance() else onRetreat()
                             true
                         }
                         Key.Spacebar -> {
-                            goNext()
+                            onAdvance()
                             true
                         }
                         else -> false
@@ -282,6 +336,8 @@ private fun ReaderSingleView(
                         indication = null,
                     ) {
                         controlsVisible = !controlsVisible
+                        nextPromptVisible = false
+                        prevPromptVisible = false
                     },
             )
         }
@@ -290,61 +346,119 @@ private fun ReaderSingleView(
         Row(modifier = Modifier.fillMaxSize()) {
             Box(
                 modifier = Modifier
-                    .weight(1f)
+                    .weight(0.38f)
                     .fillMaxHeight()
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                     ) {
-                        if (isR2L) goNext() else goPrev()
+                        if (isR2L) onAdvance() else onRetreat()
                     },
             )
             Box(
                 modifier = Modifier
-                    .weight(1f)
+                    .weight(0.24f)
                     .fillMaxHeight()
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                     ) {
                         controlsVisible = !controlsVisible
+                        nextPromptVisible = false
+                        prevPromptVisible = false
                     },
             )
             Box(
                 modifier = Modifier
-                    .weight(1f)
+                    .weight(0.38f)
                     .fillMaxHeight()
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                     ) {
-                        if (isR2L) goPrev() else goNext()
+                        if (isR2L) onRetreat() else onAdvance()
                     },
             )
         }
 
         // Page Indicator
-        Surface(
-            shape = RoundedCornerShape(8.dp),
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(16.dp),
-        ) {
-            Text(
-                text = "${currentPage + 1} / $totalPages",
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-            )
+        if (!controlsVisible) {
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(16.dp),
+            ) {
+                Text(
+                    text = "${currentPage + 1} / $totalPages",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            }
         }
 
-        if (controlsVisible) {
+        // Boundary Confirmation Prompt
+        EpisodeBoundaryPrompt(
+            visible = nextPromptVisible,
+            title = if (state.hasNextEpisode) "마지막 페이지입니다" else "마지막 회차입니다",
+            subtitle = if (state.hasNextEpisode) "한 번 더 클릭하면 다음 회차로 이동" else "한 번 더 클릭하면 메인 목록으로 이동",
+            onClick = {
+                nextPromptVisible = false
+                if (state.hasNextEpisode) {
+                    viewModel.openNextEpisode()
+                } else {
+                    viewModel.closeReader()
+                }
+            },
+        )
+
+        EpisodeBoundaryPrompt(
+            visible = prevPromptVisible,
+            title = if (state.hasPrevEpisode) "첫 페이지입니다" else "첫 번째 회차입니다",
+            subtitle = if (state.hasPrevEpisode) "한 번 더 클릭하면 이전 회차로 이동" else "한 번 더 클릭하면 메인 목록으로 이동",
+            onClick = {
+                prevPromptVisible = false
+                if (state.hasPrevEpisode) {
+                    viewModel.openPrevEpisode()
+                } else {
+                    viewModel.closeReader()
+                }
+            },
+        )
+
+        AnimatedVisibility(
+            visible = controlsVisible,
+            enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
+            modifier = Modifier.align(Alignment.TopCenter),
+        ) {
             TopBar(
                 state = state,
                 viewModel = viewModel,
                 inOverlay = true,
-                modifier = Modifier.align(Alignment.TopCenter),
+            )
+        }
+
+        AnimatedVisibility(
+            visible = controlsVisible,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
+            ReaderBottomBar(
+                currentRangeText = "${currentPage + 1} / $totalPages",
+                currentPage = currentPage + 1,
+                maxPages = totalPages,
+                hasPrevEpisode = state.hasPrevEpisode,
+                hasNextEpisode = state.hasNextEpisode,
+                onPageChange = { targetPage ->
+                    currentPage = (targetPage - 1).coerceIn(0, totalPages - 1)
+                },
+                onPrevEp = viewModel::openPrevEpisode,
+                onNextEp = viewModel::openNextEpisode,
+                onClose = viewModel::closeReader,
             )
         }
     }
@@ -373,6 +487,10 @@ private fun ReaderDualView(
     }
 
     var controlsVisible by remember { mutableStateOf(false) }
+    var nextPromptVisible by remember { mutableStateOf(false) }
+    var prevPromptVisible by remember { mutableStateOf(false) }
+    var promptJob by remember { mutableStateOf<Job?>(null) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(currentSpreadIndex, spreads) {
         val spread = spreads.getOrNull(currentSpreadIndex)
@@ -387,19 +505,55 @@ private fun ReaderDualView(
 
     val isR2L = state.readDirection == ReadDirection.RIGHT_TO_LEFT
 
-    val goNext = {
+    val onAdvance = {
+        controlsVisible = false
         if (currentSpreadIndex < totalSpreads - 1) {
+            nextPromptVisible = false
+            prevPromptVisible = false
             currentSpreadIndex++
-        } else if (state.hasNextEpisode) {
-            viewModel.openNextEpisode()
+        } else {
+            if (nextPromptVisible) {
+                nextPromptVisible = false
+                if (state.hasNextEpisode) {
+                    viewModel.openNextEpisode()
+                } else {
+                    viewModel.closeReader()
+                }
+            } else {
+                nextPromptVisible = true
+                prevPromptVisible = false
+                promptJob?.cancel()
+                promptJob = scope.launch {
+                    delay(3000)
+                    nextPromptVisible = false
+                }
+            }
         }
     }
 
-    val goPrev = {
+    val onRetreat = {
+        controlsVisible = false
         if (currentSpreadIndex > 0) {
+            nextPromptVisible = false
+            prevPromptVisible = false
             currentSpreadIndex--
-        } else if (state.hasPrevEpisode) {
-            viewModel.openPrevEpisode()
+        } else {
+            if (prevPromptVisible) {
+                prevPromptVisible = false
+                if (state.hasPrevEpisode) {
+                    viewModel.openPrevEpisode()
+                } else {
+                    viewModel.closeReader()
+                }
+            } else {
+                prevPromptVisible = true
+                nextPromptVisible = false
+                promptJob?.cancel()
+                promptJob = scope.launch {
+                    delay(3000)
+                    prevPromptVisible = false
+                }
+            }
         }
     }
 
@@ -410,15 +564,15 @@ private fun ReaderDualView(
                 if (event.type == KeyEventType.KeyDown) {
                     when (event.key) {
                         Key.DirectionRight -> {
-                            if (isR2L) goPrev() else goNext()
+                            if (isR2L) onRetreat() else onAdvance()
                             true
                         }
                         Key.DirectionLeft -> {
-                            if (isR2L) goNext() else goPrev()
+                            if (isR2L) onAdvance() else onRetreat()
                             true
                         }
                         Key.Spacebar -> {
-                            goNext()
+                            onAdvance()
                             true
                         }
                         else -> false
@@ -571,49 +725,120 @@ private fun ReaderDualView(
         Row(modifier = Modifier.fillMaxSize()) {
             Box(
                 modifier = Modifier
-                    .weight(1f)
+                    .weight(0.38f)
                     .fillMaxHeight()
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                     ) {
-                        if (isR2L) goNext() else goPrev()
+                        if (isR2L) onAdvance() else onRetreat()
                     },
             )
             Box(
                 modifier = Modifier
-                    .weight(1f)
+                    .weight(0.24f)
                     .fillMaxHeight()
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                     ) {
                         controlsVisible = !controlsVisible
+                        nextPromptVisible = false
+                        prevPromptVisible = false
                     },
             )
             Box(
                 modifier = Modifier
-                    .weight(1f)
+                    .weight(0.38f)
                     .fillMaxHeight()
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                     ) {
-                        if (isR2L) goPrev() else goNext()
+                        if (isR2L) onRetreat() else onAdvance()
                     },
             )
         }
 
         // Spread Indicator
-        Surface(
-            shape = RoundedCornerShape(8.dp),
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(16.dp),
+        if (!controlsVisible) {
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(16.dp),
+            ) {
+                val currentSpreadObj = spreads.getOrNull(currentSpreadIndex)
+                val pageDesc = when (currentSpreadObj) {
+                    is DualSpread.Single -> "${currentSpreadObj.index + 1} / $totalImages"
+                    is DualSpread.Dual -> {
+                        val i1 = currentSpreadObj.firstIndex + 1
+                        val i2 = currentSpreadObj.secondIndex + 1
+                        if (isR2L) "$i2-$i1 / $totalImages" else "$i1-$i2 / $totalImages"
+                    }
+                    null -> ""
+                }
+
+                Text(
+                    text = pageDesc,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            }
+        }
+
+        // Boundary Confirmation Prompt
+        EpisodeBoundaryPrompt(
+            visible = nextPromptVisible,
+            title = if (state.hasNextEpisode) "마지막 페이지입니다" else "마지막 회차입니다",
+            subtitle = if (state.hasNextEpisode) "한 번 더 클릭하면 다음 회차로 이동" else "한 번 더 클릭하면 메인 목록으로 이동",
+            onClick = {
+                nextPromptVisible = false
+                if (state.hasNextEpisode) {
+                    viewModel.openNextEpisode()
+                } else {
+                    viewModel.closeReader()
+                }
+            },
+        )
+
+        EpisodeBoundaryPrompt(
+            visible = prevPromptVisible,
+            title = if (state.hasPrevEpisode) "첫 페이지입니다" else "첫 번째 회차입니다",
+            subtitle = if (state.hasPrevEpisode) "한 번 더 클릭하면 이전 회차로 이동" else "한 번 더 클릭하면 메인 목록으로 이동",
+            onClick = {
+                prevPromptVisible = false
+                if (state.hasPrevEpisode) {
+                    viewModel.openPrevEpisode()
+                } else {
+                    viewModel.closeReader()
+                }
+            },
+        )
+
+        AnimatedVisibility(
+            visible = controlsVisible,
+            enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
+            modifier = Modifier.align(Alignment.TopCenter),
+        ) {
+            TopBar(
+                state = state,
+                viewModel = viewModel,
+                inOverlay = true,
+            )
+        }
+
+        AnimatedVisibility(
+            visible = controlsVisible,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter),
         ) {
             val currentSpreadObj = spreads.getOrNull(currentSpreadIndex)
-            val pageDesc = when (currentSpreadObj) {
+            val spreadDesc = when (currentSpreadObj) {
                 is DualSpread.Single -> "${currentSpreadObj.index + 1} / $totalImages"
                 is DualSpread.Dual -> {
                     val i1 = currentSpreadObj.firstIndex + 1
@@ -622,22 +847,138 @@ private fun ReaderDualView(
                 }
                 null -> ""
             }
-
-            Text(
-                text = pageDesc,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-            )
-        }
-
-        if (controlsVisible) {
-            TopBar(
-                state = state,
-                viewModel = viewModel,
-                inOverlay = true,
-                modifier = Modifier.align(Alignment.TopCenter),
+            ReaderBottomBar(
+                currentRangeText = spreadDesc,
+                currentPage = currentSpreadIndex + 1,
+                maxPages = totalSpreads,
+                hasPrevEpisode = state.hasPrevEpisode,
+                hasNextEpisode = state.hasNextEpisode,
+                onPageChange = { targetSpread ->
+                    currentSpreadIndex = (targetSpread - 1).coerceIn(0, totalSpreads - 1)
+                },
+                onPrevEp = viewModel::openPrevEpisode,
+                onNextEp = viewModel::openNextEpisode,
+                onClose = viewModel::closeReader,
             )
         }
     }
 }
+
+@Composable
+private fun BoxScope.EpisodeBoundaryPrompt(
+    visible: Boolean,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn() + scaleIn(initialScale = 0.9f),
+        exit = fadeOut() + scaleOut(targetScale = 0.9f),
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .padding(bottom = 72.dp),
+    ) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.92f),
+            shadowElevation = 6.dp,
+            modifier = Modifier
+                .padding(horizontal = 24.dp)
+                .clickable(onClick = onClick),
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.inverseOnSurface,
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.inversePrimary,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReaderBottomBar(
+    currentRangeText: String,
+    currentPage: Int,
+    maxPages: Int,
+    hasPrevEpisode: Boolean,
+    hasNextEpisode: Boolean,
+    onPageChange: (Int) -> Unit,
+    onPrevEp: () -> Unit,
+    onNextEp: () -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.94f))
+            .padding(horizontal = 24.dp, vertical = 12.dp),
+    ) {
+        if (maxPages > 1) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(0.6f),
+            ) {
+                Text(
+                    text = currentRangeText,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(end = 12.dp),
+                )
+                Slider(
+                    value = currentPage.coerceIn(1, maxPages).toFloat(),
+                    onValueChange = { onPageChange(it.toInt()) },
+                    valueRange = 1f..maxPages.toFloat(),
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth(0.6f)
+                .padding(top = 4.dp),
+        ) {
+            OutlinedButton(
+                onClick = onPrevEp,
+                enabled = hasPrevEpisode,
+                modifier = Modifier.weight(1f),
+            ) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("이전화")
+            }
+            Button(
+                onClick = onClose,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("목록")
+            }
+            OutlinedButton(
+                onClick = onNextEp,
+                enabled = hasNextEpisode,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("다음화")
+                Spacer(Modifier.width(6.dp))
+                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp))
+            }
+        }
+    }
+}
+
