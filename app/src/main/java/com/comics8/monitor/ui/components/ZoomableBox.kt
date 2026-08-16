@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -15,6 +16,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -25,19 +27,26 @@ import kotlin.math.abs
 @Composable
 fun ZoomableBox(
     modifier: Modifier = Modifier,
+    resetKey: Any? = null,
     contentAlignment: Alignment = Alignment.Center,
     onTap: ((Offset, IntSize) -> Unit)? = null,
     content: @Composable BoxScope.(scale: Float) -> Unit,
 ) {
-    var scale by remember { mutableFloatStateOf(1f) }
-    var offset by remember { mutableStateOf(Offset.Zero) }
+    var scale by remember(resetKey) { mutableFloatStateOf(1f) }
+    var offset by remember(resetKey) { mutableStateOf(Offset.Zero) }
     var size by remember { mutableStateOf(IntSize.Zero) }
+
+    LaunchedEffect(resetKey) {
+        scale = 1f
+        offset = Offset.Zero
+    }
 
     Box(
         modifier = modifier
             .fillMaxSize()
+            .clipToBounds() // Strictly clip enlarged content within page boundaries
             .onSizeChanged { size = it }
-            .pointerInput(Unit) {
+            .pointerInput(resetKey) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     val downTime = System.currentTimeMillis()
@@ -59,7 +68,7 @@ fun ZoomableBox(
                         totalDragX += panChange.x
                         totalDragY += panChange.y
 
-                        // If user moved more than standard touch slop, it's a drag/pan, not a tap
+                        // If moved beyond tap threshold, treat as drag
                         if (abs(totalDragX) > 8f || abs(totalDragY) > 8f || zoomChange != 1f) {
                             isTap = false
                         }
@@ -99,6 +108,7 @@ fun ZoomableBox(
                     scaleY = scale
                     translationX = offset.x
                     translationY = offset.y
+                    clip = true
                 },
             contentAlignment = contentAlignment,
         ) {

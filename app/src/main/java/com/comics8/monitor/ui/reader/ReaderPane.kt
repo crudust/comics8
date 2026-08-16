@@ -337,6 +337,7 @@ private fun ReaderSinglePagePane(
         ) { page ->
             ZoomableBox(
                 modifier = Modifier.fillMaxSize(),
+                resetKey = page,
                 onTap = { tapOffset, size ->
                     val tapX = tapOffset.x
                     val width = size.width.toFloat()
@@ -613,6 +614,7 @@ private fun ReaderDualPagePane(
         ) { spreadIdx ->
             ZoomableBox(
                 modifier = Modifier.fillMaxSize(),
+                resetKey = spreadIdx,
                 onTap = { tapOffset, size ->
                     val tapX = tapOffset.x
                     val width = size.width.toFloat()
