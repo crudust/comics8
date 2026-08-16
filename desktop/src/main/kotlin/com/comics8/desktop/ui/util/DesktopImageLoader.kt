@@ -19,7 +19,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
-import com.comics8.desktop.data.ComicSite
+import com.comics8.core.parser.ComicSite
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -37,6 +37,11 @@ object DesktopImageCache {
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
+
+    fun get(url: String): ImageBitmap? {
+        if (url.isBlank()) return null
+        return memoryCache[url]
+    }
 
     private fun hashUrl(url: String): String {
         val digest = MessageDigest.getInstance("MD5").digest(url.toByteArray())
@@ -92,6 +97,14 @@ object DesktopImageCache {
             null
         }
     }
+
+    suspend fun preload(urls: List<String>) = withContext(Dispatchers.IO) {
+        for (url in urls) {
+            if (url.isNotBlank() && !memoryCache.containsKey(url)) {
+                loadImage(url)
+            }
+        }
+    }
 }
 
 @Composable
@@ -104,16 +117,27 @@ fun DesktopAsyncImage(
     showPlaceholder: Boolean = true,
     onLoaded: ((ImageBitmap) -> Unit)? = null,
 ) {
-    var bitmap by remember(url) { mutableStateOf<ImageBitmap?>(null) }
-    var loading by remember(url) { mutableStateOf(true) }
+    // Check synchronous memory cache first
+    val cachedBitmap = remember(url) { DesktopImageCache.get(url) }
+    var displayedBitmap by remember { mutableStateOf(cachedBitmap) }
+    var loading by remember { mutableStateOf(cachedBitmap == null) }
 
     LaunchedEffect(url) {
-        loading = true
-        val loaded = DesktopImageCache.loadImage(url)
-        bitmap = loaded
-        loading = false
-        if (loaded != null) {
-            onLoaded?.invoke(loaded)
+        val memoryHit = DesktopImageCache.get(url)
+        if (memoryHit != null) {
+            displayedBitmap = memoryHit
+            loading = false
+            onLoaded?.invoke(memoryHit)
+        } else {
+            loading = true
+            val loaded = DesktopImageCache.loadImage(url)
+            if (loaded != null) {
+                displayedBitmap = loaded
+                loading = false
+                onLoaded?.invoke(loaded)
+            } else {
+                loading = false
+            }
         }
     }
 
@@ -121,7 +145,7 @@ fun DesktopAsyncImage(
         modifier = modifier,
         contentAlignment = alignment,
     ) {
-        val currentBitmap = bitmap
+        val currentBitmap = displayedBitmap
         if (currentBitmap != null) {
             Image(
                 bitmap = currentBitmap,

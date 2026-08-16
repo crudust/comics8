@@ -22,7 +22,7 @@ import androidx.compose.ui.window.rememberWindowState
 import com.comics8.desktop.data.DesktopDatabase
 import com.comics8.desktop.data.DesktopSyncManager
 import com.comics8.desktop.data.DesktopToonRepository
-import com.comics8.desktop.data.ToonClient
+import com.comics8.core.network.ToonClient
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
 import com.comics8.desktop.ui.Screen

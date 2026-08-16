@@ -255,15 +255,12 @@ class SyncManager(
     }
 
     companion object {
-        const val KEY_SYNC_KEY = "sync_key"
-        const val KEY_SERVER_URL = "sync_server_url"
-        const val KEY_AUTO_SYNC = "sync_auto_enabled"
-        const val KEY_LAST_SYNCED_AT = "sync_last_at"
-        const val DEFAULT_SERVER_URL = "https://homeassistant.tail1946af.ts.net/api/comics8/sync"
+        const val KEY_SYNC_KEY = com.comics8.core.sync.SyncConstants.KEY_SYNC_KEY
+        const val KEY_SERVER_URL = com.comics8.core.sync.SyncConstants.KEY_SERVER_URL
+        const val KEY_AUTO_SYNC = com.comics8.core.sync.SyncConstants.KEY_AUTO_SYNC
+        const val KEY_LAST_SYNCED_AT = com.comics8.core.sync.SyncConstants.KEY_LAST_SYNCED_AT
+        const val DEFAULT_SERVER_URL = com.comics8.core.sync.SyncConstants.DEFAULT_SERVER_URL
 
-        fun generateSyncKey(): String {
-            val chars = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
-            return (1..4).map { chars.random() }.joinToString("")
-        }
+        fun generateSyncKey(): String = com.comics8.core.sync.SyncConstants.generateSyncKey()
     }
 }

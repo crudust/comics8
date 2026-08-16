@@ -85,6 +85,13 @@ adb shell am start -n "com.comics8.monitor/.MainActivity"
 
 ```
 Comics8/
+├── core/                       # 공통 모듈 (파서, 모델, 네트워크, 동기화 상수)
+│   ├── build.gradle.kts
+│   └── src/main/kotlin/com/comics8/core/
+│       ├── model/              # Catalog, ToonItem, EpisodeItem, DualSpread, ViewMode 등
+│       ├── parser/             # ComicSite, HtmlParsers, SearchParser
+│       ├── network/            # ToonClient
+│       └── sync/               # SyncConstants (서버 URL, 동기화 키 생성기)
 ├── app/                        # Android 모듈 (APK)
 │   ├── build.gradle.kts
 │   └── src/main/java/com/comics8/monitor/
@@ -92,7 +99,7 @@ Comics8/
 │   ├── build.gradle.kts
 │   └── src/main/kotlin/com/comics8/desktop/
 │       ├── Main.kt
-│       ├── data/               # SQLite JDBC, OkHttp, Jsoup 파서, 백업 매니저
+│       ├── data/               # SQLite JDBC, 리포지토리, 동기화 매니저
 │       └── ui/                 # Compose Desktop UI (Browse, Series, Reader, History)
 ├── scripts/
 │   ├── build-apk.sh            # Android Release APK 빌드

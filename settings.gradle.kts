@@ -17,5 +17,6 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "Comics8"
+include(":core")
 include(":app")
 include(":desktop")

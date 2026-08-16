@@ -105,7 +105,8 @@ fun ToonCard(
                     Badge("NEW")
                 }
             }
-            if (!item.readProgress.isNullOrBlank()) {
+            val progress = item.readProgress
+            if (!progress.isNullOrBlank()) {
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
@@ -115,7 +116,7 @@ fun ToonCard(
                         .padding(horizontal = 5.dp, vertical = 2.dp),
                 ) {
                     Text(
-                        text = item.readProgress,
+                        text = progress,
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary,

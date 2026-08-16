@@ -1,5 +1,6 @@
-package com.comics8.desktop.data
+package com.comics8.core.parser
 
+import com.comics8.core.model.ToonItem
 import org.json.JSONObject
 
 object SearchParser {

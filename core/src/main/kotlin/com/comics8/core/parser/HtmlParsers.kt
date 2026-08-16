@@ -1,5 +1,9 @@
-package com.comics8.desktop.data
+package com.comics8.core.parser
 
+import com.comics8.core.model.EpisodeItem
+import com.comics8.core.model.EpisodePage
+import com.comics8.core.model.ListingPage
+import com.comics8.core.model.ToonItem
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 
@@ -49,9 +53,15 @@ object HtmlParsers {
         RegexOption.IGNORE_CASE,
     )
 
+    /**
+     * Parses an episode page and extracts the comic image URLs.
+     * Handles JavaScript array definitions (var img_list = [...]), standard <img> tags,
+     * and CSS background‑image styles.
+     */
     fun parseImages(html: String, baseUri: String = ComicSite.ORIGIN): List<String> {
         val urls = LinkedHashSet<String>()
 
+        // 1. Check JavaScript image arrays (e.g. var img_list = [...])
         for (match in jsImgArrayRegex.findAll(html)) {
             val arrayBody = match.groupValues[1]
             for (urlMatch in jsStringUrlRegex.findAll(arrayBody)) {
@@ -65,6 +75,7 @@ object HtmlParsers {
             }
         }
 
+        // 2. Check DOM elements in viewer containers
         val doc = Jsoup.parse(html, baseUri)
         val viewerContainer = doc.selectFirst("#scroll-list, .view-content, .scroll-viewer, #page-list, #contents-wrapper")
         val searchRoot = viewerContainer ?: doc
@@ -127,6 +138,10 @@ object HtmlParsers {
             ?.ifBlank { ComicSite.seriesUrl(id, title) }
             ?: ComicSite.seriesUrl(id, title)
 
+        val rankingEl = li.selectFirst(".homelist-ranking")
+        val ranking = rankingEl?.ownText()?.filter { it.isDigit() }?.ifBlank { null }
+            ?: rankingEl?.text()?.filter { it.isDigit() }?.ifBlank { null }
+
         return ToonItem(
             id = id,
             title = title,
@@ -134,6 +149,7 @@ object HtmlParsers {
             href = href,
             genre = genre,
             updatedAt = updatedAt,
+            ranking = ranking,
         )
     }
 

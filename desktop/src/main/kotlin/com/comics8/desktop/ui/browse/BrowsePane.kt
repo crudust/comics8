@@ -160,7 +160,8 @@ fun ToonCard(
                     Badge("NEW")
                 }
             }
-            if (!item.readProgress.isNullOrBlank()) {
+            val progress = item.readProgress
+            if (!progress.isNullOrBlank()) {
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
@@ -170,7 +171,7 @@ fun ToonCard(
                         .padding(horizontal = 6.dp, vertical = 2.dp),
                 ) {
                     Text(
-                        text = item.readProgress,
+                        text = progress,
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary,
@@ -200,7 +201,8 @@ fun ToonCard(
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(top = 6.dp),
         )
-        if (item.genre.isNotBlank() || !item.updatedAt.isNullOrBlank()) {
+        val updatedAt = item.updatedAt
+        if (item.genre.isNotBlank() || !updatedAt.isNullOrBlank()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -215,9 +217,9 @@ fun ToonCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                if (!item.updatedAt.isNullOrBlank()) {
+                if (!updatedAt.isNullOrBlank()) {
                     Text(
-                        text = item.updatedAt,
+                        text = updatedAt,
                         maxLines = 1,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.outline,

@@ -64,10 +64,10 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.comics8.desktop.data.DualSpread
-import com.comics8.desktop.data.ReadDirection
-import com.comics8.desktop.data.ViewMode
-import com.comics8.desktop.data.buildDualSpreads
+import com.comics8.core.model.DualSpread
+import com.comics8.core.model.ReadDirection
+import com.comics8.core.model.ViewMode
+import com.comics8.core.model.buildDualSpreads
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
 import com.comics8.desktop.ui.components.ErrorPane
@@ -123,7 +123,7 @@ fun ReaderPane(
             else -> {
                 when (state.viewMode) {
                     ViewMode.SCROLL -> ReaderScrollView(state, viewModel)
-                    ViewMode.SINGLE -> ReaderSingleView(state, viewModel)
+                    ViewMode.PAGE -> ReaderSingleView(state, viewModel)
                     ViewMode.DUAL -> ReaderDualView(state, viewModel)
                 }
             }
@@ -242,6 +242,15 @@ private fun ReaderSingleView(
     LaunchedEffect(currentPage) {
         if (state.readerImages.isNotEmpty()) {
             viewModel.savePage(currentPage)
+        }
+    }
+
+    LaunchedEffect(currentPage, state.readerImages) {
+        if (state.readerImages.isNotEmpty()) {
+            val preloadUrls = (1..3).mapNotNull { offset ->
+                state.readerImages.getOrNull(currentPage + offset)
+            }
+            com.comics8.desktop.ui.util.DesktopImageCache.preload(preloadUrls)
         }
     }
 
@@ -403,7 +412,7 @@ private fun ReaderSingleView(
         EpisodeBoundaryPrompt(
             visible = nextPromptVisible,
             title = if (state.hasNextEpisode) "마지막 페이지입니다" else "마지막 회차입니다",
-            subtitle = if (state.hasNextEpisode) "한 번 더 클릭하면 다음 회차로 이동" else "한 번 더 클릭하면 메인 목록으로 이동",
+            subtitle = if (state.hasNextEpisode) "한 번 더 클릭하면 다음 회차로 이동" else "한 번 더 클릭하면 회차 목록으로 이동",
             onClick = {
                 nextPromptVisible = false
                 if (state.hasNextEpisode) {
@@ -417,7 +426,7 @@ private fun ReaderSingleView(
         EpisodeBoundaryPrompt(
             visible = prevPromptVisible,
             title = if (state.hasPrevEpisode) "첫 페이지입니다" else "첫 번째 회차입니다",
-            subtitle = if (state.hasPrevEpisode) "한 번 더 클릭하면 이전 회차로 이동" else "한 번 더 클릭하면 메인 목록으로 이동",
+            subtitle = if (state.hasPrevEpisode) "한 번 더 클릭하면 이전 회차로 이동" else "한 번 더 클릭하면 회차 목록으로 이동",
             onClick = {
                 prevPromptVisible = false
                 if (state.hasPrevEpisode) {
@@ -500,6 +509,24 @@ private fun ReaderDualView(
                 is DualSpread.Dual -> spread.firstIndex
             }
             viewModel.savePage(firstPage)
+        }
+    }
+
+    LaunchedEffect(currentSpreadIndex, spreads, state.readerImages) {
+        if (state.readerImages.isNotEmpty() && spreads.isNotEmpty()) {
+            val preloadUrls = mutableListOf<String>()
+            for (offset in 1..3) {
+                val nextSpread = spreads.getOrNull(currentSpreadIndex + offset)
+                when (nextSpread) {
+                    is DualSpread.Single -> state.readerImages.getOrNull(nextSpread.index)?.let { preloadUrls.add(it) }
+                    is DualSpread.Dual -> {
+                        state.readerImages.getOrNull(nextSpread.firstIndex)?.let { preloadUrls.add(it) }
+                        state.readerImages.getOrNull(nextSpread.secondIndex)?.let { preloadUrls.add(it) }
+                    }
+                    null -> {}
+                }
+            }
+            com.comics8.desktop.ui.util.DesktopImageCache.preload(preloadUrls)
         }
     }
 
@@ -793,7 +820,7 @@ private fun ReaderDualView(
         EpisodeBoundaryPrompt(
             visible = nextPromptVisible,
             title = if (state.hasNextEpisode) "마지막 페이지입니다" else "마지막 회차입니다",
-            subtitle = if (state.hasNextEpisode) "한 번 더 클릭하면 다음 회차로 이동" else "한 번 더 클릭하면 메인 목록으로 이동",
+            subtitle = if (state.hasNextEpisode) "한 번 더 클릭하면 다음 회차로 이동" else "한 번 더 클릭하면 회차 목록으로 이동",
             onClick = {
                 nextPromptVisible = false
                 if (state.hasNextEpisode) {
@@ -807,7 +834,7 @@ private fun ReaderDualView(
         EpisodeBoundaryPrompt(
             visible = prevPromptVisible,
             title = if (state.hasPrevEpisode) "첫 페이지입니다" else "첫 번째 회차입니다",
-            subtitle = if (state.hasPrevEpisode) "한 번 더 클릭하면 이전 회차로 이동" else "한 번 더 클릭하면 메인 목록으로 이동",
+            subtitle = if (state.hasPrevEpisode) "한 번 더 클릭하면 이전 회차로 이동" else "한 번 더 클릭하면 회차 목록으로 이동",
             onClick = {
                 prevPromptVisible = false
                 if (state.hasPrevEpisode) {

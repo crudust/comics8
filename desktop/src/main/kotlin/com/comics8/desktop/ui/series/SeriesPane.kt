@@ -169,10 +169,11 @@ fun EpisodeCard(
                 modifier = Modifier.weight(1f),
             )
 
-            if (!episode.date.isNullOrBlank()) {
+            val date = episode.date
+            if (!date.isNullOrBlank()) {
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = episode.date,
+                    text = date,
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.outline,
                 )

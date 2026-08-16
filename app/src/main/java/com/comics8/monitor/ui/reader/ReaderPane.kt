@@ -1,5 +1,6 @@
 package com.comics8.monitor.ui.reader
 
+import com.comics8.core.model.DualSpread
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -42,10 +43,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
-import com.comics8.monitor.data.DualSpread
 import com.comics8.monitor.data.ReadDirection
 import com.comics8.monitor.data.ViewMode
 import com.comics8.monitor.data.buildDualSpreads
@@ -270,7 +271,7 @@ private fun ReaderSinglePagePane(
                 if (state.hasNextEpisode) {
                     viewModel.openNextEpisode()
                 } else {
-                    viewModel.closeSeries()
+                    viewModel.closeReader()
                 }
             } else {
                 nextPromptVisible = true
@@ -296,7 +297,7 @@ private fun ReaderSinglePagePane(
                 if (state.hasPrevEpisode) {
                     viewModel.openPrevEpisode()
                 } else {
-                    viewModel.closeSeries()
+                    viewModel.closeReader()
                 }
             } else {
                 prevPromptVisible = true
@@ -310,6 +311,18 @@ private fun ReaderSinglePagePane(
         }
     }
 
+    val context = LocalContext.current
+    LaunchedEffect(pagerState.currentPage, state.readerImages) {
+        val imageLoader = coil.Coil.imageLoader(context)
+        for (offset in 1..4) {
+            val targetUrl = state.readerImages.getOrNull(pagerState.currentPage + offset) ?: continue
+            val request = coil.request.ImageRequest.Builder(context)
+                .data(targetUrl)
+                .build()
+            imageLoader.enqueue(request)
+        }
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -318,6 +331,7 @@ private fun ReaderSinglePagePane(
         HorizontalPager(
             state = pagerState,
             reverseLayout = isR2L,
+            beyondViewportPageCount = 2,
             modifier = Modifier.fillMaxSize(),
         ) { page ->
             Box(
@@ -392,13 +406,13 @@ private fun ReaderSinglePagePane(
         EpisodeBoundaryPrompt(
             visible = nextPromptVisible,
             title = if (state.hasNextEpisode) "마지막 페이지입니다" else "마지막 회차입니다",
-            subtitle = if (state.hasNextEpisode) "한 번 더 클릭하면 다음 회차로 이동" else "한 번 더 클릭하면 메인 목록으로 이동",
+            subtitle = if (state.hasNextEpisode) "한 번 더 클릭하면 다음 회차로 이동" else "한 번 더 클릭하면 회차 목록으로 이동",
             onClick = {
                 nextPromptVisible = false
                 if (state.hasNextEpisode) {
                     viewModel.openNextEpisode()
                 } else {
-                    viewModel.closeSeries()
+                    viewModel.closeReader()
                 }
             },
         )
@@ -406,13 +420,13 @@ private fun ReaderSinglePagePane(
         EpisodeBoundaryPrompt(
             visible = prevPromptVisible,
             title = if (state.hasPrevEpisode) "첫 페이지입니다" else "첫 번째 회차입니다",
-            subtitle = if (state.hasPrevEpisode) "한 번 더 클릭하면 이전 회차로 이동" else "한 번 더 클릭하면 메인 목록으로 이동",
+            subtitle = if (state.hasPrevEpisode) "한 번 더 클릭하면 이전 회차로 이동" else "한 번 더 클릭하면 회차 목록으로 이동",
             onClick = {
                 prevPromptVisible = false
                 if (state.hasPrevEpisode) {
                     viewModel.openPrevEpisode()
                 } else {
-                    viewModel.closeSeries()
+                    viewModel.closeReader()
                 }
             },
         )
@@ -536,7 +550,7 @@ private fun ReaderDualPagePane(
                 if (state.hasNextEpisode) {
                     viewModel.openNextEpisode()
                 } else {
-                    viewModel.closeSeries()
+                    viewModel.closeReader()
                 }
             } else {
                 nextPromptVisible = true
@@ -562,7 +576,7 @@ private fun ReaderDualPagePane(
                 if (state.hasPrevEpisode) {
                     viewModel.openPrevEpisode()
                 } else {
-                    viewModel.closeSeries()
+                    viewModel.closeReader()
                 }
             } else {
                 prevPromptVisible = true
@@ -572,6 +586,30 @@ private fun ReaderDualPagePane(
                     delay(3000)
                     prevPromptVisible = false
                 }
+            }
+        }
+    }
+
+    val context = LocalContext.current
+    LaunchedEffect(pagerState.currentPage, spreads, state.readerImages) {
+        val imageLoader = coil.Coil.imageLoader(context)
+        for (offset in 1..3) {
+            val nextSpread = spreads.getOrNull(pagerState.currentPage + offset)
+            when (nextSpread) {
+                is DualSpread.Single -> {
+                    state.readerImages.getOrNull(nextSpread.index)?.let { url ->
+                        imageLoader.enqueue(coil.request.ImageRequest.Builder(context).data(url).build())
+                    }
+                }
+                is DualSpread.Dual -> {
+                    state.readerImages.getOrNull(nextSpread.firstIndex)?.let { url ->
+                        imageLoader.enqueue(coil.request.ImageRequest.Builder(context).data(url).build())
+                    }
+                    state.readerImages.getOrNull(nextSpread.secondIndex)?.let { url ->
+                        imageLoader.enqueue(coil.request.ImageRequest.Builder(context).data(url).build())
+                    }
+                }
+                null -> {}
             }
         }
     }
@@ -596,6 +634,7 @@ private fun ReaderDualPagePane(
         HorizontalPager(
             state = pagerState,
             reverseLayout = isR2L,
+            beyondViewportPageCount = 2,
             modifier = Modifier.fillMaxSize(),
         ) { spreadIdx ->
             when (val spread = spreads.getOrNull(spreadIdx)) {
@@ -797,13 +836,13 @@ private fun ReaderDualPagePane(
         EpisodeBoundaryPrompt(
             visible = nextPromptVisible,
             title = if (state.hasNextEpisode) "마지막 페이지입니다" else "마지막 회차입니다",
-            subtitle = if (state.hasNextEpisode) "한 번 더 클릭하면 다음 회차로 이동" else "한 번 더 클릭하면 메인 목록으로 이동",
+            subtitle = if (state.hasNextEpisode) "한 번 더 클릭하면 다음 회차로 이동" else "한 번 더 클릭하면 회차 목록으로 이동",
             onClick = {
                 nextPromptVisible = false
                 if (state.hasNextEpisode) {
                     viewModel.openNextEpisode()
                 } else {
-                    viewModel.closeSeries()
+                    viewModel.closeReader()
                 }
             },
         )
@@ -811,13 +850,13 @@ private fun ReaderDualPagePane(
         EpisodeBoundaryPrompt(
             visible = prevPromptVisible,
             title = if (state.hasPrevEpisode) "첫 페이지입니다" else "첫 번째 회차입니다",
-            subtitle = if (state.hasPrevEpisode) "한 번 더 클릭하면 이전 회차로 이동" else "한 번 더 클릭하면 메인 목록으로 이동",
+            subtitle = if (state.hasPrevEpisode) "한 번 더 클릭하면 이전 회차로 이동" else "한 번 더 클릭하면 회차 목록으로 이동",
             onClick = {
                 prevPromptVisible = false
                 if (state.hasPrevEpisode) {
                     viewModel.openPrevEpisode()
                 } else {
-                    viewModel.closeSeries()
+                    viewModel.closeReader()
                 }
             },
         )

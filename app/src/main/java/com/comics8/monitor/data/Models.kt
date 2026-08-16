@@ -1,97 +1,23 @@
 package com.comics8.monitor.data
 
-data class ToonItem(
-    val id: String,
-    val title: String,
-    val thumbUrl: String,
-    val href: String,
-    val genre: String,
-    val updatedAt: String?,
-    val ranking: String? = null,
-    val isNew: Boolean = false,
-    val isFavorite: Boolean = false,
-    val readProgress: String? = null,
-) {
-    val subtitle: String
-        get() = when {
-            !updatedAt.isNullOrBlank() && genre.isNotBlank() -> "$updatedAt · $genre"
-            !updatedAt.isNullOrBlank() -> updatedAt
-            else -> genre
-        }
-}
+import com.comics8.core.model.DualSpread
+import com.comics8.core.model.EpisodeItem
+import com.comics8.core.model.EpisodePage
+import com.comics8.core.model.ListingPage
+import com.comics8.core.model.ReadDirection
+import com.comics8.core.model.ToonItem
+import com.comics8.core.model.ViewMode
+import com.comics8.core.model.buildDualSpreads
 
-data class ListingPage(
-    val items: List<ToonItem>,
-    val currentPage: Int,
-    val lastPage: Int,
-) {
-    val hasNext: Boolean get() = currentPage < lastPage
-    val hasPrev: Boolean get() = currentPage > 1
-}
-
-data class EpisodeItem(
-    val wrId: String,
-    val title: String,
-    val date: String?,
-    val thumbUrl: String?,
-    val href: String,
-    val isRead: Boolean = false,
-    val readAt: Long? = null,
-    val lastReadPage: Int = 0,
-)
-
-data class EpisodePage(
-    val items: List<EpisodeItem>,
-    val currentPage: Int,
-    val lastPage: Int,
-)
-
-enum class ViewMode(val label: String) {
-    SCROLL("세로 스크롤"),
-    PAGE("단면 페이지"),
-    DUAL("양쪽보기"),
-}
-
-enum class ReadDirection(val label: String) {
-    RIGHT_TO_LEFT("RL (우좌)"),
-    LEFT_TO_RIGHT("LR (좌우)"),
-}
-
-sealed interface DualSpread {
-    data class Single(val index: Int) : DualSpread
-    data class Dual(val firstIndex: Int, val secondIndex: Int) : DualSpread
-}
+typealias ToonItem = ToonItem
+typealias ListingPage = ListingPage
+typealias EpisodeItem = EpisodeItem
+typealias EpisodePage = EpisodePage
+typealias ViewMode = ViewMode
+typealias ReadDirection = ReadDirection
+typealias DualSpread = DualSpread
 
 fun buildDualSpreads(
     imageCount: Int,
     aspectRatios: Map<Int, Float>,
-): List<DualSpread> {
-    if (imageCount <= 0) return emptyList()
-    val spreads = mutableListOf<DualSpread>()
-    var i = 0
-    while (i < imageCount) {
-        val ratio = aspectRatios[i]
-        val isWide = ratio != null && ratio >= 1.0f
-
-        if (isWide) {
-            spreads.add(DualSpread.Single(i))
-            i += 1
-        } else {
-            if (i + 1 < imageCount) {
-                val nextRatio = aspectRatios[i + 1]
-                val nextIsWide = nextRatio != null && nextRatio >= 1.0f
-                if (nextIsWide) {
-                    spreads.add(DualSpread.Single(i))
-                    i += 1
-                } else {
-                    spreads.add(DualSpread.Dual(i, i + 1))
-                    i += 2
-                }
-            } else {
-                spreads.add(DualSpread.Single(i))
-                i += 1
-            }
-        }
-    }
-    return spreads
-}
+): List<DualSpread> = com.comics8.core.model.buildDualSpreads(imageCount, aspectRatios)

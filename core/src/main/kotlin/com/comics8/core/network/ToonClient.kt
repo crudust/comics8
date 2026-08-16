@@ -1,5 +1,7 @@
-package com.comics8.desktop.data
+package com.comics8.core.network
 
+import com.comics8.core.parser.ComicSite
+import com.comics8.core.parser.HtmlParsers
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
@@ -23,11 +25,17 @@ class ToonClient(
         }
     }
 
+    /**
+     * Fetches an episode page and extracts the image URLs to display in a reader.
+     */
     fun fetchImages(url: String): List<String> {
         val html = fetch(url)
         return HtmlParsers.parseImages(html, ComicSite.ORIGIN)
     }
 
+    /**
+     * Downloads raw bytes for an image URL.
+     */
     fun fetchBytes(url: String): ByteArray {
         val request = Request.Builder()
             .url(url)
@@ -46,12 +54,14 @@ class ToonClient(
 
     companion object {
         const val USER_AGENT =
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+            "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
 
         fun defaultClient(): OkHttpClient =
             OkHttpClient.Builder()
                 .connectTimeout(20, TimeUnit.SECONDS)
                 .readTimeout(40, TimeUnit.SECONDS)
+                .followRedirects(true)
+                .followSslRedirects(true)
                 .build()
     }
 }

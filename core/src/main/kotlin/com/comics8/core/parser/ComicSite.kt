@@ -1,4 +1,6 @@
-package com.comics8.desktop.data
+package com.comics8.core.parser
+
+import com.comics8.core.model.Catalog
 
 object ComicSite {
     const val ORIGIN = "http://103.204.13.68:8904"

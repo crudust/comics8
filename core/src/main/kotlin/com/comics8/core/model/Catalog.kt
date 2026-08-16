@@ -1,4 +1,4 @@
-package com.comics8.desktop.data
+package com.comics8.core.model
 
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets

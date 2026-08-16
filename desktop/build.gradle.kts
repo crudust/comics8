@@ -5,6 +5,8 @@ plugins {
 }
 
 dependencies {
+    implementation(project(":core"))
+
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
     implementation(compose.materialIconsExtended)

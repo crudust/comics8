@@ -120,9 +120,10 @@ fun EpisodeRow(
                     MaterialTheme.colorScheme.onSurface
                 },
             )
-            if (!episode.date.isNullOrBlank()) {
+            val date = episode.date
+            if (!date.isNullOrBlank()) {
                 Text(
-                    text = episode.date,
+                    text = date,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
                     modifier = Modifier.padding(top = 2.dp),
@@ -144,9 +145,10 @@ fun EpisodeRow(
                         .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.85f))
                         .padding(horizontal = 6.dp, vertical = 2.dp),
                 )
-                if (episode.readAt != null) {
+                val readAt = episode.readAt
+                if (readAt != null) {
                     Text(
-                        text = formatReadDate(episode.readAt),
+                        text = formatReadDate(readAt),
                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                         modifier = Modifier.padding(top = 2.dp),
