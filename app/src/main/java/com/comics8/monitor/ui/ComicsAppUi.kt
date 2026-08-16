@@ -12,6 +12,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
@@ -21,6 +23,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -73,6 +76,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -108,6 +112,8 @@ import com.comics8.monitor.data.EpisodeItem
 import com.comics8.monitor.data.ReadDirection
 import com.comics8.monitor.data.ToonItem
 import com.comics8.monitor.data.ViewMode
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private fun Context.findActivity(): Activity? = when (this) {
@@ -843,6 +849,50 @@ private fun ReaderScrollPane(state: ListingUiState, viewModel: ListingViewModel)
 }
 
 @Composable
+private fun BoxScope.EpisodeBoundaryPrompt(
+    visible: Boolean,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn() + scaleIn(initialScale = 0.9f),
+        exit = fadeOut() + scaleOut(targetScale = 0.9f),
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .padding(bottom = 72.dp),
+    ) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.92f),
+            shadowElevation = 6.dp,
+            modifier = Modifier
+                .padding(horizontal = 24.dp)
+                .clickable(onClick = onClick),
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.inverseOnSurface,
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.inversePrimary,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun ReaderSinglePagePane(state: ListingUiState, viewModel: ListingViewModel) {
     val isR2L = state.readDirection == ReadDirection.RIGHT_TO_LEFT
     val pagerState = rememberPagerState(
@@ -851,6 +901,70 @@ private fun ReaderSinglePagePane(state: ListingUiState, viewModel: ListingViewMo
     )
     val scope = rememberCoroutineScope()
     var controlsVisible by remember { mutableStateOf(false) }
+    var nextPromptVisible by remember { mutableStateOf(false) }
+    var prevPromptVisible by remember { mutableStateOf(false) }
+    var promptJob by remember { mutableStateOf<Job?>(null) }
+
+    LaunchedEffect(state.currentEpisode?.wrId, pagerState.currentPage) {
+        nextPromptVisible = false
+        prevPromptVisible = false
+    }
+
+    val onAdvance = {
+        if (pagerState.currentPage < state.readerImages.size - 1) {
+            nextPromptVisible = false
+            prevPromptVisible = false
+            scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
+        } else {
+            if (!state.hasNextEpisode) {
+                nextPromptVisible = true
+                promptJob?.cancel()
+                promptJob = scope.launch {
+                    delay(2500)
+                    nextPromptVisible = false
+                }
+            } else if (nextPromptVisible) {
+                nextPromptVisible = false
+                viewModel.openNextEpisode()
+            } else {
+                nextPromptVisible = true
+                prevPromptVisible = false
+                promptJob?.cancel()
+                promptJob = scope.launch {
+                    delay(3000)
+                    nextPromptVisible = false
+                }
+            }
+        }
+    }
+
+    val onRetreat = {
+        if (pagerState.currentPage > 0) {
+            nextPromptVisible = false
+            prevPromptVisible = false
+            scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) }
+        } else {
+            if (!state.hasPrevEpisode) {
+                prevPromptVisible = true
+                promptJob?.cancel()
+                promptJob = scope.launch {
+                    delay(2500)
+                    prevPromptVisible = false
+                }
+            } else if (prevPromptVisible) {
+                prevPromptVisible = false
+                viewModel.openPrevEpisode()
+            } else {
+                prevPromptVisible = true
+                nextPromptVisible = false
+                promptJob?.cancel()
+                promptJob = scope.launch {
+                    delay(3000)
+                    prevPromptVisible = false
+                }
+            }
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -886,21 +1000,7 @@ private fun ReaderSinglePagePane(state: ListingUiState, viewModel: ListingViewMo
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                     ) {
-                        scope.launch {
-                            if (isR2L) {
-                                if (pagerState.currentPage < state.readerImages.size - 1) {
-                                    pagerState.animateScrollToPage(pagerState.currentPage + 1)
-                                } else if (state.hasNextEpisode) {
-                                    viewModel.openNextEpisode()
-                                }
-                            } else {
-                                if (pagerState.currentPage > 0) {
-                                    pagerState.animateScrollToPage(pagerState.currentPage - 1)
-                                } else if (state.hasPrevEpisode) {
-                                    viewModel.openPrevEpisode()
-                                }
-                            }
-                        }
+                        if (isR2L) onAdvance() else onRetreat()
                     },
             )
             Box(
@@ -912,6 +1012,8 @@ private fun ReaderSinglePagePane(state: ListingUiState, viewModel: ListingViewMo
                         indication = null,
                     ) {
                         controlsVisible = !controlsVisible
+                        nextPromptVisible = false
+                        prevPromptVisible = false
                     },
             )
             Box(
@@ -922,21 +1024,7 @@ private fun ReaderSinglePagePane(state: ListingUiState, viewModel: ListingViewMo
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                     ) {
-                        scope.launch {
-                            if (isR2L) {
-                                if (pagerState.currentPage > 0) {
-                                    pagerState.animateScrollToPage(pagerState.currentPage - 1)
-                                } else if (state.hasPrevEpisode) {
-                                    viewModel.openPrevEpisode()
-                                }
-                            } else {
-                                if (pagerState.currentPage < state.readerImages.size - 1) {
-                                    pagerState.animateScrollToPage(pagerState.currentPage + 1)
-                                } else if (state.hasNextEpisode) {
-                                    viewModel.openNextEpisode()
-                                }
-                            }
-                        }
+                        if (isR2L) onRetreat() else onAdvance()
                     },
             )
         }
@@ -956,6 +1044,31 @@ private fun ReaderSinglePagePane(state: ListingUiState, viewModel: ListingViewMo
                     .padding(horizontal = 8.dp, vertical = 4.dp),
             )
         }
+
+        // Boundary Prompt Overlay (Next/Prev Episode 2-tap confirmation)
+        EpisodeBoundaryPrompt(
+            visible = nextPromptVisible,
+            title = if (state.hasNextEpisode) "마지막 페이지입니다" else "마지막 회차입니다",
+            subtitle = if (state.hasNextEpisode) "한 번 더 클릭하면 다음 회차로 이동" else "현재 최신 회차입니다",
+            onClick = {
+                if (state.hasNextEpisode) {
+                    nextPromptVisible = false
+                    viewModel.openNextEpisode()
+                }
+            },
+        )
+
+        EpisodeBoundaryPrompt(
+            visible = prevPromptVisible,
+            title = if (state.hasPrevEpisode) "첫 페이지입니다" else "첫 번째 회차입니다",
+            subtitle = if (state.hasPrevEpisode) "한 번 더 클릭하면 이전 회차로 이동" else "가장 첫 회차입니다",
+            onClick = {
+                if (state.hasPrevEpisode) {
+                    prevPromptVisible = false
+                    viewModel.openPrevEpisode()
+                }
+            },
+        )
 
         // Top Controls Overlay
         AnimatedVisibility(
@@ -1002,6 +1115,70 @@ private fun ReaderDualPagePane(state: ListingUiState, viewModel: ListingViewMode
     )
     val scope = rememberCoroutineScope()
     var controlsVisible by remember { mutableStateOf(false) }
+    var nextPromptVisible by remember { mutableStateOf(false) }
+    var prevPromptVisible by remember { mutableStateOf(false) }
+    var promptJob by remember { mutableStateOf<Job?>(null) }
+
+    LaunchedEffect(state.currentEpisode?.wrId, pagerState.currentPage) {
+        nextPromptVisible = false
+        prevPromptVisible = false
+    }
+
+    val onAdvance = {
+        if (pagerState.currentPage < totalSpreads - 1) {
+            nextPromptVisible = false
+            prevPromptVisible = false
+            scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
+        } else {
+            if (!state.hasNextEpisode) {
+                nextPromptVisible = true
+                promptJob?.cancel()
+                promptJob = scope.launch {
+                    delay(2500)
+                    nextPromptVisible = false
+                }
+            } else if (nextPromptVisible) {
+                nextPromptVisible = false
+                viewModel.openNextEpisode()
+            } else {
+                nextPromptVisible = true
+                prevPromptVisible = false
+                promptJob?.cancel()
+                promptJob = scope.launch {
+                    delay(3000)
+                    nextPromptVisible = false
+                }
+            }
+        }
+    }
+
+    val onRetreat = {
+        if (pagerState.currentPage > 0) {
+            nextPromptVisible = false
+            prevPromptVisible = false
+            scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) }
+        } else {
+            if (!state.hasPrevEpisode) {
+                prevPromptVisible = true
+                promptJob?.cancel()
+                promptJob = scope.launch {
+                    delay(2500)
+                    prevPromptVisible = false
+                }
+            } else if (prevPromptVisible) {
+                prevPromptVisible = false
+                viewModel.openPrevEpisode()
+            } else {
+                prevPromptVisible = true
+                nextPromptVisible = false
+                promptJob?.cancel()
+                promptJob = scope.launch {
+                    delay(3000)
+                    prevPromptVisible = false
+                }
+            }
+        }
+    }
 
     val currentSpread = pagerState.currentPage
     val curImg1 = currentSpread * 2
@@ -1118,21 +1295,7 @@ private fun ReaderDualPagePane(state: ListingUiState, viewModel: ListingViewMode
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                     ) {
-                        scope.launch {
-                            if (isR2L) {
-                                if (pagerState.currentPage < totalSpreads - 1) {
-                                    pagerState.animateScrollToPage(pagerState.currentPage + 1)
-                                } else if (state.hasNextEpisode) {
-                                    viewModel.openNextEpisode()
-                                }
-                            } else {
-                                if (pagerState.currentPage > 0) {
-                                    pagerState.animateScrollToPage(pagerState.currentPage - 1)
-                                } else if (state.hasPrevEpisode) {
-                                    viewModel.openPrevEpisode()
-                                }
-                            }
-                        }
+                        if (isR2L) onAdvance() else onRetreat()
                     },
             )
             // Center Tap Zone (Toggles Controls)
@@ -1145,6 +1308,8 @@ private fun ReaderDualPagePane(state: ListingUiState, viewModel: ListingViewMode
                         indication = null,
                     ) {
                         controlsVisible = !controlsVisible
+                        nextPromptVisible = false
+                        prevPromptVisible = false
                     },
             )
             // Right Tap Zone
@@ -1156,21 +1321,7 @@ private fun ReaderDualPagePane(state: ListingUiState, viewModel: ListingViewMode
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                     ) {
-                        scope.launch {
-                            if (isR2L) {
-                                if (pagerState.currentPage > 0) {
-                                    pagerState.animateScrollToPage(pagerState.currentPage - 1)
-                                } else if (state.hasPrevEpisode) {
-                                    viewModel.openPrevEpisode()
-                                }
-                            } else {
-                                if (pagerState.currentPage < totalSpreads - 1) {
-                                    pagerState.animateScrollToPage(pagerState.currentPage + 1)
-                                } else if (state.hasNextEpisode) {
-                                    viewModel.openNextEpisode()
-                                }
-                            }
-                        }
+                        if (isR2L) onRetreat() else onAdvance()
                     },
             )
         }
@@ -1190,6 +1341,31 @@ private fun ReaderDualPagePane(state: ListingUiState, viewModel: ListingViewMode
                     .padding(horizontal = 8.dp, vertical = 4.dp),
             )
         }
+
+        // Boundary Prompt Overlay (Next/Prev Episode 2-tap confirmation)
+        EpisodeBoundaryPrompt(
+            visible = nextPromptVisible,
+            title = if (state.hasNextEpisode) "마지막 페이지입니다" else "마지막 회차입니다",
+            subtitle = if (state.hasNextEpisode) "한 번 더 클릭하면 다음 회차로 이동" else "현재 최신 회차입니다",
+            onClick = {
+                if (state.hasNextEpisode) {
+                    nextPromptVisible = false
+                    viewModel.openNextEpisode()
+                }
+            },
+        )
+
+        EpisodeBoundaryPrompt(
+            visible = prevPromptVisible,
+            title = if (state.hasPrevEpisode) "첫 페이지입니다" else "첫 번째 회차입니다",
+            subtitle = if (state.hasPrevEpisode) "한 번 더 클릭하면 이전 회차로 이동" else "가장 첫 회차입니다",
+            onClick = {
+                if (state.hasPrevEpisode) {
+                    prevPromptVisible = false
+                    viewModel.openPrevEpisode()
+                }
+            },
+        )
 
         // Top Controls Overlay
         AnimatedVisibility(
