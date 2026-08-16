@@ -123,6 +123,7 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                         )
                         else -> ListingGrid(
                             items = state.items,
+                            scrollToTopTrigger = state.scrollToTopTrigger,
                             onOpen = viewModel::openSeries,
                             onToggleFavorite = viewModel::toggleFavorite,
                         )

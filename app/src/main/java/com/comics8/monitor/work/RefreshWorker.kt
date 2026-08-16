@@ -48,10 +48,16 @@ class RefreshWorker(
         )
         manager.createNotificationChannel(channel)
 
+        val intent = Intent(applicationContext, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            putExtra(EXTRA_FROM_NOTIFICATION, true)
+            putExtra(EXTRA_TARGET_CATALOG, com.comics8.monitor.data.Catalog.FAVORITE.name)
+        }
+
         val launch = PendingIntent.getActivity(
             applicationContext,
             0,
-            Intent(applicationContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
@@ -83,6 +89,8 @@ class RefreshWorker(
     }
 
     companion object {
+        const val EXTRA_FROM_NOTIFICATION = "from_notification"
+        const val EXTRA_TARGET_CATALOG = "target_catalog"
         private const val UNIQUE_NAME = "latest-refresh"
         private const val CHANNEL_ID = "latest-updates"
         private const val NOTIFY_ID = 81

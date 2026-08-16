@@ -45,6 +45,7 @@ data class ListingUiState(
     val readerError: String? = null,
     val viewMode: ViewMode = ViewMode.SCROLL,
     val readDirection: ReadDirection = ReadDirection.RIGHT_TO_LEFT,
+    val scrollToTopTrigger: Int = 0,
 ) {
     val isSearch: Boolean get() = searchQuery != null
 
@@ -114,6 +115,31 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         refresh(force = true)
     }
 
+    fun handleNotificationLaunch(targetCatalog: Catalog? = null) {
+        readerJob?.cancel()
+        episodeJob?.cancel()
+        val destCatalog = targetCatalog ?: Catalog.FAVORITE
+        _state.update {
+            it.copy(
+                screen = Screen.Browse,
+                catalog = destCatalog,
+                series = null,
+                episodes = emptyList(),
+                currentEpisode = null,
+                readerImages = emptyList(),
+                page = 1,
+                lastPage = 1,
+                items = emptyList(),
+                searchQuery = null,
+                searchExpanded = false,
+                searchInput = "",
+                error = null,
+                scrollToTopTrigger = it.scrollToTopTrigger + 1,
+            )
+        }
+        loadPage(1, replace = true, asRefresh = true)
+    }
+
     fun selectCatalog(catalog: Catalog) {
         if (
             catalog == _state.value.catalog &&
@@ -137,6 +163,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 currentEpisode = null,
                 readerImages = emptyList(),
                 readerError = null,
+                scrollToTopTrigger = it.scrollToTopTrigger + 1,
             )
         }
         loadPage(1, replace = true)

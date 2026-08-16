@@ -232,6 +232,12 @@ private fun ReaderSinglePagePane(
         prevPromptVisible = false
     }
 
+    LaunchedEffect(pagerState.isScrollInProgress) {
+        if (pagerState.isScrollInProgress) {
+            controlsVisible = false
+        }
+    }
+
     LaunchedEffect(pagerState.currentPage) {
         if (state.readerImages.isNotEmpty()) {
             viewModel.savePage(pagerState.currentPage)
@@ -239,6 +245,7 @@ private fun ReaderSinglePagePane(
     }
 
     val onAdvance = {
+        controlsVisible = false
         if (pagerState.currentPage < state.readerImages.size - 1) {
             nextPromptVisible = false
             prevPromptVisible = false
@@ -264,6 +271,7 @@ private fun ReaderSinglePagePane(
     }
 
     val onRetreat = {
+        controlsVisible = false
         if (pagerState.currentPage > 0) {
             nextPromptVisible = false
             prevPromptVisible = false
@@ -469,6 +477,12 @@ private fun ReaderDualPagePane(
         prevPromptVisible = false
     }
 
+    LaunchedEffect(pagerState.isScrollInProgress) {
+        if (pagerState.isScrollInProgress) {
+            controlsVisible = false
+        }
+    }
+
     LaunchedEffect(pagerState.currentPage, spreads) {
         if (state.readerImages.isNotEmpty() && spreads.isNotEmpty()) {
             val spread = spreads.getOrNull(pagerState.currentPage)
@@ -482,6 +496,7 @@ private fun ReaderDualPagePane(
     }
 
     val onAdvance = {
+        controlsVisible = false
         if (pagerState.currentPage < totalSpreads - 1) {
             nextPromptVisible = false
             prevPromptVisible = false
@@ -507,6 +522,7 @@ private fun ReaderDualPagePane(
     }
 
     val onRetreat = {
+        controlsVisible = false
         if (pagerState.currentPage > 0) {
             nextPromptVisible = false
             prevPromptVisible = false
