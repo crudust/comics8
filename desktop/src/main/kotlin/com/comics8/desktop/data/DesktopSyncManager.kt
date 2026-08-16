@@ -14,6 +14,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.Properties
@@ -128,12 +129,12 @@ class DesktopSyncManager(
         debounceJob?.cancel()
         debounceJob = scope.launch {
             delay(2500)
-            syncPushInternal(isSilent = true)
+            syncDeltaInternal(isSilent = true)
         }
     }
 
     suspend fun syncPull(): DesktopSyncResult = withContext(Dispatchers.IO) {
-        syncPullInternal(isSilent = false)
+        syncDeltaInternal(isSilent = false)
     }
 
     suspend fun syncPush(): DesktopSyncResult = withContext(Dispatchers.IO) {
@@ -152,6 +153,247 @@ class DesktopSyncManager(
         }
         val pushRes = syncPushInternal(isSilent = false)
         pushRes
+    }
+
+    /**
+     * Incremental (Delta) Sync: Exchanges only changes since lastSyncedAt.
+     */
+    suspend fun syncDeltaInternal(isSilent: Boolean): DesktopSyncResult = withContext(Dispatchers.IO) {
+        val state = _syncState.value
+        val baseUrl = state.serverUrl.trimEnd('/')
+        val deltaUrl = if (baseUrl.endsWith("/sync")) "$baseUrl/delta" else "$baseUrl/sync/delta"
+        val key = state.syncKey.trim()
+        if (key.isBlank()) return@withContext DesktopSyncResult(false, "동기화 키가 비어있습니다.")
+
+        val since = properties.getProperty(KEY_LAST_SYNCED_AT, "0").toLongOrNull() ?: 0L
+        if (since == 0L) {
+            // First time sync: perform full sync
+            return@withContext syncFull()
+        }
+
+        if (!isSilent) {
+            _syncState.value = _syncState.value.copy(isSyncing = true, syncMessage = null)
+        }
+
+        try {
+            // 1. Gather local changes since lastSyncedAt
+            val localFavs = database.getFavoritesSince(since)
+            val localHist = database.getHistorySince(since)
+            val localEps = database.getReadEpisodesSince(since)
+            val localSettings = database.getReaderSettingsSince(since)
+            val localTombs = database.getTombstonesSince(since)
+
+            val changesObj = JSONObject().apply {
+                val favArr = JSONArray()
+                localFavs.forEach { f ->
+                    favArr.put(JSONObject().apply {
+                        put("id", f.id)
+                        put("title", f.title)
+                        put("thumbUrl", f.thumbUrl)
+                        put("href", f.href)
+                        put("genre", f.genre)
+                        put("updatedAt", f.updatedAt ?: JSONObject.NULL)
+                        put("savedAt", f.savedAt)
+                    })
+                }
+                put("favorites", favArr)
+
+                val histArr = JSONArray()
+                localHist.forEach { h ->
+                    histArr.put(JSONObject().apply {
+                        put("toonId", h.toonId)
+                        put("toonTitle", h.toonTitle)
+                        put("toonThumbUrl", h.toonThumbUrl)
+                        put("toonHref", h.toonHref)
+                        put("lastWrId", h.lastWrId)
+                        put("lastEpisodeTitle", h.lastEpisodeTitle)
+                        put("lastEpisodeHref", h.lastEpisodeHref)
+                        put("lastReadOrder", h.lastReadOrder)
+                        put("totalEpisodes", h.totalEpisodes)
+                        put("lastReadAt", h.lastReadAt)
+                        put("nextWrId", h.nextWrId ?: JSONObject.NULL)
+                        put("nextEpisodeTitle", h.nextEpisodeTitle ?: JSONObject.NULL)
+                        put("nextEpisodeHref", h.nextEpisodeHref ?: JSONObject.NULL)
+                        put("hasNew", h.hasNew)
+                    })
+                }
+                put("history", histArr)
+
+                val epArr = JSONArray()
+                localEps.forEach { ep ->
+                    epArr.put(JSONObject().apply {
+                        put("toonId", ep.toonId)
+                        put("wrId", ep.wrId)
+                        put("readAt", ep.readAt)
+                        put("lastPage", ep.lastPage)
+                    })
+                }
+                put("readEpisodes", epArr)
+
+                val setArr = JSONArray()
+                localSettings.forEach { s ->
+                    setArr.put(JSONObject().apply {
+                        put("toonId", s.toonId)
+                        put("viewMode", s.viewMode)
+                        put("readDirection", s.readDirection)
+                        put("updatedAt", s.updatedAt)
+                    })
+                }
+                put("readerSettings", setArr)
+
+                val tombArr = JSONArray()
+                localTombs.forEach { t ->
+                    tombArr.put(JSONObject().apply {
+                        put("entityType", t.entityType)
+                        put("entityId", t.entityId)
+                        put("deletedAt", t.deletedAt)
+                    })
+                }
+                put("tombstones", tombArr)
+            }
+
+            val reqObj = JSONObject().apply {
+                put("since", since)
+                put("clientTime", System.currentTimeMillis())
+                put("changes", changesObj)
+            }
+
+            val mediaType = "application/json; charset=utf-8".toMediaType()
+            val reqBody = reqObj.toString().toRequestBody(mediaType)
+            val req = Request.Builder()
+                .url(deltaUrl)
+                .addHeader("Authorization", "Bearer $key")
+                .addHeader("X-Sync-Key", key)
+                .post(reqBody)
+                .build()
+
+            val resp = client.newCall(req).execute()
+            if (!resp.isSuccessful) {
+                // Fallback to legacy full sync if delta endpoint 404
+                if (resp.code == 404) {
+                    return@withContext syncPullInternal(isSilent)
+                }
+                val err = "증분 동기화 서버 오류 (${resp.code})"
+                if (!isSilent) {
+                    _syncState.value = _syncState.value.copy(isSyncing = false, isSuccess = false, syncMessage = err)
+                }
+                return@withContext DesktopSyncResult(false, err)
+            }
+
+            val body = resp.body?.string().orEmpty()
+            val json = JSONObject(body)
+            val serverTime = json.optLong("serverTime", System.currentTimeMillis())
+            val serverChanges = json.optJSONObject("changes") ?: JSONObject()
+
+            // Apply received tombstones
+            val serverTombs = serverChanges.optJSONArray("tombstones") ?: JSONArray()
+            for (i in 0 until serverTombs.length()) {
+                val t = serverTombs.getJSONObject(i)
+                val type = t.optString("entityType", "")
+                val id = t.optString("entityId", "")
+                if (type == "FAVORITE") database.deleteFavorite(id)
+                else if (type == "HISTORY") database.deleteHistory(id)
+                else if (type == "EPISODE") database.deleteReadEpisodesByToon(id)
+            }
+
+            // Apply received favorites
+            val serverFavs = serverChanges.optJSONArray("favorites") ?: JSONArray()
+            val favList = mutableListOf<FavoriteRecord>()
+            for (i in 0 until serverFavs.length()) {
+                val f = serverFavs.getJSONObject(i)
+                favList.add(
+                    FavoriteRecord(
+                        id = f.getString("id"),
+                        title = f.getString("title"),
+                        thumbUrl = f.optString("thumbUrl", ""),
+                        href = f.optString("href", ""),
+                        genre = f.optString("genre", ""),
+                        updatedAt = if (f.isNull("updatedAt")) null else f.getString("updatedAt"),
+                        savedAt = f.optLong("savedAt", serverTime),
+                    )
+                )
+            }
+            if (favList.isNotEmpty()) database.saveAllFavorites(favList)
+
+            // Apply received history
+            val serverHist = serverChanges.optJSONArray("history") ?: JSONArray()
+            val histList = mutableListOf<ReadHistoryRecord>()
+            for (i in 0 until serverHist.length()) {
+                val h = serverHist.getJSONObject(i)
+                histList.add(
+                    ReadHistoryRecord(
+                        toonId = h.getString("toonId"),
+                        toonTitle = h.getString("toonTitle"),
+                        toonThumbUrl = h.optString("toonThumbUrl", ""),
+                        toonHref = h.optString("toonHref", ""),
+                        lastWrId = h.getString("lastWrId"),
+                        lastEpisodeTitle = h.getString("lastEpisodeTitle"),
+                        lastEpisodeHref = h.optString("lastEpisodeHref", ""),
+                        lastReadOrder = h.optInt("lastReadOrder", 1),
+                        totalEpisodes = h.optInt("totalEpisodes", 1),
+                        lastReadAt = h.optLong("lastReadAt", serverTime),
+                        nextWrId = if (h.isNull("nextWrId")) null else h.getString("nextWrId"),
+                        nextEpisodeTitle = if (h.isNull("nextEpisodeTitle")) null else h.getString("nextEpisodeTitle"),
+                        nextEpisodeHref = if (h.isNull("nextEpisodeHref")) null else h.getString("nextEpisodeHref"),
+                        hasNew = h.optBoolean("hasNew", false),
+                    )
+                )
+            }
+            if (histList.isNotEmpty()) database.saveAllHistory(histList)
+
+            // Apply received episodes
+            val serverEps = serverChanges.optJSONArray("readEpisodes") ?: JSONArray()
+            val epList = mutableListOf<ReadEpisodeRecord>()
+            for (i in 0 until serverEps.length()) {
+                val ep = serverEps.getJSONObject(i)
+                epList.add(
+                    ReadEpisodeRecord(
+                        toonId = ep.getString("toonId"),
+                        wrId = ep.getString("wrId"),
+                        readAt = ep.optLong("readAt", serverTime),
+                        lastPage = ep.optInt("lastPage", 0),
+                    )
+                )
+            }
+            if (epList.isNotEmpty()) database.markAllEpisodesRead(epList)
+
+            // Apply received settings
+            val serverSettings = serverChanges.optJSONArray("readerSettings") ?: JSONArray()
+            val settingList = mutableListOf<ReaderSettingRecord>()
+            for (i in 0 until serverSettings.length()) {
+                val s = serverSettings.getJSONObject(i)
+                settingList.add(
+                    ReaderSettingRecord(
+                        toonId = s.getString("toonId"),
+                        viewMode = s.optString("viewMode", "SCROLL"),
+                        readDirection = s.optString("readDirection", "RIGHT_TO_LEFT"),
+                        updatedAt = s.optLong("updatedAt", serverTime),
+                    )
+                )
+            }
+            if (settingList.isNotEmpty()) database.saveAllReaderSettings(settingList)
+
+            // Cleanup old tombstones
+            database.deleteTombstonesOlderThan(System.currentTimeMillis() - 30L * 86400000L)
+
+            properties.setProperty(KEY_LAST_SYNCED_AT, serverTime.toString())
+            saveProperties()
+
+            val msg = "증분 동기화 완료: 수신 (즐겨찾기 ${favList.size}개, 기록 ${histList.size}개)"
+            _syncState.value = _syncState.value.copy(
+                isSyncing = false,
+                isSuccess = true,
+                lastSyncedAt = serverTime,
+                syncMessage = msg,
+            )
+            return@withContext DesktopSyncResult(true, msg, favList.size, histList.size)
+        } catch (e: Exception) {
+            val err = "증분 동기화 실패: ${e.localizedMessage ?: "서버 연결 오류"}"
+            if (!isSilent) {
+                _syncState.value = _syncState.value.copy(isSyncing = false, isSuccess = false, syncMessage = err)
+            }
+            return@withContext DesktopSyncResult(false, err)
+        }
     }
 
     private suspend fun syncPullInternal(isSilent: Boolean): DesktopSyncResult {

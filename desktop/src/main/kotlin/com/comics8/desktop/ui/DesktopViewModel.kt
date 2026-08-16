@@ -449,6 +449,18 @@ class DesktopViewModel(
         repository.syncManager?.setAutoSyncEnabled(enabled)
     }
 
+    fun openSeriesFromHistory(item: ReadHistoryRecord) {
+        val toon = ToonItem(
+            id = item.toonId,
+            title = item.toonTitle,
+            thumbUrl = item.toonThumbUrl,
+            href = item.toonHref,
+            genre = "",
+            updatedAt = null,
+        )
+        openSeries(toon)
+    }
+
     fun reopenHistoryEpisode(item: ReadHistoryRecord, startPage: Int = 0) {
         val toon = ToonItem(
             id = item.toonId,
@@ -837,6 +849,7 @@ class DesktopViewModel(
                 readerError = null,
             )
         }
+        repository.syncManager?.triggerDebouncedPush()
     }
 
     fun toggleFullscreen() {

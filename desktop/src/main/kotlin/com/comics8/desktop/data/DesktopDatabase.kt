@@ -1,5 +1,6 @@
 package com.comics8.desktop.data
 
+import com.comics8.core.model.SyncTombstone
 import java.io.File
 import java.sql.Connection
 import java.sql.DriverManager
@@ -90,6 +91,72 @@ class DesktopDatabase(dbFile: File? = null) {
                     );
                     """.trimIndent(),
                 )
+                stmt.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS tombstones (
+                        entityType TEXT,
+                        entityId TEXT,
+                        deletedAt INTEGER,
+                        PRIMARY KEY (entityType, entityId)
+                    );
+                    """.trimIndent(),
+                )
+            }
+        }
+    }
+
+    // --- Tombstones ---
+    fun recordTombstone(entityType: String, entityId: String, deletedAt: Long = System.currentTimeMillis()) {
+        getConnection().use { conn ->
+            conn.prepareStatement(
+                """
+                INSERT OR REPLACE INTO tombstones (entityType, entityId, deletedAt)
+                VALUES (?, ?, ?)
+                """.trimIndent(),
+            ).use { stmt ->
+                stmt.setString(1, entityType)
+                stmt.setString(2, entityId)
+                stmt.setLong(3, deletedAt)
+                stmt.executeUpdate()
+            }
+        }
+    }
+
+    fun deleteTombstone(entityType: String, entityId: String) {
+        getConnection().use { conn ->
+            conn.prepareStatement("DELETE FROM tombstones WHERE entityType = ? AND entityId = ?").use { stmt ->
+                stmt.setString(1, entityType)
+                stmt.setString(2, entityId)
+                stmt.executeUpdate()
+            }
+        }
+    }
+
+    fun getTombstonesSince(since: Long): List<SyncTombstone> {
+        val list = mutableListOf<SyncTombstone>()
+        getConnection().use { conn ->
+            conn.prepareStatement("SELECT entityType, entityId, deletedAt FROM tombstones WHERE deletedAt > ?").use { stmt ->
+                stmt.setLong(1, since)
+                val rs = stmt.executeQuery()
+                while (rs.next()) {
+                    list.add(
+                        SyncTombstone(
+                            entityType = rs.getString("entityType"),
+                            entityId = rs.getString("entityId"),
+                            deletedAt = rs.getLong("deletedAt"),
+                        )
+                    )
+                }
+            }
+        }
+        return list
+    }
+
+    fun deleteTombstonesOlderThan(cutoff: Long) {
+        getConnection().use { conn ->
+            conn.prepareStatement("DELETE FROM tombstones WHERE deletedAt < ?").use { stmt ->
+                stmt.setLong(1, cutoff)
+                stmt.executeUpdate()
             }
         }
     }
@@ -99,6 +166,30 @@ class DesktopDatabase(dbFile: File? = null) {
         val list = mutableListOf<FavoriteRecord>()
         getConnection().use { conn ->
             conn.prepareStatement("SELECT * FROM favorites ORDER BY savedAt DESC").use { stmt ->
+                val rs = stmt.executeQuery()
+                while (rs.next()) {
+                    list.add(
+                        FavoriteRecord(
+                            id = rs.getString("id"),
+                            title = rs.getString("title"),
+                            thumbUrl = rs.getString("thumbUrl"),
+                            href = rs.getString("href"),
+                            genre = rs.getString("genre"),
+                            updatedAt = rs.getString("updatedAt"),
+                            savedAt = rs.getLong("savedAt"),
+                        ),
+                    )
+                }
+            }
+        }
+        return list
+    }
+
+    fun getFavoritesSince(since: Long): List<FavoriteRecord> {
+        val list = mutableListOf<FavoriteRecord>()
+        getConnection().use { conn ->
+            conn.prepareStatement("SELECT * FROM favorites WHERE savedAt > ? ORDER BY savedAt DESC").use { stmt ->
+                stmt.setLong(1, since)
                 val rs = stmt.executeQuery()
                 while (rs.next()) {
                     list.add(
@@ -285,6 +376,37 @@ class DesktopDatabase(dbFile: File? = null) {
         return list
     }
 
+    fun getHistorySince(since: Long): List<ReadHistoryRecord> {
+        val list = mutableListOf<ReadHistoryRecord>()
+        getConnection().use { conn ->
+            conn.prepareStatement("SELECT * FROM read_history WHERE lastReadAt > ? ORDER BY lastReadAt DESC").use { stmt ->
+                stmt.setLong(1, since)
+                val rs = stmt.executeQuery()
+                while (rs.next()) {
+                    list.add(
+                        ReadHistoryRecord(
+                            toonId = rs.getString("toonId"),
+                            toonTitle = rs.getString("toonTitle"),
+                            toonThumbUrl = rs.getString("toonThumbUrl"),
+                            toonHref = rs.getString("toonHref"),
+                            lastWrId = rs.getString("lastWrId"),
+                            lastEpisodeTitle = rs.getString("lastEpisodeTitle"),
+                            lastEpisodeHref = rs.getString("lastEpisodeHref"),
+                            lastReadOrder = rs.getInt("lastReadOrder"),
+                            totalEpisodes = rs.getInt("totalEpisodes"),
+                            lastReadAt = rs.getLong("lastReadAt"),
+                            nextWrId = rs.getString("nextWrId"),
+                            nextEpisodeTitle = rs.getString("nextEpisodeTitle"),
+                            nextEpisodeHref = rs.getString("nextEpisodeHref"),
+                            hasNew = rs.getInt("hasNew") == 1,
+                        ),
+                    )
+                }
+            }
+        }
+        return list
+    }
+
     fun getHistory(toonId: String): ReadHistoryRecord? {
         getConnection().use { conn ->
             conn.prepareStatement("SELECT * FROM read_history WHERE toonId = ?").use { stmt ->
@@ -413,6 +535,27 @@ class DesktopDatabase(dbFile: File? = null) {
         return list
     }
 
+    fun getReadEpisodesSince(since: Long): List<ReadEpisodeRecord> {
+        val list = mutableListOf<ReadEpisodeRecord>()
+        getConnection().use { conn ->
+            conn.prepareStatement("SELECT * FROM read_episodes WHERE readAt > ?").use { stmt ->
+                stmt.setLong(1, since)
+                val rs = stmt.executeQuery()
+                while (rs.next()) {
+                    list.add(
+                        ReadEpisodeRecord(
+                            toonId = rs.getString("toonId"),
+                            wrId = rs.getString("wrId"),
+                            readAt = rs.getLong("readAt"),
+                            lastPage = rs.getInt("lastPage"),
+                        ),
+                    )
+                }
+            }
+        }
+        return list
+    }
+
     fun getReadEpisodesByToon(toonId: String): List<ReadEpisodeRecord> {
         val list = mutableListOf<ReadEpisodeRecord>()
         getConnection().use { conn ->
@@ -493,12 +636,22 @@ class DesktopDatabase(dbFile: File? = null) {
         }
     }
 
-    fun updateLastPage(toonId: String, wrId: String, page: Int) {
+    fun updateLastPage(toonId: String, wrId: String, page: Int, readAt: Long = System.currentTimeMillis()) {
         getConnection().use { conn ->
-            conn.prepareStatement("UPDATE read_episodes SET lastPage = ? WHERE toonId = ? AND wrId = ?").use { stmt ->
+            conn.prepareStatement("UPDATE read_episodes SET lastPage = ?, readAt = ? WHERE toonId = ? AND wrId = ?").use { stmt ->
                 stmt.setInt(1, page)
-                stmt.setString(2, toonId)
-                stmt.setString(3, wrId)
+                stmt.setLong(2, readAt)
+                stmt.setString(3, toonId)
+                stmt.setString(4, wrId)
+                stmt.executeUpdate()
+            }
+        }
+    }
+
+    fun deleteReadEpisodesByToon(toonId: String) {
+        getConnection().use { conn ->
+            conn.prepareStatement("DELETE FROM read_episodes WHERE toonId = ?").use { stmt ->
+                stmt.setString(1, toonId)
                 stmt.executeUpdate()
             }
         }
@@ -509,6 +662,27 @@ class DesktopDatabase(dbFile: File? = null) {
         val list = mutableListOf<ReaderSettingRecord>()
         getConnection().use { conn ->
             conn.prepareStatement("SELECT * FROM reader_settings").use { stmt ->
+                val rs = stmt.executeQuery()
+                while (rs.next()) {
+                    list.add(
+                        ReaderSettingRecord(
+                            toonId = rs.getString("toonId"),
+                            viewMode = rs.getString("viewMode"),
+                            readDirection = rs.getString("readDirection"),
+                            updatedAt = rs.getLong("updatedAt"),
+                        ),
+                    )
+                }
+            }
+        }
+        return list
+    }
+
+    fun getReaderSettingsSince(since: Long): List<ReaderSettingRecord> {
+        val list = mutableListOf<ReaderSettingRecord>()
+        getConnection().use { conn ->
+            conn.prepareStatement("SELECT * FROM reader_settings WHERE updatedAt > ?").use { stmt ->
+                stmt.setLong(1, since)
                 val rs = stmt.executeQuery()
                 while (rs.next()) {
                     list.add(

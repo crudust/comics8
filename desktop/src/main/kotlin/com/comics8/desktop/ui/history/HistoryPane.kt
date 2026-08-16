@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.Delete
@@ -72,6 +73,7 @@ fun HistoryPane(
                 items(state.historyItems, key = { it.toonId }) { item ->
                     HistoryItemCard(
                         item = item,
+                        onOpenSeries = { viewModel.openSeriesFromHistory(item) },
                         onReopen = { viewModel.reopenHistoryEpisode(item) },
                         onContinue = { viewModel.continueHistoryEpisode(item) },
                         onDelete = { viewModel.deleteHistory(item.toonId) },
@@ -85,6 +87,7 @@ fun HistoryPane(
 @Composable
 fun HistoryItemCard(
     item: ReadHistoryRecord,
+    onOpenSeries: () -> Unit,
     onReopen: () -> Unit,
     onContinue: () -> Unit,
     onDelete: () -> Unit,
@@ -149,6 +152,25 @@ fun HistoryItemCard(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    FilledTonalButton(
+                        onClick = onOpenSeries,
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        modifier = Modifier.height(32.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.MenuBook,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = "목차",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+
                     FilledTonalButton(
                         onClick = onReopen,
                         shape = RoundedCornerShape(8.dp),

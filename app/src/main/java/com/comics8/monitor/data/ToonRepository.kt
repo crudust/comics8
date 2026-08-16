@@ -150,6 +150,7 @@ class ToonRepository(
         val exists = favoriteDao.exists(item.id)
         val result = if (exists) {
             favoriteDao.delete(item.id)
+            database?.tombstoneDao()?.insert(com.comics8.monitor.data.local.Tombstone("FAVORITE", item.id, now()))
             false
         } else {
             favoriteDao.upsert(
@@ -163,6 +164,7 @@ class ToonRepository(
                     savedAt = now(),
                 ),
             )
+            database?.tombstoneDao()?.delete("FAVORITE", item.id)
             true
         }
         syncManager?.triggerDebouncedPush()
@@ -216,7 +218,6 @@ class ToonRepository(
 
     suspend fun saveEpisodePage(toonId: String, wrId: String, page: Int) = withContext(Dispatchers.IO) {
         readEpisodeDao.updateLastPage(toonId, wrId, page)
-        syncManager?.triggerDebouncedPush()
     }
 
     suspend fun getReadEpisode(toonId: String, wrId: String): ReadEpisode? = withContext(Dispatchers.IO) {
@@ -229,15 +230,21 @@ class ToonRepository(
 
     suspend fun saveHistory(history: ReadHistory) = withContext(Dispatchers.IO) {
         readHistoryDao.upsert(history)
+        database?.tombstoneDao()?.delete("HISTORY", history.toonId)
         syncManager?.triggerDebouncedPush()
     }
 
     suspend fun deleteHistory(toonId: String) = withContext(Dispatchers.IO) {
         readHistoryDao.delete(toonId)
+        database?.tombstoneDao()?.insert(com.comics8.monitor.data.local.Tombstone("HISTORY", toonId, now()))
         syncManager?.triggerDebouncedPush()
     }
 
     suspend fun clearHistory() = withContext(Dispatchers.IO) {
+        val all = readHistoryDao.all()
+        all.forEach {
+            database?.tombstoneDao()?.insert(com.comics8.monitor.data.local.Tombstone("HISTORY", it.toonId, now()))
+        }
         readHistoryDao.clearAll()
         syncManager?.triggerDebouncedPush()
     }

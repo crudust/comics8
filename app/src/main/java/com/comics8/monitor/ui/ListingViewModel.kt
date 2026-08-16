@@ -601,6 +601,18 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun openSeriesFromHistory(item: ReadHistory) {
+        val toon = ToonItem(
+            id = item.toonId,
+            title = item.toonTitle,
+            thumbUrl = item.toonThumbUrl,
+            href = item.toonHref,
+            genre = "",
+            updatedAt = null,
+        )
+        openSeries(toon)
+    }
+
     fun continueHistoryEpisode(item: ReadHistory) {
         val toon = ToonItem(
             id = item.toonId,
@@ -821,6 +833,11 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 readerError = null,
             )
         }
+        repository.syncManager?.triggerDebouncedPush()
+    }
+
+    fun onAppBackgrounded() {
+        repository.syncManager?.triggerDebouncedPush()
     }
 
     fun openNextEpisode() {

@@ -33,6 +33,7 @@ import com.comics8.monitor.ui.ListingUiState
 import com.comics8.monitor.ui.ListingViewModel
 import com.comics8.monitor.ui.components.ErrorPane
 import com.comics8.monitor.ui.components.LoadingPane
+import com.comics8.monitor.ui.components.PageBar
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -57,15 +58,30 @@ fun SeriesPane(
                 onRetry = viewModel::refresh,
             )
         else -> {
-            LazyColumn(
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = modifier.fillMaxSize(),
-            ) {
-                items(state.episodes, key = { it.wrId }) { episode ->
-                    EpisodeRow(
-                        episode = episode,
-                        onClick = { viewModel.openEpisode(episode) },
+            Column(modifier = modifier.fillMaxSize()) {
+                LazyColumn(
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                ) {
+                    items(state.episodes, key = { it.wrId }) { episode ->
+                        EpisodeRow(
+                            episode = episode,
+                            onClick = { viewModel.openEpisode(episode) },
+                        )
+                    }
+                }
+                if (state.episodeLastPage > 1) {
+                    PageBar(
+                        page = state.episodePage,
+                        lastPage = state.episodeLastPage,
+                        onPrev = { viewModel.goToEpisodePage(state.episodePage - 1) },
+                        onNext = { viewModel.goToEpisodePage(state.episodePage + 1) },
+                        onJump = { viewModel.togglePageJump(true) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
                     )
                 }
             }

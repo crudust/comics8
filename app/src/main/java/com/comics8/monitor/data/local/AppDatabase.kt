@@ -41,6 +41,9 @@ interface FavoriteDao {
     @Query("SELECT * FROM favorites ORDER BY savedAt DESC")
     suspend fun all(): List<FavoriteToon>
 
+    @Query("SELECT * FROM favorites WHERE savedAt > :since ORDER BY savedAt DESC")
+    suspend fun getSince(since: Long): List<FavoriteToon>
+
     @Query("SELECT EXISTS(SELECT 1 FROM favorites WHERE id = :id)")
     suspend fun exists(id: String): Boolean
 
@@ -88,6 +91,9 @@ interface ReaderSettingDao {
     @Query("SELECT * FROM reader_settings")
     suspend fun all(): List<ReaderSetting>
 
+    @Query("SELECT * FROM reader_settings WHERE updatedAt > :since")
+    suspend fun getSince(since: Long): List<ReaderSetting>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun saveSetting(setting: ReaderSetting)
 
@@ -114,6 +120,9 @@ interface ReadEpisodeDao {
     @Query("SELECT * FROM read_episodes")
     suspend fun all(): List<ReadEpisode>
 
+    @Query("SELECT * FROM read_episodes WHERE readAt > :since")
+    suspend fun getSince(since: Long): List<ReadEpisode>
+
     @Query("SELECT wrId FROM read_episodes WHERE toonId = :toonId")
     suspend fun getReadWrIds(toonId: String): List<String>
 
@@ -123,8 +132,11 @@ interface ReadEpisodeDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun markReadAll(items: List<ReadEpisode>)
 
-    @Query("UPDATE read_episodes SET lastPage = :page WHERE toonId = :toonId AND wrId = :wrId")
-    suspend fun updateLastPage(toonId: String, wrId: String, page: Int)
+    @Query("UPDATE read_episodes SET lastPage = :page, readAt = :readAt WHERE toonId = :toonId AND wrId = :wrId")
+    suspend fun updateLastPage(toonId: String, wrId: String, page: Int, readAt: Long = System.currentTimeMillis())
+
+    @Query("DELETE FROM read_episodes WHERE toonId = :toonId")
+    suspend fun deleteByToonId(toonId: String)
 }
 
 @Entity(
@@ -153,6 +165,9 @@ interface ReadHistoryDao {
     @Query("SELECT * FROM read_history ORDER BY lastReadAt DESC")
     suspend fun all(): List<ReadHistory>
 
+    @Query("SELECT * FROM read_history WHERE lastReadAt > :since ORDER BY lastReadAt DESC")
+    suspend fun getSince(since: Long): List<ReadHistory>
+
     @Query("SELECT * FROM read_history WHERE toonId = :toonId")
     suspend fun get(toonId: String): ReadHistory?
 
@@ -172,6 +187,31 @@ interface ReadHistoryDao {
     suspend fun incrementTotal(toonId: String, amount: Int = 1)
 }
 
+@Entity(tableName = "tombstones", primaryKeys = ["entityType", "entityId"])
+data class Tombstone(
+    val entityType: String,
+    val entityId: String,
+    val deletedAt: Long,
+)
+
+@Dao
+interface TombstoneDao {
+    @Query("SELECT * FROM tombstones WHERE deletedAt > :since")
+    suspend fun getSince(since: Long): List<Tombstone>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(item: Tombstone)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(items: List<Tombstone>)
+
+    @Query("DELETE FROM tombstones WHERE entityType = :type AND entityId = :id")
+    suspend fun delete(type: String, id: String)
+
+    @Query("DELETE FROM tombstones WHERE deletedAt < :cutoff")
+    suspend fun deleteOlderThan(cutoff: Long)
+}
+
 @Database(
     entities = [
         SeenToon::class,
@@ -179,8 +219,9 @@ interface ReadHistoryDao {
         ReaderSetting::class,
         ReadEpisode::class,
         ReadHistory::class,
+        Tombstone::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -189,4 +230,5 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun readerSettingDao(): ReaderSettingDao
     abstract fun readEpisodeDao(): ReadEpisodeDao
     abstract fun readHistoryDao(): ReadHistoryDao
+    abstract fun tombstoneDao(): TombstoneDao
 }

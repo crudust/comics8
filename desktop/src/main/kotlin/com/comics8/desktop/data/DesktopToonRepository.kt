@@ -109,6 +109,7 @@ class DesktopToonRepository(
         val exists = database.isFavorite(item.id)
         val result = if (exists) {
             database.deleteFavorite(item.id)
+            database.recordTombstone("FAVORITE", item.id, now())
             false
         } else {
             database.saveFavorite(
@@ -122,6 +123,7 @@ class DesktopToonRepository(
                     savedAt = now(),
                 ),
             )
+            database.deleteTombstone("FAVORITE", item.id)
             true
         }
         syncManager?.triggerDebouncedPush()
@@ -175,7 +177,6 @@ class DesktopToonRepository(
 
     suspend fun saveEpisodePage(toonId: String, wrId: String, page: Int) = withContext(Dispatchers.IO) {
         database.updateLastPage(toonId, wrId, page)
-        syncManager?.triggerDebouncedPush()
     }
 
     suspend fun getReadEpisode(toonId: String, wrId: String): ReadEpisodeRecord? = withContext(Dispatchers.IO) {
@@ -188,15 +189,21 @@ class DesktopToonRepository(
 
     suspend fun saveHistory(history: ReadHistoryRecord) = withContext(Dispatchers.IO) {
         database.saveHistory(history)
+        database.deleteTombstone("HISTORY", history.toonId)
         syncManager?.triggerDebouncedPush()
     }
 
     suspend fun deleteHistory(toonId: String) = withContext(Dispatchers.IO) {
         database.deleteHistory(toonId)
+        database.recordTombstone("HISTORY", toonId, now())
         syncManager?.triggerDebouncedPush()
     }
 
     suspend fun clearHistory() = withContext(Dispatchers.IO) {
+        val all = database.getAllHistory()
+        all.forEach {
+            database.recordTombstone("HISTORY", it.toonId, now())
+        }
         database.clearAllHistory()
         syncManager?.triggerDebouncedPush()
     }

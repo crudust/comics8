@@ -251,6 +251,9 @@ fun TopBar(
                     )
                 }
             }
+            IconButton(onClick = viewModel::refresh) {
+                Icon(Icons.Default.Refresh, contentDescription = "새로고침")
+            }
         }
 
         // Search Bar in Browse
@@ -305,17 +308,6 @@ fun TopBar(
                             selectedContainerColor = MaterialTheme.colorScheme.primary,
                             selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
                         ),
-                    )
-                }
-                Spacer(Modifier.weight(1f))
-                IconButton(
-                    onClick = viewModel::refresh,
-                    modifier = Modifier.size(32.dp),
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = "새로고침",
-                        modifier = Modifier.size(18.dp),
                     )
                 }
             }

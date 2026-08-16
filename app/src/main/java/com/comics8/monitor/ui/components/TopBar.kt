@@ -362,36 +362,6 @@ fun TopBar(
             }
         }
 
-        val showPager = when (state.screen) {
-            Screen.Series -> state.episodeLastPage > 1
-            Screen.Browse -> !state.isSearch && state.catalog.paginated && state.lastPage > 1
-            Screen.Reader -> false
-            Screen.History -> false
-        }
-        if (showPager) {
-            val page = if (state.screen == Screen.Series) state.episodePage else state.page
-            val last = if (state.screen == Screen.Series) state.episodeLastPage else state.lastPage
-            PageBar(
-                page = page,
-                lastPage = last,
-                onPrev = {
-                    if (state.screen == Screen.Series) {
-                        viewModel.goToEpisodePage(page - 1)
-                    } else {
-                        viewModel.prevPage()
-                    }
-                },
-                onNext = {
-                    if (state.screen == Screen.Series) {
-                        viewModel.goToEpisodePage(page + 1)
-                    } else {
-                        viewModel.nextPage()
-                    }
-                },
-                onJump = { viewModel.togglePageJump(true) },
-            )
-        }
-
         state.error?.takeIf { state.items.isNotEmpty() }?.let { msg ->
             Text(
                 text = msg,

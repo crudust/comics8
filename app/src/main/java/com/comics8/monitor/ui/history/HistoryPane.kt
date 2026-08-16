@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.Delete
@@ -73,6 +74,7 @@ fun HistoryPane(
                 items(state.historyItems, key = { it.toonId }) { item ->
                     HistoryItemCard(
                         item = item,
+                        onOpenSeries = { viewModel.openSeriesFromHistory(item) },
                         onReopen = { viewModel.reopenHistoryEpisode(item) },
                         onContinue = { viewModel.continueHistoryEpisode(item) },
                         onDelete = { viewModel.deleteHistory(item.toonId) },
@@ -86,6 +88,7 @@ fun HistoryPane(
 @Composable
 fun HistoryItemCard(
     item: ReadHistory,
+    onOpenSeries: () -> Unit,
     onReopen: () -> Unit,
     onContinue: () -> Unit,
     onDelete: () -> Unit,
@@ -151,9 +154,28 @@ fun HistoryItemCard(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     FilledTonalButton(
+                        onClick = onOpenSeries,
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                        modifier = Modifier.height(32.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.MenuBook,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                        )
+                        Spacer(Modifier.width(3.dp))
+                        Text(
+                            text = "목차",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+
+                    FilledTonalButton(
                         onClick = onReopen,
                         shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                         modifier = Modifier.height(32.dp),
                     ) {
                         Icon(
@@ -161,7 +183,7 @@ fun HistoryItemCard(
                             contentDescription = null,
                             modifier = Modifier.size(14.dp),
                         )
-                        Spacer(Modifier.width(4.dp))
+                        Spacer(Modifier.width(3.dp))
                         Text(
                             text = "다시보기",
                             style = MaterialTheme.typography.labelSmall,
@@ -172,7 +194,7 @@ fun HistoryItemCard(
                     Button(
                         onClick = onContinue,
                         shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.primary,
                             contentColor = MaterialTheme.colorScheme.onPrimary,
@@ -184,7 +206,7 @@ fun HistoryItemCard(
                             contentDescription = null,
                             modifier = Modifier.size(14.dp),
                         )
-                        Spacer(Modifier.width(4.dp))
+                        Spacer(Modifier.width(3.dp))
                         Text(
                             text = "이어보기",
                             style = MaterialTheme.typography.labelSmall,

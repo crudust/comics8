@@ -30,3 +30,9 @@ data class BackupResult(
     val favoriteCount: Int = 0,
     val historyCount: Int = 0,
 )
+
+data class SyncTombstone(
+    val entityType: String, // "FAVORITE", "HISTORY", "EPISODE", "SETTING"
+    val entityId: String,
+    val deletedAt: Long,
+)
