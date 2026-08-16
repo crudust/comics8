@@ -38,25 +38,8 @@ fun ZoomableBox(
             .fillMaxSize()
             .onSizeChanged { size = it }
             .pointerInput(Unit) {
+                // Instant tap response (0ms delay - no double-tap detector)
                 detectTapGestures(
-                    onDoubleTap = { tapOffset ->
-                        if (scale > 1.05f) {
-                            scale = 1f
-                            offset = Offset.Zero
-                        } else {
-                            scale = 2.5f
-                            val centerX = size.width / 2f
-                            val centerY = size.height / 2f
-                            val targetX = (centerX - tapOffset.x) * 1.5f
-                            val targetY = (centerY - tapOffset.y) * 1.5f
-                            val maxX = (size.width * 1.5f) / 2f
-                            val maxY = (size.height * 1.5f) / 2f
-                            offset = Offset(
-                                targetX.coerceIn(-maxX, maxX),
-                                targetY.coerceIn(-maxY, maxY),
-                            )
-                        }
-                    },
                     onTap = { tapOffset ->
                         onTap?.invoke(tapOffset, size)
                     },
@@ -79,13 +62,15 @@ fun ZoomableBox(
                                 scale = newScale
                                 val maxX = (size.width * (newScale - 1f)) / 2f
                                 val maxY = (size.height * (newScale - 1f)) / 2f
-                                offset = Offset(
-                                    (offset.x + panChange.x).coerceIn(-maxX, maxX),
-                                    (offset.y + panChange.y).coerceIn(-maxY, maxY),
-                                )
-                            }
-                            if (scale > 1.05f) {
-                                event.changes.forEach { it.consume() }
+                                val targetX = (offset.x + panChange.x).coerceIn(-maxX, maxX)
+                                val targetY = (offset.y + panChange.y).coerceIn(-maxY, maxY)
+
+                                // Consume event if within pan bounds
+                                val isAtHorizontalEdge = (targetX == offset.x && panChange.x != 0f)
+                                if (!isAtHorizontalEdge || event.changes.size > 1) {
+                                    event.changes.forEach { it.consume() }
+                                }
+                                offset = Offset(targetX, targetY)
                             }
                         }
                     } while (event.changes.any { it.pressed })
