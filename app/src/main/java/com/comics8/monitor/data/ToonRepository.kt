@@ -66,7 +66,7 @@ class ToonRepository(
 
     suspend fun checkLatestUpdates(): List<ToonItem> {
         val page = loadListing(Catalog.LATEST, 1)
-        val fresh = page.items.filter { it.isNew || it.isUpdated }
+        val fresh = page.items.filter { it.isNew }
         if (fresh.isEmpty()) {
             markSeen(page.items)
             return emptyList()
@@ -90,9 +90,6 @@ class ToonRepository(
             val prev = existing[item.id]
             item.copy(
                 isNew = total > 0 && prev == null,
-                isUpdated = prev != null &&
-                    !item.updatedAt.isNullOrBlank() &&
-                    prev.updatedAt != item.updatedAt,
                 isFavorite = item.id in favoriteIds,
             )
         }

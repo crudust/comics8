@@ -174,15 +174,29 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
     fun toggleFavorite() {
         val series = _state.value.series ?: return
+        toggleFavorite(series)
+    }
+
+    fun toggleFavorite(item: ToonItem) {
         viewModelScope.launch {
-            val favorited = repository.toggleFavorite(series)
+            val favorited = repository.toggleFavorite(item)
             _state.update { current ->
-                if (current.series?.id != series.id) current
-                else current.copy(
-                    seriesFavorited = favorited,
-                    items = current.items.map { item ->
-                        if (item.id == series.id) item.copy(isFavorite = favorited) else item
-                    },
+                val updated = current.items.map { row ->
+                    if (row.id == item.id) row.copy(isFavorite = favorited) else row
+                }
+                val visible = if (
+                    !favorited &&
+                    current.catalog == Catalog.FAVORITE &&
+                    current.screen == Screen.Browse &&
+                    !current.isSearch
+                ) {
+                    updated.filter { it.id != item.id }
+                } else {
+                    updated
+                }
+                current.copy(
+                    seriesFavorited = if (current.series?.id == item.id) favorited else current.seriesFavorited,
+                    items = visible,
                 )
             }
         }

@@ -123,7 +123,11 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                         ) {
                             viewModel.selectCatalog(Catalog.LATEST)
                         }
-                    else -> ListingGrid(state.items, onOpen = viewModel::openSeries)
+                    else -> ListingGrid(
+                        items = state.items,
+                        onOpen = viewModel::openSeries,
+                        onToggleFavorite = viewModel::toggleFavorite,
+                    )
                 }
             }
         }
@@ -341,7 +345,11 @@ private fun PageBar(
 }
 
 @Composable
-private fun ListingGrid(items: List<ToonItem>, onOpen: (ToonItem) -> Unit) {
+private fun ListingGrid(
+    items: List<ToonItem>,
+    onOpen: (ToonItem) -> Unit,
+    onToggleFavorite: (ToonItem) -> Unit,
+) {
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = 118.dp),
         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
@@ -350,13 +358,21 @@ private fun ListingGrid(items: List<ToonItem>, onOpen: (ToonItem) -> Unit) {
         modifier = Modifier.fillMaxSize(),
     ) {
         items(items, key = { it.id }) { item ->
-            ToonCard(item = item, onClick = { onOpen(item) })
+            ToonCard(
+                item = item,
+                onClick = { onOpen(item) },
+                onToggleFavorite = { onToggleFavorite(item) },
+            )
         }
     }
 }
 
 @Composable
-private fun ToonCard(item: ToonItem, onClick: () -> Unit) {
+private fun ToonCard(
+    item: ToonItem,
+    onClick: () -> Unit,
+    onToggleFavorite: () -> Unit,
+) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -382,19 +398,22 @@ private fun ToonCard(item: ToonItem, onClick: () -> Unit) {
                     .padding(6.dp),
             ) {
                 if (item.isNew) Badge("NEW")
-                if (item.isUpdated) Badge("UP")
-                item.ranking?.let { Badge("${it}위") }
             }
-            if (item.isFavorite) {
+            IconButton(
+                onClick = onToggleFavorite,
+                modifier = Modifier.align(Alignment.TopEnd),
+            ) {
                 Icon(
-                    imageVector = Icons.Filled.Star,
-                    contentDescription = "즐겨찾기",
-                    tint = MaterialTheme.colorScheme.primary,
+                    imageVector = if (item.isFavorite) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                    contentDescription = if (item.isFavorite) "즐겨찾기 해제" else "즐겨찾기",
+                    tint = if (item.isFavorite) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onBackground
+                    },
                     modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(6.dp)
                         .clip(RoundedCornerShape(4.dp))
-                        .background(MaterialTheme.colorScheme.background.copy(alpha = 0.72f))
+                        .background(MaterialTheme.colorScheme.background.copy(alpha = 0.55f))
                         .padding(2.dp),
                 )
             }

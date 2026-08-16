@@ -9,7 +9,6 @@ data class ToonItem(
     val updatedAt: String?,
     val ranking: String? = null,
     val isNew: Boolean = false,
-    val isUpdated: Boolean = false,
     val isFavorite: Boolean = false,
 ) {
     val subtitle: String
