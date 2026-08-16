@@ -579,11 +579,9 @@ private fun ReaderDualPagePane(
                             )
                         }
                     } else {
-                        // Isolated single portrait page -> Position in proper half-screen slot (Right for RL, Left for LR)
+                        // Isolated single portrait page -> Position in proper half-screen slot (Right for RL, Left for LR) touching center
                         Row(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 2.dp),
+                            modifier = Modifier.fillMaxSize(),
                             horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -593,12 +591,13 @@ private fun ReaderDualPagePane(
                                     modifier = Modifier
                                         .weight(1f)
                                         .fillMaxHeight(),
-                                    contentAlignment = Alignment.Center,
+                                    contentAlignment = Alignment.CenterStart,
                                 ) {
                                     AsyncImage(
                                         model = state.readerImages.getOrNull(spread.index),
                                         contentDescription = "페이지 ${spread.index + 1}",
                                         contentScale = ContentScale.Fit,
+                                        alignment = Alignment.CenterStart,
                                         modifier = Modifier.fillMaxSize(),
                                         onSuccess = { result ->
                                             val w = result.result.drawable.intrinsicWidth
@@ -614,12 +613,13 @@ private fun ReaderDualPagePane(
                                     modifier = Modifier
                                         .weight(1f)
                                         .fillMaxHeight(),
-                                    contentAlignment = Alignment.Center,
+                                    contentAlignment = Alignment.CenterEnd,
                                 ) {
                                     AsyncImage(
                                         model = state.readerImages.getOrNull(spread.index),
                                         contentDescription = "페이지 ${spread.index + 1}",
                                         contentScale = ContentScale.Fit,
+                                        alignment = Alignment.CenterEnd,
                                         modifier = Modifier.fillMaxSize(),
                                         onSuccess = { result ->
                                             val w = result.result.drawable.intrinsicWidth
@@ -636,14 +636,12 @@ private fun ReaderDualPagePane(
                     }
                 }
                 is DualSpread.Dual -> {
-                    // Normal 2 portrait pages side-by-side
+                    // Normal 2 portrait pages side-by-side: hug the center spine like a book
                     val leftIndex = if (isR2L) spread.secondIndex else spread.firstIndex
                     val rightIndex = if (isR2L) spread.firstIndex else spread.secondIndex
 
                     Row(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 2.dp),
+                        modifier = Modifier.fillMaxSize(),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -651,12 +649,13 @@ private fun ReaderDualPagePane(
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxHeight(),
-                            contentAlignment = Alignment.Center,
+                            contentAlignment = Alignment.CenterEnd,
                         ) {
                             AsyncImage(
                                 model = state.readerImages.getOrNull(leftIndex),
                                 contentDescription = "페이지 ${leftIndex + 1}",
                                 contentScale = ContentScale.Fit,
+                                alignment = Alignment.CenterEnd,
                                 modifier = Modifier.fillMaxSize(),
                                 onSuccess = { result ->
                                     val w = result.result.drawable.intrinsicWidth
@@ -671,12 +670,13 @@ private fun ReaderDualPagePane(
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxHeight(),
-                            contentAlignment = Alignment.Center,
+                            contentAlignment = Alignment.CenterStart,
                         ) {
                             AsyncImage(
                                 model = state.readerImages.getOrNull(rightIndex),
                                 contentDescription = "페이지 ${rightIndex + 1}",
                                 contentScale = ContentScale.Fit,
+                                alignment = Alignment.CenterStart,
                                 modifier = Modifier.fillMaxSize(),
                                 onSuccess = { result ->
                                     val w = result.result.drawable.intrinsicWidth
