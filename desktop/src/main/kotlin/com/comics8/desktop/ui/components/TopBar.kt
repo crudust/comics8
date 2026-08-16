@@ -28,7 +28,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.SwapVert
-import androidx.compose.material.icons.outlined.CloudUpload
+import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.StarBorder
@@ -103,10 +103,10 @@ fun TopBar(
                 modifier = Modifier.weight(1f),
             )
             if (state.screen == Screen.Browse) {
-                IconButton(onClick = viewModel::openBackupDialog) {
+                IconButton(onClick = viewModel::openSyncDialog) {
                     Icon(
-                        imageVector = Icons.Outlined.CloudUpload,
-                        contentDescription = "백업 및 복원",
+                        imageVector = Icons.Outlined.CloudSync,
+                        contentDescription = "클라우드 동기화",
                     )
                 }
                 IconButton(onClick = viewModel::openHistory) {
@@ -123,10 +123,10 @@ fun TopBar(
                 }
             }
             if (state.screen == Screen.History) {
-                IconButton(onClick = viewModel::openBackupDialog) {
+                IconButton(onClick = viewModel::openSyncDialog) {
                     Icon(
-                        imageVector = Icons.Outlined.CloudUpload,
-                        contentDescription = "백업 및 복원",
+                        imageVector = Icons.Outlined.CloudSync,
+                        contentDescription = "클라우드 동기화",
                     )
                 }
                 if (state.historyItems.isNotEmpty()) {

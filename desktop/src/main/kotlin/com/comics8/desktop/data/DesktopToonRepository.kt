@@ -6,6 +6,7 @@ import kotlinx.coroutines.withContext
 class DesktopToonRepository(
     private val client: ToonClient,
     private val database: DesktopDatabase,
+    val syncManager: DesktopSyncManager? = null,
     private val now: () -> Long = { System.currentTimeMillis() },
 ) {
     suspend fun loadListing(catalog: Catalog, page: Int): ListingPage = withContext(Dispatchers.IO) {
@@ -101,7 +102,8 @@ class DesktopToonRepository(
     }
 
     suspend fun toggleFavorite(item: ToonItem): Boolean = withContext(Dispatchers.IO) {
-        if (database.isFavorite(item.id)) {
+        val exists = database.isFavorite(item.id)
+        val result = if (exists) {
             database.deleteFavorite(item.id)
             false
         } else {
@@ -118,6 +120,8 @@ class DesktopToonRepository(
             )
             true
         }
+        syncManager?.triggerDebouncedPush()
+        result
     }
 
     suspend fun getReaderSetting(toonId: String): Pair<ViewMode, ReadDirection>? = withContext(Dispatchers.IO) {
@@ -148,6 +152,7 @@ class DesktopToonRepository(
                 updatedAt = now(),
             ),
         )
+        syncManager?.triggerDebouncedPush()
     }
 
     suspend fun markEpisodeRead(toonId: String, wrId: String, lastPage: Int = 0): Long = withContext(Dispatchers.IO) {
@@ -160,11 +165,13 @@ class DesktopToonRepository(
                 lastPage = lastPage,
             ),
         )
+        syncManager?.triggerDebouncedPush()
         readAt
     }
 
     suspend fun saveEpisodePage(toonId: String, wrId: String, page: Int) = withContext(Dispatchers.IO) {
         database.updateLastPage(toonId, wrId, page)
+        syncManager?.triggerDebouncedPush()
     }
 
     suspend fun getReadEpisode(toonId: String, wrId: String): ReadEpisodeRecord? = withContext(Dispatchers.IO) {
@@ -177,14 +184,17 @@ class DesktopToonRepository(
 
     suspend fun saveHistory(history: ReadHistoryRecord) = withContext(Dispatchers.IO) {
         database.saveHistory(history)
+        syncManager?.triggerDebouncedPush()
     }
 
     suspend fun deleteHistory(toonId: String) = withContext(Dispatchers.IO) {
         database.deleteHistory(toonId)
+        syncManager?.triggerDebouncedPush()
     }
 
     suspend fun clearHistory() = withContext(Dispatchers.IO) {
         database.clearAllHistory()
+        syncManager?.triggerDebouncedPush()
     }
 
     suspend fun exportBackupJson(): String = withContext(Dispatchers.IO) {

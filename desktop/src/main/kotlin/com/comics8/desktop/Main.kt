@@ -20,14 +20,15 @@ import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.comics8.desktop.data.DesktopDatabase
+import com.comics8.desktop.data.DesktopSyncManager
 import com.comics8.desktop.data.DesktopToonRepository
 import com.comics8.desktop.data.ToonClient
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
 import com.comics8.desktop.ui.Screen
 import com.comics8.desktop.ui.browse.BrowsePane
-import com.comics8.desktop.ui.components.BackupDialog
 import com.comics8.desktop.ui.components.PageJumpDialog
+import com.comics8.desktop.ui.components.SyncDialog
 import com.comics8.desktop.ui.components.TopBar
 import com.comics8.desktop.ui.history.HistoryPane
 import com.comics8.desktop.ui.reader.ReaderPane
@@ -59,7 +60,8 @@ fun main() {
 
     application {
         val database = remember { DesktopDatabase() }
-        val repository = remember { DesktopToonRepository(ToonClient(), database) }
+        val syncManager = remember { DesktopSyncManager(database) }
+        val repository = remember { DesktopToonRepository(ToonClient(), database, syncManager) }
         val viewModel = remember { DesktopViewModel(repository) }
         val state by viewModel.state.collectAsState()
 
@@ -128,11 +130,11 @@ fun ComicsDesktopApp(
             )
         }
 
-        if (state.showBackupDialog) {
-            BackupDialog(
+        if (state.showSyncDialog) {
+            SyncDialog(
                 state = state,
                 viewModel = viewModel,
-                onDismiss = viewModel::closeBackupDialog,
+                onDismiss = viewModel::closeSyncDialog,
             )
         }
     }

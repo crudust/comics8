@@ -2,6 +2,7 @@ package com.comics8.desktop.ui
 
 import com.comics8.desktop.data.Catalog
 import com.comics8.desktop.data.DesktopBackupStats
+import com.comics8.desktop.data.DesktopSyncState
 import com.comics8.desktop.data.EpisodeItem
 import com.comics8.desktop.data.ReadDirection
 import com.comics8.desktop.data.ReadHistoryRecord
@@ -45,10 +46,8 @@ data class DesktopUiState(
     val seriesHistory: ReadHistoryRecord? = null,
     val historyItems: List<ReadHistoryRecord> = emptyList(),
     val historyLoading: Boolean = false,
-    val showBackupDialog: Boolean = false,
-    val backupStats: DesktopBackupStats? = null,
-    val backupMessage: String? = null,
-    val backupProcessing: Boolean = false,
+    val showSyncDialog: Boolean = false,
+    val syncState: DesktopSyncState = DesktopSyncState(),
     val isFullscreen: Boolean = false,
 ) {
     val isSearch: Boolean get() = searchQuery != null

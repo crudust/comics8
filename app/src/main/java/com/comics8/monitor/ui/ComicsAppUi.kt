@@ -32,10 +32,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.comics8.monitor.data.Catalog
 import com.comics8.monitor.data.ViewMode
 import com.comics8.monitor.ui.browse.ListingGrid
-import com.comics8.monitor.ui.components.BackupDialog
 import com.comics8.monitor.ui.components.ErrorPane
 import com.comics8.monitor.ui.components.LoadingPane
 import com.comics8.monitor.ui.components.PageJumpDialog
+import com.comics8.monitor.ui.components.SyncDialog
 import com.comics8.monitor.ui.components.TopBar
 import com.comics8.monitor.ui.history.HistoryPane
 import com.comics8.monitor.ui.reader.ReaderPane
@@ -155,11 +155,11 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                 },
             )
         }
-        if (state.showBackupDialog) {
-            BackupDialog(
+        if (state.showSyncDialog) {
+            SyncDialog(
                 state = state,
                 viewModel = viewModel,
-                onDismiss = viewModel::closeBackupDialog,
+                onDismiss = viewModel::closeSyncDialog,
             )
         }
     }

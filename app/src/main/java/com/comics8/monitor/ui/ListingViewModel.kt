@@ -10,6 +10,7 @@ import com.comics8.monitor.data.BackupStats
 import com.comics8.monitor.data.Catalog
 import com.comics8.monitor.data.EpisodeItem
 import com.comics8.monitor.data.ReadDirection
+import com.comics8.monitor.data.SyncState
 import com.comics8.monitor.data.ToonItem
 import com.comics8.monitor.data.ViewMode
 import com.comics8.monitor.data.local.ReadHistory
@@ -52,10 +53,8 @@ data class ListingUiState(
     val seriesHistory: ReadHistory? = null,
     val historyItems: List<ReadHistory> = emptyList(),
     val historyLoading: Boolean = false,
-    val showBackupDialog: Boolean = false,
-    val backupStats: BackupStats? = null,
-    val backupMessage: String? = null,
-    val backupProcessing: Boolean = false,
+    val showSyncDialog: Boolean = false,
+    val syncState: SyncState = SyncState(),
 ) {
     val isSearch: Boolean get() = searchQuery != null
 
@@ -122,6 +121,19 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 viewMode = singleViewPreference,
                 readDirection = globalReadDirection,
             )
+        }
+        repository.syncManager?.let { sm ->
+            viewModelScope.launch {
+                sm.syncState.collect { s ->
+                    _state.update { it.copy(syncState = s) }
+                }
+            }
+            viewModelScope.launch {
+                val res = sm.syncPull()
+                if (res.success && (res.favoritesCount > 0 || res.historyCount > 0)) {
+                    loadPage(page = _state.value.page, replace = true)
+                }
+            }
         }
         refresh(force = true)
     }
@@ -478,83 +490,39 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun openBackupDialog() {
-        _state.update { it.copy(showBackupDialog = true, backupMessage = null) }
-        viewModelScope.launch {
-            val stats = repository.getBackupStats()
-            _state.update { it.copy(backupStats = stats) }
-        }
+    fun openSyncDialog() {
+        _state.update { it.copy(showSyncDialog = true) }
     }
 
-    fun closeBackupDialog() {
-        _state.update { it.copy(showBackupDialog = false, backupMessage = null) }
+    fun closeSyncDialog() {
+        _state.update { it.copy(showSyncDialog = false) }
     }
 
-    fun exportBackup(context: Context, uri: Uri) {
+    fun syncNow() {
         viewModelScope.launch {
-            _state.update { it.copy(backupProcessing = true, backupMessage = null) }
-            try {
-                val json = repository.exportBackupJson()
-                context.contentResolver.openOutputStream(uri)?.use { output ->
-                    output.write(json.toByteArray(Charsets.UTF_8))
-                }
-                val stats = repository.getBackupStats()
-                _state.update {
-                    it.copy(
-                        backupProcessing = false,
-                        backupStats = stats,
-                        backupMessage = "✅ 백업 파일 저장이 완료되었습니다.",
-                    )
-                }
-            } catch (e: Exception) {
-                _state.update {
-                    it.copy(
-                        backupProcessing = false,
-                        backupMessage = "❌ 백업 저장 실패: ${e.localizedMessage ?: "알 수 없는 오류"}",
-                    )
-                }
+            val res = repository.syncManager?.syncFull()
+            if (res?.success == true) {
+                loadPage(page = _state.value.page, replace = true)
+                val updatedHistory = repository.getHistory()
+                _state.update { it.copy(historyItems = updatedHistory) }
             }
         }
     }
 
-    fun importBackup(context: Context, uri: Uri) {
-        viewModelScope.launch {
-            _state.update { it.copy(backupProcessing = true, backupMessage = null) }
-            try {
-                val json = context.contentResolver.openInputStream(uri)?.use { input ->
-                    input.bufferedReader(Charsets.UTF_8).readText()
-                } ?: error("파일을 읽을 수 없습니다.")
+    fun updateSyncKey(key: String) {
+        repository.syncManager?.updateSyncKey(key)
+    }
 
-                val result = repository.importBackupJson(json)
-                if (result.success) {
-                    val stats = repository.getBackupStats()
-                    loadPage(page = _state.value.page, replace = true)
-                    val updatedHistory = repository.getHistory()
-                    _state.update {
-                        it.copy(
-                            backupProcessing = false,
-                            backupStats = stats,
-                            historyItems = updatedHistory,
-                            backupMessage = "✅ 복원 완료: 즐겨찾기 ${result.favoriteCount}개, 읽음 기록 ${result.historyCount}개",
-                        )
-                    }
-                } else {
-                    _state.update {
-                        it.copy(
-                            backupProcessing = false,
-                            backupMessage = "❌ ${result.message}",
-                        )
-                    }
-                }
-            } catch (e: Exception) {
-                _state.update {
-                    it.copy(
-                        backupProcessing = false,
-                        backupMessage = "❌ 복원 실패: ${e.localizedMessage ?: "알 수 없는 오류"}",
-                    )
-                }
-            }
-        }
+    fun generateNewSyncKey() {
+        repository.syncManager?.generateNewKey()
+    }
+
+    fun updateSyncServerUrl(url: String) {
+        repository.syncManager?.updateServerUrl(url)
+    }
+
+    fun toggleAutoSync(enabled: Boolean) {
+        repository.syncManager?.setAutoSyncEnabled(enabled)
     }
 
     fun reopenHistoryEpisode(item: ReadHistory, startPage: Int = 0) {

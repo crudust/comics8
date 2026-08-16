@@ -33,6 +33,19 @@ class DesktopViewModel(
 
     init {
         loadPage(1)
+        repository.syncManager?.let { sm ->
+            scope.launch {
+                sm.syncState.collect { s ->
+                    _state.update { it.copy(syncState = s) }
+                }
+            }
+            scope.launch {
+                val res = sm.syncPull()
+                if (res.success && (res.favoritesCount > 0 || res.historyCount > 0)) {
+                    loadPage(_state.value.page, replace = true)
+                }
+            }
+        }
     }
 
     fun selectCatalog(catalog: Catalog) {
@@ -401,78 +414,39 @@ class DesktopViewModel(
         }
     }
 
-    fun openBackupDialog() {
-        _state.update { it.copy(showBackupDialog = true, backupMessage = null) }
-        scope.launch {
-            val stats = repository.getBackupStats()
-            _state.update { it.copy(backupStats = stats) }
-        }
+    fun openSyncDialog() {
+        _state.update { it.copy(showSyncDialog = true) }
     }
 
-    fun closeBackupDialog() {
-        _state.update { it.copy(showBackupDialog = false, backupMessage = null) }
+    fun closeSyncDialog() {
+        _state.update { it.copy(showSyncDialog = false) }
     }
 
-    fun exportBackup(file: File) {
+    fun syncNow() {
         scope.launch {
-            _state.update { it.copy(backupProcessing = true, backupMessage = null) }
-            try {
-                val json = repository.exportBackupJson()
-                file.writeText(json, Charsets.UTF_8)
-                val stats = repository.getBackupStats()
-                _state.update {
-                    it.copy(
-                        backupProcessing = false,
-                        backupStats = stats,
-                        backupMessage = "✅ 백업 파일 저장이 완료되었습니다.",
-                    )
-                }
-            } catch (e: Exception) {
-                _state.update {
-                    it.copy(
-                        backupProcessing = false,
-                        backupMessage = "❌ 백업 저장 실패: ${e.localizedMessage ?: "알 수 없는 오류"}",
-                    )
-                }
+            val res = repository.syncManager?.syncFull()
+            if (res?.success == true) {
+                loadPage(_state.value.page, replace = true)
+                val updatedHistory = repository.getHistory()
+                _state.update { it.copy(historyItems = updatedHistory) }
             }
         }
     }
 
-    fun importBackup(file: File) {
-        scope.launch {
-            _state.update { it.copy(backupProcessing = true, backupMessage = null) }
-            try {
-                val json = file.readText(Charsets.UTF_8)
-                val result = repository.importBackupJson(json)
-                if (result.success) {
-                    val stats = repository.getBackupStats()
-                    loadPage(page = _state.value.page, replace = true)
-                    val updatedHistory = repository.getHistory()
-                    _state.update {
-                        it.copy(
-                            backupProcessing = false,
-                            backupStats = stats,
-                            historyItems = updatedHistory,
-                            backupMessage = "✅ 복원 완료: 즐겨찾기 ${result.favoriteCount}개, 읽음 기록 ${result.historyCount}개",
-                        )
-                    }
-                } else {
-                    _state.update {
-                        it.copy(
-                            backupProcessing = false,
-                            backupMessage = "❌ ${result.message}",
-                        )
-                    }
-                }
-            } catch (e: Exception) {
-                _state.update {
-                    it.copy(
-                        backupProcessing = false,
-                        backupMessage = "❌ 복원 실패: ${e.localizedMessage ?: "알 수 없는 오류"}",
-                    )
-                }
-            }
-        }
+    fun updateSyncKey(key: String) {
+        repository.syncManager?.updateSyncKey(key)
+    }
+
+    fun generateNewSyncKey() {
+        repository.syncManager?.generateNewKey()
+    }
+
+    fun updateSyncServerUrl(url: String) {
+        repository.syncManager?.updateServerUrl(url)
+    }
+
+    fun toggleAutoSync(enabled: Boolean) {
+        repository.syncManager?.setAutoSyncEnabled(enabled)
     }
 
     fun reopenHistoryEpisode(item: ReadHistoryRecord, startPage: Int = 0) {

@@ -22,6 +22,7 @@ class ToonRepository(
     private val readEpisodeDao: ReadEpisodeDao,
     private val readHistoryDao: ReadHistoryDao,
     private val database: AppDatabase? = null,
+    val syncManager: SyncManager? = null,
     private val now: () -> Long = { System.currentTimeMillis() },
 ) {
     suspend fun loadListing(catalog: Catalog, page: Int): ListingPage = withContext(Dispatchers.IO) {
@@ -146,7 +147,8 @@ class ToonRepository(
     }
 
     suspend fun toggleFavorite(item: ToonItem): Boolean = withContext(Dispatchers.IO) {
-        if (favoriteDao.exists(item.id)) {
+        val exists = favoriteDao.exists(item.id)
+        val result = if (exists) {
             favoriteDao.delete(item.id)
             false
         } else {
@@ -163,6 +165,8 @@ class ToonRepository(
             )
             true
         }
+        syncManager?.triggerDebouncedPush()
+        result
     }
 
     suspend fun getReaderSetting(toonId: String): Pair<ViewMode, ReadDirection>? = withContext(Dispatchers.IO) {
@@ -193,6 +197,7 @@ class ToonRepository(
                 updatedAt = now(),
             ),
         )
+        syncManager?.triggerDebouncedPush()
     }
 
     suspend fun markEpisodeRead(toonId: String, wrId: String, lastPage: Int = 0): Long = withContext(Dispatchers.IO) {
@@ -205,11 +210,13 @@ class ToonRepository(
                 lastPage = lastPage,
             ),
         )
+        syncManager?.triggerDebouncedPush()
         readAt
     }
 
     suspend fun saveEpisodePage(toonId: String, wrId: String, page: Int) = withContext(Dispatchers.IO) {
         readEpisodeDao.updateLastPage(toonId, wrId, page)
+        syncManager?.triggerDebouncedPush()
     }
 
     suspend fun getReadEpisode(toonId: String, wrId: String): ReadEpisode? = withContext(Dispatchers.IO) {
@@ -222,14 +229,17 @@ class ToonRepository(
 
     suspend fun saveHistory(history: ReadHistory) = withContext(Dispatchers.IO) {
         readHistoryDao.upsert(history)
+        syncManager?.triggerDebouncedPush()
     }
 
     suspend fun deleteHistory(toonId: String) = withContext(Dispatchers.IO) {
         readHistoryDao.delete(toonId)
+        syncManager?.triggerDebouncedPush()
     }
 
     suspend fun clearHistory() = withContext(Dispatchers.IO) {
         readHistoryDao.clearAll()
+        syncManager?.triggerDebouncedPush()
     }
 
     suspend fun exportBackupJson(): String = withContext(Dispatchers.IO) {
