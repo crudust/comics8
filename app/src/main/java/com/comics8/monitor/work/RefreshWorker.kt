@@ -17,6 +17,8 @@ import com.comics8.monitor.MainActivity
 import com.comics8.monitor.R
 import java.util.concurrent.TimeUnit
 
+import com.comics8.monitor.data.ToonItem
+
 class RefreshWorker(
     appContext: Context,
     params: WorkerParameters,
@@ -27,7 +29,7 @@ class RefreshWorker(
         return try {
             val fresh = app.repository.checkLatestUpdates()
             if (fresh.isNotEmpty()) {
-                notifyUpdates(fresh.size, fresh.take(3).joinToString(" · ") { it.title })
+                notifyUpdates(fresh)
             }
             Result.success()
         } catch (_: Exception) {
@@ -35,7 +37,7 @@ class RefreshWorker(
         }
     }
 
-    private fun notifyUpdates(count: Int, preview: String) {
+    private fun notifyUpdates(items: List<ToonItem>) {
         val manager = NotificationManagerCompat.from(applicationContext)
         if (!manager.areNotificationsEnabled()) return
 
@@ -52,11 +54,24 @@ class RefreshWorker(
             Intent(applicationContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+
+        val count = items.size
+        val title = if (count == 1) {
+            "즐겨찾기: ${items.first().title}"
+        } else {
+            "즐겨찾기 만화 ${count}개 갱신"
+        }
+        val text = if (count == 1) {
+            "새로운 회차가 등록되었습니다."
+        } else {
+            items.take(4).joinToString(" · ") { it.title }
+        }
+
         val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.star_on)
-            .setContentTitle("최신만화 ${count}개 갱신")
-            .setContentText(preview)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(preview))
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(items.joinToString("\n") { "• ${it.title}" }))
             .setContentIntent(launch)
             .setAutoCancel(true)
             .build()

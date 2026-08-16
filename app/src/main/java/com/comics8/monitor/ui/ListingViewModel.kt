@@ -287,8 +287,31 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         loadReaderImages(episode)
         if (series != null) {
             viewModelScope.launch {
-                repository.markEpisodeRead(series.id, episode.wrId)
+                repository.markEpisodeRead(series.id, episode.wrId, episode.lastReadPage)
             }
+        }
+    }
+
+    fun savePage(page: Int) {
+        val current = _state.value
+        val series = current.series ?: return
+        val episode = current.currentEpisode ?: return
+        val totalImages = current.readerImages.size
+        val isLastPage = totalImages > 0 && page >= totalImages - 1
+        val targetPage = if (isLastPage) 0 else page.coerceAtLeast(0)
+
+        _state.update { state ->
+            val updatedEpisode = state.currentEpisode?.copy(lastReadPage = targetPage)
+            val updatedEpisodes = state.episodes.map {
+                if (it.wrId == episode.wrId) it.copy(lastReadPage = targetPage) else it
+            }
+            state.copy(
+                currentEpisode = updatedEpisode,
+                episodes = updatedEpisodes,
+            )
+        }
+        viewModelScope.launch {
+            repository.saveEpisodePage(series.id, episode.wrId, targetPage)
         }
     }
 
@@ -307,6 +330,13 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
     fun openNextEpisode() {
         val current = _state.value
+        val series = current.series
+        val currentEp = current.currentEpisode
+        if (series != null && currentEp != null) {
+            viewModelScope.launch {
+                repository.saveEpisodePage(series.id, currentEp.wrId, 0)
+            }
+        }
         val idx = current.currentEpisodeIndex
         if (idx in 1 until current.episodes.size) {
             openEpisode(current.episodes[idx - 1])

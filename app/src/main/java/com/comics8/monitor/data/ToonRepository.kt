@@ -45,7 +45,7 @@ class ToonRepository(
         val enriched = parsed.items.map { ep ->
             val read = readMap[ep.wrId]
             if (read != null) {
-                ep.copy(isRead = true, readAt = read.readAt)
+                ep.copy(isRead = true, readAt = read.readAt, lastReadPage = read.lastPage)
             } else {
                 ep
             }
@@ -89,14 +89,17 @@ class ToonRepository(
     }
 
     suspend fun checkLatestUpdates(): List<ToonItem> {
+        val favoriteIds = favoriteDao.ids().toSet()
+        if (favoriteIds.isEmpty()) return emptyList()
+
         val page = loadListing(Catalog.LATEST, 1)
-        val fresh = page.items.filter { it.isNew }
-        if (fresh.isEmpty()) {
+        val favoriteItems = page.items.filter { it.id in favoriteIds }
+        if (favoriteItems.isEmpty()) {
             markSeen(page.items)
             return emptyList()
         }
-        val existing = seenDao.byIds(fresh.map { it.id }).associateBy { it.id }
-        val unseen = fresh.filter { item ->
+        val existing = seenDao.byIds(favoriteItems.map { it.id }).associateBy { it.id }
+        val unseen = favoriteItems.filter { item ->
             existing[item.id]?.notifiedKey != notifyKey(item)
         }
         markSeen(page.items)
@@ -173,16 +176,21 @@ class ToonRepository(
         )
     }
 
-    suspend fun markEpisodeRead(toonId: String, wrId: String): Long = withContext(Dispatchers.IO) {
+    suspend fun markEpisodeRead(toonId: String, wrId: String, lastPage: Int = 0): Long = withContext(Dispatchers.IO) {
         val readAt = now()
         readEpisodeDao.markRead(
             ReadEpisode(
                 toonId = toonId,
                 wrId = wrId,
                 readAt = readAt,
+                lastPage = lastPage,
             ),
         )
         readAt
+    }
+
+    suspend fun saveEpisodePage(toonId: String, wrId: String, page: Int) = withContext(Dispatchers.IO) {
+        readEpisodeDao.updateLastPage(toonId, wrId, page)
     }
 
     private fun notifyKey(item: ToonItem): String = "${item.id}|${item.updatedAt.orEmpty()}"

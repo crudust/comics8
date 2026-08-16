@@ -36,6 +36,7 @@ data class EpisodeItem(
     val href: String,
     val isRead: Boolean = false,
     val readAt: Long? = null,
+    val lastReadPage: Int = 0,
 )
 
 data class EpisodePage(

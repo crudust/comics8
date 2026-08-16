@@ -7,9 +7,12 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
+import androidx.room.Index
 import androidx.room.RoomDatabase
 
-@Entity(tableName = "seen_toons")
+@Entity(
+    tableName = "seen_toons",
+)
 data class SeenToon(
     @PrimaryKey val id: String,
     val title: String,
@@ -19,7 +22,10 @@ data class SeenToon(
     val notifiedKey: String,
 )
 
-@Entity(tableName = "favorites")
+@Entity(
+    tableName = "favorites",
+    indices = [Index("savedAt")],
+)
 data class FavoriteToon(
     @PrimaryKey val id: String,
     val title: String,
@@ -85,6 +91,7 @@ data class ReadEpisode(
     val toonId: String,
     val wrId: String,
     val readAt: Long,
+    val lastPage: Int = 0,
 )
 
 @Dao
@@ -97,11 +104,14 @@ interface ReadEpisodeDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun markRead(item: ReadEpisode)
+
+    @Query("UPDATE read_episodes SET lastPage = :page WHERE toonId = :toonId AND wrId = :wrId")
+    suspend fun updateLastPage(toonId: String, wrId: String, page: Int)
 }
 
 @Database(
     entities = [SeenToon::class, FavoriteToon::class, ReaderSetting::class, ReadEpisode::class],
-    version = 4,
+    version = 6,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {

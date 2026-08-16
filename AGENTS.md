@@ -86,8 +86,12 @@ Comics8/
 │       │   │   ├── ComicsApp.kt        # Application 클래스 (DB, WorkManager, Repository 초기화)
 │       │   │   ├── MainActivity.kt     # Compose 테마/UI 진입점
 │       │   │   ├── ui/
-│       │   │   │   ├── ComicsAppUi.kt  # Compose 전체 UI (목록, 검색, 즐겨찾기, 뷰어 등)
+│       │   │   │   ├── ComicsAppUi.kt  # Compose 루트 컨테이너 및 진입점
 │       │   │   │   ├── ListingViewModel.kt # 화면 상태 및 비즈니스 로직 관리
+│       │   │   │   ├── browse/         # 작품 탐색 그리드/카드 (BrowsePane)
+│       │   │   │   ├── series/         # 회차 상세 목록 및 행 (SeriesPane)
+│       │   │   │   ├── reader/         # 만화 뷰어 (스크롤, 단면, 양쪽보기 등 ReaderPane)
+│       │   │   │   ├── components/     # 공통 위젯, TopBar, 다이얼로그, 프롬프트
 │       │   │   │   └── theme/Theme.kt  # 색상/타이포그래피 테마
 │       │   │   ├── data/
 │       │   │   │   ├── Models.kt       # 데이터 모델 (ComicItem, EpisodeItem 등)
