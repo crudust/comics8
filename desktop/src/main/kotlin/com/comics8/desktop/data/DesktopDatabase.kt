@@ -1,0 +1,585 @@
+package com.comics8.desktop.data
+
+import java.io.File
+import java.sql.Connection
+import java.sql.DriverManager
+
+class DesktopDatabase(dbFile: File? = null) {
+    private val dbPath: String
+
+    init {
+        try {
+            Class.forName("org.sqlite.JDBC")
+        } catch (_: Exception) {
+        }
+        val file = dbFile ?: File(System.getProperty("user.home"), ".comics8/comics8.db")
+        file.parentFile?.mkdirs()
+        dbPath = file.absolutePath
+        initTables()
+    }
+
+    private fun getConnection(): Connection =
+        DriverManager.getConnection("jdbc:sqlite:$dbPath")
+
+    private fun initTables() {
+        getConnection().use { conn ->
+            conn.createStatement().use { stmt ->
+                stmt.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS seen_toons (
+                        id TEXT PRIMARY KEY,
+                        title TEXT,
+                        updatedAt TEXT,
+                        firstSeenAt INTEGER,
+                        lastSeenAt INTEGER,
+                        notifiedKey TEXT
+                    );
+                    """.trimIndent(),
+                )
+                stmt.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS favorites (
+                        id TEXT PRIMARY KEY,
+                        title TEXT,
+                        thumbUrl TEXT,
+                        href TEXT,
+                        genre TEXT,
+                        updatedAt TEXT,
+                        savedAt INTEGER
+                    );
+                    """.trimIndent(),
+                )
+                stmt.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS reader_settings (
+                        toonId TEXT PRIMARY KEY,
+                        viewMode TEXT,
+                        readDirection TEXT,
+                        updatedAt INTEGER
+                    );
+                    """.trimIndent(),
+                )
+                stmt.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS read_episodes (
+                        toonId TEXT,
+                        wrId TEXT,
+                        readAt INTEGER,
+                        lastPage INTEGER DEFAULT 0,
+                        PRIMARY KEY (toonId, wrId)
+                    );
+                    """.trimIndent(),
+                )
+                stmt.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS read_history (
+                        toonId TEXT PRIMARY KEY,
+                        toonTitle TEXT,
+                        toonThumbUrl TEXT,
+                        toonHref TEXT,
+                        lastWrId TEXT,
+                        lastEpisodeTitle TEXT,
+                        lastEpisodeHref TEXT,
+                        lastReadOrder INTEGER,
+                        totalEpisodes INTEGER,
+                        lastReadAt INTEGER,
+                        nextWrId TEXT,
+                        nextEpisodeTitle TEXT,
+                        nextEpisodeHref TEXT,
+                        hasNew INTEGER DEFAULT 0
+                    );
+                    """.trimIndent(),
+                )
+            }
+        }
+    }
+
+    // --- Favorites ---
+    fun getAllFavorites(): List<FavoriteRecord> {
+        val list = mutableListOf<FavoriteRecord>()
+        getConnection().use { conn ->
+            conn.prepareStatement("SELECT * FROM favorites ORDER BY savedAt DESC").use { stmt ->
+                val rs = stmt.executeQuery()
+                while (rs.next()) {
+                    list.add(
+                        FavoriteRecord(
+                            id = rs.getString("id"),
+                            title = rs.getString("title"),
+                            thumbUrl = rs.getString("thumbUrl"),
+                            href = rs.getString("href"),
+                            genre = rs.getString("genre"),
+                            updatedAt = rs.getString("updatedAt"),
+                            savedAt = rs.getLong("savedAt"),
+                        ),
+                    )
+                }
+            }
+        }
+        return list
+    }
+
+    fun isFavorite(id: String): Boolean {
+        getConnection().use { conn ->
+            conn.prepareStatement("SELECT 1 FROM favorites WHERE id = ?").use { stmt ->
+                stmt.setString(1, id)
+                val rs = stmt.executeQuery()
+                return rs.next()
+            }
+        }
+    }
+
+    fun getFavoriteIds(): Set<String> {
+        val set = mutableSetOf<String>()
+        getConnection().use { conn ->
+            conn.prepareStatement("SELECT id FROM favorites").use { stmt ->
+                val rs = stmt.executeQuery()
+                while (rs.next()) {
+                    set.add(rs.getString("id"))
+                }
+            }
+        }
+        return set
+    }
+
+    fun saveFavorite(item: FavoriteRecord) {
+        getConnection().use { conn ->
+            conn.prepareStatement(
+                """
+                INSERT OR REPLACE INTO favorites (id, title, thumbUrl, href, genre, updatedAt, savedAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { stmt ->
+                stmt.setString(1, item.id)
+                stmt.setString(2, item.title)
+                stmt.setString(3, item.thumbUrl)
+                stmt.setString(4, item.href)
+                stmt.setString(5, item.genre)
+                stmt.setString(6, item.updatedAt)
+                stmt.setLong(7, item.savedAt)
+                stmt.executeUpdate()
+            }
+        }
+    }
+
+    fun saveAllFavorites(items: List<FavoriteRecord>) {
+        getConnection().use { conn ->
+            conn.autoCommit = false
+            conn.prepareStatement(
+                """
+                INSERT OR REPLACE INTO favorites (id, title, thumbUrl, href, genre, updatedAt, savedAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { stmt ->
+                for (item in items) {
+                    stmt.setString(1, item.id)
+                    stmt.setString(2, item.title)
+                    stmt.setString(3, item.thumbUrl)
+                    stmt.setString(4, item.href)
+                    stmt.setString(5, item.genre)
+                    stmt.setString(6, item.updatedAt)
+                    stmt.setLong(7, item.savedAt)
+                    stmt.addBatch()
+                }
+                stmt.executeBatch()
+            }
+            conn.commit()
+        }
+    }
+
+    fun deleteFavorite(id: String) {
+        getConnection().use { conn ->
+            conn.prepareStatement("DELETE FROM favorites WHERE id = ?").use { stmt ->
+                stmt.setString(1, id)
+                stmt.executeUpdate()
+            }
+        }
+    }
+
+    // --- Seen Toons ---
+    fun getSeenCount(): Int {
+        getConnection().use { conn ->
+            conn.prepareStatement("SELECT COUNT(*) FROM seen_toons").use { stmt ->
+                val rs = stmt.executeQuery()
+                return if (rs.next()) rs.getInt(1) else 0
+            }
+        }
+    }
+
+    fun getSeenByIds(ids: List<String>): Map<String, SeenRecord> {
+        if (ids.isEmpty()) return emptyMap()
+        val map = mutableMapOf<String, SeenRecord>()
+        getConnection().use { conn ->
+            val placeholders = ids.joinToString(",") { "?" }
+            conn.prepareStatement("SELECT * FROM seen_toons WHERE id IN ($placeholders)").use { stmt ->
+                ids.forEachIndexed { index, id -> stmt.setString(index + 1, id) }
+                val rs = stmt.executeQuery()
+                while (rs.next()) {
+                    val record = SeenRecord(
+                        id = rs.getString("id"),
+                        title = rs.getString("title"),
+                        updatedAt = rs.getString("updatedAt"),
+                        firstSeenAt = rs.getLong("firstSeenAt"),
+                        lastSeenAt = rs.getLong("lastSeenAt"),
+                        notifiedKey = rs.getString("notifiedKey"),
+                    )
+                    map[record.id] = record
+                }
+            }
+        }
+        return map
+    }
+
+    fun saveAllSeen(items: List<SeenRecord>) {
+        if (items.isEmpty()) return
+        getConnection().use { conn ->
+            conn.autoCommit = false
+            conn.prepareStatement(
+                """
+                INSERT OR REPLACE INTO seen_toons (id, title, updatedAt, firstSeenAt, lastSeenAt, notifiedKey)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { stmt ->
+                for (item in items) {
+                    stmt.setString(1, item.id)
+                    stmt.setString(2, item.title)
+                    stmt.setString(3, item.updatedAt)
+                    stmt.setLong(4, item.firstSeenAt)
+                    stmt.setLong(5, item.lastSeenAt)
+                    stmt.setString(6, item.notifiedKey)
+                    stmt.addBatch()
+                }
+                stmt.executeBatch()
+            }
+            conn.commit()
+        }
+    }
+
+    // --- Read History ---
+    fun getAllHistory(): List<ReadHistoryRecord> {
+        val list = mutableListOf<ReadHistoryRecord>()
+        getConnection().use { conn ->
+            conn.prepareStatement("SELECT * FROM read_history ORDER BY lastReadAt DESC").use { stmt ->
+                val rs = stmt.executeQuery()
+                while (rs.next()) {
+                    list.add(
+                        ReadHistoryRecord(
+                            toonId = rs.getString("toonId"),
+                            toonTitle = rs.getString("toonTitle"),
+                            toonThumbUrl = rs.getString("toonThumbUrl"),
+                            toonHref = rs.getString("toonHref"),
+                            lastWrId = rs.getString("lastWrId"),
+                            lastEpisodeTitle = rs.getString("lastEpisodeTitle"),
+                            lastEpisodeHref = rs.getString("lastEpisodeHref"),
+                            lastReadOrder = rs.getInt("lastReadOrder"),
+                            totalEpisodes = rs.getInt("totalEpisodes"),
+                            lastReadAt = rs.getLong("lastReadAt"),
+                            nextWrId = rs.getString("nextWrId"),
+                            nextEpisodeTitle = rs.getString("nextEpisodeTitle"),
+                            nextEpisodeHref = rs.getString("nextEpisodeHref"),
+                            hasNew = rs.getInt("hasNew") == 1,
+                        ),
+                    )
+                }
+            }
+        }
+        return list
+    }
+
+    fun getHistory(toonId: String): ReadHistoryRecord? {
+        getConnection().use { conn ->
+            conn.prepareStatement("SELECT * FROM read_history WHERE toonId = ?").use { stmt ->
+                stmt.setString(1, toonId)
+                val rs = stmt.executeQuery()
+                if (rs.next()) {
+                    return ReadHistoryRecord(
+                        toonId = rs.getString("toonId"),
+                        toonTitle = rs.getString("toonTitle"),
+                        toonThumbUrl = rs.getString("toonThumbUrl"),
+                        toonHref = rs.getString("toonHref"),
+                        lastWrId = rs.getString("lastWrId"),
+                        lastEpisodeTitle = rs.getString("lastEpisodeTitle"),
+                        lastEpisodeHref = rs.getString("lastEpisodeHref"),
+                        lastReadOrder = rs.getInt("lastReadOrder"),
+                        totalEpisodes = rs.getInt("totalEpisodes"),
+                        lastReadAt = rs.getLong("lastReadAt"),
+                        nextWrId = rs.getString("nextWrId"),
+                        nextEpisodeTitle = rs.getString("nextEpisodeTitle"),
+                        nextEpisodeHref = rs.getString("nextEpisodeHref"),
+                        hasNew = rs.getInt("hasNew") == 1,
+                    )
+                }
+            }
+        }
+        return null
+    }
+
+    fun saveHistory(history: ReadHistoryRecord) {
+        getConnection().use { conn ->
+            conn.prepareStatement(
+                """
+                INSERT OR REPLACE INTO read_history 
+                (toonId, toonTitle, toonThumbUrl, toonHref, lastWrId, lastEpisodeTitle, lastEpisodeHref, lastReadOrder, totalEpisodes, lastReadAt, nextWrId, nextEpisodeTitle, nextEpisodeHref, hasNew)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { stmt ->
+                stmt.setString(1, history.toonId)
+                stmt.setString(2, history.toonTitle)
+                stmt.setString(3, history.toonThumbUrl)
+                stmt.setString(4, history.toonHref)
+                stmt.setString(5, history.lastWrId)
+                stmt.setString(6, history.lastEpisodeTitle)
+                stmt.setString(7, history.lastEpisodeHref)
+                stmt.setInt(8, history.lastReadOrder)
+                stmt.setInt(9, history.totalEpisodes)
+                stmt.setLong(10, history.lastReadAt)
+                stmt.setString(11, history.nextWrId)
+                stmt.setString(12, history.nextEpisodeTitle)
+                stmt.setString(13, history.nextEpisodeHref)
+                stmt.setInt(14, if (history.hasNew) 1 else 0)
+                stmt.executeUpdate()
+            }
+        }
+    }
+
+    fun saveAllHistory(items: List<ReadHistoryRecord>) {
+        if (items.isEmpty()) return
+        getConnection().use { conn ->
+            conn.autoCommit = false
+            conn.prepareStatement(
+                """
+                INSERT OR REPLACE INTO read_history 
+                (toonId, toonTitle, toonThumbUrl, toonHref, lastWrId, lastEpisodeTitle, lastEpisodeHref, lastReadOrder, totalEpisodes, lastReadAt, nextWrId, nextEpisodeTitle, nextEpisodeHref, hasNew)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { stmt ->
+                for (history in items) {
+                    stmt.setString(1, history.toonId)
+                    stmt.setString(2, history.toonTitle)
+                    stmt.setString(3, history.toonThumbUrl)
+                    stmt.setString(4, history.toonHref)
+                    stmt.setString(5, history.lastWrId)
+                    stmt.setString(6, history.lastEpisodeTitle)
+                    stmt.setString(7, history.lastEpisodeHref)
+                    stmt.setInt(8, history.lastReadOrder)
+                    stmt.setInt(9, history.totalEpisodes)
+                    stmt.setLong(10, history.lastReadAt)
+                    stmt.setString(11, history.nextWrId)
+                    stmt.setString(12, history.nextEpisodeTitle)
+                    stmt.setString(13, history.nextEpisodeHref)
+                    stmt.setInt(14, if (history.hasNew) 1 else 0)
+                    stmt.addBatch()
+                }
+                stmt.executeBatch()
+            }
+            conn.commit()
+        }
+    }
+
+    fun deleteHistory(toonId: String) {
+        getConnection().use { conn ->
+            conn.prepareStatement("DELETE FROM read_history WHERE toonId = ?").use { stmt ->
+                stmt.setString(1, toonId)
+                stmt.executeUpdate()
+            }
+        }
+    }
+
+    fun clearAllHistory() {
+        getConnection().use { conn ->
+            conn.prepareStatement("DELETE FROM read_history").use { stmt ->
+                stmt.executeUpdate()
+            }
+        }
+    }
+
+    // --- Read Episodes ---
+    fun getAllReadEpisodes(): List<ReadEpisodeRecord> {
+        val list = mutableListOf<ReadEpisodeRecord>()
+        getConnection().use { conn ->
+            conn.prepareStatement("SELECT * FROM read_episodes").use { stmt ->
+                val rs = stmt.executeQuery()
+                while (rs.next()) {
+                    list.add(
+                        ReadEpisodeRecord(
+                            toonId = rs.getString("toonId"),
+                            wrId = rs.getString("wrId"),
+                            readAt = rs.getLong("readAt"),
+                            lastPage = rs.getInt("lastPage"),
+                        ),
+                    )
+                }
+            }
+        }
+        return list
+    }
+
+    fun getReadEpisodesByToon(toonId: String): List<ReadEpisodeRecord> {
+        val list = mutableListOf<ReadEpisodeRecord>()
+        getConnection().use { conn ->
+            conn.prepareStatement("SELECT * FROM read_episodes WHERE toonId = ?").use { stmt ->
+                stmt.setString(1, toonId)
+                val rs = stmt.executeQuery()
+                while (rs.next()) {
+                    list.add(
+                        ReadEpisodeRecord(
+                            toonId = rs.getString("toonId"),
+                            wrId = rs.getString("wrId"),
+                            readAt = rs.getLong("readAt"),
+                            lastPage = rs.getInt("lastPage"),
+                        ),
+                    )
+                }
+            }
+        }
+        return list
+    }
+
+    fun getReadEpisode(toonId: String, wrId: String): ReadEpisodeRecord? {
+        getConnection().use { conn ->
+            conn.prepareStatement("SELECT * FROM read_episodes WHERE toonId = ? AND wrId = ?").use { stmt ->
+                stmt.setString(1, toonId)
+                stmt.setString(2, wrId)
+                val rs = stmt.executeQuery()
+                if (rs.next()) {
+                    return ReadEpisodeRecord(
+                        toonId = rs.getString("toonId"),
+                        wrId = rs.getString("wrId"),
+                        readAt = rs.getLong("readAt"),
+                        lastPage = rs.getInt("lastPage"),
+                    )
+                }
+            }
+        }
+        return null
+    }
+
+    fun markEpisodeRead(record: ReadEpisodeRecord) {
+        getConnection().use { conn ->
+            conn.prepareStatement(
+                """
+                INSERT OR REPLACE INTO read_episodes (toonId, wrId, readAt, lastPage)
+                VALUES (?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { stmt ->
+                stmt.setString(1, record.toonId)
+                stmt.setString(2, record.wrId)
+                stmt.setLong(3, record.readAt)
+                stmt.setInt(4, record.lastPage)
+                stmt.executeUpdate()
+            }
+        }
+    }
+
+    fun markAllEpisodesRead(items: List<ReadEpisodeRecord>) {
+        if (items.isEmpty()) return
+        getConnection().use { conn ->
+            conn.autoCommit = false
+            conn.prepareStatement(
+                """
+                INSERT OR REPLACE INTO read_episodes (toonId, wrId, readAt, lastPage)
+                VALUES (?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { stmt ->
+                for (item in items) {
+                    stmt.setString(1, item.toonId)
+                    stmt.setString(2, item.wrId)
+                    stmt.setLong(3, item.readAt)
+                    stmt.setInt(4, item.lastPage)
+                    stmt.addBatch()
+                }
+                stmt.executeBatch()
+            }
+            conn.commit()
+        }
+    }
+
+    fun updateLastPage(toonId: String, wrId: String, page: Int) {
+        getConnection().use { conn ->
+            conn.prepareStatement("UPDATE read_episodes SET lastPage = ? WHERE toonId = ? AND wrId = ?").use { stmt ->
+                stmt.setInt(1, page)
+                stmt.setString(2, toonId)
+                stmt.setString(3, wrId)
+                stmt.executeUpdate()
+            }
+        }
+    }
+
+    // --- Reader Settings ---
+    fun getAllReaderSettings(): List<ReaderSettingRecord> {
+        val list = mutableListOf<ReaderSettingRecord>()
+        getConnection().use { conn ->
+            conn.prepareStatement("SELECT * FROM reader_settings").use { stmt ->
+                val rs = stmt.executeQuery()
+                while (rs.next()) {
+                    list.add(
+                        ReaderSettingRecord(
+                            toonId = rs.getString("toonId"),
+                            viewMode = rs.getString("viewMode"),
+                            readDirection = rs.getString("readDirection"),
+                            updatedAt = rs.getLong("updatedAt"),
+                        ),
+                    )
+                }
+            }
+        }
+        return list
+    }
+
+    fun getReaderSetting(toonId: String): ReaderSettingRecord? {
+        getConnection().use { conn ->
+            conn.prepareStatement("SELECT * FROM reader_settings WHERE toonId = ?").use { stmt ->
+                stmt.setString(1, toonId)
+                val rs = stmt.executeQuery()
+                if (rs.next()) {
+                    return ReaderSettingRecord(
+                        toonId = rs.getString("toonId"),
+                        viewMode = rs.getString("viewMode"),
+                        readDirection = rs.getString("readDirection"),
+                        updatedAt = rs.getLong("updatedAt"),
+                    )
+                }
+            }
+        }
+        return null
+    }
+
+    fun saveReaderSetting(setting: ReaderSettingRecord) {
+        getConnection().use { conn ->
+            conn.prepareStatement(
+                """
+                INSERT OR REPLACE INTO reader_settings (toonId, viewMode, readDirection, updatedAt)
+                VALUES (?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { stmt ->
+                stmt.setString(1, setting.toonId)
+                stmt.setString(2, setting.viewMode)
+                stmt.setString(3, setting.readDirection)
+                stmt.setLong(4, setting.updatedAt)
+                stmt.executeUpdate()
+            }
+        }
+    }
+
+    fun saveAllReaderSettings(items: List<ReaderSettingRecord>) {
+        if (items.isEmpty()) return
+        getConnection().use { conn ->
+            conn.autoCommit = false
+            conn.prepareStatement(
+                """
+                INSERT OR REPLACE INTO reader_settings (toonId, viewMode, readDirection, updatedAt)
+                VALUES (?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { stmt ->
+                for (item in items) {
+                    stmt.setString(1, item.toonId)
+                    stmt.setString(2, item.viewMode)
+                    stmt.setString(3, item.readDirection)
+                    stmt.setLong(4, item.updatedAt)
+                    stmt.addBatch()
+                }
+                stmt.executeBatch()
+            }
+            conn.commit()
+        }
+    }
+}

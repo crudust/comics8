@@ -1,0 +1,382 @@
+package com.comics8.desktop.ui.components
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ChromeReaderMode
+import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material.icons.outlined.CloudUpload
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.comics8.desktop.data.Catalog
+import com.comics8.desktop.data.ReadDirection
+import com.comics8.desktop.data.ViewMode
+import com.comics8.desktop.ui.DesktopUiState
+import com.comics8.desktop.ui.DesktopViewModel
+import com.comics8.desktop.ui.Screen
+
+@Composable
+fun TopBar(
+    state: DesktopUiState,
+    viewModel: DesktopViewModel,
+    modifier: Modifier = Modifier,
+    inOverlay: Boolean = false,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .then(
+                if (inOverlay) {
+                    Modifier.background(MaterialTheme.colorScheme.surface.copy(alpha = 0.94f))
+                } else {
+                    Modifier
+                },
+            )
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (state.screen == Screen.Reader) {
+                IconButton(onClick = viewModel::closeReader) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "뒤로")
+                }
+            } else if (state.screen == Screen.Series) {
+                IconButton(onClick = viewModel::closeSeries) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "뒤로")
+                }
+            } else if (state.screen == Screen.History) {
+                IconButton(onClick = viewModel::closeHistory) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "뒤로")
+                }
+            }
+            Text(
+                text = when (state.screen) {
+                    Screen.Reader -> state.currentEpisode?.title.orEmpty().ifBlank { "만화 보기" }
+                    Screen.Series -> state.series?.title.orEmpty()
+                    Screen.Browse -> "Comics8"
+                    Screen.History -> "히스토리"
+                },
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (state.screen == Screen.Browse) {
+                IconButton(onClick = viewModel::openBackupDialog) {
+                    Icon(
+                        imageVector = Icons.Outlined.CloudUpload,
+                        contentDescription = "백업 및 복원",
+                    )
+                }
+                IconButton(onClick = viewModel::openHistory) {
+                    Icon(
+                        imageVector = Icons.Outlined.History,
+                        contentDescription = "히스토리",
+                    )
+                }
+                IconButton(onClick = viewModel::toggleSearchBar) {
+                    Icon(
+                        imageVector = if (state.searchExpanded) Icons.Default.Close else Icons.Default.Search,
+                        contentDescription = if (state.searchExpanded) "검색 닫기" else "검색",
+                    )
+                }
+            }
+            if (state.screen == Screen.History) {
+                IconButton(onClick = viewModel::openBackupDialog) {
+                    Icon(
+                        imageVector = Icons.Outlined.CloudUpload,
+                        contentDescription = "백업 및 복원",
+                    )
+                }
+                if (state.historyItems.isNotEmpty()) {
+                    IconButton(onClick = viewModel::clearAllHistory) {
+                        Icon(
+                            imageVector = Icons.Outlined.Delete,
+                            contentDescription = "기록 전체 삭제",
+                        )
+                    }
+                }
+            }
+            if (state.screen == Screen.Series) {
+                val hist = state.seriesHistory
+                if (hist != null) {
+                    TextButton(
+                        onClick = viewModel::resumeSeries,
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.PlayArrow,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = "이어보기 (${hist.lastReadOrder}/${hist.totalEpisodes})",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                } else {
+                    TextButton(
+                        onClick = viewModel::openFirstEpisode,
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.PlayArrow,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = "처음부터",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+                IconButton(onClick = viewModel::toggleFavorite) {
+                    Icon(
+                        imageVector = if (state.seriesFavorited) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                        contentDescription = if (state.seriesFavorited) "즐겨찾기 해제" else "즐겨찾기",
+                        tint = if (state.seriesFavorited) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onBackground
+                        },
+                    )
+                }
+            }
+            if (state.screen == Screen.Reader) {
+                // View Mode Switcher [ Scroll | Page | Dual ]
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    modifier = Modifier
+                        .padding(end = 6.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                        .padding(2.dp),
+                ) {
+                    ViewModeChip(
+                        selected = state.viewMode == ViewMode.SCROLL,
+                        onClick = { viewModel.setViewMode(ViewMode.SCROLL) },
+                        icon = Icons.Default.SwapVert,
+                        label = "스크롤",
+                    )
+                    ViewModeChip(
+                        selected = state.viewMode == ViewMode.SINGLE,
+                        onClick = { viewModel.setViewMode(ViewMode.SINGLE) },
+                        icon = Icons.AutoMirrored.Filled.ChromeReaderMode,
+                        label = "단면",
+                    )
+                    ViewModeChip(
+                        selected = state.viewMode == ViewMode.DUAL,
+                        onClick = { viewModel.setViewMode(ViewMode.DUAL) },
+                        icon = Icons.AutoMirrored.Filled.MenuBook,
+                        label = "양면",
+                    )
+                }
+
+                // Read Direction Switcher
+                if (state.viewMode != ViewMode.SCROLL) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        modifier = Modifier
+                            .padding(end = 6.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                            .padding(2.dp),
+                    ) {
+                        DirectionChip(
+                            selected = state.readDirection == ReadDirection.RIGHT_TO_LEFT,
+                            onClick = { viewModel.setReadDirection(ReadDirection.RIGHT_TO_LEFT) },
+                            label = "우→좌",
+                        )
+                        DirectionChip(
+                            selected = state.readDirection == ReadDirection.LEFT_TO_RIGHT,
+                            onClick = { viewModel.setReadDirection(ReadDirection.LEFT_TO_RIGHT) },
+                            label = "좌→우",
+                        )
+                    }
+                }
+
+                IconButton(onClick = viewModel::toggleFullscreen) {
+                    Icon(
+                        imageVector = if (state.isFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                        contentDescription = "전체화면",
+                    )
+                }
+            }
+        }
+
+        // Search Bar in Browse
+        AnimatedVisibility(visible = state.searchExpanded && state.screen == Screen.Browse) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+            ) {
+                OutlinedTextField(
+                    value = state.searchInput,
+                    onValueChange = viewModel::updateSearchInput,
+                    placeholder = { Text("만화 제목 검색...") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { viewModel.search(state.searchInput) }),
+                    trailingIcon = {
+                        if (state.searchInput.isNotEmpty()) {
+                            IconButton(onClick = {
+                                viewModel.updateSearchInput("")
+                                if (state.isSearch) viewModel.selectCatalog(state.catalog)
+                            }) {
+                                Icon(Icons.Default.Close, contentDescription = "검색어 지우기")
+                            }
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                IconButton(onClick = { viewModel.search(state.searchInput) }) {
+                    Icon(Icons.Default.Search, contentDescription = "검색 실행")
+                }
+            }
+        }
+
+        // Category Chips in Browse
+        if (state.screen == Screen.Browse && !state.isSearch) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+            ) {
+                Catalog.entries.forEach { catalog ->
+                    FilterChip(
+                        selected = state.catalog == catalog,
+                        onClick = { viewModel.selectCatalog(catalog) },
+                        label = { Text(catalog.label) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primary,
+                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                        ),
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                IconButton(
+                    onClick = viewModel::refresh,
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "새로고침",
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ViewModeChip(
+    selected: Boolean,
+    onClick: () -> Unit,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(
+                if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(14.dp),
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DirectionChip(
+    selected: Boolean,
+    onClick: () -> Unit,
+    label: String,
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(
+                if (selected) MaterialTheme.colorScheme.secondary else Color.Transparent,
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+            color = if (selected) MaterialTheme.colorScheme.onSecondary else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}

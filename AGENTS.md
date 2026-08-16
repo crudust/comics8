@@ -63,13 +63,21 @@ export PATH="$JAVA_HOME/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
 adb shell am start -n "com.comics8.monitor/.MainActivity"
 ```
 
-### 3.4. 단위 테스트 실행
+### 3.5. macOS 데스크톱 앱 실행 (Desktop Run)
 ```bash
-export JAVA_HOME="/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"
-export ANDROID_SDK_ROOT="/opt/homebrew/share/android-commandlinetools"
-export ANDROID_HOME="$ANDROID_SDK_ROOT"
-./gradlew testDebugUnitTest
+./scripts/run-desktop.sh
+# 또는
+./gradlew :desktop:run
 ```
+
+### 3.6. macOS 데스크톱 배포본 빌드 (.app 및 .dmg)
+```bash
+./scripts/build-mac-desktop.sh
+# 또는
+./gradlew :desktop:createDistributable :desktop:packageDmg
+```
+- **출력 App 경로**: `desktop/build/compose/binaries/main/app/Comics8.app`
+- **출력 DMG 경로**: `desktop/build/compose/binaries/main/dmg/Comics8-1.0.0.dmg`
 
 ---
 
@@ -77,43 +85,24 @@ export ANDROID_HOME="$ANDROID_SDK_ROOT"
 
 ```
 Comics8/
-├── app/
-│   ├── build.gradle.kts          # 의존성, SDK 버전, Compose/Room/KSP 설정
-│   └── src/
-│       ├── main/
-│       │   ├── AndroidManifest.xml
-│       │   ├── java/com/comics8/monitor/
-│       │   │   ├── ComicsApp.kt        # Application 클래스 (DB, WorkManager, Repository 초기화)
-│       │   │   ├── MainActivity.kt     # Compose 테마/UI 진입점
-│       │   │   ├── ui/
-│       │   │   │   ├── ComicsAppUi.kt  # Compose 루트 컨테이너 및 진입점
-│       │   │   │   ├── ListingViewModel.kt # 화면 상태 및 비즈니스 로직 관리
-│       │   │   │   ├── browse/         # 작품 탐색 그리드/카드 (BrowsePane)
-│       │   │   │   ├── series/         # 회차 상세 목록 및 행 (SeriesPane)
-│       │   │   │   ├── reader/         # 만화 뷰어 (스크롤, 단면, 양쪽보기 등 ReaderPane)
-│       │   │   │   ├── components/     # 공통 위젯, TopBar, 다이얼로그, 프롬프트
-│       │   │   │   └── theme/Theme.kt  # 색상/타이포그래피 테마
-│       │   │   ├── data/
-│       │   │   │   ├── Models.kt       # 데이터 모델 (ComicItem, EpisodeItem 등)
-│       │   │   │   ├── Catalog.kt      # 카탈로그/카테고리/사이트 정의
-│       │   │   │   ├── ComicSite.kt    # 사이트 열거형 및 설정
-│       │   │   │   ├── HtmlParsers.kt  # Jsoup 파서 (에피소드, 목록, 이미지)
-│       │   │   │   ├── SearchParser.kt # 검색 응답 파서
-│       │   │   │   ├── ToonClient.kt   # OkHttp 네트워크 클라이언트
-│       │   │   │   ├── ToonRepository.kt # 네트워크 + Room 캐시 저장소
-│       │   │   │   └── local/
-│       │   │   │       └── AppDatabase.kt # Room Database, DAO, Entity 정의
-│       │   │   └── work/
-│       │   │       └── RefreshWorker.kt   # 백그라운드 주기적 업데이트 Worker
-│       │   └── res/            # 리소스 (아이콘, 테마, 문자열 등)
-│       └── test/               # 단위 테스트 및 테스트 리소스 (HTML/JSON fixture)
+├── app/                        # Android 모듈 (APK)
+│   ├── build.gradle.kts
+│   └── src/main/java/com/comics8/monitor/
+├── desktop/                    # macOS Desktop 모듈 (.app / .dmg)
+│   ├── build.gradle.kts
+│   └── src/main/kotlin/com/comics8/desktop/
+│       ├── Main.kt
+│       ├── data/               # SQLite JDBC, OkHttp, Jsoup 파서, 백업 매니저
+│       └── ui/                 # Compose Desktop UI (Browse, Series, Reader, History)
 ├── scripts/
-│   ├── build-apk.sh            # APK 빌드 스크립트
-│   └── run-mac.sh              # 에뮬레이터 생성/실행/설치 올인원 스크립트
+│   ├── build-apk.sh            # Android Release APK 빌드
+│   ├── run-mac.sh              # Android 에뮬레이터 실행 및 설치
+│   ├── build-mac-desktop.sh    # macOS Desktop .app 및 .dmg 빌드
+│   └── run-desktop.sh          # macOS Desktop 앱 직접 실행
 ├── build.gradle.kts
 ├── settings.gradle.kts
-├── local.properties            # sdk.dir 설정
-└── AGENTS.md                   # Agent 가이드 문서 (본 문서)
+├── local.properties
+└── AGENTS.md
 ```
 
 ---
@@ -122,9 +111,10 @@ Comics8/
 
 1. **빌드/테스트 전 환경변수 필수**:
    - `JAVA_HOME`과 `ANDROID_SDK_ROOT`가 셸 세션에 올바르게 잡혀 있어야 `./gradlew` 및 `adb` 명령어가 정상 동작합니다.
-2. **APK 빌드 vs 에뮬레이터 갱신 구분**:
-   - `assembleDebug`는 디스크에 `app-debug.apk`를 생성하기만 합니다.
-   - 에뮬레이터에 변경사항을 즉시 확인시키려면 `installDebug`와 `adb shell am start -n "com.comics8.monitor/.MainActivity"`를 함께 실행해야 합니다.
+2. **Android 빌드와 macOS Desktop 빌드 구분**:
+   - Android APK: `./scripts/build-apk.sh` 또는 `./gradlew assembleRelease`
+   - macOS Desktop: `./scripts/build-mac-desktop.sh` 또는 `./gradlew :desktop:createDistributable :desktop:packageDmg`
+   - macOS 직접 실행: `./scripts/run-desktop.sh` 또는 `./gradlew :desktop:run`
 3. **Room Entity 변경 시 주의**:
    - Room 엔티티나 스키마 수정 시 KSP 코드 생성이 필요하며, DB 버전 업그레이드 시 마이그레이션 전략(`fallbackToDestructiveMigration()` 여부 확인)을 확인해야 합니다.
 4. **테스트 추가 및 검증**:
