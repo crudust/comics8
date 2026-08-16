@@ -56,6 +56,7 @@ import com.comics8.monitor.ui.components.EpisodeBoundaryPrompt
 import com.comics8.monitor.ui.components.ErrorPane
 import com.comics8.monitor.ui.components.LoadingPane
 import com.comics8.monitor.ui.components.TopBar
+import com.comics8.monitor.ui.components.ZoomableBox
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -334,56 +335,29 @@ private fun ReaderSinglePagePane(
             beyondViewportPageCount = 2,
             modifier = Modifier.fillMaxSize(),
         ) { page ->
-            Box(
+            ZoomableBox(
                 modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
+                onTap = { tapOffset, size ->
+                    val tapX = tapOffset.x
+                    val width = size.width.toFloat()
+                    when {
+                        tapX < width * 0.35f -> if (isR2L) onAdvance() else onRetreat()
+                        tapX > width * 0.65f -> if (isR2L) onRetreat() else onAdvance()
+                        else -> {
+                            controlsVisible = !controlsVisible
+                            nextPromptVisible = false
+                            prevPromptVisible = false
+                        }
+                    }
+                },
+            ) { scale ->
                 AsyncImage(
-                    model = state.readerImages[page],
+                    model = state.readerImages.getOrNull(page),
                     contentDescription = "페이지 ${page + 1}",
                     contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
-        }
-
-        // Tap Zones: Left 38%, Center 24% (Controls), Right 38%
-        Row(modifier = Modifier.fillMaxSize()) {
-            Box(
-                modifier = Modifier
-                    .weight(0.38f)
-                    .fillMaxHeight()
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                    ) {
-                        if (isR2L) onAdvance() else onRetreat()
-                    },
-            )
-            Box(
-                modifier = Modifier
-                    .weight(0.24f)
-                    .fillMaxHeight()
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                    ) {
-                        controlsVisible = !controlsVisible
-                        nextPromptVisible = false
-                        prevPromptVisible = false
-                    },
-            )
-            Box(
-                modifier = Modifier
-                    .weight(0.38f)
-                    .fillMaxHeight()
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                    ) {
-                        if (isR2L) onRetreat() else onAdvance()
-                    },
-            )
         }
 
         // Floating Page Indicator
@@ -637,183 +611,161 @@ private fun ReaderDualPagePane(
             beyondViewportPageCount = 2,
             modifier = Modifier.fillMaxSize(),
         ) { spreadIdx ->
-            when (val spread = spreads.getOrNull(spreadIdx)) {
-                is DualSpread.Single -> {
-                    val ratio = state.imageAspectRatios[spread.index]
-                    val isWide = ratio != null && ratio >= 1.0f
-
-                    if (isWide) {
-                        // Wide 2-page panoramic spread -> Display across full width in center
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            AsyncImage(
-                                model = state.readerImages.getOrNull(spread.index),
-                                contentDescription = "페이지 ${spread.index + 1}",
-                                contentScale = ContentScale.Fit,
-                                modifier = Modifier.fillMaxSize(),
-                                onSuccess = { result ->
-                                    val w = result.result.drawable.intrinsicWidth
-                                    val h = result.result.drawable.intrinsicHeight
-                                    if (w > 0 && h > 0) {
-                                        viewModel.recordImageAspectRatio(spread.index, w, h)
-                                    }
-                                },
-                            )
+            ZoomableBox(
+                modifier = Modifier.fillMaxSize(),
+                onTap = { tapOffset, size ->
+                    val tapX = tapOffset.x
+                    val width = size.width.toFloat()
+                    when {
+                        tapX < width * 0.35f -> if (isR2L) onAdvance() else onRetreat()
+                        tapX > width * 0.65f -> if (isR2L) onRetreat() else onAdvance()
+                        else -> {
+                            controlsVisible = !controlsVisible
+                            nextPromptVisible = false
+                            prevPromptVisible = false
                         }
-                    } else {
-                        // Isolated single portrait page -> Position in proper half-screen slot (Right for RL, Left for LR) touching center
+                    }
+                },
+            ) { scale ->
+                when (val spread = spreads.getOrNull(spreadIdx)) {
+                    is DualSpread.Single -> {
+                        val ratio = state.imageAspectRatios[spread.index]
+                        val isWide = ratio != null && ratio >= 1.0f
+
+                        if (isWide) {
+                            // Wide 2-page panoramic spread -> Display across full width in center
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                AsyncImage(
+                                    model = state.readerImages.getOrNull(spread.index),
+                                    contentDescription = "페이지 ${spread.index + 1}",
+                                    contentScale = ContentScale.Fit,
+                                    modifier = Modifier.fillMaxSize(),
+                                    onSuccess = { result ->
+                                        val w = result.result.drawable.intrinsicWidth
+                                        val h = result.result.drawable.intrinsicHeight
+                                        if (w > 0 && h > 0) {
+                                            viewModel.recordImageAspectRatio(spread.index, w, h)
+                                        }
+                                    },
+                                )
+                            }
+                        } else {
+                            // Isolated single portrait page -> Position in proper half-screen slot (Right for RL, Left for LR) touching center
+                            Row(
+                                modifier = Modifier.fillMaxSize(),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (isR2L) {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxHeight(),
+                                        contentAlignment = Alignment.CenterStart,
+                                    ) {
+                                        AsyncImage(
+                                            model = state.readerImages.getOrNull(spread.index),
+                                            contentDescription = "페이지 ${spread.index + 1}",
+                                            contentScale = ContentScale.Fit,
+                                            alignment = Alignment.CenterStart,
+                                            modifier = Modifier.fillMaxSize(),
+                                            onSuccess = { result ->
+                                                val w = result.result.drawable.intrinsicWidth
+                                                val h = result.result.drawable.intrinsicHeight
+                                                if (w > 0 && h > 0) {
+                                                    viewModel.recordImageAspectRatio(spread.index, w, h)
+                                                }
+                                            },
+                                        )
+                                    }
+                                } else {
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxHeight(),
+                                        contentAlignment = Alignment.CenterEnd,
+                                    ) {
+                                        AsyncImage(
+                                            model = state.readerImages.getOrNull(spread.index),
+                                            contentDescription = "페이지 ${spread.index + 1}",
+                                            contentScale = ContentScale.Fit,
+                                            alignment = Alignment.CenterEnd,
+                                            modifier = Modifier.fillMaxSize(),
+                                            onSuccess = { result ->
+                                                val w = result.result.drawable.intrinsicWidth
+                                                val h = result.result.drawable.intrinsicHeight
+                                                if (w > 0 && h > 0) {
+                                                    viewModel.recordImageAspectRatio(spread.index, w, h)
+                                                }
+                                            },
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.weight(1f))
+                                }
+                            }
+                        }
+                    }
+                    is DualSpread.Dual -> {
+                        // Normal 2 portrait pages side-by-side: hug the center spine like a book
+                        val leftIndex = if (isR2L) spread.secondIndex else spread.firstIndex
+                        val rightIndex = if (isR2L) spread.firstIndex else spread.secondIndex
+
                         Row(
                             modifier = Modifier.fillMaxSize(),
                             horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            if (isR2L) {
-                                Spacer(modifier = Modifier.weight(1f))
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxHeight(),
-                                    contentAlignment = Alignment.CenterStart,
-                                ) {
-                                    AsyncImage(
-                                        model = state.readerImages.getOrNull(spread.index),
-                                        contentDescription = "페이지 ${spread.index + 1}",
-                                        contentScale = ContentScale.Fit,
-                                        alignment = Alignment.CenterStart,
-                                        modifier = Modifier.fillMaxSize(),
-                                        onSuccess = { result ->
-                                            val w = result.result.drawable.intrinsicWidth
-                                            val h = result.result.drawable.intrinsicHeight
-                                            if (w > 0 && h > 0) {
-                                                viewModel.recordImageAspectRatio(spread.index, w, h)
-                                            }
-                                        },
-                                    )
-                                }
-                            } else {
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxHeight(),
-                                    contentAlignment = Alignment.CenterEnd,
-                                ) {
-                                    AsyncImage(
-                                        model = state.readerImages.getOrNull(spread.index),
-                                        contentDescription = "페이지 ${spread.index + 1}",
-                                        contentScale = ContentScale.Fit,
-                                        alignment = Alignment.CenterEnd,
-                                        modifier = Modifier.fillMaxSize(),
-                                        onSuccess = { result ->
-                                            val w = result.result.drawable.intrinsicWidth
-                                            val h = result.result.drawable.intrinsicHeight
-                                            if (w > 0 && h > 0) {
-                                                viewModel.recordImageAspectRatio(spread.index, w, h)
-                                            }
-                                        },
-                                    )
-                                }
-                                Spacer(modifier = Modifier.weight(1f))
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight(),
+                                contentAlignment = Alignment.CenterEnd,
+                            ) {
+                                AsyncImage(
+                                    model = state.readerImages.getOrNull(leftIndex),
+                                    contentDescription = "페이지 ${leftIndex + 1}",
+                                    contentScale = ContentScale.Fit,
+                                    alignment = Alignment.CenterEnd,
+                                    modifier = Modifier.fillMaxSize(),
+                                    onSuccess = { result ->
+                                        val w = result.result.drawable.intrinsicWidth
+                                        val h = result.result.drawable.intrinsicHeight
+                                        if (w > 0 && h > 0) {
+                                            viewModel.recordImageAspectRatio(leftIndex, w, h)
+                                        }
+                                    },
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight(),
+                                contentAlignment = Alignment.CenterStart,
+                            ) {
+                                AsyncImage(
+                                    model = state.readerImages.getOrNull(rightIndex),
+                                    contentDescription = "페이지 ${rightIndex + 1}",
+                                    contentScale = ContentScale.Fit,
+                                    alignment = Alignment.CenterStart,
+                                    modifier = Modifier.fillMaxSize(),
+                                    onSuccess = { result ->
+                                        val w = result.result.drawable.intrinsicWidth
+                                        val h = result.result.drawable.intrinsicHeight
+                                        if (w > 0 && h > 0) {
+                                            viewModel.recordImageAspectRatio(rightIndex, w, h)
+                                        }
+                                    },
+                                )
                             }
                         }
                     }
+                    null -> {}
                 }
-                is DualSpread.Dual -> {
-                    // Normal 2 portrait pages side-by-side: hug the center spine like a book
-                    val leftIndex = if (isR2L) spread.secondIndex else spread.firstIndex
-                    val rightIndex = if (isR2L) spread.firstIndex else spread.secondIndex
-
-                    Row(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight(),
-                            contentAlignment = Alignment.CenterEnd,
-                        ) {
-                            AsyncImage(
-                                model = state.readerImages.getOrNull(leftIndex),
-                                contentDescription = "페이지 ${leftIndex + 1}",
-                                contentScale = ContentScale.Fit,
-                                alignment = Alignment.CenterEnd,
-                                modifier = Modifier.fillMaxSize(),
-                                onSuccess = { result ->
-                                    val w = result.result.drawable.intrinsicWidth
-                                    val h = result.result.drawable.intrinsicHeight
-                                    if (w > 0 && h > 0) {
-                                        viewModel.recordImageAspectRatio(leftIndex, w, h)
-                                    }
-                                },
-                            )
-                        }
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight(),
-                            contentAlignment = Alignment.CenterStart,
-                        ) {
-                            AsyncImage(
-                                model = state.readerImages.getOrNull(rightIndex),
-                                contentDescription = "페이지 ${rightIndex + 1}",
-                                contentScale = ContentScale.Fit,
-                                alignment = Alignment.CenterStart,
-                                modifier = Modifier.fillMaxSize(),
-                                onSuccess = { result ->
-                                    val w = result.result.drawable.intrinsicWidth
-                                    val h = result.result.drawable.intrinsicHeight
-                                    if (w > 0 && h > 0) {
-                                        viewModel.recordImageAspectRatio(rightIndex, w, h)
-                                    }
-                                },
-                            )
-                        }
-                    }
-                }
-                null -> {}
             }
-        }
-
-        // Tap Zones: Left 38%, Center 24% (Toggle Controls), Right 38%
-        Row(modifier = Modifier.fillMaxSize()) {
-            Box(
-                modifier = Modifier
-                    .weight(0.38f)
-                    .fillMaxHeight()
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                    ) {
-                        if (isR2L) onAdvance() else onRetreat()
-                    },
-            )
-            Box(
-                modifier = Modifier
-                    .weight(0.24f)
-                    .fillMaxHeight()
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                    ) {
-                        controlsVisible = !controlsVisible
-                        nextPromptVisible = false
-                        prevPromptVisible = false
-                    },
-            )
-            Box(
-                modifier = Modifier
-                    .weight(0.38f)
-                    .fillMaxHeight()
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                    ) {
-                        if (isR2L) onRetreat() else onAdvance()
-                    },
-            )
         }
 
         // Floating Page Indicator
