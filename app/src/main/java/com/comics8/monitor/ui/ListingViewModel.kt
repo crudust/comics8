@@ -39,6 +39,7 @@ data class ListingUiState(
     val seriesFavorited: Boolean = false,
     val currentEpisode: EpisodeItem? = null,
     val readerImages: List<String> = emptyList(),
+    val imageAspectRatios: Map<Int, Float> = emptyMap(),
     val readerLoading: Boolean = false,
     val readerError: String? = null,
     val viewMode: ViewMode = ViewMode.SCROLL,
@@ -506,11 +507,13 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 _state.update {
                     it.copy(
                         readerImages = images,
+                        imageAspectRatios = emptyMap(),
                         readerLoading = false,
                         refreshing = false,
                         readerError = null,
                     )
                 }
+                prefetchImageDimensions(images)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -521,6 +524,38 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                         readerError = humanError("만화 이미지를 불러오지 못했습니다.", e),
                     )
                 }
+            }
+        }
+    }
+
+    fun recordImageAspectRatio(index: Int, width: Int, height: Int) {
+        if (height <= 0 || width <= 0) return
+        val ratio = width.toFloat() / height.toFloat()
+        _state.update { current ->
+            if (current.imageAspectRatios[index] == ratio) current
+            else current.copy(imageAspectRatios = current.imageAspectRatios + (index to ratio))
+        }
+    }
+
+    private fun prefetchImageDimensions(images: List<String>) {
+        val context = getApplication<Application>()
+        val imageLoader = coil.Coil.imageLoader(context)
+        viewModelScope.launch {
+            images.forEachIndexed { index, url ->
+                val request = coil.request.ImageRequest.Builder(context)
+                    .data(url)
+                    .size(coil.size.Size.ORIGINAL)
+                    .target(
+                        onSuccess = { drawable ->
+                            val w = drawable.intrinsicWidth
+                            val h = drawable.intrinsicHeight
+                            if (w > 0 && h > 0) {
+                                recordImageAspectRatio(index, w, h)
+                            }
+                        }
+                    )
+                    .build()
+                imageLoader.enqueue(request)
             }
         }
     }

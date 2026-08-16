@@ -55,3 +55,42 @@ enum class ReadDirection(val label: String) {
     RIGHT_TO_LEFT("RL (우좌)"),
     LEFT_TO_RIGHT("LR (좌우)"),
 }
+
+sealed interface DualSpread {
+    data class Single(val index: Int) : DualSpread
+    data class Dual(val firstIndex: Int, val secondIndex: Int) : DualSpread
+}
+
+fun buildDualSpreads(
+    imageCount: Int,
+    aspectRatios: Map<Int, Float>,
+): List<DualSpread> {
+    if (imageCount <= 0) return emptyList()
+    val spreads = mutableListOf<DualSpread>()
+    var i = 0
+    while (i < imageCount) {
+        val ratio = aspectRatios[i]
+        val isWide = ratio != null && ratio >= 1.0f
+
+        if (isWide) {
+            spreads.add(DualSpread.Single(i))
+            i += 1
+        } else {
+            if (i + 1 < imageCount) {
+                val nextRatio = aspectRatios[i + 1]
+                val nextIsWide = nextRatio != null && nextRatio >= 1.0f
+                if (nextIsWide) {
+                    spreads.add(DualSpread.Single(i))
+                    i += 1
+                } else {
+                    spreads.add(DualSpread.Dual(i, i + 1))
+                    i += 2
+                }
+            } else {
+                spreads.add(DualSpread.Single(i))
+                i += 1
+            }
+        }
+    }
+    return spreads
+}
