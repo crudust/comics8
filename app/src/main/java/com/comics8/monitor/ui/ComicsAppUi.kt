@@ -5,8 +5,11 @@ import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -55,6 +58,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
@@ -172,15 +177,36 @@ private fun TopBar(state: ListingUiState, viewModel: ListingViewModel) {
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            if (state.screen == Screen.Browse) {
+                IconButton(onClick = viewModel::toggleSearchBar) {
+                    Icon(
+                        imageVector = if (state.searchExpanded) Icons.Default.Close else Icons.Default.Search,
+                        contentDescription = if (state.searchExpanded) "검색 닫기" else "검색",
+                    )
+                }
+            }
             IconButton(onClick = { viewModel.refresh() }) {
                 Icon(Icons.Default.Refresh, contentDescription = "새로고침")
             }
         }
         if (state.screen == Screen.Browse) {
-            SearchBar(state = state, viewModel = viewModel)
+            AnimatedVisibility(visible = state.searchExpanded) {
+                SearchBar(state = state, viewModel = viewModel)
+            }
+            if (state.isSearch) {
+                Text(
+                    text = "검색 · ${state.items.size}건",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
             ) {
                 Catalog.entries.forEach { catalog ->
                     FilterChip(
@@ -193,14 +219,6 @@ private fun TopBar(state: ListingUiState, viewModel: ListingViewModel) {
                         ),
                     )
                 }
-            }
-            if (state.isSearch) {
-                Text(
-                    text = "검색 · ${state.items.size}건",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
             }
         }
         val showPager = if (state.screen == Screen.Series) {
@@ -245,24 +263,23 @@ private fun TopBar(state: ListingUiState, viewModel: ListingViewModel) {
 @Composable
 private fun SearchBar(state: ListingUiState, viewModel: ListingViewModel) {
     val focus = LocalFocusManager.current
+    val requester = remember { FocusRequester() }
+    LaunchedEffect(state.searchExpanded) {
+        if (state.searchExpanded) requester.requestFocus()
+    }
     OutlinedTextField(
         value = state.searchInput,
         onValueChange = viewModel::updateSearchInput,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(bottom = 8.dp),
+            .padding(top = 4.dp, bottom = 4.dp)
+            .focusRequester(requester),
         singleLine = true,
         placeholder = { Text("제목 검색") },
-        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
         trailingIcon = {
-            if (state.searchInput.isNotEmpty() || state.isSearch) {
-                IconButton(
-                    onClick = {
-                        viewModel.updateSearchInput("")
-                        if (state.isSearch) viewModel.selectCatalog(state.catalog)
-                    },
-                ) {
-                    Icon(Icons.Default.Close, contentDescription = "검색 지우기")
+            if (state.searchInput.isNotEmpty()) {
+                IconButton(onClick = { viewModel.updateSearchInput("") }) {
+                    Icon(Icons.Default.Close, contentDescription = "검색어 지우기")
                 }
             }
         },

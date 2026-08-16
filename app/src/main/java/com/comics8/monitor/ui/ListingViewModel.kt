@@ -33,6 +33,7 @@ data class ListingUiState(
     val showPageJump: Boolean = false,
     val searchInput: String = "",
     val searchQuery: String? = null,
+    val searchExpanded: Boolean = false,
 ) {
     val isSearch: Boolean get() = searchQuery != null
 }
@@ -71,9 +72,23 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 episodes = emptyList(),
                 error = null,
                 searchQuery = null,
+                searchExpanded = false,
             )
         }
         loadPage(1, replace = true)
+    }
+
+    fun toggleSearchBar() {
+        val current = _state.value
+        if (current.searchExpanded) {
+            if (current.isSearch) {
+                selectCatalog(current.catalog)
+            } else {
+                _state.update { it.copy(searchExpanded = false, searchInput = "") }
+            }
+        } else {
+            _state.update { it.copy(searchExpanded = true) }
+        }
     }
 
     fun updateSearchInput(value: String) {
