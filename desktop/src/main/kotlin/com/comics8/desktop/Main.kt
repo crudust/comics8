@@ -137,5 +137,13 @@ fun ComicsDesktopApp(
                 onDismiss = viewModel::closeSyncDialog,
             )
         }
+
+        if (state.showUpdateDialog) {
+            com.comics8.desktop.ui.components.DesktopUpdateDialog(
+                updateState = state.updateState,
+                onDismiss = viewModel::closeUpdateDialog,
+                onConfirmUpdate = viewModel::startUpdate,
+            )
+        }
     }
 }

@@ -185,6 +185,13 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                 onDismiss = viewModel::closeSyncDialog,
             )
         }
+        if (state.showUpdateDialog) {
+            com.comics8.monitor.ui.components.UpdateDialog(
+                updateState = state.updateState,
+                onDismiss = viewModel::dismissUpdateDialog,
+                onConfirmUpdate = viewModel::startUpdate,
+            )
+        }
     }
 }
 

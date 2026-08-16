@@ -77,7 +77,13 @@ adb shell am start -n "com.comics8.monitor/.MainActivity"
 ./gradlew :desktop:createDistributable :desktop:packageDmg
 ```
 - **출력 App 경로**: `desktop/build/compose/binaries/main/app/Comics8.app`
-- **출력 DMG 경로**: `desktop/build/compose/binaries/main/dmg/Comics8-1.0.0.dmg`
+### 3.7. 릴리즈 자동 빌드 및 서버 배포 (Deploy Release)
+Android APK + Mac Desktop 앱을 빌드하여 서버(VM 101)에 업로드하고 `version.json`을 갱신합니다:
+```bash
+./scripts/deploy-release.sh [versionName] [versionCode] [releaseNotes]
+# 예시:
+./scripts/deploy-release.sh 1.0.1 2 "성능 개선 및 인앱 자동 업데이트 지원"
+```
 
 ---
 
@@ -85,13 +91,13 @@ adb shell am start -n "com.comics8.monitor/.MainActivity"
 
 ```
 Comics8/
-├── core/                       # 공통 모듈 (파서, 모델, 네트워크, 동기화 상수)
+├── core/                       # 공통 모듈 (파서, 모델, 네트워크, 동기화 상수, 업데이트 체커)
 │   ├── build.gradle.kts
 │   └── src/main/kotlin/com/comics8/core/
-│       ├── model/              # Catalog, ToonItem, EpisodeItem, DualSpread, ViewMode 등
+│       ├── model/              # Catalog, ToonItem, EpisodeItem, DualSpread, ViewMode, UpdateModels 등
 │       ├── parser/             # ComicSite, HtmlParsers, SearchParser
 │       ├── network/            # ToonClient
-│       └── sync/               # SyncConstants (서버 URL, 동기화 키 생성기)
+│       └── sync/               # SyncConstants, AppUpdateChecker
 ├── app/                        # Android 모듈 (APK)
 │   ├── build.gradle.kts
 │   └── src/main/java/com/comics8/monitor/
@@ -99,13 +105,14 @@ Comics8/
 │   ├── build.gradle.kts
 │   └── src/main/kotlin/com/comics8/desktop/
 │       ├── Main.kt
-│       ├── data/               # SQLite JDBC, 리포지토리, 동기화 매니저
+│       ├── data/               # SQLite JDBC, 리포지토리, 동기화/업데이트 매니저
 │       └── ui/                 # Compose Desktop UI (Browse, Series, Reader, History)
 ├── scripts/
 │   ├── build-apk.sh            # Android Release APK 빌드
 │   ├── run-mac.sh              # Android 에뮬레이터 실행 및 설치
 │   ├── build-mac-desktop.sh    # macOS Desktop .app 및 .dmg 빌드
-│   └── run-desktop.sh          # macOS Desktop 앱 직접 실행
+│   ├── run-desktop.sh          # macOS Desktop 앱 직접 실행
+│   └── deploy-release.sh       # Release 빌드 및 VM 101 서버 배포
 ├── build.gradle.kts
 ├── settings.gradle.kts
 ├── local.properties

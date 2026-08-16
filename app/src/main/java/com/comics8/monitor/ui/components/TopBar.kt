@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material.icons.outlined.Delete
@@ -110,6 +111,15 @@ fun TopBar(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            if (state.updateState.hasUpdate) {
+                IconButton(onClick = viewModel::openUpdateDialog) {
+                    Icon(
+                        imageVector = Icons.Default.SystemUpdate,
+                        contentDescription = "업데이트 알림",
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
             if (state.screen == Screen.Browse) {
                 IconButton(onClick = viewModel::openSyncDialog) {
                     Icon(

@@ -49,6 +49,8 @@ data class DesktopUiState(
     val showSyncDialog: Boolean = false,
     val syncState: DesktopSyncState = DesktopSyncState(),
     val isFullscreen: Boolean = false,
+    val showUpdateDialog: Boolean = false,
+    val updateState: com.comics8.core.model.AppUpdateState = com.comics8.core.model.AppUpdateState(),
 ) {
     val isSearch: Boolean get() = searchQuery != null
 

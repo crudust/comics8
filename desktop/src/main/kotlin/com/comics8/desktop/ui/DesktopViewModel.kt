@@ -1,7 +1,11 @@
 package com.comics8.desktop.ui
 
+import com.comics8.core.sync.AppUpdateChecker
+import com.comics8.core.sync.SyncConstants
+import com.comics8.desktop.DesktopVersion
 import com.comics8.desktop.data.Catalog
 import com.comics8.desktop.data.DesktopToonRepository
+import com.comics8.desktop.data.DesktopUpdateManager
 import com.comics8.desktop.data.EpisodeItem
 import com.comics8.desktop.data.ReadDirection
 import com.comics8.desktop.data.ReadHistoryRecord
@@ -33,6 +37,7 @@ class DesktopViewModel(
 
     init {
         loadPage(1)
+        checkForUpdate()
         repository.syncManager?.let { sm ->
             scope.launch {
                 sm.syncState.collect { s ->
@@ -45,6 +50,65 @@ class DesktopViewModel(
                     loadPage(_state.value.page, replace = true)
                 }
             }
+        }
+    }
+
+    fun checkForUpdate() {
+        scope.launch(Dispatchers.IO) {
+            val currentVersionName = DesktopVersion.VERSION_NAME
+            val currentVersionCode = DesktopVersion.VERSION_CODE
+            val serverUrl = _state.value.syncState.serverUrl.ifBlank { SyncConstants.DEFAULT_SERVER_URL }
+            val updateState = AppUpdateChecker.checkDesktopUpdate(
+                currentVersionName = currentVersionName,
+                currentVersionCode = currentVersionCode,
+                serverUrl = serverUrl,
+            )
+            _state.update { it.copy(updateState = updateState) }
+        }
+    }
+
+    fun openUpdateDialog() {
+        _state.update { it.copy(showUpdateDialog = true) }
+    }
+
+    fun closeUpdateDialog() {
+        _state.update { it.copy(showUpdateDialog = false) }
+    }
+
+    fun startUpdate() {
+        val updateUrl = _state.value.updateState.downloadUrl
+        if (updateUrl.isBlank()) return
+        scope.launch {
+            _state.update {
+                it.copy(
+                    updateState = it.updateState.copy(
+                        isDownloading = true,
+                        downloadProgress = 0f,
+                        error = null,
+                    )
+                )
+            }
+            val result = DesktopUpdateManager.downloadAndApplyUpdate(
+                downloadUrl = updateUrl,
+                onProgress = { progress ->
+                    _state.update { it.copy(updateState = it.updateState.copy(downloadProgress = progress)) }
+                }
+            )
+            result.fold(
+                onSuccess = {
+                    _state.update { it.copy(updateState = it.updateState.copy(isDownloading = false)) }
+                },
+                onFailure = { err ->
+                    _state.update {
+                        it.copy(
+                            updateState = it.updateState.copy(
+                                isDownloading = false,
+                                error = "업데이트 실패: ${err.localizedMessage ?: err.message}"
+                            )
+                        )
+                    }
+                }
+            )
         }
     }
 
@@ -112,6 +176,7 @@ class DesktopViewModel(
     }
 
     fun refresh() {
+        checkForUpdate()
         if (_state.value.isSearch) {
             val query = _state.value.searchQuery.orEmpty()
             if (query.isNotEmpty()) search(query)

@@ -11,4 +11,27 @@ object SyncConstants {
         val chars = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
         return (1..4).map { chars.random() }.joinToString("")
     }
+
+    fun versionUrl(serverUrl: String = DEFAULT_SERVER_URL): String {
+        val base = serverUrl.trimEnd('/')
+        return if (base.endsWith("/sync")) {
+            base.substringBeforeLast("/sync") + "/version"
+        } else {
+            "$base/version"
+        }
+    }
+
+    fun resolveDownloadUrl(downloadPath: String, serverUrl: String = DEFAULT_SERVER_URL): String {
+        if (downloadPath.startsWith("http://") || downloadPath.startsWith("https://")) {
+            return downloadPath
+        }
+        val origin = if (serverUrl.startsWith("http://") || serverUrl.startsWith("https://")) {
+            val uri = java.net.URI(serverUrl)
+            "${uri.scheme}://${uri.authority}"
+        } else {
+            "https://homeassistant.tail1946af.ts.net"
+        }
+        val cleaned = if (downloadPath.startsWith("/")) downloadPath else "/$downloadPath"
+        return "$origin$cleaned"
+    }
 }

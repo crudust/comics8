@@ -5,7 +5,12 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.comics8.core.model.AppUpdateState
+import com.comics8.core.sync.AppUpdateChecker
+import com.comics8.core.sync.SyncConstants
+import com.comics8.monitor.BuildConfig
 import com.comics8.monitor.ComicsApp
+import com.comics8.monitor.data.AndroidUpdateManager
 import com.comics8.monitor.data.BackupStats
 import com.comics8.monitor.data.Catalog
 import com.comics8.monitor.data.EpisodeItem
@@ -15,6 +20,7 @@ import com.comics8.monitor.data.ToonItem
 import com.comics8.monitor.data.ViewMode
 import com.comics8.monitor.data.local.ReadHistory
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -55,6 +61,8 @@ data class ListingUiState(
     val historyLoading: Boolean = false,
     val showSyncDialog: Boolean = false,
     val syncState: SyncState = SyncState(),
+    val showUpdateDialog: Boolean = false,
+    val updateState: AppUpdateState = AppUpdateState(),
 ) {
     val isSearch: Boolean get() = searchQuery != null
 
@@ -136,6 +144,67 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             }
         }
         refresh(force = true)
+        checkForUpdate()
+    }
+
+    fun checkForUpdate() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val currentVersionName = BuildConfig.VERSION_NAME
+            val currentVersionCode = BuildConfig.VERSION_CODE
+            val serverUrl = _state.value.syncState.serverUrl.ifBlank { SyncConstants.DEFAULT_SERVER_URL }
+            val updateState = AppUpdateChecker.checkAndroidUpdate(
+                currentVersionName = currentVersionName,
+                currentVersionCode = currentVersionCode,
+                serverUrl = serverUrl,
+            )
+            _state.update { it.copy(updateState = updateState) }
+        }
+    }
+
+    fun openUpdateDialog() {
+        _state.update { it.copy(showUpdateDialog = true) }
+    }
+
+    fun dismissUpdateDialog() {
+        _state.update { it.copy(showUpdateDialog = false) }
+    }
+
+    fun startUpdate() {
+        val updateUrl = _state.value.updateState.downloadUrl
+        if (updateUrl.isBlank()) return
+        viewModelScope.launch {
+            _state.update {
+                it.copy(
+                    updateState = it.updateState.copy(
+                        isDownloading = true,
+                        downloadProgress = 0f,
+                        error = null,
+                    )
+                )
+            }
+            val result = AndroidUpdateManager.downloadAndInstall(
+                context = getApplication(),
+                downloadUrl = updateUrl,
+                onProgress = { progress ->
+                    _state.update { it.copy(updateState = it.updateState.copy(downloadProgress = progress)) }
+                }
+            )
+            result.fold(
+                onSuccess = {
+                    _state.update { it.copy(updateState = it.updateState.copy(isDownloading = false)) }
+                },
+                onFailure = { err ->
+                    _state.update {
+                        it.copy(
+                            updateState = it.updateState.copy(
+                                isDownloading = false,
+                                error = "업데이트 실패: ${err.localizedMessage ?: err.message}"
+                            )
+                        )
+                    }
+                }
+            )
+        }
     }
 
     fun handleNotificationLaunch(targetCatalog: Catalog? = null) {
@@ -234,6 +303,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun refresh(force: Boolean = false) {
+        checkForUpdate()
         val current = _state.value
         if (current.screen == Screen.Reader) {
             val episode = current.currentEpisode ?: return
