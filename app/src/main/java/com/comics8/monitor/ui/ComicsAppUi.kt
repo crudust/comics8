@@ -36,6 +36,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -114,6 +116,13 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                         ) {
                             viewModel.selectCatalog(state.catalog)
                         }
+                    state.catalog == Catalog.FAVORITE && state.items.isEmpty() ->
+                        ErrorPane(
+                            message = "즐겨찾기한 작품이 없습니다.",
+                            actionLabel = "최신으로",
+                        ) {
+                            viewModel.selectCatalog(Catalog.LATEST)
+                        }
                     else -> ListingGrid(state.items, onOpen = viewModel::openSeries)
                 }
             }
@@ -182,6 +191,19 @@ private fun TopBar(state: ListingUiState, viewModel: ListingViewModel) {
                     Icon(
                         imageVector = if (state.searchExpanded) Icons.Default.Close else Icons.Default.Search,
                         contentDescription = if (state.searchExpanded) "검색 닫기" else "검색",
+                    )
+                }
+            }
+            if (state.screen == Screen.Series) {
+                IconButton(onClick = viewModel::toggleFavorite) {
+                    Icon(
+                        imageVector = if (state.seriesFavorited) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                        contentDescription = if (state.seriesFavorited) "즐겨찾기 해제" else "즐겨찾기",
+                        tint = if (state.seriesFavorited) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onBackground
+                        },
                     )
                 }
             }
@@ -362,6 +384,19 @@ private fun ToonCard(item: ToonItem, onClick: () -> Unit) {
                 if (item.isNew) Badge("NEW")
                 if (item.isUpdated) Badge("UP")
                 item.ranking?.let { Badge("${it}위") }
+            }
+            if (item.isFavorite) {
+                Icon(
+                    imageVector = Icons.Filled.Star,
+                    contentDescription = "즐겨찾기",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(MaterialTheme.colorScheme.background.copy(alpha = 0.72f))
+                        .padding(2.dp),
+                )
             }
         }
         Text(

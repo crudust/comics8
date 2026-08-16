@@ -1,5 +1,7 @@
 package com.comics8.monitor.data
 
+import com.comics8.monitor.data.local.FavoriteDao
+import com.comics8.monitor.data.local.FavoriteToon
 import com.comics8.monitor.data.local.SeenDao
 import com.comics8.monitor.data.local.SeenToon
 import kotlinx.coroutines.Dispatchers
@@ -8,15 +10,23 @@ import kotlinx.coroutines.withContext
 class ToonRepository(
     private val client: ToonClient,
     private val seenDao: SeenDao,
+    private val favoriteDao: FavoriteDao,
     private val now: () -> Long = { System.currentTimeMillis() },
 ) {
     suspend fun loadListing(catalog: Catalog, page: Int): ListingPage = withContext(Dispatchers.IO) {
+        if (catalog == Catalog.FAVORITE) {
+            return@withContext ListingPage(
+                items = favoriteDao.all().map { it.toItem().copy(isFavorite = true) },
+                currentPage = 1,
+                lastPage = 1,
+            )
+        }
         val html = client.fetch(ComicSite.listingUrl(catalog, page))
         val parsed = HtmlParsers.parseListing(html)
         if (parsed.items.isEmpty()) {
             error("목록을 읽지 못했습니다. 사이트 구조가 바뀌었을 수 있습니다.")
         }
-        parsed.copy(items = applyBadges(parsed.items))
+        parsed.copy(items = applyFlags(parsed.items))
     }
 
     suspend fun loadEpisodes(item: ToonItem, page: Int): EpisodePage = withContext(Dispatchers.IO) {
@@ -33,7 +43,7 @@ class ToonRepository(
         if (q.isEmpty()) return@withContext emptyList()
         val json = client.fetch(ComicSite.searchUrl(q))
         val items = SearchParser.parse(json)
-        applyBadges(items)
+        applyFlags(items)
     }
 
     suspend fun markSeen(items: List<ToonItem>) = withContext(Dispatchers.IO) {
@@ -69,23 +79,57 @@ class ToonRepository(
         return unseen
     }
 
-    private suspend fun applyBadges(items: List<ToonItem>): List<ToonItem> {
+    private suspend fun applyFlags(items: List<ToonItem>): List<ToonItem> {
         if (items.isEmpty()) return items
+        val favoriteIds = favoriteDao.ids().toSet()
         val total = seenDao.count()
-        if (total == 0) {
-            return items
+        val existing = if (total == 0) emptyMap() else {
+            seenDao.byIds(items.map { it.id }).associateBy { it.id }
         }
-        val existing = seenDao.byIds(items.map { it.id }).associateBy { it.id }
         return items.map { item ->
             val prev = existing[item.id]
             item.copy(
-                isNew = prev == null,
+                isNew = total > 0 && prev == null,
                 isUpdated = prev != null &&
                     !item.updatedAt.isNullOrBlank() &&
                     prev.updatedAt != item.updatedAt,
+                isFavorite = item.id in favoriteIds,
             )
         }
     }
 
+    suspend fun isFavorite(id: String): Boolean = withContext(Dispatchers.IO) {
+        favoriteDao.exists(id)
+    }
+
+    suspend fun toggleFavorite(item: ToonItem): Boolean = withContext(Dispatchers.IO) {
+        if (favoriteDao.exists(item.id)) {
+            favoriteDao.delete(item.id)
+            false
+        } else {
+            favoriteDao.upsert(
+                FavoriteToon(
+                    id = item.id,
+                    title = item.title,
+                    thumbUrl = item.thumbUrl,
+                    href = item.href,
+                    genre = item.genre,
+                    updatedAt = item.updatedAt,
+                    savedAt = now(),
+                ),
+            )
+            true
+        }
+    }
+
     private fun notifyKey(item: ToonItem): String = "${item.id}|${item.updatedAt.orEmpty()}"
+
+    private fun FavoriteToon.toItem(): ToonItem = ToonItem(
+        id = id,
+        title = title,
+        thumbUrl = thumbUrl,
+        href = href,
+        genre = genre,
+        updatedAt = updatedAt,
+    )
 }

@@ -19,6 +19,35 @@ data class SeenToon(
     val notifiedKey: String,
 )
 
+@Entity(tableName = "favorites")
+data class FavoriteToon(
+    @PrimaryKey val id: String,
+    val title: String,
+    val thumbUrl: String,
+    val href: String,
+    val genre: String,
+    val updatedAt: String?,
+    val savedAt: Long,
+)
+
+@Dao
+interface FavoriteDao {
+    @Query("SELECT * FROM favorites ORDER BY savedAt DESC")
+    suspend fun all(): List<FavoriteToon>
+
+    @Query("SELECT EXISTS(SELECT 1 FROM favorites WHERE id = :id)")
+    suspend fun exists(id: String): Boolean
+
+    @Query("SELECT id FROM favorites")
+    suspend fun ids(): List<String>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(item: FavoriteToon)
+
+    @Query("DELETE FROM favorites WHERE id = :id")
+    suspend fun delete(id: String)
+}
+
 @Dao
 interface SeenDao {
     @Query("SELECT COUNT(*) FROM seen_toons")
@@ -34,7 +63,8 @@ interface SeenDao {
     suspend fun upsertAll(items: List<SeenToon>)
 }
 
-@Database(entities = [SeenToon::class], version = 1, exportSchema = false)
+@Database(entities = [SeenToon::class, FavoriteToon::class], version = 2, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun seenDao(): SeenDao
+    abstract fun favoriteDao(): FavoriteDao
 }

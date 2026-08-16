@@ -34,6 +34,7 @@ data class ListingUiState(
     val searchInput: String = "",
     val searchQuery: String? = null,
     val searchExpanded: Boolean = false,
+    val seriesFavorited: Boolean = false,
 ) {
     val isSearch: Boolean get() = searchQuery != null
 }
@@ -159,13 +160,38 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 episodePage = 1,
                 episodeLastPage = 1,
                 episodeError = null,
+                seriesFavorited = false,
             )
         }
         loadEpisodes(item, 1)
+        viewModelScope.launch {
+            val favorited = repository.isFavorite(item.id)
+            _state.update { current ->
+                if (current.series?.id == item.id) current.copy(seriesFavorited = favorited) else current
+            }
+        }
+    }
+
+    fun toggleFavorite() {
+        val series = _state.value.series ?: return
+        viewModelScope.launch {
+            val favorited = repository.toggleFavorite(series)
+            _state.update { current ->
+                if (current.series?.id != series.id) current
+                else current.copy(
+                    seriesFavorited = favorited,
+                    items = current.items.map { item ->
+                        if (item.id == series.id) item.copy(isFavorite = favorited) else item
+                    },
+                )
+            }
+        }
     }
 
     fun closeSeries() {
         episodeJob?.cancel()
+        val catalog = _state.value.catalog
+        val searching = _state.value.isSearch
         _state.update {
             it.copy(
                 screen = Screen.Browse,
@@ -173,7 +199,11 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 episodes = emptyList(),
                 episodeError = null,
                 showPageJump = false,
+                seriesFavorited = false,
             )
+        }
+        if (catalog == Catalog.FAVORITE && !searching) {
+            loadPage(1, replace = true)
         }
     }
 
