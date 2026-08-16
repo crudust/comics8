@@ -25,12 +25,52 @@ class ToonClient(
         }
     }
 
+    fun isUrlAccessible(url: String?): Boolean {
+        if (url.isNullOrBlank()) return false
+        return try {
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", USER_AGENT)
+                .header("Referer", ComicSite.ORIGIN)
+                .head()
+                .build()
+            client.newCall(request).execute().use { it.isSuccessful }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     /**
      * Fetches an episode page and extracts the image URLs to display in a reader.
+     * When multiple candidate lists (e.g. img_list and img_list_2) exist,
+     * automatically verifies and selects the working CDN image list.
      */
     fun fetchImages(url: String): List<String> {
         val html = fetch(url)
-        return HtmlParsers.parseImages(html, ComicSite.ORIGIN)
+        val candidateLists = HtmlParsers.parseAllImageCandidateLists(html, ComicSite.ORIGIN)
+        if (candidateLists.isEmpty()) {
+            val parsed = HtmlParsers.parseImages(html, ComicSite.ORIGIN)
+            if (parsed.isEmpty()) {
+                error("만화 이미지를 불러오지 못했습니다.")
+            }
+            return parsed
+        }
+        if (candidateLists.size == 1) {
+            return candidateLists[0]
+        }
+        // Check primary candidate list first
+        val primary = candidateLists[0]
+        if (isUrlAccessible(primary.firstOrNull())) {
+            return primary
+        }
+        // Try fallback lists (e.g. img_list_2)
+        for (i in 1 until candidateLists.size) {
+            val candidate = candidateLists[i]
+            if (isUrlAccessible(candidate.firstOrNull())) {
+                return candidate
+            }
+        }
+        return primary
     }
 
     /**

@@ -97,6 +97,36 @@ class HtmlParsersTest {
         assertThat(images[1]).isEqualTo("http://103.204.13.68:8904/data/2.webp")
     }
 
+    @Test
+    fun parseMultipleImageCandidateLists() {
+        val html = """
+            <html>
+            <script>
+            var img_list = ["//www.pl3040.com/kr/1.png", "//www.pl3040.com/kr/2.jpg"];
+            var img_list_2 = ["//www.pl4050.com/kr/1.png?v=ei", "//www.pl4050.com/kr/2.jpg?v=ei"];
+            </script>
+            </html>
+        """.trimIndent()
+
+        val candidateLists = HtmlParsers.parseAllImageCandidateLists(html, ComicSite.ORIGIN)
+        assertThat(candidateLists).hasSize(2)
+        assertThat(candidateLists[0]).containsExactly(
+            "https://www.pl3040.com/kr/1.png",
+            "https://www.pl3040.com/kr/2.jpg",
+        )
+        assertThat(candidateLists[1]).containsExactly(
+            "https://www.pl4050.com/kr/1.png?v=ei",
+            "https://www.pl4050.com/kr/2.jpg?v=ei",
+        )
+    }
+
+    @Test
+    fun generateFallbackImageUrls() {
+        val fallbacks = ComicSite.getFallbackImageUrls("https://www.pl3040.com/kr/1.png")
+        assertThat(fallbacks).contains("https://www.pl4050.com/kr/1.png")
+        assertThat(fallbacks).contains("https://www.pl4050.com/kr/1.png?v=ei")
+    }
+
     private fun readFixture(name: String): String =
         checkNotNull(javaClass.classLoader?.getResourceAsStream(name)).bufferedReader().readText()
 }

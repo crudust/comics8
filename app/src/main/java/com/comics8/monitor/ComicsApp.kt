@@ -6,6 +6,7 @@ import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
+import com.comics8.core.parser.ComicSite
 import com.comics8.monitor.data.SyncManager
 import com.comics8.monitor.data.ToonClient
 import com.comics8.monitor.data.ToonRepository
@@ -40,12 +41,32 @@ class ComicsApp : Application(), ImageLoaderFactory {
         val http = OkHttpClient.Builder()
             .followRedirects(true)
             .followSslRedirects(true)
-            .addNetworkInterceptor { chain ->
+            .addInterceptor { chain ->
                 val request = chain.request().newBuilder()
                     .header("User-Agent", ToonClient.USER_AGENT)
-                    .header("Referer", "http://103.204.13.68:8904/")
+                    .header("Referer", ComicSite.ORIGIN)
                     .build()
-                chain.proceed(request)
+                var response = chain.proceed(request)
+                if (!response.isSuccessful && (response.code == 404 || response.code >= 500)) {
+                    val urlStr = request.url.toString()
+                    val fallbacks = ComicSite.getFallbackImageUrls(urlStr)
+                    for (fallback in fallbacks) {
+                        response.close()
+                        val retryReq = request.newBuilder().url(fallback).build()
+                        val retryResp = try {
+                            chain.proceed(retryReq)
+                        } catch (_: Exception) {
+                            null
+                        }
+                        if (retryResp != null && retryResp.isSuccessful) {
+                            return@addInterceptor retryResp
+                        }
+                        if (retryResp != null) {
+                            response = retryResp
+                        }
+                    }
+                }
+                response
             }
             .build()
         return ImageLoader.Builder(this)

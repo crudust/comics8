@@ -28,4 +28,26 @@ object ComicSite {
             else -> "$base/$value"
         }
     }
+
+    fun getFallbackImageUrls(url: String): List<String> {
+        if (url.isBlank()) return emptyList()
+        val fallbacks = LinkedHashSet<String>()
+        val knownDomains = listOf("pl4050.com", "pl3040.com", "pl3030.com", "pl4040.com", "pl1020.com", "pl2030.com", "pl5060.com")
+        val domainRegex = Regex("""pl\d{4}\.com""")
+        for (domain in knownDomains) {
+            if (!url.contains(domain)) {
+                val replaced = url.replace(domainRegex, domain)
+                if (replaced != url) {
+                    fallbacks.add(replaced)
+                    val withParam = if (replaced.contains("?")) {
+                        if (!replaced.contains("v=ei")) "$replaced&v=ei" else replaced
+                    } else {
+                        "$replaced?v=ei"
+                    }
+                    fallbacks.add(withParam)
+                }
+            }
+        }
+        return fallbacks.toList()
+    }
 }

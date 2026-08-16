@@ -54,16 +54,14 @@ object HtmlParsers {
     )
 
     /**
-     * Parses an episode page and extracts the comic image URLs.
-     * Handles JavaScript array definitions (var img_list = [...]), standard <img> tags,
-     * and CSS background‑image styles.
+     * Parses all JavaScript image array definitions (e.g. img_list, img_list_2).
+     * Returns a list of candidate image URL lists for failover verification.
      */
-    fun parseImages(html: String, baseUri: String = ComicSite.ORIGIN): List<String> {
-        val urls = LinkedHashSet<String>()
-
-        // 1. Check JavaScript image arrays (e.g. var img_list = [...])
+    fun parseAllImageCandidateLists(html: String, baseUri: String = ComicSite.ORIGIN): List<List<String>> {
+        val result = mutableListOf<List<String>>()
         for (match in jsImgArrayRegex.findAll(html)) {
             val arrayBody = match.groupValues[1]
+            val urls = LinkedHashSet<String>()
             for (urlMatch in jsStringUrlRegex.findAll(arrayBody)) {
                 val rawUrl = urlMatch.groupValues[1].trim()
                 if (rawUrl.isNotBlank() && isImageUrl(rawUrl)) {
@@ -71,9 +69,24 @@ object HtmlParsers {
                 }
             }
             if (urls.isNotEmpty()) {
-                return urls.toList()
+                result.add(urls.toList())
             }
         }
+        return result
+    }
+
+    /**
+     * Parses an episode page and extracts the comic image URLs.
+     * Handles JavaScript array definitions (var img_list = [...]), standard <img> tags,
+     * and CSS background‑image styles.
+     */
+    fun parseImages(html: String, baseUri: String = ComicSite.ORIGIN): List<String> {
+        val candidateLists = parseAllImageCandidateLists(html, baseUri)
+        if (candidateLists.isNotEmpty()) {
+            return candidateLists[0]
+        }
+
+        val urls = LinkedHashSet<String>()
 
         // 2. Check DOM elements in viewer containers
         val doc = Jsoup.parse(html, baseUri)

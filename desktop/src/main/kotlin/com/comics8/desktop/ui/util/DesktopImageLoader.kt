@@ -63,25 +63,32 @@ object DesktopImageCache {
             }
         } else {
             null
-        } ?: try {
-            val request = Request.Builder()
-                .url(url)
-                .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
-                .header("Referer", ComicSite.ORIGIN)
-                .get()
-                .build()
-            val fetched = httpClient.newCall(request).execute().use { resp ->
-                if (resp.isSuccessful) resp.body?.bytes() else null
-            }
-            if (fetched != null && fetched.isNotEmpty()) {
+        } ?: run {
+            val urlsToTry = listOf(url) + ComicSite.getFallbackImageUrls(url)
+            var fetchedBytes: ByteArray? = null
+            for (targetUrl in urlsToTry) {
                 try {
-                    cachedFile.writeBytes(fetched)
+                    val request = Request.Builder()
+                        .url(targetUrl)
+                        .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+                        .header("Referer", ComicSite.ORIGIN)
+                        .get()
+                        .build()
+                    val result = httpClient.newCall(request).execute().use { resp ->
+                        if (resp.isSuccessful) resp.body?.bytes() else null
+                    }
+                    if (result != null && result.isNotEmpty()) {
+                        fetchedBytes = result
+                        try {
+                            cachedFile.writeBytes(result)
+                        } catch (_: Exception) {
+                        }
+                        break
+                    }
                 } catch (_: Exception) {
                 }
             }
-            fetched
-        } catch (_: Exception) {
-            null
+            fetchedBytes
         }
 
         if (bytes != null && bytes.isNotEmpty()) {

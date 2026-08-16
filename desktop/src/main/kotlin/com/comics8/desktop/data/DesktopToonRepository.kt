@@ -49,8 +49,7 @@ class DesktopToonRepository(
     }
 
     suspend fun loadImages(episode: EpisodeItem): List<String> = withContext(Dispatchers.IO) {
-        val html = client.fetch(episode.href)
-        val parsed = HtmlParsers.parseImages(html, ComicSite.ORIGIN)
+        val parsed = client.fetchImages(episode.href)
         if (parsed.isEmpty()) {
             error("만화 이미지를 불러오지 못했습니다.")
         }
