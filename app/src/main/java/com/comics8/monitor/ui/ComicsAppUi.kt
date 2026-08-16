@@ -50,13 +50,13 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
-    val isPagingReader = state.screen == Screen.Reader && state.viewMode != ViewMode.SCROLL
+    val isReader = state.screen == Screen.Reader
 
-    DisposableEffect(state.screen, state.viewMode) {
+    DisposableEffect(state.screen) {
         val window = activity?.window
         val controller = window?.let { WindowCompat.getInsetsController(it, it.decorView) }
 
-        if (state.screen == Screen.Reader && state.viewMode != ViewMode.SCROLL) {
+        if (state.screen == Screen.Reader) {
             controller?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             controller?.hide(WindowInsetsCompat.Type.systemBars())
         } else {
@@ -85,8 +85,8 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
         BackHandler { viewModel.selectCatalog(state.catalog) }
     }
 
-    ComicsThemeScaffold(isImmersive = isPagingReader) {
-        if (isPagingReader) {
+    ComicsThemeScaffold(isImmersive = isReader) {
+        if (isReader) {
             ReaderPane(state = state, viewModel = viewModel)
         } else {
             PullToRefreshBox(
@@ -97,7 +97,6 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                 Column(Modifier.fillMaxSize()) {
                     TopBar(state = state, viewModel = viewModel)
                     when {
-                        state.screen == Screen.Reader -> ReaderPane(state = state, viewModel = viewModel)
                         state.screen == Screen.Series -> SeriesPane(state = state, viewModel = viewModel)
                         state.loading && state.items.isEmpty() -> LoadingPane()
                         state.error != null && state.items.isEmpty() -> ErrorPane(

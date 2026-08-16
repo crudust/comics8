@@ -100,6 +100,15 @@ private fun ReaderScrollPane(
         (state.currentEpisode?.lastReadPage ?: 0).coerceIn(0, (state.readerImages.size - 1).coerceAtLeast(0))
     }
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
+    val scope = rememberCoroutineScope()
+    var controlsVisible by remember { mutableStateOf(false) }
+
+    // Automatically hide controls when scrolling starts
+    LaunchedEffect(listState.isScrollInProgress) {
+        if (listState.isScrollInProgress) {
+            controlsVisible = false
+        }
+    }
 
     LaunchedEffect(listState.firstVisibleItemIndex) {
         if (state.readerImages.isNotEmpty()) {
@@ -107,27 +116,89 @@ private fun ReaderScrollPane(
         }
     }
 
-    LazyColumn(
-        state = listState,
+    Box(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
     ) {
-        itemsIndexed(state.readerImages, key = { index, url -> "$index-$url" }) { index, imageUrl ->
-            AsyncImage(
-                model = imageUrl,
-                contentDescription = "페이지 ${index + 1}",
-                contentScale = ContentScale.FillWidth,
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            itemsIndexed(state.readerImages, key = { index, url -> "$index-$url" }) { index, imageUrl ->
+                AsyncImage(
+                    model = imageUrl,
+                    contentDescription = "페이지 ${index + 1}",
+                    contentScale = ContentScale.FillWidth,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .wrapContentHeight()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) {
+                            controlsVisible = !controlsVisible
+                        },
+                )
+            }
+            item {
+                ReaderFooter(
+                    state = state,
+                    onPrev = viewModel::openPrevEpisode,
+                    onNext = viewModel::openNextEpisode,
+                    onClose = viewModel::closeReader,
+                )
+            }
+        }
+
+        // Floating Page Indicator (Visible when controls are hidden)
+        if (!controlsVisible && state.readerImages.isNotEmpty()) {
+            Text(
+                text = "${(listState.firstVisibleItemIndex + 1).coerceAtMost(state.readerImages.size)} / ${state.readerImages.size}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .wrapContentHeight(),
+                    .align(Alignment.BottomEnd)
+                    .navigationBarsPadding()
+                    .padding(16.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.65f))
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
             )
         }
-        item {
-            ReaderFooter(
+
+        // Top Controls Overlay
+        AnimatedVisibility(
+            visible = controlsVisible,
+            enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
+            modifier = Modifier.align(Alignment.TopCenter),
+        ) {
+            TopBar(
                 state = state,
-                onPrev = viewModel::openPrevEpisode,
-                onNext = viewModel::openNextEpisode,
+                viewModel = viewModel,
+                inOverlay = true,
+            )
+        }
+
+        // Bottom Controls Overlay
+        AnimatedVisibility(
+            visible = controlsVisible,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
+            ReaderBottomBar(
+                currentRangeText = "${(listState.firstVisibleItemIndex + 1).coerceAtMost(state.readerImages.size)} / ${state.readerImages.size}",
+                currentPage = listState.firstVisibleItemIndex + 1,
+                maxPages = state.readerImages.size,
+                hasPrevEpisode = state.hasPrevEpisode,
+                hasNextEpisode = state.hasNextEpisode,
+                onPageChange = { targetPage ->
+                    scope.launch { listState.scrollToItem(targetPage - 1) }
+                },
+                onPrevEp = viewModel::openPrevEpisode,
+                onNextEp = viewModel::openNextEpisode,
                 onClose = viewModel::closeReader,
             )
         }
@@ -343,11 +414,14 @@ private fun ReaderSinglePagePane(
             exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
-            ReaderSinglePageBottomBar(
-                state = state,
-                pagerState = pagerState,
-                onPageChange = { target ->
-                    scope.launch { pagerState.scrollToPage(target) }
+            ReaderBottomBar(
+                currentRangeText = "${pagerState.currentPage + 1} / ${state.readerImages.size}",
+                currentPage = pagerState.currentPage + 1,
+                maxPages = state.readerImages.size,
+                hasPrevEpisode = state.hasPrevEpisode,
+                hasNextEpisode = state.hasNextEpisode,
+                onPageChange = { targetPage ->
+                    scope.launch { pagerState.scrollToPage(targetPage - 1) }
                 },
                 onPrevEp = viewModel::openPrevEpisode,
                 onNextEp = viewModel::openNextEpisode,
@@ -645,13 +719,14 @@ private fun ReaderDualPagePane(
             exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
-            ReaderDualPageBottomBar(
-                state = state,
-                pagerState = pagerState,
-                totalSpreads = totalSpreads,
+            ReaderBottomBar(
                 currentRangeText = currentRangeText,
-                onSpreadChange = { targetSpread ->
-                    scope.launch { pagerState.scrollToPage(targetSpread) }
+                currentPage = pagerState.currentPage + 1,
+                maxPages = totalSpreads,
+                hasPrevEpisode = state.hasPrevEpisode,
+                hasNextEpisode = state.hasNextEpisode,
+                onPageChange = { targetSpread ->
+                    scope.launch { pagerState.scrollToPage(targetSpread - 1) }
                 },
                 onPrevEp = viewModel::openPrevEpisode,
                 onNextEp = viewModel::openNextEpisode,
@@ -662,9 +737,12 @@ private fun ReaderDualPagePane(
 }
 
 @Composable
-private fun ReaderSinglePageBottomBar(
-    state: ListingUiState,
-    pagerState: PagerState,
+private fun ReaderBottomBar(
+    currentRangeText: String,
+    currentPage: Int,
+    maxPages: Int,
+    hasPrevEpisode: Boolean,
+    hasNextEpisode: Boolean,
     onPageChange: (Int) -> Unit,
     onPrevEp: () -> Unit,
     onNextEp: () -> Unit,
@@ -679,21 +757,21 @@ private fun ReaderSinglePageBottomBar(
             .navigationBarsPadding()
             .padding(horizontal = 16.dp, vertical = 10.dp),
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(
-                text = "${pagerState.currentPage + 1} / ${state.readerImages.size}",
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(end = 8.dp),
-            )
-            if (state.readerImages.size > 1) {
+        if (maxPages > 1) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    text = currentRangeText,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(end = 8.dp),
+                )
                 Slider(
-                    value = (pagerState.currentPage + 1).toFloat(),
-                    onValueChange = { onPageChange(it.toInt() - 1) },
-                    valueRange = 1f..state.readerImages.size.toFloat(),
+                    value = currentPage.coerceIn(1, maxPages).toFloat(),
+                    onValueChange = { onPageChange(it.toInt()) },
+                    valueRange = 1f..maxPages.toFloat(),
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -707,7 +785,7 @@ private fun ReaderSinglePageBottomBar(
         ) {
             OutlinedButton(
                 onClick = onPrevEp,
-                enabled = state.hasPrevEpisode,
+                enabled = hasPrevEpisode,
                 modifier = Modifier.weight(1f),
             ) {
                 Text("이전화")
@@ -720,77 +798,7 @@ private fun ReaderSinglePageBottomBar(
             }
             OutlinedButton(
                 onClick = onNextEp,
-                enabled = state.hasNextEpisode,
-                modifier = Modifier.weight(1f),
-            ) {
-                Text("다음화")
-            }
-        }
-    }
-}
-
-@Composable
-private fun ReaderDualPageBottomBar(
-    state: ListingUiState,
-    pagerState: PagerState,
-    totalSpreads: Int,
-    currentRangeText: String,
-    onSpreadChange: (Int) -> Unit,
-    onPrevEp: () -> Unit,
-    onNextEp: () -> Unit,
-    onClose: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.94f))
-            .navigationBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(
-                text = currentRangeText,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(end = 8.dp),
-            )
-            if (totalSpreads > 1) {
-                Slider(
-                    value = (pagerState.currentPage + 1).toFloat(),
-                    onValueChange = { onSpreadChange(it.toInt() - 1) },
-                    valueRange = 1f..totalSpreads.toFloat(),
-                    modifier = Modifier.weight(1f),
-                )
-            }
-        }
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 2.dp),
-        ) {
-            OutlinedButton(
-                onClick = onPrevEp,
-                enabled = state.hasPrevEpisode,
-                modifier = Modifier.weight(1f),
-            ) {
-                Text("이전화")
-            }
-            Button(
-                onClick = onClose,
-                modifier = Modifier.weight(1f),
-            ) {
-                Text("목록")
-            }
-            OutlinedButton(
-                onClick = onNextEp,
-                enabled = state.hasNextEpisode,
+                enabled = hasNextEpisode,
                 modifier = Modifier.weight(1f),
             ) {
                 Text("다음화")

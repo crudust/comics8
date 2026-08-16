@@ -37,13 +37,13 @@ export PATH="$JAVA_HOME/bin:$ANDROID_SDK_ROOT/emulator:$ANDROID_SDK_ROOT/platfor
 ## 3. 주요 빌드 및 실행 명령어 (Build & Run Commands)
 
 ### 3.1. APK 단독 빌드
-APK 파일만 새로 빌드할 때 사용합니다:
+정식 서명된 Release APK 파일을 빌드할 때 사용합니다:
 ```bash
 ./scripts/build-apk.sh
 # 또는
-./gradlew assembleDebug
+./gradlew assembleRelease
 ```
-- **출력 APK 경로**: `app/build/outputs/apk/debug/app-debug.apk`
+- **출력 APK 경로**: `app/build/outputs/apk/release/app-release.apk`
 
 ### 3.2. 에뮬레이터 기동 + 설치 + 앱 실행
 에뮬레이터가 꺼져 있으면 부팅 후 자동 설치 및 실행합니다:
