@@ -6,7 +6,9 @@ import androidx.lifecycle.viewModelScope
 import com.comics8.monitor.ComicsApp
 import com.comics8.monitor.data.Catalog
 import com.comics8.monitor.data.EpisodeItem
+import com.comics8.monitor.data.ReadDirection
 import com.comics8.monitor.data.ToonItem
+import com.comics8.monitor.data.ViewMode
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -39,6 +41,8 @@ data class ListingUiState(
     val readerImages: List<String> = emptyList(),
     val readerLoading: Boolean = false,
     val readerError: String? = null,
+    val viewMode: ViewMode = ViewMode.SCROLL,
+    val readDirection: ReadDirection = ReadDirection.RIGHT_TO_LEFT,
 ) {
     val isSearch: Boolean get() = searchQuery != null
 
@@ -196,8 +200,17 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         loadEpisodes(item, 1)
         viewModelScope.launch {
             val favorited = repository.isFavorite(item.id)
+            val savedSetting = repository.getReaderSetting(item.id)
             _state.update { current ->
-                if (current.series?.id == item.id) current.copy(seriesFavorited = favorited) else current
+                if (current.series?.id == item.id) {
+                    current.copy(
+                        seriesFavorited = favorited,
+                        viewMode = savedSetting?.first ?: current.viewMode,
+                        readDirection = savedSetting?.second ?: current.readDirection,
+                    )
+                } else {
+                    current
+                }
             }
         }
     }
@@ -256,16 +269,27 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun openEpisode(episode: EpisodeItem) {
-        _state.update {
-            it.copy(
+        val series = _state.value.series
+        val nowMs = System.currentTimeMillis()
+        _state.update { current ->
+            val updatedEpisodes = current.episodes.map {
+                if (it.wrId == episode.wrId) it.copy(isRead = true, readAt = nowMs) else it
+            }
+            current.copy(
                 screen = Screen.Reader,
-                currentEpisode = episode,
+                currentEpisode = episode.copy(isRead = true, readAt = nowMs),
+                episodes = updatedEpisodes,
                 readerImages = emptyList(),
                 readerLoading = true,
                 readerError = null,
             )
         }
         loadReaderImages(episode)
+        if (series != null) {
+            viewModelScope.launch {
+                repository.markEpisodeRead(series.id, episode.wrId)
+            }
+        }
     }
 
     fun closeReader() {
@@ -294,6 +318,24 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         val idx = current.currentEpisodeIndex
         if (idx in 0 until (current.episodes.size - 1)) {
             openEpisode(current.episodes[idx + 1])
+        }
+    }
+
+    fun setViewMode(mode: ViewMode) {
+        _state.update { it.copy(viewMode = mode) }
+        val series = _state.value.series ?: return
+        val dir = _state.value.readDirection
+        viewModelScope.launch {
+            repository.saveReaderSetting(series.id, mode, dir)
+        }
+    }
+
+    fun setReadDirection(direction: ReadDirection) {
+        _state.update { it.copy(readDirection = direction) }
+        val series = _state.value.series ?: return
+        val mode = _state.value.viewMode
+        viewModelScope.launch {
+            repository.saveReaderSetting(series.id, mode, direction)
         }
     }
 

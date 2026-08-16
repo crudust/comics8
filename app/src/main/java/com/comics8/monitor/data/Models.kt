@@ -34,6 +34,8 @@ data class EpisodeItem(
     val date: String?,
     val thumbUrl: String?,
     val href: String,
+    val isRead: Boolean = false,
+    val readAt: Long? = null,
 )
 
 data class EpisodePage(
@@ -41,3 +43,14 @@ data class EpisodePage(
     val currentPage: Int,
     val lastPage: Int,
 )
+
+enum class ViewMode(val label: String) {
+    SCROLL("세로 스크롤"),
+    PAGE("단면 페이지"),
+    DUAL("양쪽보기"),
+}
+
+enum class ReadDirection(val label: String) {
+    RIGHT_TO_LEFT("RL (우좌)"),
+    LEFT_TO_RIGHT("LR (좌우)"),
+}

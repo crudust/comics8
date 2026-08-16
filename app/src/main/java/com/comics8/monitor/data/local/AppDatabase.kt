@@ -63,8 +63,50 @@ interface SeenDao {
     suspend fun upsertAll(items: List<SeenToon>)
 }
 
-@Database(entities = [SeenToon::class, FavoriteToon::class], version = 2, exportSchema = false)
+@Entity(tableName = "reader_settings")
+data class ReaderSetting(
+    @PrimaryKey val toonId: String,
+    val viewMode: String,
+    val readDirection: String,
+    val updatedAt: Long,
+)
+
+@Dao
+interface ReaderSettingDao {
+    @Query("SELECT * FROM reader_settings WHERE toonId = :toonId")
+    suspend fun getSetting(toonId: String): ReaderSetting?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun saveSetting(setting: ReaderSetting)
+}
+
+@Entity(tableName = "read_episodes", primaryKeys = ["toonId", "wrId"])
+data class ReadEpisode(
+    val toonId: String,
+    val wrId: String,
+    val readAt: Long,
+)
+
+@Dao
+interface ReadEpisodeDao {
+    @Query("SELECT * FROM read_episodes WHERE toonId = :toonId")
+    suspend fun getReadEpisodes(toonId: String): List<ReadEpisode>
+
+    @Query("SELECT wrId FROM read_episodes WHERE toonId = :toonId")
+    suspend fun getReadWrIds(toonId: String): List<String>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun markRead(item: ReadEpisode)
+}
+
+@Database(
+    entities = [SeenToon::class, FavoriteToon::class, ReaderSetting::class, ReadEpisode::class],
+    version = 4,
+    exportSchema = false,
+)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun seenDao(): SeenDao
     abstract fun favoriteDao(): FavoriteDao
+    abstract fun readerSettingDao(): ReaderSettingDao
+    abstract fun readEpisodeDao(): ReadEpisodeDao
 }

@@ -21,7 +21,13 @@ class ComicsApp : Application(), ImageLoaderFactory {
         val db = Room.databaseBuilder(this, AppDatabase::class.java, "comics8.db")
             .fallbackToDestructiveMigration()
             .build()
-        repository = ToonRepository(ToonClient(), db.seenDao(), db.favoriteDao())
+        repository = ToonRepository(
+            ToonClient(),
+            db.seenDao(),
+            db.favoriteDao(),
+            db.readerSettingDao(),
+            db.readEpisodeDao(),
+        )
         RefreshWorker.enqueue(this)
     }
 

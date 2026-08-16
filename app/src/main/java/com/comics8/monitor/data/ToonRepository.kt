@@ -2,6 +2,10 @@ package com.comics8.monitor.data
 
 import com.comics8.monitor.data.local.FavoriteDao
 import com.comics8.monitor.data.local.FavoriteToon
+import com.comics8.monitor.data.local.ReadEpisode
+import com.comics8.monitor.data.local.ReadEpisodeDao
+import com.comics8.monitor.data.local.ReaderSetting
+import com.comics8.monitor.data.local.ReaderSettingDao
 import com.comics8.monitor.data.local.SeenDao
 import com.comics8.monitor.data.local.SeenToon
 import kotlinx.coroutines.Dispatchers
@@ -11,6 +15,8 @@ class ToonRepository(
     private val client: ToonClient,
     private val seenDao: SeenDao,
     private val favoriteDao: FavoriteDao,
+    private val readerSettingDao: ReaderSettingDao,
+    private val readEpisodeDao: ReadEpisodeDao,
     private val now: () -> Long = { System.currentTimeMillis() },
 ) {
     suspend fun loadListing(catalog: Catalog, page: Int): ListingPage = withContext(Dispatchers.IO) {
@@ -35,7 +41,16 @@ class ToonRepository(
         if (parsed.items.isEmpty()) {
             error("회차 목록을 읽지 못했습니다.")
         }
-        parsed
+        val readMap = readEpisodeDao.getReadEpisodes(item.id).associateBy { it.wrId }
+        val enriched = parsed.items.map { ep ->
+            val read = readMap[ep.wrId]
+            if (read != null) {
+                ep.copy(isRead = true, readAt = read.readAt)
+            } else {
+                ep
+            }
+        }
+        parsed.copy(items = enriched)
     }
 
     suspend fun loadImages(episode: EpisodeItem): List<String> = withContext(Dispatchers.IO) {
@@ -126,6 +141,48 @@ class ToonRepository(
             )
             true
         }
+    }
+
+    suspend fun getReaderSetting(toonId: String): Pair<ViewMode, ReadDirection>? = withContext(Dispatchers.IO) {
+        val setting = readerSettingDao.getSetting(toonId) ?: return@withContext null
+        val viewMode = try {
+            ViewMode.valueOf(setting.viewMode)
+        } catch (_: Exception) {
+            ViewMode.SCROLL
+        }
+        val direction = try {
+            ReadDirection.valueOf(setting.readDirection)
+        } catch (_: Exception) {
+            ReadDirection.RIGHT_TO_LEFT
+        }
+        Pair(viewMode, direction)
+    }
+
+    suspend fun saveReaderSetting(
+        toonId: String,
+        viewMode: ViewMode,
+        readDirection: ReadDirection,
+    ) = withContext(Dispatchers.IO) {
+        readerSettingDao.saveSetting(
+            ReaderSetting(
+                toonId = toonId,
+                viewMode = viewMode.name,
+                readDirection = readDirection.name,
+                updatedAt = now(),
+            ),
+        )
+    }
+
+    suspend fun markEpisodeRead(toonId: String, wrId: String): Long = withContext(Dispatchers.IO) {
+        val readAt = now()
+        readEpisodeDao.markRead(
+            ReadEpisode(
+                toonId = toonId,
+                wrId = wrId,
+                readAt = readAt,
+            ),
+        )
+        readAt
     }
 
     private fun notifyKey(item: ToonItem): String = "${item.id}|${item.updatedAt.orEmpty()}"
