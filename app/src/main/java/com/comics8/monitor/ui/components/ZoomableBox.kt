@@ -4,7 +4,6 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,6 +20,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
+import kotlin.math.abs
 
 @Composable
 fun ZoomableBox(
@@ -38,22 +38,34 @@ fun ZoomableBox(
             .fillMaxSize()
             .onSizeChanged { size = it }
             .pointerInput(Unit) {
-                // Instant tap response (0ms delay - no double-tap detector)
-                detectTapGestures(
-                    onTap = { tapOffset ->
-                        onTap?.invoke(tapOffset, size)
-                    },
-                )
-            }
-            .pointerInput(Unit) {
                 awaitEachGesture {
-                    awaitFirstDown(requireUnconsumed = false)
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val downTime = System.currentTimeMillis()
+                    val downPos = down.position
+                    var isTap = true
+                    var isMultiTouch = false
+                    var totalDragX = 0f
+                    var totalDragY = 0f
+
                     do {
                         val event = awaitPointerEvent()
+                        if (event.changes.size > 1) {
+                            isMultiTouch = true
+                            isTap = false
+                        }
+
                         val zoomChange = event.calculateZoom()
                         val panChange = event.calculatePan()
+                        totalDragX += panChange.x
+                        totalDragY += panChange.y
 
-                        if (zoomChange != 1f || scale > 1.05f) {
+                        // If user moved more than standard touch slop, it's a drag/pan, not a tap
+                        if (abs(totalDragX) > 8f || abs(totalDragY) > 8f || zoomChange != 1f) {
+                            isTap = false
+                        }
+
+                        // Handle zoom & pan
+                        if (zoomChange != 1f || (scale > 1.05f && !isTap)) {
                             val newScale = (scale * zoomChange).coerceIn(1f, 5f)
                             if (newScale <= 1.02f) {
                                 scale = 1f
@@ -62,18 +74,19 @@ fun ZoomableBox(
                                 scale = newScale
                                 val maxX = (size.width * (newScale - 1f)) / 2f
                                 val maxY = (size.height * (newScale - 1f)) / 2f
-                                val targetX = (offset.x + panChange.x).coerceIn(-maxX, maxX)
-                                val targetY = (offset.y + panChange.y).coerceIn(-maxY, maxY)
-
-                                // Consume event if within pan bounds
-                                val isAtHorizontalEdge = (targetX == offset.x && panChange.x != 0f)
-                                if (!isAtHorizontalEdge || event.changes.size > 1) {
-                                    event.changes.forEach { it.consume() }
-                                }
-                                offset = Offset(targetX, targetY)
+                                val newX = (offset.x + panChange.x).coerceIn(-maxX, maxX)
+                                val newY = (offset.y + panChange.y).coerceIn(-maxY, maxY)
+                                offset = Offset(newX, newY)
                             }
+                            event.changes.forEach { it.consume() }
                         }
                     } while (event.changes.any { it.pressed })
+
+                    // If it was a clean tap (finger released without dragging)
+                    val duration = System.currentTimeMillis() - downTime
+                    if (isTap && !isMultiTouch && duration < 600) {
+                        onTap?.invoke(downPos, size)
+                    }
                 }
             },
         contentAlignment = contentAlignment,
