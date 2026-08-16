@@ -1,0 +1,18 @@
+{
+  "status": "success",
+  "counts": 2,
+  "list": [
+    {
+      "wr_id": "1",
+      "wr_subject": "열혈강호",
+      "ca_name": "무협",
+      "wr_datetime": "2026-08-15 12:40:44"
+    },
+    {
+      "wr_id": "35732",
+      "wr_subject": "게이트 제로",
+      "ca_name": "라노벨,판타지",
+      "wr_datetime": "2026-08-16 09:08:04"
+    }
+  ]
+}

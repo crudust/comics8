@@ -1,0 +1,8 @@
+<resources>
+    <style name="Theme.Comics8" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">#FF121212</item>
+        <item name="android:windowBackground">#FF121212</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+</resources>
