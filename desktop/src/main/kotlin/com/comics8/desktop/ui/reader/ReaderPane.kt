@@ -52,6 +52,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
@@ -61,6 +62,8 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -74,6 +77,71 @@ import com.comics8.desktop.ui.components.ErrorPane
 import com.comics8.desktop.ui.components.LoadingPane
 import com.comics8.desktop.ui.components.TopBar
 import com.comics8.desktop.ui.util.DesktopAsyncImage
+
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun rememberWheelPageScroller(
+    onNextPage: () -> Unit,
+    onPrevPage: () -> Unit,
+    isR2L: Boolean = false,
+    threshold: Float = 0.5f,
+    cooldownMs: Long = 200L,
+): Modifier {
+    var accumulatedDeltaY by remember { mutableStateOf(0f) }
+    var accumulatedDeltaX by remember { mutableStateOf(0f) }
+    var lastTriggerTime by remember { mutableStateOf(0L) }
+    val scope = rememberCoroutineScope()
+    var resetJob by remember { mutableStateOf<Job?>(null) }
+
+    return Modifier.onPointerEvent(PointerEventType.Scroll) { event ->
+        val now = System.currentTimeMillis()
+        var deltaY = 0f
+        var deltaX = 0f
+        event.changes.forEach { change ->
+            deltaY += change.scrollDelta.y
+            deltaX += change.scrollDelta.x
+            change.consume()
+        }
+
+        accumulatedDeltaY += deltaY
+        accumulatedDeltaX += deltaX
+
+        // Reset accumulation after 200ms of inactivity
+        resetJob?.cancel()
+        resetJob = scope.launch {
+            delay(200L)
+            accumulatedDeltaY = 0f
+            accumulatedDeltaX = 0f
+        }
+
+        if (now - lastTriggerTime >= cooldownMs) {
+            // Vertical Wheel / Trackpad Scroll (Down = Next, Up = Prev)
+            if (accumulatedDeltaY >= threshold) {
+                lastTriggerTime = now
+                accumulatedDeltaY = 0f
+                accumulatedDeltaX = 0f
+                onNextPage()
+            } else if (accumulatedDeltaY <= -threshold) {
+                lastTriggerTime = now
+                accumulatedDeltaY = 0f
+                accumulatedDeltaX = 0f
+                onPrevPage()
+            }
+            // Horizontal Trackpad 2-finger swipe
+            else if (accumulatedDeltaX >= threshold) {
+                lastTriggerTime = now
+                accumulatedDeltaY = 0f
+                accumulatedDeltaX = 0f
+                if (isR2L) onPrevPage() else onNextPage()
+            } else if (accumulatedDeltaX <= -threshold) {
+                lastTriggerTime = now
+                accumulatedDeltaY = 0f
+                accumulatedDeltaX = 0f
+                if (isR2L) onNextPage() else onPrevPage()
+            }
+        }
+    }
+}
 
 @Composable
 fun ReaderPane(
@@ -310,9 +378,16 @@ private fun ReaderSingleView(
         }
     }
 
+    val wheelModifier = rememberWheelPageScroller(
+        onNextPage = { onAdvance() },
+        onPrevPage = { onRetreat() },
+        isR2L = isR2L,
+    )
+
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .then(wheelModifier)
             .onKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown) {
                     when (event.key) {
@@ -584,9 +659,16 @@ private fun ReaderDualView(
         }
     }
 
+    val wheelModifier = rememberWheelPageScroller(
+        onNextPage = { onAdvance() },
+        onPrevPage = { onRetreat() },
+        isR2L = isR2L,
+    )
+
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .then(wheelModifier)
             .onKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown) {
                     when (event.key) {

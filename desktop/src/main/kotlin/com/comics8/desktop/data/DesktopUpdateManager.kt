@@ -86,6 +86,7 @@ object DesktopUpdateManager {
 
                 rm -rf "${'$'}DEST_APP"
                 cp -R "${'$'}NEW_APP" "${'$'}DEST_APP"
+                xattr -dr com.apple.quarantine "${'$'}DEST_APP" 2>/dev/null || true
                 open "${'$'}DEST_APP"
                 """.trimIndent()
             )

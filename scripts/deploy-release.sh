@@ -26,6 +26,20 @@ echo "🚀 Comics8 Deploying Release v${VERSION_NAME} (code ${VERSION_CODE})"
 echo "Notes: ${RELEASE_NOTES}"
 echo "=================================================="
 
+# 0. Sync version across modules
+echo "🔧 Syncing codebase version..."
+sed -i '' -E "s/versionCode = [0-9]+/versionCode = ${VERSION_CODE}/" app/build.gradle.kts
+sed -i '' -E "s/versionName = \"[^\"]+\"/versionName = \"${VERSION_NAME}\"/" app/build.gradle.kts
+
+cat <<EOF > desktop/src/main/kotlin/com/comics8/desktop/DesktopVersion.kt
+package com.comics8.desktop
+
+object DesktopVersion {
+    const val VERSION_NAME = "${VERSION_NAME}"
+    const val VERSION_CODE = ${VERSION_CODE}
+}
+EOF
+
 # 1. Build Android Release APK
 echo "📦 1/4: Building Android Release APK..."
 ./gradlew assembleRelease
