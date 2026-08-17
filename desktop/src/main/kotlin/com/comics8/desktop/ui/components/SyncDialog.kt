@@ -213,6 +213,29 @@ fun SyncDialog(
                     )
                 }
 
+                // Server Proxy Bypass Toggle
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "서버 IP 우회 요청",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Text(
+                            text = "사이트 메타데이터 요청을 서버 IP로 중계",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = syncState.useServerProxy,
+                        onCheckedChange = { viewModel.toggleServerProxy(it) },
+                    )
+                }
+
                 // Server Settings Toggle
                 Row(
                     verticalAlignment = Alignment.CenterVertically,

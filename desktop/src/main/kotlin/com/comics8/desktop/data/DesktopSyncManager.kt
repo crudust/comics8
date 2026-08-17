@@ -1,5 +1,7 @@
 package com.comics8.desktop.data
 
+import com.comics8.core.network.ToonClient
+import com.comics8.core.sync.SyncConstants
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -24,6 +26,7 @@ data class DesktopSyncState(
     val syncKey: String = "",
     val serverUrl: String = DesktopSyncManager.DEFAULT_SERVER_URL,
     val autoSyncEnabled: Boolean = true,
+    val useServerProxy: Boolean = true,
     val isSyncing: Boolean = false,
     val lastSyncedAt: Long = 0L,
     val syncMessage: String? = null,
@@ -39,6 +42,7 @@ data class DesktopSyncResult(
 
 class DesktopSyncManager(
     private val database: DesktopDatabase,
+    private val toonClient: ToonClient? = null,
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
@@ -62,10 +66,18 @@ class DesktopSyncManager(
             syncKey = getOrGenerateSyncKey(),
             serverUrl = properties.getProperty(KEY_SERVER_URL, DEFAULT_SERVER_URL),
             autoSyncEnabled = properties.getProperty(KEY_AUTO_SYNC, "true").toBoolean(),
+            useServerProxy = properties.getProperty(KEY_USE_SERVER_PROXY, "true").toBoolean(),
             lastSyncedAt = properties.getProperty(KEY_LAST_SYNCED_AT, "0").toLongOrNull() ?: 0L,
         )
     )
     val syncState: StateFlow<DesktopSyncState> = _syncState.asStateFlow()
+
+    init {
+        val serverUrl = _syncState.value.serverUrl
+        val useProxy = _syncState.value.useServerProxy
+        toonClient?.proxyBaseUrl = SyncConstants.proxyBaseUrl(serverUrl)
+        toonClient?.isProxyEnabled = useProxy
+    }
 
     private fun saveProperties() {
         try {
@@ -114,6 +126,7 @@ class DesktopSyncManager(
         if (trimmed.isNotBlank()) {
             properties.setProperty(KEY_SERVER_URL, trimmed)
             saveProperties()
+            toonClient?.proxyBaseUrl = SyncConstants.proxyBaseUrl(trimmed)
             _syncState.value = _syncState.value.copy(serverUrl = trimmed)
         }
     }
@@ -122,6 +135,13 @@ class DesktopSyncManager(
         properties.setProperty(KEY_AUTO_SYNC, enabled.toString())
         saveProperties()
         _syncState.value = _syncState.value.copy(autoSyncEnabled = enabled)
+    }
+
+    fun setUseServerProxy(enabled: Boolean) {
+        properties.setProperty(KEY_USE_SERVER_PROXY, enabled.toString())
+        saveProperties()
+        toonClient?.isProxyEnabled = enabled
+        _syncState.value = _syncState.value.copy(useServerProxy = enabled)
     }
 
     fun triggerDebouncedPush() {
@@ -521,6 +541,7 @@ class DesktopSyncManager(
         const val KEY_SERVER_URL = com.comics8.core.sync.SyncConstants.KEY_SERVER_URL
         const val KEY_AUTO_SYNC = com.comics8.core.sync.SyncConstants.KEY_AUTO_SYNC
         const val KEY_LAST_SYNCED_AT = com.comics8.core.sync.SyncConstants.KEY_LAST_SYNCED_AT
+        const val KEY_USE_SERVER_PROXY = com.comics8.core.sync.SyncConstants.KEY_USE_SERVER_PROXY
         const val DEFAULT_SERVER_URL = com.comics8.core.sync.SyncConstants.DEFAULT_SERVER_URL
 
         fun generateSyncKey(): String = com.comics8.core.sync.SyncConstants.generateSyncKey()

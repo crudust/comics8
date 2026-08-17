@@ -672,6 +672,10 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         repository.syncManager?.setAutoSyncEnabled(enabled)
     }
 
+    fun toggleServerProxy(enabled: Boolean) {
+        repository.syncManager?.setUseServerProxy(enabled)
+    }
+
     fun reopenHistoryEpisode(item: ReadHistory, startPage: Int = 0) {
         val toon = ToonItem(
             id = item.toonId,

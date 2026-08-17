@@ -66,9 +66,15 @@ echo "📦 Zipping Comics8.app..."
 rm -f "$MAC_ZIP_PATH"
 (cd "$MAC_APP_DIR" && zip -r -q "../Comics8-mac.zip" "Comics8.app")
 
-# 3. Upload binaries to Server (Keep only the latest version)
-echo "🚀 3/4: Uploading binaries to server ($SERVER_HOST)..."
+# 3. Upload binaries and server code to Server
+echo "🚀 3/4: Uploading server code and binaries to server ($SERVER_HOST)..."
 ssh -o StrictHostKeyChecking=no "${SERVER_USER}@${SERVER_HOST}" "mkdir -p ${SERVER_DOWNLOAD_DIR} && rm -rf ${SERVER_DOWNLOAD_DIR}/*"
+
+if [ -f "server/server.py" ]; then
+    echo "🐍 Updating server.py and restarting comics8-sync service..."
+    scp server/server.py "${SERVER_USER}@${SERVER_HOST}:/home/crudust/comics8-sync/server.py"
+    ssh -o StrictHostKeyChecking=no "${SERVER_USER}@${SERVER_HOST}" "sudo -n systemctl restart comics8-sync"
+fi
 
 scp "$APK_PATH" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/comics8-latest.apk"
 scp "$MAC_ZIP_PATH" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/Comics8-mac.zip"

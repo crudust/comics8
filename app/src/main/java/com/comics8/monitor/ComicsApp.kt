@@ -25,7 +25,7 @@ class ComicsApp : Application(), ImageLoaderFactory {
             .fallbackToDestructiveMigration()
             .build()
         val client = ToonClient()
-        val syncManager = SyncManager(this, db)
+        val syncManager = SyncManager(this, db, client)
         val downloadManager = DownloadManager(this, db, client)
         repository = ToonRepository(
             client = client,

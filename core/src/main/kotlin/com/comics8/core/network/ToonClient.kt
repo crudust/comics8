@@ -2,14 +2,31 @@ package com.comics8.core.network
 
 import com.comics8.core.parser.ComicSite
 import com.comics8.core.parser.HtmlParsers
+import com.comics8.core.sync.SyncConstants
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
 class ToonClient(
     private val client: OkHttpClient = defaultClient(),
+    @Volatile var proxyBaseUrl: String? = SyncConstants.proxyBaseUrl(),
+    @Volatile var isProxyEnabled: Boolean = true,
 ) {
     fun fetch(url: String): String {
+        val proxyBase = proxyBaseUrl
+        if (isProxyEnabled && !proxyBase.isNullOrBlank() && !url.contains("/proxy?url=")) {
+            val proxiedUrl = SyncConstants.proxyUrl(url, proxyBase)
+            try {
+                return executeFetch(proxiedUrl)
+            } catch (e: Exception) {
+                // Fallback to direct fetch if proxy fails
+                System.err.println("ToonClient: Proxy fetch failed ($proxiedUrl): ${e.message}. Falling back to direct fetch.")
+            }
+        }
+        return executeFetch(url)
+    }
+
+    private fun executeFetch(url: String): String {
         val request = Request.Builder()
             .url(url)
             .header("User-Agent", USER_AGENT)

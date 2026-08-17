@@ -5,6 +5,7 @@ object SyncConstants {
     const val KEY_SERVER_URL = "sync_server_url"
     const val KEY_AUTO_SYNC = "sync_auto_enabled"
     const val KEY_LAST_SYNCED_AT = "sync_last_at"
+    const val KEY_USE_SERVER_PROXY = "sync_use_server_proxy"
     const val DEFAULT_SERVER_URL = "https://homeassistant.tail1946af.ts.net/api/comics8/sync"
 
     fun generateSyncKey(): String {
@@ -19,6 +20,22 @@ object SyncConstants {
         } else {
             "$base/version"
         }
+    }
+
+    fun proxyBaseUrl(serverUrl: String = DEFAULT_SERVER_URL): String {
+        val base = serverUrl.trimEnd('/')
+        return when {
+            base.endsWith("/proxy") -> base
+            base.endsWith("/sync") -> base.substringBeforeLast("/sync") + "/proxy"
+            base.endsWith("/version") -> base.substringBeforeLast("/version") + "/proxy"
+            else -> "$base/proxy"
+        }
+    }
+
+    fun proxyUrl(targetUrl: String, serverUrl: String = DEFAULT_SERVER_URL): String {
+        val proxyBase = proxyBaseUrl(serverUrl)
+        val encodedTarget = java.net.URLEncoder.encode(targetUrl, "UTF-8")
+        return "$proxyBase?url=$encodedTarget"
     }
 
     fun resolveDownloadUrl(downloadPath: String, serverUrl: String = DEFAULT_SERVER_URL): String {

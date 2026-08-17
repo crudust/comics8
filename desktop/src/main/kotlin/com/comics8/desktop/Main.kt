@@ -60,8 +60,8 @@ fun main() {
 
     application {
         val database = remember { DesktopDatabase() }
-        val syncManager = remember { DesktopSyncManager(database) }
         val toonClient = remember { ToonClient() }
+        val syncManager = remember { DesktopSyncManager(database, toonClient) }
         val downloadManager = remember { com.comics8.desktop.data.DesktopDownloadManager(database, toonClient) }
         val repository = remember { DesktopToonRepository(toonClient, database, syncManager, downloadManager) }
         val viewModel = remember { DesktopViewModel(repository) }

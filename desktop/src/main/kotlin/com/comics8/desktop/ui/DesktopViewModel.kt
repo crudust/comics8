@@ -650,6 +650,10 @@ class DesktopViewModel(
         repository.syncManager?.setAutoSyncEnabled(enabled)
     }
 
+    fun toggleServerProxy(enabled: Boolean) {
+        repository.syncManager?.setUseServerProxy(enabled)
+    }
+
     fun openSeriesFromHistory(item: ReadHistoryRecord) {
         val toon = ToonItem(
             id = item.toonId,
