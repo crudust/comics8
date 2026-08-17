@@ -15,7 +15,12 @@ class DesktopToonRepository(
 ) {
     suspend fun loadListing(catalog: Catalog, page: Int): ListingPage = withContext(Dispatchers.IO) {
         if (catalog == Catalog.FAVORITE) {
-            val favs = database.getAllFavorites().map { it.toItem().copy(isFavorite = true) }
+            val favs = database.getAllFavorites()
+                .sortedWith(
+                    compareByDescending<FavoriteRecord> { parseDateScore(it.updatedAt) }
+                        .thenByDescending { it.savedAt }
+                )
+                .map { it.toItem().copy(isFavorite = true) }
             return@withContext ListingPage(
                 items = applyFlags(favs),
                 currentPage = 1,
@@ -30,11 +35,40 @@ class DesktopToonRepository(
         parsed.copy(items = applyFlags(parsed.items))
     }
 
+    private fun parseDateScore(dateStr: String?): Long {
+        if (dateStr.isNullOrBlank()) return 0L
+        val parts = dateStr.trim().split('.')
+        return try {
+            when (parts.size) {
+                3 -> {
+                    val yy = parts[0].toInt()
+                    val mm = parts[1].toInt()
+                    val dd = parts[2].toInt()
+                    (yy * 10000L) + (mm * 100L) + dd
+                }
+                2 -> {
+                    val mm = parts[0].toInt()
+                    val dd = parts[1].toInt()
+                    (26 * 10000L) + (mm * 100L) + dd
+                }
+                else -> 0L
+            }
+        } catch (_: Exception) {
+            0L
+        }
+    }
+
     suspend fun loadEpisodes(item: ToonItem, page: Int): EpisodePage = withContext(Dispatchers.IO) {
         val html = client.fetch(ComicSite.seriesUrl(item.id, item.title, page))
         val parsed = HtmlParsers.parseEpisodes(html)
         if (parsed.items.isEmpty()) {
             error("회차 목록을 읽지 못했습니다.")
+        }
+        val firstDate = parsed.items.firstOrNull()?.date
+        if (!firstDate.isNullOrBlank()) {
+            try {
+                database.updateFavoriteUpdatedAt(item.id, firstDate)
+            } catch (_: Exception) {}
         }
         val readMap = database.getReadEpisodesByToon(item.id).associateBy { it.wrId }
         val enriched = parsed.items.map { ep ->
@@ -88,6 +122,15 @@ class DesktopToonRepository(
         val total = database.getSeenCount()
         val existing = if (total == 0) emptyMap() else database.getSeenByIds(items.map { it.id })
         val historyMap = database.getAllHistory().associateBy { it.toonId }
+
+        for (item in items) {
+            val uDate = item.updatedAt
+            if (item.id in favoriteIds && !uDate.isNullOrBlank()) {
+                try {
+                    database.updateFavoriteUpdatedAt(item.id, uDate)
+                } catch (_: Exception) {}
+            }
+        }
 
         return items.map { item ->
             val prev = existing[item.id]

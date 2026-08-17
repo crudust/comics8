@@ -35,6 +35,9 @@ class DesktopViewModel(
     private var episodeJob: Job? = null
     private var readerJob: Job? = null
 
+    private val toonTotalCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
+    private val toonLastPageCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
     init {
         loadPage(1)
         checkForUpdate()
@@ -287,6 +290,83 @@ class DesktopViewModel(
                         episodeLoading = false,
                         episodeError = null,
                     )
+                }
+                if (result.items.isNotEmpty()) {
+                    val lastP = result.lastPage.coerceAtLeast(1)
+                    val currP = result.currentPage.coerceIn(1, lastP)
+                    val pageSize = 100
+
+                    if (lastP <= 1) {
+                        toonTotalCounts[item.id] = result.items.size
+                        toonLastPageCounts[item.id] = result.items.size
+                    } else if (currP == lastP) {
+                        toonLastPageCounts[item.id] = result.items.size
+                        val total = (lastP - 1) * pageSize + result.items.size
+                        toonTotalCounts[item.id] = total
+                    } else if (!toonLastPageCounts.containsKey(item.id)) {
+                        scope.launch(Dispatchers.IO) {
+                            try {
+                                val lastRes = repository.loadEpisodes(item, lastP)
+                                val lastCount = lastRes.items.size
+                                toonLastPageCounts[item.id] = lastCount
+                                val exactTotal = (lastP - 1) * pageSize + lastCount
+                                toonTotalCounts[item.id] = exactTotal
+
+                                val existing = repository.getHistory().firstOrNull { it.toonId == item.id }
+                                if (existing != null) {
+                                    val safeOrder = existing.lastReadOrder.coerceIn(1, exactTotal)
+                                    val updated = existing.copy(
+                                        totalEpisodes = exactTotal,
+                                        lastReadOrder = safeOrder,
+                                        hasNew = safeOrder < exactTotal,
+                                    )
+                                    repository.saveHistory(updated)
+                                    val progressText = "${updated.lastReadOrder}/${updated.totalEpisodes}"
+                                    _state.update { curr ->
+                                        val updatedItems = curr.items.map { row ->
+                                            if (row.id == item.id) row.copy(readProgress = progressText) else row
+                                        }
+                                        curr.copy(
+                                            items = updatedItems,
+                                            seriesHistory = if (curr.series?.id == item.id) updated else curr.seriesHistory,
+                                        )
+                                    }
+                                }
+                            } catch (_: Exception) {}
+                        }
+                    }
+
+                    val knownLast = toonLastPageCounts[item.id]
+                    val totalCalculated = when {
+                        lastP <= 1 -> result.items.size
+                        currP == lastP -> (lastP - 1) * pageSize + result.items.size
+                        knownLast != null -> (lastP - 1) * pageSize + knownLast
+                        else -> (lastP - 1) * pageSize + result.items.size
+                    }
+
+                    val existing = repository.getHistory().firstOrNull { it.toonId == item.id }
+                    if (existing != null) {
+                        val safeOrder = existing.lastReadOrder.coerceIn(1, totalCalculated)
+                        val hasNew = safeOrder < totalCalculated
+                        if (existing.totalEpisodes != totalCalculated || existing.lastReadOrder != safeOrder) {
+                            val updated = existing.copy(
+                                totalEpisodes = totalCalculated,
+                                lastReadOrder = safeOrder,
+                                hasNew = hasNew,
+                            )
+                            repository.saveHistory(updated)
+                            val progressText = "${updated.lastReadOrder}/${updated.totalEpisodes}"
+                            _state.update { curr ->
+                                val updatedItems = curr.items.map { row ->
+                                    if (row.id == item.id) row.copy(readProgress = progressText) else row
+                                }
+                                curr.copy(
+                                    items = updatedItems,
+                                    seriesHistory = if (curr.series?.id == item.id) updated else curr.seriesHistory,
+                                )
+                            }
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 if (e is CancellationException) return@launch
@@ -701,16 +781,26 @@ class DesktopViewModel(
         val currentPage = current.episodePage.coerceIn(1, lastPage)
         val pageSize = 100
 
-        val totalEpCount = if (lastPage <= 1) {
-            episodes.size.coerceAtLeast(1)
-        } else if (currentPage == lastPage && episodes.isNotEmpty()) {
-            (lastPage - 1) * pageSize + episodes.size
-        } else {
-            lastPage * pageSize
+        val seriesId = series?.id.orEmpty()
+        val knownLastPageCount = toonLastPageCounts[seriesId]
+        val knownTotalCount = toonTotalCounts[seriesId]
+
+        val totalEpCount = when {
+            knownTotalCount != null && knownTotalCount > 0 -> knownTotalCount
+            lastPage <= 1 -> episodes.size.coerceAtLeast(1)
+            currentPage == lastPage && episodes.isNotEmpty() -> (lastPage - 1) * pageSize + episodes.size
+            knownLastPageCount != null -> (lastPage - 1) * pageSize + knownLastPageCount
+            else -> (lastPage - 1) * pageSize + episodes.size
         }
 
         val calculatedOrder = if (idx >= 0 && episodes.isNotEmpty()) {
-            val olderCount = (lastPage - currentPage) * pageSize
+            val olderCount = if (currentPage == lastPage) {
+                0
+            } else {
+                val lastPageItems = knownLastPageCount ?: pageSize
+                val middlePagesCount = (lastPage - 1 - currentPage).coerceAtLeast(0) * pageSize
+                lastPageItems + middlePagesCount
+            }
             val onPageOrder = (episodes.size - idx).coerceAtLeast(1)
             (olderCount + onPageOrder).coerceIn(1, totalEpCount)
         } else null

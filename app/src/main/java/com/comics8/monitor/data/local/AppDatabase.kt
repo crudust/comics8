@@ -38,7 +38,7 @@ data class FavoriteToon(
 
 @Dao
 interface FavoriteDao {
-    @Query("SELECT * FROM favorites ORDER BY savedAt DESC")
+    @Query("SELECT * FROM favorites ORDER BY COALESCE(updatedAt, '') DESC, savedAt DESC")
     suspend fun all(): List<FavoriteToon>
 
     @Query("SELECT * FROM favorites WHERE savedAt > :since ORDER BY savedAt DESC")
@@ -55,6 +55,9 @@ interface FavoriteDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(items: List<FavoriteToon>)
+
+    @Query("UPDATE favorites SET updatedAt = :updatedAt WHERE id = :id AND (:updatedAt != '' AND (updatedAt IS NULL OR updatedAt < :updatedAt))")
+    suspend fun updateUpdatedAt(id: String, updatedAt: String)
 
     @Query("DELETE FROM favorites WHERE id = :id")
     suspend fun delete(id: String)
@@ -182,9 +185,6 @@ interface ReadHistoryDao {
 
     @Query("DELETE FROM read_history")
     suspend fun clearAll()
-
-    @Query("UPDATE read_history SET totalEpisodes = totalEpisodes + :amount, hasNew = 1 WHERE toonId = :toonId")
-    suspend fun incrementTotal(toonId: String, amount: Int = 1)
 }
 
 @Entity(tableName = "tombstones", primaryKeys = ["entityType", "entityId"])

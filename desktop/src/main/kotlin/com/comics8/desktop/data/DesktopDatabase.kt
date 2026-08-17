@@ -165,7 +165,7 @@ class DesktopDatabase(dbFile: File? = null) {
     fun getAllFavorites(): List<FavoriteRecord> {
         val list = mutableListOf<FavoriteRecord>()
         getConnection().use { conn ->
-            conn.prepareStatement("SELECT * FROM favorites ORDER BY savedAt DESC").use { stmt ->
+            conn.prepareStatement("SELECT * FROM favorites ORDER BY COALESCE(updatedAt, '') DESC, savedAt DESC").use { stmt ->
                 val rs = stmt.executeQuery()
                 while (rs.next()) {
                     list.add(
@@ -215,6 +215,20 @@ class DesktopDatabase(dbFile: File? = null) {
                 stmt.setString(1, id)
                 val rs = stmt.executeQuery()
                 return rs.next()
+            }
+        }
+    }
+
+    fun updateFavoriteUpdatedAt(id: String, updatedAt: String) {
+        if (updatedAt.isBlank()) return
+        getConnection().use { conn ->
+            conn.prepareStatement(
+                "UPDATE favorites SET updatedAt = ? WHERE id = ? AND (updatedAt IS NULL OR updatedAt < ?)"
+            ).use { stmt ->
+                stmt.setString(1, updatedAt)
+                stmt.setString(2, id)
+                stmt.setString(3, updatedAt)
+                stmt.executeUpdate()
             }
         }
     }
