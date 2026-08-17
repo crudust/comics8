@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -56,27 +58,45 @@ private fun Context.findActivity(): Activity? = when (this) {
 @Composable
 fun ComicsAppUi(viewModel: ListingViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val configuration = LocalConfiguration.current
-    val screenWidthDp = configuration.screenWidthDp
     val isReader = state.screen == Screen.Reader
+    val context = LocalContext.current
+    val config = LocalConfiguration.current
 
-    LaunchedEffect(screenWidthDp) {
-        viewModel.updateScreenWidthDp(screenWidthDp)
+    val catalogs = remember { Catalog.entries.toTypedArray() }
+    val browsePagerState = rememberPagerState(
+        initialPage = catalogs.indexOf(state.catalog).coerceAtLeast(0),
+        pageCount = { catalogs.size },
+    )
+
+    LaunchedEffect(state.catalog) {
+        val targetIndex = catalogs.indexOf(state.catalog)
+        if (targetIndex >= 0 && browsePagerState.currentPage != targetIndex) {
+            browsePagerState.animateScrollToPage(targetIndex)
+        }
     }
 
-    val context = LocalContext.current
-    val activity = remember(context) { context.findActivity() }
-    val window = activity?.window
-    DisposableEffect(isReader, window) {
-        if (window == null) return@DisposableEffect onDispose { }
+    LaunchedEffect(browsePagerState.currentPage) {
+        val targetCatalog = catalogs[browsePagerState.currentPage]
+        if (targetCatalog != state.catalog && !state.isSearch && state.screen == Screen.Browse) {
+            viewModel.selectCatalog(targetCatalog)
+        }
+    }
+
+    LaunchedEffect(config.screenWidthDp) {
+        viewModel.updateScreenWidthDp(config.screenWidthDp)
+    }
+
+    DisposableEffect(isReader) {
+        val activity = context.findActivity() ?: return@DisposableEffect onDispose {}
+        val window = activity.window
         val controller = WindowCompat.getInsetsController(window, window.decorView)
-        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        controller.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         if (isReader) {
             controller.hide(WindowInsetsCompat.Type.systemBars())
         } else {
             controller.show(WindowInsetsCompat.Type.systemBars())
         }
-
         onDispose {
             controller.show(WindowInsetsCompat.Type.systemBars())
         }
@@ -121,42 +141,72 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                     when {
                         state.screen == Screen.Series -> SeriesPane(state = state, viewModel = viewModel)
                         state.screen == Screen.History -> HistoryPane(state = state, viewModel = viewModel)
-                        state.loading && state.items.isEmpty() -> LoadingPane()
-                        state.error != null && state.items.isEmpty() -> ErrorPane(
-                            message = state.error!!,
-                            onRetry = { viewModel.refresh(force = true) },
-                        )
-                        state.isSearch && state.items.isEmpty() -> ErrorPane(
-                            message = "\"${state.searchQuery}\" 검색 결과가 없습니다.",
-                            actionLabel = "목록으로",
-                            onRetry = { viewModel.selectCatalog(state.catalog) },
-                        )
-                        state.catalog == Catalog.FAVORITE && state.items.isEmpty() -> ErrorPane(
-                            message = "즐겨찾기한 작품이 없습니다.",
-                            actionLabel = "최신으로",
-                            onRetry = { viewModel.selectCatalog(Catalog.LATEST) },
-                        )
-                        else -> {
-                            Column(Modifier.fillMaxSize()) {
-                                ListingGrid(
+                        state.isSearch -> {
+                            when {
+                                state.loading && state.items.isEmpty() -> LoadingPane()
+                                state.error != null && state.items.isEmpty() -> ErrorPane(
+                                    message = state.error!!,
+                                    onRetry = { viewModel.refresh(force = true) },
+                                )
+                                state.items.isEmpty() -> ErrorPane(
+                                    message = "\"${state.searchQuery}\" 검색 결과가 없습니다.",
+                                    actionLabel = "목록으로",
+                                    onRetry = { viewModel.selectCatalog(state.catalog) },
+                                )
+                                else -> ListingGrid(
                                     items = state.items,
                                     scrollToTopTrigger = state.scrollToTopTrigger,
                                     onOpen = viewModel::openSeries,
                                     onToggleFavorite = viewModel::toggleFavorite,
-                                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                                    modifier = Modifier.fillMaxSize(),
                                 )
-                                if (!state.isSearch && state.catalog.paginated && state.lastPage > 1) {
-                                    PageBar(
-                                        page = state.page,
-                                        lastPage = state.lastPage,
-                                        onPrev = viewModel::prevPage,
-                                        onNext = viewModel::nextPage,
-                                        onJump = { viewModel.togglePageJump(true) },
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-                                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                            }
+                        }
+                        else -> {
+                            HorizontalPager(
+                                state = browsePagerState,
+                                modifier = Modifier.fillMaxSize(),
+                            ) { pageIndex ->
+                                val pageCatalog = catalogs[pageIndex]
+                                val isCurrent = pageCatalog == state.catalog
+                                when {
+                                    isCurrent && state.loading && state.items.isEmpty() -> LoadingPane()
+                                    isCurrent && state.error != null && state.items.isEmpty() -> ErrorPane(
+                                        message = state.error!!,
+                                        onRetry = { viewModel.refresh(force = true) },
                                     )
+                                    isCurrent && pageCatalog == Catalog.FAVORITE && state.items.isEmpty() -> ErrorPane(
+                                        message = "즐겨찾기한 작품이 없습니다.",
+                                        actionLabel = "최신으로",
+                                        onRetry = { viewModel.selectCatalog(Catalog.LATEST) },
+                                    )
+                                    isCurrent -> {
+                                        Column(Modifier.fillMaxSize()) {
+                                            ListingGrid(
+                                                items = state.items,
+                                                scrollToTopTrigger = state.scrollToTopTrigger,
+                                                onOpen = viewModel::openSeries,
+                                                onToggleFavorite = viewModel::toggleFavorite,
+                                                modifier = Modifier.weight(1f).fillMaxWidth(),
+                                            )
+                                            if (pageCatalog.paginated && state.lastPage > 1) {
+                                                PageBar(
+                                                    page = state.page,
+                                                    lastPage = state.lastPage,
+                                                    onPrev = viewModel::prevPage,
+                                                    onNext = viewModel::nextPage,
+                                                    onJump = { viewModel.togglePageJump(true) },
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                                                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                                                )
+                                            }
+                                        }
+                                    }
+                                    else -> {
+                                        LoadingPane()
+                                    }
                                 }
                             }
                         }

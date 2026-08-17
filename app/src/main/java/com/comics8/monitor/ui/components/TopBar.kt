@@ -351,14 +351,22 @@ fun TopBar(
                     modifier = Modifier.padding(top = 4.dp),
                 )
             }
+            val chipScrollState = rememberScrollState()
+            val catalogsList = remember { Catalog.entries }
+            LaunchedEffect(state.catalog) {
+                val idx = catalogsList.indexOf(state.catalog)
+                if (idx >= 0) {
+                    chipScrollState.animateScrollTo((idx * 75).coerceAtLeast(0))
+                }
+            }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
+                    .horizontalScroll(chipScrollState),
             ) {
-                Catalog.entries.forEach { catalog ->
+                catalogsList.forEach { catalog ->
                     FilterChip(
                         selected = !state.isSearch && state.catalog == catalog,
                         onClick = { viewModel.selectCatalog(catalog) },

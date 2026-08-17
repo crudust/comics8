@@ -27,7 +27,14 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
@@ -46,7 +53,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
+import coil.compose.AsyncImagePainter
+import coil.compose.SubcomposeAsyncImage
 import com.comics8.monitor.data.ReadDirection
 import com.comics8.monitor.data.ViewMode
 import com.comics8.monitor.data.buildDualSpreads
@@ -137,7 +145,7 @@ private fun ReaderScrollPane(
             modifier = Modifier.fillMaxSize(),
         ) {
             itemsIndexed(state.readerImages, key = { index, url -> "$index-$url" }) { index, imageUrl ->
-                AsyncImage(
+                ReaderImage(
                     model = imageUrl,
                     contentDescription = "페이지 ${index + 1}",
                     contentScale = ContentScale.FillWidth,
@@ -352,7 +360,7 @@ private fun ReaderSinglePagePane(
                     }
                 },
             ) { scale ->
-                AsyncImage(
+                ReaderImage(
                     model = state.readerImages.getOrNull(page),
                     contentDescription = "페이지 ${page + 1}",
                     contentScale = ContentScale.Fit,
@@ -640,7 +648,7 @@ private fun ReaderDualPagePane(
                                 modifier = Modifier.fillMaxSize(),
                                 contentAlignment = Alignment.Center,
                             ) {
-                                AsyncImage(
+                                ReaderImage(
                                     model = state.readerImages.getOrNull(spread.index),
                                     contentDescription = "페이지 ${spread.index + 1}",
                                     contentScale = ContentScale.Fit,
@@ -669,7 +677,7 @@ private fun ReaderDualPagePane(
                                             .fillMaxHeight(),
                                         contentAlignment = Alignment.CenterStart,
                                     ) {
-                                        AsyncImage(
+                                        ReaderImage(
                                             model = state.readerImages.getOrNull(spread.index),
                                             contentDescription = "페이지 ${spread.index + 1}",
                                             contentScale = ContentScale.Fit,
@@ -691,7 +699,7 @@ private fun ReaderDualPagePane(
                                             .fillMaxHeight(),
                                         contentAlignment = Alignment.CenterEnd,
                                     ) {
-                                        AsyncImage(
+                                        ReaderImage(
                                             model = state.readerImages.getOrNull(spread.index),
                                             contentDescription = "페이지 ${spread.index + 1}",
                                             contentScale = ContentScale.Fit,
@@ -727,7 +735,7 @@ private fun ReaderDualPagePane(
                                     .fillMaxHeight(),
                                 contentAlignment = Alignment.CenterEnd,
                             ) {
-                                AsyncImage(
+                                ReaderImage(
                                     model = state.readerImages.getOrNull(leftIndex),
                                     contentDescription = "페이지 ${leftIndex + 1}",
                                     contentScale = ContentScale.Fit,
@@ -748,7 +756,7 @@ private fun ReaderDualPagePane(
                                     .fillMaxHeight(),
                                 contentAlignment = Alignment.CenterStart,
                             ) {
-                                AsyncImage(
+                                ReaderImage(
                                     model = state.readerImages.getOrNull(rightIndex),
                                     contentDescription = "페이지 ${rightIndex + 1}",
                                     contentScale = ContentScale.Fit,
@@ -971,4 +979,64 @@ fun ReaderFooter(
             }
         }
     }
+}
+
+@Composable
+private fun ReaderImage(
+    model: Any?,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Fit,
+    alignment: Alignment = Alignment.Center,
+    onSuccess: ((AsyncImagePainter.State.Success) -> Unit)? = null,
+) {
+    SubcomposeAsyncImage(
+        model = model,
+        contentDescription = contentDescription,
+        contentScale = contentScale,
+        alignment = alignment,
+        modifier = modifier,
+        onSuccess = onSuccess,
+        loading = {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .defaultMinSize(minHeight = 240.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(36.dp),
+                    strokeWidth = 3.dp,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        },
+        error = {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .defaultMinSize(minHeight = 200.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                    modifier = Modifier.padding(16.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.BrokenImage,
+                        contentDescription = "이미지 로딩 실패",
+                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                        modifier = Modifier.size(36.dp),
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = "이미지를 불러올 수 없습니다",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                    )
+                }
+            }
+        },
+    )
 }

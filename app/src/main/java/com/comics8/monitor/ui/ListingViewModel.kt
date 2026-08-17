@@ -123,6 +123,9 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     private var episodeJob: Job? = null
     private var readerJob: Job? = null
 
+    private val catalogCache = mutableMapOf<Catalog, List<ToonItem>>()
+    private val catalogPages = mutableMapOf<Catalog, Pair<Int, Int>>()
+
     init {
         _state.update {
             it.copy(
@@ -240,12 +243,15 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         ) return
         readerJob?.cancel()
         episodeJob?.cancel()
+        val cached = catalogCache[catalog]
+        val (cachedPage, cachedLastPage) = catalogPages[catalog] ?: Pair(1, 1)
         _state.update {
             it.copy(
                 catalog = catalog,
-                page = 1,
-                lastPage = 1,
-                items = emptyList(),
+                page = cachedPage,
+                lastPage = cachedLastPage,
+                items = cached ?: emptyList(),
+                loading = cached == null,
                 screen = Screen.Browse,
                 series = null,
                 episodes = emptyList(),
@@ -258,7 +264,9 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 scrollToTopTrigger = it.scrollToTopTrigger + 1,
             )
         }
-        loadPage(1, replace = true)
+        if (cached == null || catalog == Catalog.FAVORITE) {
+            loadPage(cachedPage, replace = true)
+        }
     }
 
     fun toggleSearchBar() {
@@ -304,6 +312,10 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
     fun refresh(force: Boolean = false) {
         checkForUpdate()
+        if (force) {
+            catalogCache.clear()
+            catalogPages.clear()
+        }
         val current = _state.value
         if (current.screen == Screen.Reader) {
             val episode = current.currentEpisode ?: return
@@ -397,6 +409,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     fun toggleFavorite(item: ToonItem) {
         viewModelScope.launch {
             val favorited = repository.toggleFavorite(item)
+            catalogCache.remove(Catalog.FAVORITE)
             _state.update { current ->
                 val updated = current.items.map { row ->
                     if (row.id == item.id) row.copy(isFavorite = favorited) else row
@@ -1042,8 +1055,11 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 )
             }
             try {
-                val result = repository.loadListing(_state.value.catalog, page)
+                val currentCat = _state.value.catalog
+                val result = repository.loadListing(currentCat, page)
                 repository.markSeen(result.items)
+                catalogCache[currentCat] = result.items
+                catalogPages[currentCat] = Pair(result.currentPage, result.lastPage)
                 _state.update {
                     it.copy(
                         items = result.items,
