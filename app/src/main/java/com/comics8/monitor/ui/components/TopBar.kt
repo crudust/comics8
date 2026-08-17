@@ -24,6 +24,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ChromeReaderMode
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -97,6 +98,10 @@ fun TopBar(
                 IconButton(onClick = viewModel::closeHistory) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "뒤로")
                 }
+            } else if (state.screen == Screen.Downloads) {
+                IconButton(onClick = viewModel::closeDownloads) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "뒤로")
+                }
             }
             Text(
                 text = when (state.screen) {
@@ -104,6 +109,7 @@ fun TopBar(
                     Screen.Series -> state.series?.title.orEmpty()
                     Screen.Browse -> "Comics8"
                     Screen.History -> "히스토리"
+                    Screen.Downloads -> "오프라인 저장소"
                 },
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
@@ -125,6 +131,12 @@ fun TopBar(
                     Icon(
                         imageVector = Icons.Outlined.CloudSync,
                         contentDescription = "클라우드 동기화",
+                    )
+                }
+                IconButton(onClick = viewModel::openDownloads) {
+                    Icon(
+                        imageVector = Icons.Default.Download,
+                        contentDescription = "다운로드 보관함",
                     )
                 }
                 IconButton(onClick = viewModel::openHistory) {
@@ -194,6 +206,13 @@ fun TopBar(
                             fontWeight = FontWeight.Bold,
                         )
                     }
+                }
+                IconButton(onClick = viewModel::openDownloadOptions) {
+                    Icon(
+                        imageVector = Icons.Default.Download,
+                        contentDescription = "오프라인 다운로드",
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
                 }
                 IconButton(onClick = viewModel::toggleFavorite) {
                     Icon(

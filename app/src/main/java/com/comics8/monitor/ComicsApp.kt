@@ -7,6 +7,7 @@ import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.comics8.core.parser.ComicSite
+import com.comics8.monitor.data.DownloadManager
 import com.comics8.monitor.data.SyncManager
 import com.comics8.monitor.data.ToonClient
 import com.comics8.monitor.data.ToonRepository
@@ -23,16 +24,19 @@ class ComicsApp : Application(), ImageLoaderFactory {
         val db = Room.databaseBuilder(this, AppDatabase::class.java, "comics8.db")
             .fallbackToDestructiveMigration()
             .build()
+        val client = ToonClient()
         val syncManager = SyncManager(this, db)
+        val downloadManager = DownloadManager(this, db, client)
         repository = ToonRepository(
-            ToonClient(),
-            db.seenDao(),
-            db.favoriteDao(),
-            db.readerSettingDao(),
-            db.readEpisodeDao(),
-            db.readHistoryDao(),
+            client = client,
+            seenDao = db.seenDao(),
+            favoriteDao = db.favoriteDao(),
+            readerSettingDao = db.readerSettingDao(),
+            readEpisodeDao = db.readEpisodeDao(),
+            readHistoryDao = db.readHistoryDao(),
             database = db,
             syncManager = syncManager,
+            downloadManager = downloadManager,
         )
         RefreshWorker.enqueue(this)
     }

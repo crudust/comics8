@@ -54,6 +54,13 @@ class DesktopViewModel(
                 }
             }
         }
+        repository.downloadManager?.let { dm ->
+            scope.launch {
+                dm.progress.collect { p ->
+                    _state.update { it.copy(downloadProgress = p) }
+                }
+            }
+        }
     }
 
     fun checkForUpdate() {
@@ -529,6 +536,55 @@ class DesktopViewModel(
         }
     }
 
+    fun openDownloadOptions() {
+        _state.update { it.copy(showDownloadOptions = true) }
+    }
+
+    fun closeDownloadOptions() {
+        _state.update { it.copy(showDownloadOptions = false) }
+    }
+
+    fun startDownloadEpisodes(episodesToDownload: List<EpisodeItem>) {
+        val series = _state.value.series ?: return
+        closeDownloadOptions()
+        repository.downloadManager?.enqueueEpisodes(series, episodesToDownload)
+    }
+
+    fun cancelDownloads() {
+        repository.downloadManager?.cancelAll()
+    }
+
+    fun openDownloads() {
+        readerJob?.cancel()
+        episodeJob?.cancel()
+        _state.update {
+            it.copy(
+                screen = Screen.Downloads,
+                downloadLoading = true,
+            )
+        }
+        loadDownloads()
+    }
+
+    fun closeDownloads() {
+        _state.update { it.copy(screen = Screen.Browse) }
+    }
+
+    fun loadDownloads() {
+        scope.launch {
+            _state.update { it.copy(downloadLoading = it.downloadSummaries.isEmpty()) }
+            val items = repository.downloadManager?.getDownloadedToonSummaries().orEmpty()
+            _state.update { it.copy(downloadSummaries = items, downloadLoading = false) }
+        }
+    }
+
+    fun deleteToonDownloads(toonId: String) {
+        scope.launch {
+            repository.downloadManager?.deleteToonDownloads(toonId)
+            loadDownloads()
+        }
+    }
+
     fun deleteHistory(toonId: String) {
         scope.launch {
             repository.deleteHistory(toonId)
@@ -873,7 +929,8 @@ class DesktopViewModel(
         readerJob?.cancel()
         readerJob = scope.launch {
             try {
-                val images = repository.loadImages(episode)
+                val seriesId = _state.value.series?.id
+                val images = repository.loadImages(episode, seriesId)
                 _state.update {
                     it.copy(
                         readerImages = images,

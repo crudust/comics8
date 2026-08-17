@@ -212,6 +212,52 @@ interface TombstoneDao {
     suspend fun deleteOlderThan(cutoff: Long)
 }
 
+@Entity(
+    tableName = "downloaded_episodes",
+    primaryKeys = ["toonId", "wrId"],
+    indices = [Index("toonId"), Index("downloadedAt")],
+)
+data class DownloadedEpisode(
+    val toonId: String,
+    val wrId: String,
+    val toonTitle: String,
+    val toonThumbUrl: String,
+    val toonHref: String,
+    val episodeTitle: String,
+    val episodeHref: String,
+    val imageCount: Int,
+    val totalBytes: Long,
+    val downloadedAt: Long,
+    val localDirPath: String,
+)
+
+@Dao
+interface DownloadedEpisodeDao {
+    @Query("SELECT * FROM downloaded_episodes ORDER BY downloadedAt DESC")
+    suspend fun all(): List<DownloadedEpisode>
+
+    @Query("SELECT * FROM downloaded_episodes WHERE toonId = :toonId ORDER BY downloadedAt DESC")
+    suspend fun byToon(toonId: String): List<DownloadedEpisode>
+
+    @Query("SELECT * FROM downloaded_episodes WHERE toonId = :toonId AND wrId = :wrId")
+    suspend fun get(toonId: String, wrId: String): DownloadedEpisode?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(item: DownloadedEpisode)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(items: List<DownloadedEpisode>)
+
+    @Query("DELETE FROM downloaded_episodes WHERE toonId = :toonId AND wrId = :wrId")
+    suspend fun delete(toonId: String, wrId: String)
+
+    @Query("DELETE FROM downloaded_episodes WHERE toonId = :toonId")
+    suspend fun deleteByToon(toonId: String)
+
+    @Query("SELECT DISTINCT toonId FROM downloaded_episodes")
+    suspend fun getDownloadedToonIds(): List<String>
+}
+
 @Database(
     entities = [
         SeenToon::class,
@@ -220,8 +266,9 @@ interface TombstoneDao {
         ReadEpisode::class,
         ReadHistory::class,
         Tombstone::class,
+        DownloadedEpisode::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -231,4 +278,5 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun readEpisodeDao(): ReadEpisodeDao
     abstract fun readHistoryDao(): ReadHistoryDao
     abstract fun tombstoneDao(): TombstoneDao
+    abstract fun downloadedEpisodeDao(): DownloadedEpisodeDao
 }

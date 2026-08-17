@@ -11,6 +11,7 @@ class DesktopToonRepository(
     private val client: ToonClient,
     private val database: DesktopDatabase,
     val syncManager: DesktopSyncManager? = null,
+    val downloadManager: DesktopDownloadManager? = null,
     private val now: () -> Long = { System.currentTimeMillis() },
 ) {
     suspend fun loadListing(catalog: Catalog, page: Int): ListingPage = withContext(Dispatchers.IO) {
@@ -82,7 +83,13 @@ class DesktopToonRepository(
         parsed.copy(items = enriched)
     }
 
-    suspend fun loadImages(episode: EpisodeItem): List<String> = withContext(Dispatchers.IO) {
+    suspend fun loadImages(episode: EpisodeItem, toonId: String? = null): List<String> = withContext(Dispatchers.IO) {
+        if (!toonId.isNullOrBlank() && downloadManager != null) {
+            val localImages = downloadManager.getLocalEpisodeImages(toonId, episode.wrId)
+            if (!localImages.isNullOrEmpty()) {
+                return@withContext localImages
+            }
+        }
         val parsed = client.fetchImages(episode.href)
         if (parsed.isEmpty()) {
             error("만화 이미지를 불러오지 못했습니다.")

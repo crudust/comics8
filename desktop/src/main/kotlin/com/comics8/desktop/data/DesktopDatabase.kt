@@ -101,6 +101,24 @@ class DesktopDatabase(dbFile: File? = null) {
                     );
                     """.trimIndent(),
                 )
+                stmt.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS downloaded_episodes (
+                        toonId TEXT,
+                        wrId TEXT,
+                        toonTitle TEXT,
+                        toonThumbUrl TEXT,
+                        toonHref TEXT,
+                        episodeTitle TEXT,
+                        episodeHref TEXT,
+                        imageCount INTEGER,
+                        totalBytes INTEGER,
+                        downloadedAt INTEGER,
+                        localDirPath TEXT,
+                        PRIMARY KEY (toonId, wrId)
+                    );
+                    """.trimIndent(),
+                )
             }
         }
     }
@@ -768,6 +786,132 @@ class DesktopDatabase(dbFile: File? = null) {
                 stmt.executeBatch()
             }
             conn.commit()
+        }
+    }
+
+    // --- Downloaded Episodes ---
+    fun getAllDownloadedEpisodes(): List<DownloadedEpisodeRecord> {
+        val list = mutableListOf<DownloadedEpisodeRecord>()
+        getConnection().use { conn ->
+            conn.prepareStatement("SELECT * FROM downloaded_episodes ORDER BY downloadedAt DESC").use { stmt ->
+                val rs = stmt.executeQuery()
+                while (rs.next()) {
+                    list.add(
+                        DownloadedEpisodeRecord(
+                            toonId = rs.getString("toonId"),
+                            wrId = rs.getString("wrId"),
+                            toonTitle = rs.getString("toonTitle"),
+                            toonThumbUrl = rs.getString("toonThumbUrl"),
+                            toonHref = rs.getString("toonHref"),
+                            episodeTitle = rs.getString("episodeTitle"),
+                            episodeHref = rs.getString("episodeHref"),
+                            imageCount = rs.getInt("imageCount"),
+                            totalBytes = rs.getLong("totalBytes"),
+                            downloadedAt = rs.getLong("downloadedAt"),
+                            localDirPath = rs.getString("localDirPath"),
+                        )
+                    )
+                }
+            }
+        }
+        return list
+    }
+
+    fun getDownloadedEpisodesByToon(toonId: String): List<DownloadedEpisodeRecord> {
+        val list = mutableListOf<DownloadedEpisodeRecord>()
+        getConnection().use { conn ->
+            conn.prepareStatement("SELECT * FROM downloaded_episodes WHERE toonId = ? ORDER BY downloadedAt DESC").use { stmt ->
+                stmt.setString(1, toonId)
+                val rs = stmt.executeQuery()
+                while (rs.next()) {
+                    list.add(
+                        DownloadedEpisodeRecord(
+                            toonId = rs.getString("toonId"),
+                            wrId = rs.getString("wrId"),
+                            toonTitle = rs.getString("toonTitle"),
+                            toonThumbUrl = rs.getString("toonThumbUrl"),
+                            toonHref = rs.getString("toonHref"),
+                            episodeTitle = rs.getString("episodeTitle"),
+                            episodeHref = rs.getString("episodeHref"),
+                            imageCount = rs.getInt("imageCount"),
+                            totalBytes = rs.getLong("totalBytes"),
+                            downloadedAt = rs.getLong("downloadedAt"),
+                            localDirPath = rs.getString("localDirPath"),
+                        )
+                    )
+                }
+            }
+        }
+        return list
+    }
+
+    fun getDownloadedEpisode(toonId: String, wrId: String): DownloadedEpisodeRecord? {
+        getConnection().use { conn ->
+            conn.prepareStatement("SELECT * FROM downloaded_episodes WHERE toonId = ? AND wrId = ?").use { stmt ->
+                stmt.setString(1, toonId)
+                stmt.setString(2, wrId)
+                val rs = stmt.executeQuery()
+                if (rs.next()) {
+                    return DownloadedEpisodeRecord(
+                        toonId = rs.getString("toonId"),
+                        wrId = rs.getString("wrId"),
+                        toonTitle = rs.getString("toonTitle"),
+                        toonThumbUrl = rs.getString("toonThumbUrl"),
+                        toonHref = rs.getString("toonHref"),
+                        episodeTitle = rs.getString("episodeTitle"),
+                        episodeHref = rs.getString("episodeHref"),
+                        imageCount = rs.getInt("imageCount"),
+                        totalBytes = rs.getLong("totalBytes"),
+                        downloadedAt = rs.getLong("downloadedAt"),
+                        localDirPath = rs.getString("localDirPath"),
+                    )
+                }
+            }
+        }
+        return null
+    }
+
+    fun saveDownloadedEpisode(item: DownloadedEpisodeRecord) {
+        getConnection().use { conn ->
+            conn.prepareStatement(
+                """
+                INSERT OR REPLACE INTO downloaded_episodes
+                (toonId, wrId, toonTitle, toonThumbUrl, toonHref, episodeTitle, episodeHref, imageCount, totalBytes, downloadedAt, localDirPath)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, item.toonId)
+                stmt.setString(2, item.wrId)
+                stmt.setString(3, item.toonTitle)
+                stmt.setString(4, item.toonThumbUrl)
+                stmt.setString(5, item.toonHref)
+                stmt.setString(6, item.episodeTitle)
+                stmt.setString(7, item.episodeHref)
+                stmt.setInt(8, item.imageCount)
+                stmt.setLong(9, item.totalBytes)
+                stmt.setLong(10, item.downloadedAt)
+                stmt.setString(11, item.localDirPath)
+                stmt.executeUpdate()
+            }
+        }
+    }
+
+    fun deleteDownloadedEpisode(toonId: String, wrId: String) {
+        getConnection().use { conn ->
+            conn.prepareStatement("DELETE FROM downloaded_episodes WHERE toonId = ? AND wrId = ?").use { stmt ->
+                stmt.setString(1, toonId)
+                stmt.setString(2, wrId)
+                stmt.executeUpdate()
+            }
+        }
+    }
+
+    fun deleteDownloadedEpisodesByToon(toonId: String) {
+        getConnection().use { conn ->
+            conn.prepareStatement("DELETE FROM downloaded_episodes WHERE toonId = ?").use { stmt ->
+                stmt.setString(1, toonId)
+                stmt.executeUpdate()
+            }
         }
     }
 }

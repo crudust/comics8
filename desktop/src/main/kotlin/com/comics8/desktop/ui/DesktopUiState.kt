@@ -14,6 +14,7 @@ enum class Screen {
     Series,
     Reader,
     History,
+    Downloads,
 }
 
 data class DesktopUiState(
@@ -51,6 +52,10 @@ data class DesktopUiState(
     val isFullscreen: Boolean = false,
     val showUpdateDialog: Boolean = false,
     val updateState: com.comics8.core.model.AppUpdateState = com.comics8.core.model.AppUpdateState(),
+    val downloadSummaries: List<com.comics8.core.model.DownloadedToonSummary> = emptyList(),
+    val downloadLoading: Boolean = false,
+    val showDownloadOptions: Boolean = false,
+    val downloadProgress: com.comics8.desktop.data.DesktopDownloadProgressState = com.comics8.desktop.data.DesktopDownloadProgressState(),
 ) {
     val isSearch: Boolean get() = searchQuery != null
 

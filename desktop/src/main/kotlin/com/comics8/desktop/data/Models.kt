@@ -10,6 +10,8 @@ import com.comics8.core.model.ToonItem
 import com.comics8.core.model.ViewMode
 import com.comics8.core.model.buildDualSpreads
 
+import com.comics8.core.model.DownloadedToonSummary
+
 typealias ViewMode = ViewMode
 typealias ReadDirection = ReadDirection
 typealias ToonItem = ToonItem
@@ -18,6 +20,7 @@ typealias ListingPage = ListingPage
 typealias EpisodePage = EpisodePage
 typealias Catalog = Catalog
 typealias DualSpread = DualSpread
+typealias DownloadedToonSummary = DownloadedToonSummary
 
 data class FavoriteRecord(
     val id: String,
@@ -67,5 +70,19 @@ data class ReaderSettingRecord(
     val viewMode: String,
     val readDirection: String,
     val updatedAt: Long,
+)
+
+data class DownloadedEpisodeRecord(
+    val toonId: String,
+    val wrId: String,
+    val toonTitle: String,
+    val toonThumbUrl: String,
+    val toonHref: String,
+    val episodeTitle: String,
+    val episodeHref: String,
+    val imageCount: Int,
+    val totalBytes: Long,
+    val downloadedAt: Long,
+    val localDirPath: String,
 )
 

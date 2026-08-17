@@ -117,6 +117,8 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
         BackHandler { viewModel.closeSeries() }
     } else if (state.screen == Screen.History) {
         BackHandler { viewModel.closeHistory() }
+    } else if (state.screen == Screen.Downloads) {
+        BackHandler { viewModel.closeDownloads() }
     } else if (state.isSearch) {
         BackHandler { viewModel.selectCatalog(state.catalog) }
     }
@@ -130,6 +132,8 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                 onRefresh = {
                     if (state.screen == Screen.History) {
                         viewModel.loadHistory()
+                    } else if (state.screen == Screen.Downloads) {
+                        viewModel.loadDownloads()
                     } else {
                         viewModel.refresh()
                     }
@@ -141,6 +145,7 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                     when {
                         state.screen == Screen.Series -> SeriesPane(state = state, viewModel = viewModel)
                         state.screen == Screen.History -> HistoryPane(state = state, viewModel = viewModel)
+                        state.screen == Screen.Downloads -> com.comics8.monitor.ui.downloads.DownloadsPane(state = state, viewModel = viewModel)
                         state.isSearch -> {
                             when {
                                 state.loading && state.items.isEmpty() -> LoadingPane()
@@ -233,6 +238,15 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                 state = state,
                 viewModel = viewModel,
                 onDismiss = viewModel::closeSyncDialog,
+            )
+        }
+        val currentSeries = state.series
+        if (state.showDownloadOptions && currentSeries != null) {
+            com.comics8.monitor.ui.components.DownloadOptionsDialog(
+                series = currentSeries,
+                episodes = state.episodes,
+                onDismiss = viewModel::closeDownloadOptions,
+                onConfirm = viewModel::startDownloadEpisodes,
             )
         }
         if (state.showUpdateDialog) {

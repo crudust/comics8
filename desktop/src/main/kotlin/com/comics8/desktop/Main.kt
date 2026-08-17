@@ -61,7 +61,9 @@ fun main() {
     application {
         val database = remember { DesktopDatabase() }
         val syncManager = remember { DesktopSyncManager(database) }
-        val repository = remember { DesktopToonRepository(ToonClient(), database, syncManager) }
+        val toonClient = remember { ToonClient() }
+        val downloadManager = remember { com.comics8.desktop.data.DesktopDownloadManager(database, toonClient) }
+        val repository = remember { DesktopToonRepository(toonClient, database, syncManager, downloadManager) }
         val viewModel = remember { DesktopViewModel(repository) }
         val state by viewModel.state.collectAsState()
 
@@ -110,9 +112,20 @@ fun ComicsDesktopApp(
                     Screen.Browse -> BrowsePane(state = state, viewModel = viewModel, modifier = Modifier.weight(1f))
                     Screen.Series -> SeriesPane(state = state, viewModel = viewModel, modifier = Modifier.weight(1f))
                     Screen.History -> HistoryPane(state = state, viewModel = viewModel, modifier = Modifier.weight(1f))
+                    Screen.Downloads -> com.comics8.desktop.ui.downloads.DesktopDownloadsPane(state = state, viewModel = viewModel, modifier = Modifier.weight(1f))
                     Screen.Reader -> {}
                 }
             }
+        }
+
+        val currentSeries = state.series
+        if (state.showDownloadOptions && currentSeries != null) {
+            com.comics8.desktop.ui.components.DesktopDownloadDialog(
+                series = currentSeries,
+                episodes = state.episodes,
+                onDismiss = viewModel::closeDownloadOptions,
+                onConfirm = viewModel::startDownloadEpisodes,
+            )
         }
 
         if (state.showPageJump) {

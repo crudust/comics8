@@ -100,3 +100,13 @@ fun buildDualSpreads(
     }
     return spreads
 }
+
+data class DownloadedToonSummary(
+    val toonId: String,
+    val toonTitle: String,
+    val toonThumbUrl: String,
+    val toonHref: String,
+    val episodeCount: Int,
+    val totalBytes: Long,
+    val latestDownloadedAt: Long,
+)

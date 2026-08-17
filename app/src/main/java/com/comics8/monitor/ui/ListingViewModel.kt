@@ -63,6 +63,10 @@ data class ListingUiState(
     val syncState: SyncState = SyncState(),
     val showUpdateDialog: Boolean = false,
     val updateState: AppUpdateState = AppUpdateState(),
+    val downloadSummaries: List<com.comics8.core.model.DownloadedToonSummary> = emptyList(),
+    val downloadLoading: Boolean = false,
+    val showDownloadOptions: Boolean = false,
+    val downloadProgress: com.comics8.monitor.data.DownloadProgressState = com.comics8.monitor.data.DownloadProgressState(),
 ) {
     val isSearch: Boolean get() = searchQuery != null
 
@@ -81,6 +85,7 @@ sealed interface Screen {
     data object Series : Screen
     data object Reader : Screen
     data object History : Screen
+    data object Downloads : Screen
 }
 
 class ListingViewModel(application: Application) : AndroidViewModel(application) {
@@ -146,6 +151,13 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 val res = sm.syncPull()
                 if (res.success && (res.favoritesCount > 0 || res.historyCount > 0)) {
                     loadPage(page = _state.value.page, replace = true)
+                }
+            }
+        }
+        repository.downloadManager?.let { dm ->
+            viewModelScope.launch {
+                dm.progress.collect { p ->
+                    _state.update { it.copy(downloadProgress = p) }
                 }
             }
         }
@@ -543,6 +555,55 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             _state.update { it.copy(historyLoading = it.historyItems.isEmpty()) }
             val items = repository.getHistory()
             _state.update { it.copy(historyItems = items, historyLoading = false) }
+        }
+    }
+
+    fun openDownloadOptions() {
+        _state.update { it.copy(showDownloadOptions = true) }
+    }
+
+    fun closeDownloadOptions() {
+        _state.update { it.copy(showDownloadOptions = false) }
+    }
+
+    fun startDownloadEpisodes(episodesToDownload: List<EpisodeItem>) {
+        val series = _state.value.series ?: return
+        closeDownloadOptions()
+        repository.downloadManager?.enqueueEpisodes(series, episodesToDownload)
+    }
+
+    fun cancelDownloads() {
+        repository.downloadManager?.cancelAll()
+    }
+
+    fun openDownloads() {
+        readerJob?.cancel()
+        episodeJob?.cancel()
+        _state.update {
+            it.copy(
+                screen = Screen.Downloads,
+                downloadLoading = true,
+            )
+        }
+        loadDownloads()
+    }
+
+    fun closeDownloads() {
+        _state.update { it.copy(screen = Screen.Browse) }
+    }
+
+    fun loadDownloads() {
+        viewModelScope.launch {
+            _state.update { it.copy(downloadLoading = it.downloadSummaries.isEmpty()) }
+            val items = repository.downloadManager?.getDownloadedToonSummaries().orEmpty()
+            _state.update { it.copy(downloadSummaries = items, downloadLoading = false) }
+        }
+    }
+
+    fun deleteToonDownloads(toonId: String) {
+        viewModelScope.launch {
+            repository.downloadManager?.deleteToonDownloads(toonId)
+            loadDownloads()
         }
     }
 
@@ -1223,7 +1284,8 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 )
             }
             try {
-                val images = repository.loadImages(episode)
+                val seriesId = _state.value.series?.id
+                val images = repository.loadImages(episode, seriesId)
                 _state.update {
                     it.copy(
                         readerImages = images,
