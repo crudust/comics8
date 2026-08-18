@@ -44,6 +44,9 @@ interface FavoriteDao {
     @Query("SELECT * FROM favorites WHERE savedAt > :since ORDER BY savedAt DESC")
     suspend fun getSince(since: Long): List<FavoriteToon>
 
+    @Query("SELECT * FROM favorites WHERE id = :id")
+    suspend fun get(id: String): FavoriteToon?
+
     @Query("SELECT EXISTS(SELECT 1 FROM favorites WHERE id = :id)")
     suspend fun exists(id: String): Boolean
 
@@ -56,7 +59,7 @@ interface FavoriteDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(items: List<FavoriteToon>)
 
-    @Query("UPDATE favorites SET updatedAt = :updatedAt WHERE id = :id AND (:updatedAt != '' AND (updatedAt IS NULL OR updatedAt < :updatedAt))")
+    @Query("UPDATE favorites SET updatedAt = :updatedAt WHERE id = :id")
     suspend fun updateUpdatedAt(id: String, updatedAt: String)
 
     @Query("DELETE FROM favorites WHERE id = :id")

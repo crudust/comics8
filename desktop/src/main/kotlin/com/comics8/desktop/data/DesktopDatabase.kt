@@ -1,6 +1,7 @@
 package com.comics8.desktop.data
 
 import com.comics8.core.model.SyncTombstone
+import com.comics8.core.model.UpdateDates
 import java.io.File
 import java.sql.Connection
 import java.sql.DriverManager
@@ -237,15 +238,36 @@ class DesktopDatabase(dbFile: File? = null) {
         }
     }
 
+    fun getFavorite(id: String): FavoriteRecord? {
+        getConnection().use { conn ->
+            conn.prepareStatement("SELECT * FROM favorites WHERE id = ?").use { stmt ->
+                stmt.setString(1, id)
+                val rs = stmt.executeQuery()
+                if (!rs.next()) return null
+                return FavoriteRecord(
+                    id = rs.getString("id"),
+                    title = rs.getString("title"),
+                    thumbUrl = rs.getString("thumbUrl"),
+                    href = rs.getString("href"),
+                    genre = rs.getString("genre"),
+                    updatedAt = rs.getString("updatedAt"),
+                    savedAt = rs.getLong("savedAt"),
+                )
+            }
+        }
+    }
+
     fun updateFavoriteUpdatedAt(id: String, updatedAt: String) {
         if (updatedAt.isBlank()) return
+        val current = getFavorite(id) ?: return
+        if (!UpdateDates.shouldReplace(current.updatedAt, updatedAt)) return
+        val stored = UpdateDates.toListingDate(updatedAt) ?: updatedAt
         getConnection().use { conn ->
             conn.prepareStatement(
-                "UPDATE favorites SET updatedAt = ? WHERE id = ? AND (updatedAt IS NULL OR updatedAt < ?)"
+                "UPDATE favorites SET updatedAt = ? WHERE id = ?"
             ).use { stmt ->
-                stmt.setString(1, updatedAt)
+                stmt.setString(1, stored)
                 stmt.setString(2, id)
-                stmt.setString(3, updatedAt)
                 stmt.executeUpdate()
             }
         }

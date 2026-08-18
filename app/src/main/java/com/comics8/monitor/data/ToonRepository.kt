@@ -1,5 +1,7 @@
 package com.comics8.monitor.data
 
+import com.comics8.core.model.FavoriteListing
+import com.comics8.core.model.UpdateDates
 import com.comics8.monitor.data.local.AppDatabase
 import com.comics8.monitor.data.local.FavoriteDao
 import com.comics8.monitor.data.local.FavoriteToon
@@ -28,47 +30,30 @@ class ToonRepository(
 ) {
     suspend fun loadListing(catalog: Catalog, page: Int): ListingPage = withContext(Dispatchers.IO) {
         if (catalog == Catalog.FAVORITE) {
-            val favs = favoriteDao.all()
-                .sortedWith(
-                    compareByDescending<FavoriteToon> { parseDateScore(it.updatedAt) }
-                        .thenByDescending { it.savedAt }
-                )
-                .map { it.toItem().copy(isFavorite = true) }
-            return@withContext ListingPage(
-                items = applyFlags(favs),
-                currentPage = 1,
-                lastPage = 1,
-            )
+            return@withContext loadFavoriteListing()
         }
+        fetchRemoteListing(catalog, page)
+    }
+
+    private suspend fun loadFavoriteListing(): ListingPage {
+        val local = favoriteDao.all().map { it.toItem().copy(isFavorite = true) }
+        val items = FavoriteListing.assemble(local) { page ->
+            fetchRemoteListing(Catalog.LATEST, page)
+        }
+        return ListingPage(
+            items = applyFlags(items),
+            currentPage = 1,
+            lastPage = 1,
+        )
+    }
+
+    private suspend fun fetchRemoteListing(catalog: Catalog, page: Int): ListingPage {
         val html = client.fetch(ComicSite.listingUrl(catalog, page))
         val parsed = HtmlParsers.parseListing(html)
         if (parsed.items.isEmpty()) {
             error("목록을 읽지 못했습니다. 사이트 구조가 바뀌었을 수 있습니다.")
         }
-        parsed.copy(items = applyFlags(parsed.items))
-    }
-
-    private fun parseDateScore(dateStr: String?): Long {
-        if (dateStr.isNullOrBlank()) return 0L
-        val parts = dateStr.trim().split('.')
-        return try {
-            when (parts.size) {
-                3 -> {
-                    val yy = parts[0].toInt()
-                    val mm = parts[1].toInt()
-                    val dd = parts[2].toInt()
-                    (yy * 10000L) + (mm * 100L) + dd
-                }
-                2 -> {
-                    val mm = parts[0].toInt()
-                    val dd = parts[1].toInt()
-                    (26 * 10000L) + (mm * 100L) + dd
-                }
-                else -> 0L
-            }
-        } catch (_: Exception) {
-            0L
-        }
+        return parsed.copy(items = applyFlags(parsed.items))
     }
 
     suspend fun loadEpisodes(item: ToonItem, page: Int): EpisodePage = withContext(Dispatchers.IO) {
@@ -78,11 +63,7 @@ class ToonRepository(
             error("회차 목록을 읽지 못했습니다.")
         }
         val firstDate = parsed.items.firstOrNull()?.date
-        if (!firstDate.isNullOrBlank()) {
-            try {
-                favoriteDao.updateUpdatedAt(item.id, firstDate)
-            } catch (_: Exception) {}
-        }
+        touchFavoriteUpdatedAt(item.id, firstDate)
         val readMap = readEpisodeDao.getReadEpisodes(item.id).associateBy { it.wrId }
         val enriched = parsed.items.map { ep ->
             val read = readMap[ep.wrId]
@@ -223,11 +204,8 @@ class ToonRepository(
             emptyMap()
         }
         for (item in items) {
-            val uDate = item.updatedAt
-            if (item.id in favoriteIds && !uDate.isNullOrBlank()) {
-                try {
-                    favoriteDao.updateUpdatedAt(item.id, uDate)
-                } catch (_: Exception) {}
+            if (item.id in favoriteIds) {
+                touchFavoriteUpdatedAt(item.id, item.updatedAt)
             }
         }
         return items.map { item ->
@@ -376,6 +354,17 @@ class ToonRepository(
     suspend fun getBackupStats(): BackupStats = withContext(Dispatchers.IO) {
         val db = database ?: return@withContext BackupStats()
         BackupManager.getStats(db)
+    }
+
+    private suspend fun touchFavoriteUpdatedAt(id: String, updatedAt: String?) {
+        if (updatedAt.isNullOrBlank()) return
+        try {
+            val current = favoriteDao.get(id) ?: return
+            if (!UpdateDates.shouldReplace(current.updatedAt, updatedAt)) return
+            val stored = UpdateDates.toListingDate(updatedAt) ?: updatedAt
+            favoriteDao.updateUpdatedAt(id, stored)
+        } catch (_: Exception) {
+        }
     }
 
     private fun notifyKey(item: ToonItem): String = "${item.id}|${item.updatedAt.orEmpty()}"

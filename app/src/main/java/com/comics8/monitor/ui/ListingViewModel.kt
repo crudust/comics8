@@ -380,7 +380,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 scrollToTopTrigger = it.scrollToTopTrigger + 1,
             )
         }
-        if (cached == null || catalog == Catalog.FAVORITE) {
+        if (cached == null) {
             loadPage(cachedPage, replace = true)
         }
     }
@@ -530,7 +530,6 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     fun toggleFavorite(item: ToonItem) {
         viewModelScope.launch {
             val favorited = repository.toggleFavorite(item)
-            catalogCache.remove(Catalog.FAVORITE)
             _state.update { current ->
                 val updated = current.items.map { row ->
                     if (row.id == item.id) row.copy(isFavorite = favorited) else row
@@ -544,6 +543,12 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                     updated.filter { it.id != item.id }
                 } else {
                     updated
+                }
+                if (current.catalog != Catalog.FAVORITE) {
+                    catalogCache.remove(Catalog.FAVORITE)
+                }
+                if (!current.isSearch) {
+                    catalogCache[current.catalog] = visible
                 }
                 current.copy(
                     seriesFavorited = if (current.series?.id == item.id) favorited else current.seriesFavorited,
@@ -639,7 +644,10 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             )
         }
         if (catalog == Catalog.FAVORITE && !searching) {
-            loadPage(1, replace = true)
+            val cached = catalogCache[Catalog.FAVORITE]
+            if (cached == null) {
+                loadPage(1, replace = true)
+            }
         }
     }
 

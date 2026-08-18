@@ -36,6 +36,9 @@ class DesktopViewModel(
     private var readerJob: Job? = null
     private var countUpdateJob: Job? = null
 
+    private val catalogCache = mutableMapOf<Catalog, List<ToonItem>>()
+    private val catalogPages = mutableMapOf<Catalog, Pair<Int, Int>>()
+
     private val toonTotalCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
     private val toonLastPageCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
@@ -224,25 +227,37 @@ class DesktopViewModel(
     }
 
     fun selectCatalog(catalog: Catalog) {
-        if (_state.value.catalog == catalog && _state.value.screen == Screen.Browse && !_state.value.isSearch) {
-            refresh()
-            return
-        }
+        if (
+            catalog == _state.value.catalog &&
+            _state.value.screen == Screen.Browse &&
+            !_state.value.isSearch
+        ) return
         loadJob?.cancel()
+        episodeJob?.cancel()
+        readerJob?.cancel()
+        val cached = catalogCache[catalog]
+        val (cachedPage, cachedLastPage) = catalogPages[catalog] ?: Pair(1, 1)
         _state.update {
             it.copy(
                 catalog = catalog,
-                page = 1,
-                lastPage = 1,
-                items = emptyList(),
-                loading = true,
+                page = cachedPage,
+                lastPage = cachedLastPage,
+                items = cached ?: emptyList(),
+                loading = cached == null,
                 error = null,
                 screen = Screen.Browse,
                 searchQuery = null,
                 searchInput = "",
+                series = null,
+                episodes = emptyList(),
+                currentEpisode = null,
+                readerImages = emptyList(),
+                readerError = null,
             )
         }
-        loadPage(1)
+        if (cached == null) {
+            loadPage(cachedPage)
+        }
     }
 
     private fun updateEpisodeCountsForUpdatedItems(items: List<ToonItem>) {
@@ -272,6 +287,9 @@ class DesktopViewModel(
                             val updatedItems = curr.items.map { row ->
                                 if (row.id == target.id) row.copy(readProgress = progressText) else row
                             }
+                            if (!curr.isSearch) {
+                                catalogCache[curr.catalog] = updatedItems
+                            }
                             curr.copy(
                                 items = updatedItems,
                                 seriesHistory = if (curr.series?.id == target.id) updated else curr.seriesHistory,
@@ -298,6 +316,8 @@ class DesktopViewModel(
             }
             try {
                 val result = repository.loadListing(catalog, targetPage)
+                catalogCache[catalog] = result.items
+                catalogPages[catalog] = Pair(result.currentPage, result.lastPage)
                 _state.update {
                     it.copy(
                         page = result.currentPage,
@@ -331,6 +351,7 @@ class DesktopViewModel(
             val query = _state.value.searchQuery.orEmpty()
             if (query.isNotEmpty()) search(query)
         } else {
+            catalogCache.remove(_state.value.catalog)
             loadPage(_state.value.page, replace = true)
         }
     }
@@ -570,6 +591,12 @@ class DesktopViewModel(
                 } else {
                     updated
                 }
+                if (current.catalog != Catalog.FAVORITE) {
+                    catalogCache.remove(Catalog.FAVORITE)
+                }
+                if (!current.isSearch) {
+                    catalogCache[current.catalog] = visible
+                }
                 current.copy(
                     seriesFavorited = if (current.series?.id == item.id) favorited else current.seriesFavorited,
                     items = visible,
@@ -663,7 +690,7 @@ class DesktopViewModel(
                 readerError = null,
             )
         }
-        if (catalog == Catalog.FAVORITE && !searching) {
+        if (catalog == Catalog.FAVORITE && !searching && catalogCache[Catalog.FAVORITE] == null) {
             loadPage(1, replace = true)
         }
     }

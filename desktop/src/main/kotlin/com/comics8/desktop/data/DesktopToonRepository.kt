@@ -1,5 +1,6 @@
 package com.comics8.desktop.data
 
+import com.comics8.core.model.FavoriteListing
 import com.comics8.core.network.ToonClient
 import com.comics8.core.parser.ComicSite
 import com.comics8.core.parser.HtmlParsers
@@ -16,47 +17,30 @@ class DesktopToonRepository(
 ) {
     suspend fun loadListing(catalog: Catalog, page: Int): ListingPage = withContext(Dispatchers.IO) {
         if (catalog == Catalog.FAVORITE) {
-            val favs = database.getAllFavorites()
-                .sortedWith(
-                    compareByDescending<FavoriteRecord> { parseDateScore(it.updatedAt) }
-                        .thenByDescending { it.savedAt }
-                )
-                .map { it.toItem().copy(isFavorite = true) }
-            return@withContext ListingPage(
-                items = applyFlags(favs),
-                currentPage = 1,
-                lastPage = 1,
-            )
+            return@withContext loadFavoriteListing()
         }
+        fetchRemoteListing(catalog, page)
+    }
+
+    private suspend fun loadFavoriteListing(): ListingPage {
+        val local = database.getAllFavorites().map { it.toItem().copy(isFavorite = true) }
+        val items = FavoriteListing.assemble(local) { page ->
+            fetchRemoteListing(Catalog.LATEST, page)
+        }
+        return ListingPage(
+            items = applyFlags(items),
+            currentPage = 1,
+            lastPage = 1,
+        )
+    }
+
+    private suspend fun fetchRemoteListing(catalog: Catalog, page: Int): ListingPage {
         val html = client.fetch(ComicSite.listingUrl(catalog, page))
         val parsed = HtmlParsers.parseListing(html)
         if (parsed.items.isEmpty()) {
             error("목록을 읽지 못했습니다. 사이트 구조가 바뀌었을 수 있습니다.")
         }
-        parsed.copy(items = applyFlags(parsed.items))
-    }
-
-    private fun parseDateScore(dateStr: String?): Long {
-        if (dateStr.isNullOrBlank()) return 0L
-        val parts = dateStr.trim().split('.')
-        return try {
-            when (parts.size) {
-                3 -> {
-                    val yy = parts[0].toInt()
-                    val mm = parts[1].toInt()
-                    val dd = parts[2].toInt()
-                    (yy * 10000L) + (mm * 100L) + dd
-                }
-                2 -> {
-                    val mm = parts[0].toInt()
-                    val dd = parts[1].toInt()
-                    (26 * 10000L) + (mm * 100L) + dd
-                }
-                else -> 0L
-            }
-        } catch (_: Exception) {
-            0L
-        }
+        return parsed.copy(items = applyFlags(parsed.items))
     }
 
     suspend fun loadEpisodes(item: ToonItem, page: Int): EpisodePage = withContext(Dispatchers.IO) {
@@ -69,7 +53,8 @@ class DesktopToonRepository(
         if (!firstDate.isNullOrBlank()) {
             try {
                 database.updateFavoriteUpdatedAt(item.id, firstDate)
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+            }
         }
         val readMap = database.getReadEpisodesByToon(item.id).associateBy { it.wrId }
         val enriched = parsed.items.map { ep ->

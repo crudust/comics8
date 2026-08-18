@@ -1,0 +1,68 @@
+package com.comics8.core.model
+
+import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.runBlocking
+import org.junit.Test
+
+class FavoriteListingTest {
+    @Test
+    fun latestHitsComeFirstInListingOrderThenLeftoversByDate() = runBlocking {
+        val local = listOf(
+            toon("old", "08.10"),
+            toon("b", "08.16"),
+            toon("a", "08.16"),
+            toon("unseen-newer", "08.17"),
+        )
+        val pages = mapOf(
+            1 to ListingPage(
+                items = listOf(toon("x", "08.18"), toon("a", "08.18"), toon("b", "08.18")),
+                currentPage = 1,
+                lastPage = 1,
+            ),
+        )
+
+        val result = FavoriteListing.assemble(local) { page ->
+            pages.getValue(page)
+        }
+
+        assertThat(result.map { it.id }).containsExactly("a", "b", "unseen-newer", "old").inOrder()
+        assertThat(result[0].updatedAt).isEqualTo("08.18")
+        assertThat(result.all { it.isFavorite }).isTrue()
+    }
+
+    @Test
+    fun onlyUsesFirstLatestPage() = runBlocking {
+        val local = listOf(toon("p2", "08.16"), toon("p1", "08.16"))
+        val fetched = mutableListOf<Int>()
+
+        val result = FavoriteListing.assemble(local) { page ->
+            fetched += page
+            if (page != 1) error("should not fetch page $page")
+            ListingPage(
+                items = listOf(toon("p1", "08.18"), toon("other", "08.18")),
+                currentPage = 1,
+                lastPage = 2,
+            )
+        }
+
+        assertThat(fetched).containsExactly(1)
+        assertThat(result.map { it.id }).containsExactly("p1", "p2").inOrder()
+    }
+
+    @Test
+    fun listingFailureFallsBackToLocalDateOrder() = runBlocking {
+        val local = listOf(toon("older", "08.10"), toon("newer", "08.16"))
+
+        val result = FavoriteListing.assemble(local) { error("offline") }
+
+        assertThat(result.map { it.id }).containsExactly("newer", "older").inOrder()
+    }
+
+    private fun toon(id: String, updatedAt: String) = ToonItem(
+        id = id,
+        title = id,
+        thumbUrl = "",
+        href = "",
+        updatedAt = updatedAt,
+    )
+}
