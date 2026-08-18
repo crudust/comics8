@@ -1,5 +1,6 @@
 package com.comics8.core.source.hitomi
 
+import com.comics8.core.model.ArtistRef
 import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.EpisodePage
 import com.comics8.core.model.ListingPage
@@ -22,6 +23,9 @@ class HitomiSource(
     private val language: String = HitomiUrls.DEFAULT_LANGUAGE,
     private val delayMillis: suspend (Long) -> Unit = { kotlinx.coroutines.delay(it) },
 ) : ComicSource {
+    @Volatile
+    private var ggCache: CachedGg? = null
+
     override val id: String = HitomiUrls.SOURCE_ID
     override val displayName: String = "Hitomi"
     override val origin: String = HitomiUrls.ORIGIN
@@ -38,11 +42,7 @@ class HitomiSource(
 
     override suspend fun loadListing(catalogId: String, page: Int, http: SourceHttp): ListingPage {
         val p = page.coerceAtLeast(1)
-        val url = listingNozomi(catalogId)
-        val result = http.fetch(nozomiSpec(url, p))
-        if (result.code !in 200..299) {
-            error("HTTP ${result.code}")
-        }
+        val result = fetchNozomiPage(listingNozomi(catalogId), p, http)
         val ids = NozomiIndex.parseIds(result.body)
         val lastPage = NozomiIndex.lastPage(p, ids, result.totalLength())
         val items = loadGalleryCards(ids, http)
@@ -63,11 +63,16 @@ class HitomiSource(
         if (!query.type.isNullOrBlank() && filters.none { it.ns == "type" }) {
             filters += SearchToken("type", query.type)
         }
-        val sets = filters.map { token ->
-            fetchFullNozomi(HitomiSearch.nozomiUrl(token, lang), http).toSet()
+        val ordered = if (filters.isEmpty()) {
+            NozomiIndex.parseIds(fetchNozomiPage(HitomiUrls.indexNozomi(lang), 1, http).body)
+        } else {
+            val lists = filters.map { token ->
+                fetchRequiredNozomi(HitomiSearch.nozomiUrl(token, lang), http)
+            }
+            val sets = lists.map { it.toSet() }
+            val seed = lists.minBy { it.size }
+            seed.filter { id -> sets.all { id in it } }.take(NozomiIndex.PAGE)
         }
-        val indexIds = fetchFullNozomi(HitomiUrls.indexNozomi(lang), http)
-        val ordered = HitomiSearch.intersectInOrder(indexIds, sets).take(NozomiIndex.PAGE)
         return loadGalleryCards(ordered, http)
     }
 
@@ -75,14 +80,10 @@ class HitomiSource(
         val p = page.coerceAtLeast(1)
         val artistSlug = artistSlugOf(item.id)
         if (artistSlug != null) {
-            val url = HitomiUrls.nsNozomi("artist", artistSlug, language)
-            val result = http.fetch(nozomiSpec(url, p))
-            if (result.code !in 200..299) {
-                error("HTTP ${result.code}")
-            }
+            val result = fetchNozomiPage(HitomiUrls.nsNozomi("artist", artistSlug, language), p, http)
             val ids = NozomiIndex.parseIds(result.body)
             val lastPage = NozomiIndex.lastPage(p, ids, result.totalLength())
-            val episodes = loadGalleryCards(ids, http).map { it.toEpisode() }
+            val episodes = loadGalleryInfos(ids, http).map { it.toEpisodeItem() }
             return EpisodePage(items = episodes, currentPage = p, lastPage = lastPage)
         }
         val galleryId = galleryIdOf(item) ?: return EpisodePage(emptyList(), p, 1)
@@ -96,17 +97,22 @@ class HitomiSource(
     override suspend fun resolveImages(episode: EpisodeItem, item: ToonItem, http: SourceHttp): List<String> {
         val info = fetchGalleryInfo(episode.wrId, http)
             ?: error("만화 이미지를 불러오지 못했습니다.")
-        val gg = GgJsRouter.parse(http.fetchText(FetchSpec(HitomiUrls.ggJs(), defaultPolicy)))
+        val gg = loadGg(http)
         if (info.files.isEmpty()) {
             error("만화 이미지를 불러오지 못했습니다.")
         }
         return info.files.map { file ->
-            HitomiUrls.imageUrl(file.hash, gg.b, gg.subdomainIndex(file.hash), "webp")
+            val ext = when {
+                file.hasWebp -> "webp"
+                file.hasAvif -> "avif"
+                else -> "webp"
+            }
+            HitomiUrls.imageUrl(file.hash, gg.b, gg.subdomainIndex(file.hash), ext)
         }
     }
 
     override fun imageFallbacks(url: String): List<String> =
-        listOfNotNull(HitomiUrls.avifFallback(url))
+        listOfNotNull(HitomiUrls.altImageUrl(url))
 
     override fun supportsChapterNotifications(item: ToonItem): Boolean = false
 
@@ -134,13 +140,25 @@ class HitomiSource(
             headers = mapOf("Range" to HitomiUrls.rangeHeader(page)),
         )
 
-    private fun fetchFullNozomi(url: String, http: SourceHttp): List<Long> {
-        val result = http.fetch(FetchSpec(url, defaultPolicy))
-        if (result.code !in 200..299) return emptyList()
+    private suspend fun fetchNozomiPage(url: String, page: Int, http: SourceHttp): HttpResult {
+        val result = fetchWithBackoff(http, nozomiSpec(url, page))
+            ?: error("HTTP nozomi failed")
+        if (result.code !in 200..299) {
+            error("HTTP ${result.code}")
+        }
+        return result
+    }
+
+    private suspend fun fetchRequiredNozomi(url: String, http: SourceHttp): List<Long> {
+        val result = fetchWithBackoff(http, FetchSpec(url, defaultPolicy))
+            ?: error("HTTP ${url.substringAfterLast('/')} failed")
+        if (result.code !in 200..299) {
+            error("HTTP ${result.code}")
+        }
         return NozomiIndex.parseIds(result.body)
     }
 
-    private suspend fun loadGalleryCards(ids: List<Long>, http: SourceHttp): List<ToonItem> {
+    private suspend fun loadGalleryInfos(ids: List<Long>, http: SourceHttp): List<GalleryInfo> {
         if (ids.isEmpty()) return emptyList()
         val semaphore = Semaphore(GALLERY_CONCURRENCY)
         return coroutineScope {
@@ -148,11 +166,31 @@ class HitomiSource(
                 async {
                     semaphore.withPermit {
                         val info = fetchGalleryInfo(id.toString(), http) ?: return@withPermit null
-                        toListingItem(info)
+                        if (info.type.equals("anime", ignoreCase = true)) null else info
                     }
                 }
             }.awaitAll().filterNotNull()
         }
+    }
+
+    private suspend fun loadGalleryCards(ids: List<Long>, http: SourceHttp): List<ToonItem> =
+        loadGalleryInfos(ids, http).mapNotNull(::toListingItem)
+
+    private suspend fun loadGg(http: SourceHttp): GgJsRouter {
+        val now = System.currentTimeMillis()
+        ggCache?.let { cached ->
+            if (now - cached.loadedAt < GG_TTL_MS && cached.router.b.isNotBlank()) {
+                return cached.router
+            }
+        }
+        val result = fetchWithBackoff(http, FetchSpec(HitomiUrls.ggJs(), defaultPolicy))
+            ?: error("만화 이미지를 불러오지 못했습니다.")
+        val router = GgJsRouter.parse(result.body.toString(Charsets.UTF_8))
+        if (router.b.isBlank()) {
+            error("만화 이미지를 불러오지 못했습니다.")
+        }
+        ggCache = CachedGg(now, router)
+        return router
     }
 
     private suspend fun fetchGalleryInfo(id: String, http: SourceHttp): GalleryInfo? {
@@ -186,14 +224,14 @@ class HitomiSource(
     private fun toListingItem(info: GalleryInfo): ToonItem? {
         if (info.type.equals("anime", ignoreCase = true)) return null
         val artists = info.artists
-        val (toonId, choices) = when {
-            artists.isEmpty() -> "gallery:${info.id}" to emptyList()
-            artists.size == 1 -> "artist:${artists[0].slug}" to emptyList()
-            else -> "gallery:${info.id}" to artists
+        val (toonId, choices, title) = when {
+            artists.isEmpty() -> Triple("gallery:${info.id}", emptyList<ArtistRef>(), info.title)
+            artists.size == 1 -> Triple("artist:${artists[0].slug}", emptyList<ArtistRef>(), artists[0].displayName)
+            else -> Triple("gallery:${info.id}", artists, info.title)
         }
         return ToonItem(
             id = toonId,
-            title = info.title,
+            title = title,
             thumbUrl = info.files.firstOrNull()?.let { HitomiUrls.thumbUrl(it.hash) }.orEmpty(),
             href = HitomiUrls.galleryPage(info.id),
             genre = info.type,
@@ -203,15 +241,6 @@ class HitomiSource(
             artistChoices = choices,
         )
     }
-
-    private fun ToonItem.toEpisode(): EpisodeItem = EpisodeItem(
-        wrId = entryEpisodeId ?: galleryIdOf(this).orEmpty(),
-        title = title,
-        date = updatedAt,
-        thumbUrl = thumbUrl.ifBlank { null },
-        href = HitomiUrls.reader(entryEpisodeId ?: galleryIdOf(this).orEmpty()),
-        artistChoices = artistChoices,
-    )
 
     private fun GalleryInfo.toEpisodeItem(): EpisodeItem = EpisodeItem(
         wrId = id,
@@ -243,7 +272,10 @@ class HitomiSource(
         private const val ARTIST_PREFIX = "artist:"
         private const val GALLERY_PREFIX = "gallery:"
         private const val GALLERY_CONCURRENCY = 4
+        private const val GG_TTL_MS = 10 * 60 * 1000L
         private val BACKOFF_MS = listOf(250L, 1_000L, 4_000L)
+
+        private data class CachedGg(val loadedAt: Long, val router: GgJsRouter)
 
         private val CATALOGS = listOf(
             SourceCatalog("LATEST", "최신", paginated = true),

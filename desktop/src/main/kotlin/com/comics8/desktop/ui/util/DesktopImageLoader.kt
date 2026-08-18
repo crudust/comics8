@@ -28,8 +28,8 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
+import com.comics8.core.network.ImageFallbacks
 import com.comics8.core.network.ImageReferer
-import com.comics8.core.parser.ComicSite
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -74,7 +74,7 @@ object DesktopImageCache {
         } else {
             null
         } ?: run {
-            val urlsToTry = listOf(url) + ComicSite.getFallbackImageUrls(url)
+            val urlsToTry = listOf(url) + ImageFallbacks.forUrl(url)
             var fetchedBytes: ByteArray? = null
             for (targetUrl in urlsToTry) {
                 try {

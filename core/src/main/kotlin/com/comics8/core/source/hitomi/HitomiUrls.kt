@@ -65,10 +65,17 @@ object HitomiUrls {
         return "https://$hostPrefix$n.$CDN_HOST/$prefix$s/$hash.$ext"
     }
 
-    fun avifFallback(webpUrl: String): String? {
-        if (!webpUrl.contains(CDN_HOST) || !webpUrl.endsWith(".webp")) return null
-        val avif = webpUrl.replace(Regex("""://w(\d+)\."""), "://a$1.").replace(Regex("""\.webp$"""), ".avif")
-        return avif.takeIf { it != webpUrl }
+    fun avifFallback(webpUrl: String): String? = altImageUrl(webpUrl)?.takeIf { it.endsWith(".avif") }
+
+    fun altImageUrl(url: String): String? {
+        if (!url.contains(CDN_HOST)) return null
+        return when {
+            url.contains("://w") && url.endsWith(".webp") ->
+                url.replace(Regex("""://w(\d+)\."""), "://a$1.").replace(Regex("""\.webp$"""), ".avif")
+            url.contains("://a") && url.endsWith(".avif") ->
+                url.replace(Regex("""://a(\d+)\."""), "://w$1.").replace(Regex("""\.avif$"""), ".webp")
+            else -> null
+        }
     }
 
     fun isHitomiHost(url: String): Boolean {

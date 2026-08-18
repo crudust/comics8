@@ -9,6 +9,8 @@ import com.comics8.core.source.SourceHttp
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
 class HitomiSourceTest {
@@ -33,6 +35,7 @@ class HitomiSourceTest {
         assertThat(single.sourceId).isEqualTo("hitomi")
         assertThat(single.entryEpisodeId).isEqualTo("1001")
         assertThat(single.artistChoices).isEmpty()
+        assertThat(single.title).isEqualTo("Demo Artist")
         assertThat(single.genre).isEqualTo("doujinshi")
         assertThat(single.updatedAt).isEqualTo("24.08.15")
         assertThat(single.thumbUrl).isEqualTo(
@@ -99,6 +102,10 @@ class HitomiSourceTest {
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcabc.webp",
         )
         assertThat(images[1]).startsWith("https://w1.gold-usergeneratedcontent.net/1690000000/f/de/")
+        assertThat(images[2]).isEqualTo(
+            "https://a1.gold-usergeneratedcontent.net/1690000000/1/11/" +
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa111.avif",
+        )
         assertThat(source().imageFallbacks(images[0])).containsExactly(
             "https://a2.gold-usergeneratedcontent.net/1690000000/c/ab/" +
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcabc.avif",
@@ -113,7 +120,19 @@ class HitomiSourceTest {
         val items = source.search(SearchQuery("artist:demo_artist"), http)
         assertThat(items.map { it.entryEpisodeId }).contains("1001")
         assertThat(http.recorded.any { it.url.endsWith("/artist/demo_artist-korean.nozomi") }).isTrue()
-        assertThat(http.recorded.any { it.url.endsWith("/index-korean.nozomi") }).isTrue()
+        assertThat(http.recorded.none { it.url.endsWith("/index-korean.nozomi") && it.headers["Range"] == null }).isTrue()
+        assertThat(http.recorded.none { it.url.endsWith("/index-korean.nozomi") }).isTrue()
+    }
+
+    @Test
+    fun searchFailsWhenFilterNozomiIsNotOk() = runBlocking<Unit> {
+        val http = FakeHitomiHttp(missingNozomi = setOf("/female/"))
+        try {
+            source().search(SearchQuery("female:sole_female"), http)
+            throw AssertionError("expected HTTP error")
+        } catch (e: IllegalStateException) {
+            assertThat(e.message).contains("HTTP")
+        }
     }
 
     @Test
@@ -124,6 +143,16 @@ class HitomiSourceTest {
         assertThat(page.items.any { it.entryEpisodeId == "1001" }).isTrue()
         assertThat(delays).contains(250L)
         assertThat(http.galleryHits["1001"]?.get()).isAtLeast(2)
+    }
+
+    @Test
+    fun listingNozomiRetriesOn429() = runBlocking<Unit> {
+        val http = FakeHitomiHttp(failFirstNozomi = true)
+        val delays = mutableListOf<Long>()
+        val page = HitomiSource(delayMillis = { ms: Long -> delays += ms }).loadListing("LATEST", 1, http)
+        assertThat(page.items).isNotEmpty()
+        assertThat(delays).contains(250L)
+        assertThat(http.nozomiHits.get()).isAtLeast(2)
     }
 
     @Test
@@ -147,9 +176,12 @@ class HitomiSourceTest {
         private val includeLength: Boolean = true,
         private val listingIds: List<Long> = listOf(1001L, 2002L, 3003L, 4004L, 9999L),
         private val failFirst: Set<String> = emptySet(),
+        private val failFirstNozomi: Boolean = false,
+        private val missingNozomi: Set<String> = emptySet(),
     ) : SourceHttp {
-        val recorded = mutableListOf<FetchSpec>()
-        val galleryHits = mutableMapOf<String, AtomicInteger>()
+        val recorded = CopyOnWriteArrayList<FetchSpec>()
+        val galleryHits = ConcurrentHashMap<String, AtomicInteger>()
+        val nozomiHits = AtomicInteger(0)
         private val fixtures = mapOf(
             "1001" to readFixture("hitomi/gallery_one_artist.js"),
             "2002" to readFixture("hitomi/gallery_two_artists.js"),
@@ -186,6 +218,12 @@ class HitomiSourceTest {
         }
 
         private fun nozomi(url: String): HttpResult {
+            if (missingNozomi.any { url.contains(it) }) {
+                return HttpResult(404, emptyMap(), ByteArray(0))
+            }
+            if (failFirstNozomi && nozomiHits.incrementAndGet() == 1) {
+                return HttpResult(429, emptyMap(), ByteArray(0))
+            }
             val ids = when {
                 url.contains("/artist/demo_artist-") -> listOf(1001L, 2002L)
                 url.contains("/index-") -> listingIds

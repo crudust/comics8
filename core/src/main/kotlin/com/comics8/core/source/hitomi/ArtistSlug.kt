@@ -22,7 +22,8 @@ object ArtistSlug {
         } catch (_: Exception) {
             encoded
         }
-        val withoutExt = decoded.removeSuffix(".html")
-        return langSuffix.replace(withoutExt, "").ifBlank { null }
+        val withoutExt = decoded.replace('+', ' ').removeSuffix(".html")
+        val stripped = langSuffix.replace(withoutExt, "")
+        return stripped.takeIf { it.isNotBlank() }?.let(::normalize)
     }
 }

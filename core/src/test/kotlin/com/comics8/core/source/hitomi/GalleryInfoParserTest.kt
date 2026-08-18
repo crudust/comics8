@@ -14,7 +14,9 @@ class GalleryInfoParserTest {
         assertThat(info.artists).hasSize(1)
         assertThat(info.artists[0].slug).isEqualTo("demo_artist")
         assertThat(info.artists[0].displayName).isEqualTo("Demo Artist")
-        assertThat(info.files).hasSize(2)
+        assertThat(info.files).hasSize(3)
+        assertThat(info.files[2].hasWebp).isFalse()
+        assertThat(info.files[2].hasAvif).isTrue()
     }
 
     @Test

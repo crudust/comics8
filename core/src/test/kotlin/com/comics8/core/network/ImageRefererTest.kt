@@ -20,4 +20,16 @@ class ImageRefererTest {
     fun elevenHostsKeepOrigin() {
         assertThat(ImageReferer.forUrl("https://www.pl3040.com/kr/1.png")).isEqualTo(ComicSite.ORIGIN)
     }
+
+    @Test
+    fun fallbacksIncludeElevenAndHitomiAlts() {
+        val eleven = ImageFallbacks.forUrl("https://www.pl3040.com/kr/1.png")
+        assertThat(eleven).contains("https://www.pl4050.com/kr/1.png")
+        val hitomi = ImageFallbacks.forUrl(
+            "https://w2.gold-usergeneratedcontent.net/1690000000/c/ab/hash.webp",
+        )
+        assertThat(hitomi).containsExactly(
+            "https://a2.gold-usergeneratedcontent.net/1690000000/c/ab/hash.avif",
+        )
+    }
 }

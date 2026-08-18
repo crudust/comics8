@@ -6,8 +6,8 @@ import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
+import com.comics8.core.network.ImageFallbacks
 import com.comics8.core.network.ImageReferer
-import com.comics8.core.parser.ComicSite
 import com.comics8.monitor.data.DownloadManager
 import com.comics8.monitor.data.SyncManager
 import com.comics8.monitor.data.ToonClient
@@ -56,7 +56,7 @@ class ComicsApp : Application(), ImageLoaderFactory {
                 var response = chain.proceed(request)
                 if (!response.isSuccessful && (response.code == 404 || response.code >= 500)) {
                     val urlStr = request.url.toString()
-                    val fallbacks = ComicSite.getFallbackImageUrls(urlStr)
+                    val fallbacks = ImageFallbacks.forUrl(urlStr)
                     for (fallback in fallbacks) {
                         response.close()
                         val retryReq = request.newBuilder()

@@ -16,4 +16,12 @@ class ArtistSlugTest {
         assertThat(ArtistSlug.fromArtistUrl("https://hitomi.la/artist/second_person-korean.html"))
             .isEqualTo("second_person")
     }
+
+    @Test
+    fun fromArtistUrlNormalizesEncodedSpaces() {
+        assertThat(ArtistSlug.fromArtistUrl("https://hitomi.la/artist/Demo%20Artist-all.html"))
+            .isEqualTo("demo_artist")
+        assertThat(ArtistSlug.fromArtistUrl("https://hitomi.la/artist/Demo+Artist-all.html"))
+            .isEqualTo("demo_artist")
+    }
 }
