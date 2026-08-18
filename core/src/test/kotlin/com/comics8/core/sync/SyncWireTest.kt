@@ -10,22 +10,31 @@ import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.json.JSONArray
 import org.json.JSONObject
+import org.junit.Before
 import org.junit.Test
+import java.util.concurrent.atomic.AtomicInteger
 
 class SyncWireTest {
+    @Before
+    fun resetCache() {
+        SyncWire.clearProbeCache()
+    }
+
     @Test
-    fun mockV1ServerOmitsHitomiAndKeepsEleven() {
+    fun mockV1ServerOmitsForeignAndKeepsEleven() {
         val captured = mutableListOf<String>()
-        val http = mockHealth(404, body = "not found") { request ->
+        val http = mockHealth(200, body = """{"status":"ok","syncSchema":1}""") { request ->
             captured.add(request.url.toString())
             assertThat(request.header(SyncConstants.SCHEMA_HEADER)).isEqualTo("2")
         }
         val schema = SyncWire.probeServerSchema(http, "https://old.example/api/comics8/sync", "KEY")
-        assertThat(schema).isEqualTo(1)
+        assertThat(schema).isEqualTo(ServerSchema.Known(1))
+        assertThat(schema.commitForeign).isFalse()
         assertThat(captured.single()).isEqualTo("https://old.example/api/comics8/health")
 
         val filtered = SyncWire.filterOutbound(mixedChanges(), schema)
-        assertThat(filtered.omittedHitomi).isTrue()
+        assertThat(filtered.omittedForeignSource).isTrue()
+        assertThat(SyncWire.shouldCommitForeign(schema, filtered.omittedForeignSource)).isFalse()
 
         val favs = filtered.json.getJSONArray("favorites")
         assertThat(favs.length()).isEqualTo(1)
@@ -41,6 +50,11 @@ class SyncWireTest {
         assertThat(eps.length()).isEqualTo(1)
         assertThat(eps.getJSONObject(0).getString("toonId")).isEqualTo("11")
 
+        val settings = filtered.json.getJSONArray("readerSettings")
+        assertThat(settings.length()).isEqualTo(1)
+        assertThat(settings.getJSONObject(0).getString("toonId")).isEqualTo("11")
+        assertThat(settings.getJSONObject(0).getString("sourceId")).isEqualTo("eleven")
+
         val tombs = filtered.json.getJSONArray("tombstones")
         assertThat(tombs.length()).isEqualTo(1)
         assertThat(tombs.getJSONObject(0).getString("entityId")).isEqualTo("11")
@@ -54,10 +68,12 @@ class SyncWireTest {
             headerSchema = "2",
         )
         val schema = SyncWire.probeServerSchema(http, "https://new.example/sync", "KEY")
-        assertThat(schema).isEqualTo(2)
+        assertThat(schema).isEqualTo(ServerSchema.Known(2))
+        assertThat(schema.commitForeign).isTrue()
 
         val filtered = SyncWire.filterOutbound(mixedChanges(), schema)
-        assertThat(filtered.omittedHitomi).isFalse()
+        assertThat(filtered.omittedForeignSource).isFalse()
+        assertThat(SyncWire.shouldCommitForeign(schema, filtered.omittedForeignSource)).isTrue()
 
         val favs = filtered.json.getJSONArray("favorites")
         assertThat(favs.length()).isEqualTo(2)
@@ -68,6 +84,9 @@ class SyncWireTest {
             fav.getString("sourceId") to fav.getString("id")
         }
         assertThat(ids).containsExactly("eleven" to "11", "hitomi" to "99")
+
+        val settings = filtered.json.getJSONArray("readerSettings")
+        assertThat(settings.length()).isEqualTo(2)
 
         val tombs = filtered.json.getJSONArray("tombstones")
         val tombIds = (0 until tombs.length()).map { tombs.getJSONObject(it).getString("entityId") }
@@ -96,15 +115,106 @@ class SyncWireTest {
     }
 
     @Test
-    fun missingSchemaDefaultsToOne() {
-        assertThat(SyncWire.resolveServerSchema(null, null)).isEqualTo(1)
-        assertThat(SyncWire.resolveServerSchema("{}", null)).isEqualTo(1)
-        assertThat(SyncWire.resolveServerSchema("""{"status":"ok"}""", "")).isEqualTo(1)
+    fun schema2InboundAppliesHitomiWorkId() {
+        val hitomi = JSONObject().put("id", "99").put("sourceId", "hitomi")
+        assertThat(SyncWire.workId(hitomi, preferId = true)).isEqualTo(WorkId("hitomi", "99"))
     }
 
     @Test
-    fun headerEchoWinsOverMissingBodyField() {
-        assertThat(SyncWire.resolveServerSchema("""{"status":"ok"}""", "2")).isEqualTo(2)
+    fun omittedForeignStaysPendingUntilSchema2() {
+        val elevenSince = 100L
+        val foreignSince = 0L
+        val v1 = ServerSchema.Known(1)
+        assertThat(SyncWire.includeRow("hitomi", 50, elevenSince, foreignSince, v1)).isFalse()
+        assertThat(SyncWire.includeRow("eleven", 150, elevenSince, foreignSince, v1)).isTrue()
+        assertThat(SyncWire.localQuerySince(elevenSince, foreignSince, v1)).isEqualTo(100L)
+
+        val v2 = ServerSchema.Known(2)
+        assertThat(SyncWire.includeRow("hitomi", 50, elevenSince, foreignSince, v2)).isTrue()
+        assertThat(SyncWire.includeRow("eleven", 50, elevenSince, foreignSince, v2)).isFalse()
+        assertThat(SyncWire.localQuerySince(elevenSince, foreignSince, v2)).isEqualTo(0L)
+        assertThat(SyncWire.includeTombstone("hitomi:99", 1, elevenSince, foreignSince, v2)).isTrue()
+    }
+
+    @Test
+    fun transportFailureIsUnknownAndDoesNotCommit() {
+        val http = mockHealth(500, body = "err", headerSchema = "2")
+        val schema = SyncWire.probeServerSchema(http, "https://flaky.example/sync", "KEY")
+        assertThat(schema).isEqualTo(ServerSchema.Unknown)
+        assertThat(schema.omitForeign).isTrue()
+        assertThat(schema.commitForeign).isFalse()
+        assertThat(SyncWire.omittedMessage(schema)).isEqualTo(SyncWire.FOREIGN_OMITTED_UNKNOWN_MESSAGE)
+    }
+
+    @Test
+    fun missingHealthJsonOn200IsSchema1() {
+        assertThat(SyncWire.resolveSuccessfulHealth("""{"status":"ok"}""", null))
+            .isEqualTo(ServerSchema.Known(1))
+        assertThat(SyncWire.resolveSuccessfulHealth(null, null)).isEqualTo(ServerSchema.Known(1))
+    }
+
+    @Test
+    fun bodySyncSchemaPreferredOverHeaderOnSuccess() {
+        assertThat(SyncWire.resolveSuccessfulHealth("""{"syncSchema":1}""", "2"))
+            .isEqualTo(ServerSchema.Known(1))
+        assertThat(SyncWire.resolveSuccessfulHealth("""{"status":"ok"}""", "2"))
+            .isEqualTo(ServerSchema.Known(2))
+    }
+
+    @Test
+    fun probeCacheSkipsRepeatHealthAndFallsBackToLastKnown() {
+        val hits = AtomicInteger(0)
+        val http = OkHttpClient.Builder()
+            .addInterceptor(Interceptor { chain ->
+                val n = hits.incrementAndGet()
+                val (code, body) = if (n == 1) {
+                    200 to """{"syncSchema":2}"""
+                } else {
+                    500 to "down"
+                }
+                Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(code)
+                    .message("x")
+                    .body(body.toByteArray().toResponseBody("application/json".toMediaType()))
+                    .build()
+            })
+            .build()
+        val first = SyncWire.probeServerSchema(http, "https://cache.example/sync", "KEY", nowMs = 1_000L)
+        val cached = SyncWire.probeServerSchema(http, "https://cache.example/sync", "KEY", nowMs = 2_000L)
+        val afterTtlFail = SyncWire.probeServerSchema(
+            http,
+            "https://cache.example/sync",
+            "KEY",
+            nowMs = 1_000L + SyncConstants.SCHEMA_PROBE_TTL_MS + 1,
+        )
+        assertThat(first).isEqualTo(ServerSchema.Known(2))
+        assertThat(cached).isEqualTo(ServerSchema.Known(2))
+        assertThat(afterTtlFail).isEqualTo(ServerSchema.Known(2))
+        assertThat(hits.get()).isEqualTo(2)
+    }
+
+    @Test
+    fun healthUrlRewritesSyncVersionAndProxySuffixes() {
+        assertThat(SyncConstants.healthUrl("https://h.example/api/comics8/sync"))
+            .isEqualTo("https://h.example/api/comics8/health")
+        assertThat(SyncConstants.healthUrl("https://h.example/api/comics8/version"))
+            .isEqualTo("https://h.example/api/comics8/health")
+        assertThat(SyncConstants.healthUrl("https://h.example/api/comics8/proxy"))
+            .isEqualTo("https://h.example/api/comics8/health")
+    }
+
+    @Test
+    fun blankSourceIdOnSettingsDefaultsToEleven() {
+        val row = JSONObject().put("toonId", "11").put("viewMode", "SCROLL")
+        val filtered = SyncWire.filterOutbound(
+            JSONObject().put("readerSettings", JSONArray().put(row)),
+            ServerSchema.Known(1),
+        )
+        val setting = filtered.json.getJSONArray("readerSettings").getJSONObject(0)
+        assertThat(setting.getString("sourceId")).isEqualTo("eleven")
+        assertThat(filtered.omittedForeignSource).isFalse()
     }
 
     private fun mixedChanges(): JSONObject {
@@ -136,6 +246,12 @@ class SyncWireTest {
                 JSONArray()
                     .put(JSONObject().put("toonId", "11").put("sourceId", "eleven").put("wrId", "a"))
                     .put(JSONObject().put("toonId", "99").put("sourceId", "hitomi").put("wrId", "b")),
+            )
+            .put(
+                "readerSettings",
+                JSONArray()
+                    .put(JSONObject().put("toonId", "11").put("viewMode", "SCROLL"))
+                    .put(JSONObject().put("toonId", "99").put("sourceId", "hitomi").put("viewMode", "DUAL")),
             )
             .put(
                 "tombstones",

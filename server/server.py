@@ -844,6 +844,7 @@ class SyncHandler(BaseHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             self.send_header("Access-Control-Allow-Headers", CORS_ALLOW_HEADERS)
+            self.send_header(SYNC_SCHEMA_HEADER, str(SYNC_SCHEMA_CURRENT))
             self.end_headers()
             self.wfile.write(body)
             self.close_connection = True

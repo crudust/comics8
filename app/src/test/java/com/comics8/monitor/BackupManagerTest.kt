@@ -89,7 +89,7 @@ class BackupManagerTest {
     }
 
     @Test
-    fun v2InboundAcceptsIdOrToonIdAndRejectsHitomi() {
+    fun v2InboundAcceptsIdOrToonIdAndHitomi() {
         val favByToonId = JSONObject()
             .put("toonId", "7883")
             .put("sourceId", "eleven")
@@ -101,7 +101,7 @@ class BackupManagerTest {
         val hitomi = JSONObject()
             .put("id", "99")
             .put("sourceId", "hitomi")
-        assertThat(BackupJson.workId(hitomi, preferId = true)).isNull()
+        assertThat(BackupJson.workId(hitomi, preferId = true)).isEqualTo(WorkId("hitomi", "99"))
     }
 
     @Test

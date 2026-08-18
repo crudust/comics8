@@ -562,7 +562,7 @@ class DesktopDatabase(dbFile: File? = null) {
                 """.trimIndent(),
             ).use { stmt ->
                 for (item in items) {
-                    val workId = WorkId.writable(item.sourceId, item.id) ?: continue
+                    val workId = WorkId.stored(item.sourceId, item.id) ?: continue
                     stmt.setString(1, workId.sourceId)
                     stmt.setString(2, workId.toonId)
                     stmt.setString(3, item.title)
@@ -739,7 +739,7 @@ class DesktopDatabase(dbFile: File? = null) {
                 """.trimIndent(),
             ).use { stmt ->
                 for (history in items) {
-                    val workId = WorkId.writable(history.sourceId, history.toonId) ?: continue
+                    val workId = WorkId.stored(history.sourceId, history.toonId) ?: continue
                     bindHistory(stmt, history, workId)
                     stmt.addBatch()
                 }
@@ -855,7 +855,7 @@ class DesktopDatabase(dbFile: File? = null) {
                 """.trimIndent(),
             ).use { stmt ->
                 for (item in items) {
-                    val workId = WorkId.writable(item.sourceId, item.toonId) ?: continue
+                    val workId = WorkId.stored(item.sourceId, item.toonId) ?: continue
                     stmt.setString(1, workId.sourceId)
                     stmt.setString(2, workId.toonId)
                     stmt.setString(3, item.wrId)
@@ -966,7 +966,7 @@ class DesktopDatabase(dbFile: File? = null) {
                 """.trimIndent(),
             ).use { stmt ->
                 for (item in items) {
-                    val workId = WorkId.writable(item.sourceId, item.toonId) ?: continue
+                    val workId = WorkId.stored(item.sourceId, item.toonId) ?: continue
                     stmt.setString(1, workId.sourceId)
                     stmt.setString(2, workId.toonId)
                     stmt.setString(3, item.viewMode)

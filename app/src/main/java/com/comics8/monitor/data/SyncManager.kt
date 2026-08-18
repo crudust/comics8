@@ -3,6 +3,7 @@ package com.comics8.monitor.data
 import android.content.Context
 import android.content.SharedPreferences
 import com.comics8.core.source.WorkId
+import com.comics8.core.sync.ServerSchema
 import com.comics8.core.sync.SyncConstants
 import com.comics8.core.sync.SyncWire
 import com.comics8.core.sync.addComics8SyncHeaders
@@ -174,8 +175,8 @@ class SyncManager(
         val key = state.syncKey.trim()
         if (key.isBlank()) return@withContext SyncResult(false, "동기화 키가 비어있습니다.")
 
-        val since = prefs.getLong(KEY_LAST_SYNCED_AT, 0L)
-        if (since == 0L) {
+        val elevenSince = prefs.getLong(KEY_LAST_SYNCED_AT, 0L)
+        if (elevenSince == 0L) {
             // First time sync: perform full pull, then push local
             return@withContext syncFull()
         }
@@ -185,12 +186,19 @@ class SyncManager(
         }
 
         try {
-            // 1. Gather local changes since lastSyncedAt
-            val localFavs = database.favoriteDao().getSince(since)
-            val localHist = database.readHistoryDao().getSince(since)
-            val localEps = database.readEpisodeDao().getSince(since)
-            val localSettings = database.readerSettingDao().getSince(since)
-            val localTombs = database.tombstoneDao().getSince(since)
+            val schema = SyncWire.probeServerSchema(client, state.serverUrl, key)
+            val foreignSince = prefs.getLong(KEY_FOREIGN_LAST_SYNCED_AT, 0L)
+            val querySince = SyncWire.localQuerySince(elevenSince, foreignSince, schema)
+            val localFavs = database.favoriteDao().getSince(querySince)
+                .filter { SyncWire.includeRow(it.sourceId, it.savedAt, elevenSince, foreignSince, schema) }
+            val localHist = database.readHistoryDao().getSince(querySince)
+                .filter { SyncWire.includeRow(it.sourceId, it.lastReadAt, elevenSince, foreignSince, schema) }
+            val localEps = database.readEpisodeDao().getSince(querySince)
+                .filter { SyncWire.includeRow(it.sourceId, it.readAt, elevenSince, foreignSince, schema) }
+            val localSettings = database.readerSettingDao().getSince(querySince)
+                .filter { SyncWire.includeRow(it.sourceId, it.updatedAt, elevenSince, foreignSince, schema) }
+            val localTombs = database.tombstoneDao().getSince(querySince)
+                .filter { SyncWire.includeTombstone(it.entityId, it.deletedAt, elevenSince, foreignSince, schema) }
 
             val changesObj = JSONObject().apply {
                 val favArr = JSONArray()
@@ -265,10 +273,9 @@ class SyncManager(
                 put("tombstones", tombArr)
             }
 
-            val serverSchema = SyncWire.probeServerSchema(client, state.serverUrl, key)
-            val outbound = SyncWire.filterOutbound(changesObj, serverSchema)
+            val outbound = SyncWire.filterOutbound(changesObj, schema)
             val reqObj = JSONObject().apply {
-                put("since", since)
+                put("since", elevenSince)
                 put("clientTime", System.currentTimeMillis())
                 put("schemaVersion", SyncConstants.SCHEMA_VERSION)
                 put("changes", outbound.json)
@@ -400,11 +407,12 @@ class SyncManager(
             // Cleanup old tombstones
             database.tombstoneDao().deleteOlderThan(System.currentTimeMillis() - 30L * 86400000L)
 
-            prefs.edit().putLong(KEY_LAST_SYNCED_AT, serverTime).apply()
+            persistSyncCursors(serverTime, schema, outbound.omittedForeignSource)
 
             val msg = SyncWire.withOmittedHint(
                 "증분 동기화 완료: 수신 (즐겨찾기 ${favList.size}개, 기록 ${histList.size}개)",
-                outbound.omittedHitomi,
+                outbound.omittedForeignSource,
+                schema,
             )
             _syncState.value = _syncState.value.copy(
                 isSyncing = false,
@@ -500,8 +508,8 @@ class SyncManager(
         try {
             val backupJson = JSONObject(BackupManager.createBackupJson(database))
             backupJson.put("schemaVersion", SyncConstants.SCHEMA_VERSION)
-            val serverSchema = SyncWire.probeServerSchema(client, state.serverUrl, key)
-            val outbound = SyncWire.filterOutbound(backupJson, serverSchema)
+            val schema = SyncWire.probeServerSchema(client, state.serverUrl, key)
+            val outbound = SyncWire.filterOutbound(backupJson, schema)
             val mediaType = "application/json; charset=utf-8".toMediaType()
             val reqBody = outbound.json.toString().toRequestBody(mediaType)
 
@@ -521,12 +529,13 @@ class SyncManager(
             }
 
             val nowMs = System.currentTimeMillis()
-            prefs.edit().putLong(KEY_LAST_SYNCED_AT, nowMs).apply()
+            persistSyncCursors(nowMs, schema, outbound.omittedForeignSource)
 
             val stats = BackupManager.getStats(database)
             val successMsg = SyncWire.withOmittedHint(
                 "서버 동기화 완료: 즐겨찾기 ${stats.favoriteCount}개, 기록 ${stats.historyCount}개",
-                outbound.omittedHitomi,
+                outbound.omittedForeignSource,
+                schema,
             )
             _syncState.value = _syncState.value.copy(
                 isSyncing = false,
@@ -544,11 +553,20 @@ class SyncManager(
         }
     }
 
+    private fun persistSyncCursors(serverTime: Long, schema: ServerSchema, omittedForeign: Boolean) {
+        val editor = prefs.edit().putLong(KEY_LAST_SYNCED_AT, serverTime)
+        if (SyncWire.shouldCommitForeign(schema, omittedForeign)) {
+            editor.putLong(KEY_FOREIGN_LAST_SYNCED_AT, serverTime)
+        }
+        editor.apply()
+    }
+
     companion object {
         const val KEY_SYNC_KEY = com.comics8.core.sync.SyncConstants.KEY_SYNC_KEY
         const val KEY_SERVER_URL = com.comics8.core.sync.SyncConstants.KEY_SERVER_URL
         const val KEY_AUTO_SYNC = com.comics8.core.sync.SyncConstants.KEY_AUTO_SYNC
         const val KEY_LAST_SYNCED_AT = com.comics8.core.sync.SyncConstants.KEY_LAST_SYNCED_AT
+        const val KEY_FOREIGN_LAST_SYNCED_AT = com.comics8.core.sync.SyncConstants.KEY_FOREIGN_LAST_SYNCED_AT
         const val KEY_USE_SERVER_PROXY = com.comics8.core.sync.SyncConstants.KEY_USE_SERVER_PROXY
         const val DEFAULT_SERVER_URL = com.comics8.core.sync.SyncConstants.DEFAULT_SERVER_URL
 

@@ -48,4 +48,11 @@ class WorkIdTest {
         assertThat(WorkId.writable("", "1")).isEqualTo(WorkId.eleven("1"))
         assertThat(WorkId.writable("hitomi", "1")).isNull()
     }
+
+    @Test
+    fun storedAcceptsAnySource() {
+        assertThat(WorkId.stored("hitomi", "1")).isEqualTo(WorkId("hitomi", "1"))
+        assertThat(WorkId.stored("", "1")).isEqualTo(WorkId.eleven("1"))
+        assertThat(WorkId.stored("ele:ven", "1")).isNull()
+    }
 }

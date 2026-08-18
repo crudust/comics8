@@ -5,43 +5,34 @@ object SyncConstants {
     const val KEY_SERVER_URL = "sync_server_url"
     const val KEY_AUTO_SYNC = "sync_auto_enabled"
     const val KEY_LAST_SYNCED_AT = "sync_last_at"
+    const val KEY_FOREIGN_LAST_SYNCED_AT = "sync_foreign_last_at"
     const val KEY_USE_SERVER_PROXY = "sync_use_server_proxy"
     const val DEFAULT_SERVER_URL = "https://homeassistant.tail1946af.ts.net/api/comics8/sync"
     const val SCHEMA_VERSION = 2
     const val SCHEMA_HEADER = "X-Comics8-Sync-Schema"
+    const val SCHEMA_PROBE_TTL_MS = 5 * 60 * 1000L
 
     fun generateSyncKey(): String {
         val chars = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
         return (1..4).map { chars.random() }.joinToString("")
     }
 
-    fun versionUrl(serverUrl: String = DEFAULT_SERVER_URL): String {
-        val base = serverUrl.trimEnd('/')
-        return if (base.endsWith("/sync")) {
-            base.substringBeforeLast("/sync") + "/version"
-        } else {
-            "$base/version"
-        }
-    }
-
-    fun healthUrl(serverUrl: String = DEFAULT_SERVER_URL): String {
-        val base = serverUrl.trimEnd('/')
-        return if (base.endsWith("/sync")) {
-            base.substringBeforeLast("/sync") + "/health"
-        } else {
-            "$base/health"
-        }
-    }
-
-    fun proxyBaseUrl(serverUrl: String = DEFAULT_SERVER_URL): String {
+    fun apiRoot(serverUrl: String = DEFAULT_SERVER_URL): String {
         val base = serverUrl.trimEnd('/')
         return when {
-            base.endsWith("/proxy") -> base
-            base.endsWith("/sync") -> base.substringBeforeLast("/sync") + "/proxy"
-            base.endsWith("/version") -> base.substringBeforeLast("/version") + "/proxy"
-            else -> "$base/proxy"
-        }
+            base.endsWith("/sync") -> base.substringBeforeLast("/sync")
+            base.endsWith("/proxy") -> base.substringBeforeLast("/proxy")
+            base.endsWith("/version") -> base.substringBeforeLast("/version")
+            base.endsWith("/health") -> base.substringBeforeLast("/health")
+            else -> base
+        }.trimEnd('/')
     }
+
+    fun versionUrl(serverUrl: String = DEFAULT_SERVER_URL): String = "${apiRoot(serverUrl)}/version"
+
+    fun healthUrl(serverUrl: String = DEFAULT_SERVER_URL): String = "${apiRoot(serverUrl)}/health"
+
+    fun proxyBaseUrl(serverUrl: String = DEFAULT_SERVER_URL): String = "${apiRoot(serverUrl)}/proxy"
 
     fun proxyUrl(targetUrl: String, serverUrl: String = DEFAULT_SERVER_URL): String {
         val proxyBase = proxyBaseUrl(serverUrl)

@@ -5,15 +5,42 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
+
+sealed class ServerSchema {
+    data class Known(val version: Int) : ServerSchema()
+    data object Unknown : ServerSchema()
+
+    val omitForeign: Boolean
+        get() = when (this) {
+            Unknown -> true
+            is Known -> version < SyncConstants.SCHEMA_VERSION
+        }
+
+    val commitForeign: Boolean
+        get() = this is Known && version >= SyncConstants.SCHEMA_VERSION
+}
 
 data class SyncOutbound(
     val json: JSONObject,
-    val omittedHitomi: Boolean,
+    val omittedForeignSource: Boolean,
+    val schema: ServerSchema,
 )
 
 object SyncWire {
-    const val HITOMI_OMITTED_MESSAGE =
-        "서버가 구버전(schema 1)이라 Hitomi 변경은 전송하지 않았습니다."
+    const val FOREIGN_OMITTED_SCHEMA1_MESSAGE =
+        "서버가 구버전(schema 1)이라 Hitomi 등 다른 소스 변경은 전송하지 않았습니다."
+    const val FOREIGN_OMITTED_UNKNOWN_MESSAGE =
+        "서버 schema를 확인하지 못해 Hitomi 등 다른 소스 변경은 전송하지 않았습니다."
+
+    private data class CachedProbe(val schema: ServerSchema, val cachedAt: Long)
+
+    private val probeCache = ConcurrentHashMap<String, CachedProbe>()
+
+    fun clearProbeCache() {
+        probeCache.clear()
+    }
 
     fun parseSchema(value: String?): Int {
         val raw = value?.trim().orEmpty()
@@ -21,48 +48,106 @@ object SyncWire {
         return raw.toIntOrNull() ?: 1
     }
 
-    fun resolveServerSchema(healthJson: String?, headerValue: String?): Int {
-        val header = headerValue?.trim().orEmpty()
-        if (header.isNotEmpty()) return parseSchema(header)
-        if (healthJson.isNullOrBlank()) return 1
-        return try {
-            val obj = JSONObject(healthJson)
-            if (!obj.has("syncSchema")) return 1
-            parseSchema(obj.opt("syncSchema")?.toString())
-        } catch (_: Exception) {
-            1
+    fun resolveSuccessfulHealth(healthJson: String?, headerValue: String?): ServerSchema {
+        if (!healthJson.isNullOrBlank()) {
+            try {
+                val obj = JSONObject(healthJson)
+                if (obj.has("syncSchema")) {
+                    return ServerSchema.Known(parseSchema(obj.opt("syncSchema")?.toString()))
+                }
+            } catch (_: Exception) {
+                val header = headerValue?.trim().orEmpty()
+                if (header.isNotEmpty()) return ServerSchema.Known(parseSchema(header))
+                return ServerSchema.Unknown
+            }
         }
+        val header = headerValue?.trim().orEmpty()
+        if (header.isNotEmpty()) return ServerSchema.Known(parseSchema(header))
+        return ServerSchema.Known(1)
     }
 
-    fun probeServerSchema(client: OkHttpClient, serverUrl: String, key: String): Int {
+    fun probeServerSchema(
+        client: OkHttpClient,
+        serverUrl: String,
+        key: String,
+        nowMs: Long = System.currentTimeMillis(),
+        ttlMs: Long = SyncConstants.SCHEMA_PROBE_TTL_MS,
+    ): ServerSchema {
+        val cacheKey = SyncConstants.healthUrl(serverUrl)
+        val cached = probeCache[cacheKey]
+        if (cached != null && cached.schema is ServerSchema.Known && nowMs - cached.cachedAt < ttlMs) {
+            return cached.schema
+        }
+        val probed = probeUncached(client, serverUrl, key)
+        if (probed is ServerSchema.Known) {
+            probeCache[cacheKey] = CachedProbe(probed, nowMs)
+            return probed
+        }
+        val lastKnown = cached?.schema
+        if (lastKnown is ServerSchema.Known) return lastKnown
+        return ServerSchema.Unknown
+    }
+
+    private fun probeUncached(client: OkHttpClient, serverUrl: String, key: String): ServerSchema {
         return try {
+            val probeClient = client.newBuilder()
+                .connectTimeout(2, TimeUnit.SECONDS)
+                .readTimeout(3, TimeUnit.SECONDS)
+                .callTimeout(4, TimeUnit.SECONDS)
+                .build()
             val req = Request.Builder()
                 .url(SyncConstants.healthUrl(serverUrl))
                 .addComics8SyncHeaders(key)
                 .get()
                 .build()
-            client.newCall(req).execute().use { resp ->
-                val header = resp.header(SyncConstants.SCHEMA_HEADER)
-                val body = if (resp.isSuccessful) resp.body?.string() else null
-                resolveServerSchema(body, header)
+            probeClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return ServerSchema.Unknown
+                resolveSuccessfulHealth(resp.body?.string(), resp.header(SyncConstants.SCHEMA_HEADER))
             }
         } catch (_: Exception) {
-            1
+            ServerSchema.Unknown
         }
     }
 
-    fun allowOutbound(sourceId: String, serverSchema: Int): Boolean {
-        if (serverSchema >= SyncConstants.SCHEMA_VERSION) return true
+    fun allowOutbound(sourceId: String, schema: ServerSchema): Boolean {
+        if (!schema.omitForeign) return true
         return sourceId.ifBlank { WorkId.DEFAULT_SOURCE } == WorkId.DEFAULT_SOURCE
     }
 
-    fun tombstoneEntityId(entityId: String, serverSchema: Int): String {
-        val work = WorkId.parse(entityId)
-        return if (serverSchema >= SyncConstants.SCHEMA_VERSION) {
-            work.storageKey()
+    fun localQuerySince(elevenSince: Long, foreignSince: Long, schema: ServerSchema): Long {
+        return if (schema.commitForeign) minOf(elevenSince, foreignSince) else elevenSince
+    }
+
+    fun includeRow(
+        sourceId: String,
+        rowTime: Long,
+        elevenSince: Long,
+        foreignSince: Long,
+        schema: ServerSchema,
+    ): Boolean {
+        val source = sourceId.ifBlank { WorkId.DEFAULT_SOURCE }
+        return if (source == WorkId.DEFAULT_SOURCE) {
+            rowTime > elevenSince
         } else {
-            work.toonId
+            schema.commitForeign && rowTime > foreignSince
         }
+    }
+
+    fun includeTombstone(
+        entityId: String,
+        deletedAt: Long,
+        elevenSince: Long,
+        foreignSince: Long,
+        schema: ServerSchema,
+    ): Boolean = includeRow(WorkId.parse(entityId).sourceId, deletedAt, elevenSince, foreignSince, schema)
+
+    fun shouldCommitForeign(schema: ServerSchema, omittedForeignSource: Boolean): Boolean {
+        return schema.commitForeign && !omittedForeignSource
+    }
+
+    fun tombstoneEntityId(entityId: String, schema: ServerSchema): String {
+        val work = WorkId.parse(entityId)
+        return if (schema.commitForeign) work.storageKey() else work.toonId
     }
 
     fun workId(obj: JSONObject, preferId: Boolean): WorkId? {
@@ -72,36 +157,44 @@ object SyncWire {
         } else {
             obj.optString("toonId").ifBlank { obj.optString("id") }
         }
-        if (local.isBlank()) return null
-        return WorkId.writable(sourceId, local)
+        return WorkId.stored(sourceId, local)
     }
 
-    fun withOmittedHint(message: String, omittedHitomi: Boolean): String {
-        if (!omittedHitomi) return message
-        return if (message.isBlank()) HITOMI_OMITTED_MESSAGE else "$message $HITOMI_OMITTED_MESSAGE"
+    fun omittedMessage(schema: ServerSchema): String {
+        return if (schema is ServerSchema.Known && schema.version < SyncConstants.SCHEMA_VERSION) {
+            FOREIGN_OMITTED_SCHEMA1_MESSAGE
+        } else {
+            FOREIGN_OMITTED_UNKNOWN_MESSAGE
+        }
     }
 
-    fun filterOutbound(root: JSONObject, serverSchema: Int): SyncOutbound {
+    fun withOmittedHint(message: String, omittedForeignSource: Boolean, schema: ServerSchema): String {
+        if (!omittedForeignSource) return message
+        val hint = omittedMessage(schema)
+        return if (message.isBlank()) hint else "$message $hint"
+    }
+
+    fun filterOutbound(root: JSONObject, schema: ServerSchema): SyncOutbound {
         val out = JSONObject(root.toString())
         var omitted = false
-        omitted = filterArray(out, "favorites", serverSchema, tombstones = false) || omitted
-        omitted = filterArray(out, "history", serverSchema, tombstones = false) || omitted
-        omitted = filterArray(out, "readEpisodes", serverSchema, tombstones = false) || omitted
-        omitted = filterArray(out, "readerSettings", serverSchema, tombstones = false) || omitted
-        omitted = filterArray(out, "tombstones", serverSchema, tombstones = true) || omitted
+        omitted = filterArray(out, "favorites", schema, tombstones = false) || omitted
+        omitted = filterArray(out, "history", schema, tombstones = false) || omitted
+        omitted = filterArray(out, "readEpisodes", schema, tombstones = false) || omitted
+        omitted = filterArray(out, "readerSettings", schema, tombstones = false) || omitted
+        omitted = filterArray(out, "tombstones", schema, tombstones = true) || omitted
         val nested = out.optJSONObject("changes")
         if (nested != null) {
-            val inner = filterOutbound(nested, serverSchema)
+            val inner = filterOutbound(nested, schema)
             out.put("changes", inner.json)
-            omitted = omitted || inner.omittedHitomi
+            omitted = omitted || inner.omittedForeignSource
         }
-        return SyncOutbound(out, omitted)
+        return SyncOutbound(out, omitted, schema)
     }
 
     private fun filterArray(
         parent: JSONObject,
         key: String,
-        serverSchema: Int,
+        schema: ServerSchema,
         tombstones: Boolean,
     ): Boolean {
         val arr = parent.optJSONArray(key) ?: return false
@@ -114,17 +207,17 @@ object SyncWire {
             } else {
                 item.optString("sourceId").ifBlank { WorkId.DEFAULT_SOURCE }
             }
-            if (!allowOutbound(source, serverSchema)) {
+            if (!allowOutbound(source, schema)) {
                 omitted = true
                 continue
             }
-            next.put(normalizeRow(JSONObject(item.toString()), key, serverSchema))
+            next.put(normalizeRow(JSONObject(item.toString()), key, schema))
         }
         parent.put(key, next)
         return omitted
     }
 
-    private fun normalizeRow(copy: JSONObject, key: String, serverSchema: Int): JSONObject {
+    private fun normalizeRow(copy: JSONObject, key: String, schema: ServerSchema): JSONObject {
         when (key) {
             "favorites" -> {
                 val id = copy.optString("id").ifBlank { copy.optString("toonId") }
@@ -133,7 +226,7 @@ object SyncWire {
                 copy.put("sourceId", copy.optString("sourceId").ifBlank { WorkId.DEFAULT_SOURCE })
             }
             "tombstones" -> {
-                copy.put("entityId", tombstoneEntityId(copy.optString("entityId"), serverSchema))
+                copy.put("entityId", tombstoneEntityId(copy.optString("entityId"), schema))
             }
             else -> {
                 if (copy.optString("sourceId").isBlank()) {

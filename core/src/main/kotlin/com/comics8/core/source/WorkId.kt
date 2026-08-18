@@ -18,6 +18,16 @@ data class WorkId(val sourceId: String, val toonId: String) {
             return WorkId(sid, toonId)
         }
 
+        fun stored(sourceId: String, toonId: String): WorkId? {
+            val sid = sourceId.ifBlank { DEFAULT_SOURCE }
+            if (toonId.isBlank()) return null
+            return try {
+                WorkId(sid, toonId)
+            } catch (_: IllegalArgumentException) {
+                null
+            }
+        }
+
         fun parse(raw: String): WorkId {
             val idx = raw.indexOf(':')
             if (idx < 0) {
