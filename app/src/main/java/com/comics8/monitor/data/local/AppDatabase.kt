@@ -300,6 +300,9 @@ interface DownloadedEpisodeDao {
     @Query("SELECT * FROM downloaded_episodes ORDER BY downloadedAt DESC")
     suspend fun all(): List<DownloadedEpisode>
 
+    @Query("SELECT * FROM downloaded_episodes WHERE sourceId = :sourceId ORDER BY downloadedAt DESC")
+    suspend fun bySource(sourceId: String): List<DownloadedEpisode>
+
     @Query("SELECT * FROM downloaded_episodes WHERE sourceId = :sourceId AND toonId = :toonId ORDER BY downloadedAt DESC")
     suspend fun byToon(sourceId: String, toonId: String): List<DownloadedEpisode>
 

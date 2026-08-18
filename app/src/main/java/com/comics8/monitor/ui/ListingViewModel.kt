@@ -62,6 +62,7 @@ data class ListingUiState(
     val searchInput: String = "",
     val searchQuery: String? = null,
     val searchExpanded: Boolean = false,
+    val searchSuggestions: List<com.comics8.core.source.SearchSuggestion> = emptyList(),
     val seriesFavorited: Boolean = false,
     val currentEpisode: EpisodeItem? = null,
     val readerImages: List<String> = emptyList(),
@@ -147,6 +148,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     private var readerJob: Job? = null
     private var countUpdateJob: Job? = null
     private var downloadCatalogJob: Job? = null
+    private var suggestJob: Job? = null
 
     private val catalogCache = mutableMapOf<BrowseTab, List<ToonItem>>()
     private val catalogPages = mutableMapOf<BrowseTab, Pair<Int, Int>>()
@@ -439,6 +441,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             it.copy(
                 activeSourceId = resolved,
                 browseTabs = tabs,
+                searchSuggestions = emptyList(),
             )
         }
         selectTab(nextTab)
@@ -489,7 +492,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             if (current.isSearch) {
                 selectTab(current.tab)
             } else {
-                _state.update { it.copy(searchExpanded = false, searchInput = "") }
+                _state.update { it.copy(searchExpanded = false, searchInput = "", searchSuggestions = emptyList()) }
             }
         } else {
             _state.update { it.copy(searchExpanded = true) }
@@ -498,6 +501,32 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
     fun updateSearchInput(value: String) {
         _state.update { it.copy(searchInput = value) }
+        requestSuggestions(value)
+    }
+
+    fun applySearchSuggestion(suggestion: com.comics8.core.source.SearchSuggestion) {
+        updateSearchInput(com.comics8.core.source.hitomi.HitomiSuggest.apply(_state.value.searchInput, suggestion))
+    }
+
+    private fun requestSuggestions(value: String) {
+        suggestJob?.cancel()
+        if (value.isBlank() || _state.value.activeSourceId != "hitomi") {
+            _state.update { it.copy(searchSuggestions = emptyList()) }
+            return
+        }
+        suggestJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(200)
+            try {
+                val items = repository.suggest(value, _state.value.activeSourceId)
+                _state.update { current ->
+                    if (current.searchInput == value) current.copy(searchSuggestions = items) else current
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _state.update { it.copy(searchSuggestions = emptyList()) }
+            }
+        }
     }
 
     fun submitSearch() {
@@ -509,6 +538,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             it.copy(
                 searchQuery = query,
                 searchInput = query,
+                searchSuggestions = emptyList(),
                 screen = Screen.Browse,
                 series = null,
                 episodes = emptyList(),
@@ -645,7 +675,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                     updated
                 }
                 if (current.tab !is BrowseTab.Favorite) {
-                    catalogCache.remove(BrowseTab.Favorite)
+                    catalogCache.remove(BrowseTab.Favorite(item.sourceId.ifBlank { WorkId.DEFAULT_SOURCE }))
                 }
                 if (!current.isSearch) {
                     catalogCache[current.tab] = visible
@@ -745,7 +775,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             )
         }
         if (tab is BrowseTab.Favorite && !searching) {
-            val cached = catalogCache[BrowseTab.Favorite]
+            val cached = catalogCache[tab]
             if (cached == null) {
                 loadPage(1, replace = true)
             }
@@ -871,7 +901,9 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     fun loadDownloads() {
         viewModelScope.launch {
             _state.update { it.copy(downloadLoading = it.downloadSummaries.isEmpty()) }
-            val items = repository.downloadManager?.getDownloadedToonSummaries().orEmpty()
+            val items = repository.downloadManager
+                ?.getDownloadedToonSummaries(_state.value.activeSourceId)
+                .orEmpty()
             _state.update { it.copy(downloadSummaries = items, downloadLoading = false) }
         }
     }

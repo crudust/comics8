@@ -312,9 +312,10 @@ class DownloadManager(
         }
     }
 
-    suspend fun getDownloadedToonSummaries(): List<DownloadedToonSummary> = withContext(Dispatchers.IO) {
+    suspend fun getDownloadedToonSummaries(sourceId: String): List<DownloadedToonSummary> = withContext(Dispatchers.IO) {
         migrateLegacyDownloads()
-        val all = database.downloadedEpisodeDao().all()
+        val sid = sourceId.ifBlank { WorkId.DEFAULT_SOURCE }
+        val all = database.downloadedEpisodeDao().bySource(sid)
         val grouped = all.groupBy { it.workId().storageKey() }
         grouped.map { (_, epList) ->
             val first = epList.first()

@@ -49,6 +49,7 @@ data class DesktopUiState(
     val searchInput: String = "",
     val searchQuery: String? = null,
     val searchExpanded: Boolean = false,
+    val searchSuggestions: List<com.comics8.core.source.SearchSuggestion> = emptyList(),
     val seriesFavorited: Boolean = false,
     val currentEpisode: EpisodeItem? = null,
     val readerImages: List<String> = emptyList(),

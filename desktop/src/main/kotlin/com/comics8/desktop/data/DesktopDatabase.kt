@@ -1001,6 +1001,23 @@ class DesktopDatabase(dbFile: File? = null) {
         return list
     }
 
+    fun getDownloadedEpisodesBySource(sourceId: String): List<DownloadedEpisodeRecord> {
+        val sid = sourceId.ifBlank { WorkId.DEFAULT_SOURCE }
+        val list = mutableListOf<DownloadedEpisodeRecord>()
+        getConnection().use { conn ->
+            conn.prepareStatement(
+                "SELECT * FROM downloaded_episodes WHERE sourceId = ? ORDER BY downloadedAt DESC",
+            ).use { stmt ->
+                stmt.setString(1, sid)
+                val rs = stmt.executeQuery()
+                while (rs.next()) {
+                    list.add(downloadedFrom(rs))
+                }
+            }
+        }
+        return list
+    }
+
     fun getDownloadedEpisodesByToon(workId: WorkId): List<DownloadedEpisodeRecord> {
         val list = mutableListOf<DownloadedEpisodeRecord>()
         getConnection().use { conn ->

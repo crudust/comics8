@@ -24,6 +24,7 @@ interface ComicSource {
 
     suspend fun loadListing(catalogId: String, page: Int, http: SourceHttp): ListingPage
     suspend fun search(query: SearchQuery, http: SourceHttp): List<ToonItem>
+    suspend fun suggest(query: SearchQuery, http: SourceHttp): List<SearchSuggestion> = emptyList()
     suspend fun loadEpisodes(item: ToonItem, page: Int, http: SourceHttp): EpisodePage
     suspend fun resolveImages(episode: EpisodeItem, item: ToonItem, http: SourceHttp): List<String>
 

@@ -117,7 +117,7 @@ fun TopBar(
                         Screen.Series -> state.series?.title.orEmpty()
                         Screen.Browse -> "11toon"
                         Screen.History -> "히스토리"
-                        Screen.Downloads -> "오프라인 저장소"
+                        Screen.Downloads -> "${SourceRegistry.chipLabel(state.activeSourceId)} 저장소"
                     },
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
@@ -310,25 +310,55 @@ fun TopBar(
                     .fillMaxWidth()
                     .padding(top = 8.dp),
             ) {
-                OutlinedTextField(
-                    value = state.searchInput,
-                    onValueChange = viewModel::updateSearchInput,
-                    placeholder = { Text("만화 제목 검색...") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { viewModel.search(state.searchInput) }),
-                    trailingIcon = {
-                        if (state.searchInput.isNotEmpty()) {
-                            IconButton(onClick = {
-                                viewModel.updateSearchInput("")
-                                if (state.isSearch) viewModel.selectTab(state.tab)
-                            }) {
-                                Icon(Icons.Default.Close, contentDescription = "검색어 지우기")
+                Column(modifier = Modifier.weight(1f)) {
+                    OutlinedTextField(
+                        value = state.searchInput,
+                        onValueChange = viewModel::updateSearchInput,
+                        placeholder = {
+                            Text(
+                                if (state.activeSourceId == "hitomi") {
+                                    "작가 검색 (artist: 이름)"
+                                } else {
+                                    "만화 제목 검색..."
+                                },
+                            )
+                        },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { viewModel.search(state.searchInput) }),
+                        trailingIcon = {
+                            if (state.searchInput.isNotEmpty()) {
+                                IconButton(onClick = {
+                                    viewModel.updateSearchInput("")
+                                    if (state.isSearch) viewModel.selectTab(state.tab)
+                                }) {
+                                    Icon(Icons.Default.Close, contentDescription = "검색어 지우기")
+                                }
                             }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    state.searchSuggestions.forEach { item ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { viewModel.applySearchSuggestion(item) }
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                        ) {
+                            Text(
+                                text = item.tag,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(
+                                text = "${item.ns} · ${item.count}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
-                    },
-                    modifier = Modifier.weight(1f),
-                )
+                    }
+                }
                 Spacer(Modifier.width(8.dp))
                 IconButton(onClick = { viewModel.search(state.searchInput) }) {
                     Icon(Icons.Default.Search, contentDescription = "검색 실행")

@@ -43,13 +43,15 @@ class DesktopToonRepository(
 
     suspend fun loadListing(tab: BrowseTab, page: Int): ListingPage = withContext(Dispatchers.IO) {
         when (tab) {
-            BrowseTab.Favorite -> loadFavoriteListing()
+            is BrowseTab.Favorite -> loadFavoriteListing(tab.sourceId)
             is BrowseTab.Remote -> fetchRemoteListing(tab.sourceId, tab.catalog.id, page)
         }
     }
 
-    private suspend fun loadFavoriteListing(): ListingPage {
+    private suspend fun loadFavoriteListing(sourceId: String): ListingPage {
+        val sid = sourceId.ifBlank { WorkId.DEFAULT_SOURCE }
         val local = database.getAllFavorites().map { it.toItem().copy(isFavorite = true) }
+            .filter { it.sourceId.ifBlank { WorkId.DEFAULT_SOURCE } == sid }
         val items = FavoriteListing.assembleBySource(local) { sourceId, page ->
             val source = sources.getOrNull(sourceId)
             if (source == null || !source.favoriteUsesLatestListing) {
@@ -160,6 +162,13 @@ class DesktopToonRepository(
         }
         parsed
     }
+
+    suspend fun suggest(query: String, sourceId: String = WorkId.DEFAULT_SOURCE): List<com.comics8.core.source.SearchSuggestion> =
+        withContext(Dispatchers.IO) {
+            val q = query.trim()
+            if (q.isEmpty()) return@withContext emptyList()
+            sources.get(sourceId).suggest(SearchQuery(q, language = sources.get(sourceId).searchLanguage()), client)
+        }
 
     suspend fun search(query: String, sourceId: String = WorkId.DEFAULT_SOURCE): List<ToonItem> =
         withContext(Dispatchers.IO) {

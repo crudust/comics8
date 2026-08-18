@@ -24,6 +24,15 @@ data class SearchQuery(
     val type: String? = null,
 )
 
+data class SearchSuggestion(
+    val ns: String,
+    val tag: String,
+    val count: Int = 0,
+) {
+    val queryToken: String
+        get() = "$ns:${tag.trim().replace(' ', '_')}"
+}
+
 data class SourceConfig(
     val language: String? = null,
 )

@@ -113,17 +113,13 @@ class HitomiSourceTest {
     }
 
     @Test
-    fun searchIntersectsAndRejectsBareWords() = runBlocking<Unit> {
+    fun searchBareArtistReturnsSeriesCard() = runBlocking<Unit> {
         val http = FakeHitomiHttp()
-        val source = source()
-        assertThat(source.search(SearchQuery("big breasts"), http)).isEmpty()
-        val items = source.search(SearchQuery("artist:demo_artist"), http)
-        assertThat(items.map { it.entryEpisodeId }).contains("1001")
-        val artistCalls = http.recorded.filter { it.url.endsWith("/artist/demo_artist-korean.nozomi") }
-        assertThat(artistCalls).isNotEmpty()
-        assertThat(artistCalls.all { !it.headers["Range"].isNullOrBlank() }).isTrue()
-        assertThat(artistCalls.any { it.headers["Range"] == "bytes=0-99" }).isTrue()
-        assertThat(http.recorded.none { it.url.endsWith("/index-korean.nozomi") }).isTrue()
+        val items = source().search(SearchQuery("demo_artist"), http)
+        assertThat(items).hasSize(1)
+        assertThat(items.single().id).isEqualTo("artist:demo_artist")
+        assertThat(items.single().thumbUrl).isNotEmpty()
+        assertThat(http.recorded.any { it.url.contains("/artist/demo_artist-") }).isTrue()
     }
 
     @Test

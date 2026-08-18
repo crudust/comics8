@@ -124,7 +124,7 @@ fun TopBar(
                         Screen.Series -> state.series?.title.orEmpty()
                         Screen.Browse -> "11toon"
                         Screen.History -> "히스토리"
-                        Screen.Downloads -> "오프라인 저장소"
+                        Screen.Downloads -> "${SourceRegistry.chipLabel(state.activeSourceId)} 저장소"
                     },
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
@@ -437,30 +437,54 @@ fun SearchBar(
     LaunchedEffect(state.searchExpanded) {
         if (state.searchExpanded) requester.requestFocus()
     }
-    OutlinedTextField(
-        value = state.searchInput,
-        onValueChange = viewModel::updateSearchInput,
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp)
-            .focusRequester(requester),
-        singleLine = true,
-        placeholder = { Text("제목 검색") },
-        trailingIcon = {
-            if (state.searchInput.isNotEmpty()) {
-                IconButton(onClick = { viewModel.updateSearchInput("") }) {
-                    Icon(Icons.Default.Close, contentDescription = "검색어 지우기")
-                }
-            }
-        },
-        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-        keyboardActions = KeyboardActions(
-            onSearch = {
-                focus.clearFocus()
-                viewModel.submitSearch()
+    Column(modifier = modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = state.searchInput,
+            onValueChange = viewModel::updateSearchInput,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp)
+                .focusRequester(requester),
+            singleLine = true,
+            placeholder = {
+                Text(if (state.activeSourceId == "hitomi") "작가 검색 (artist: 이름)" else "제목 검색")
             },
-        ),
-    )
+            trailingIcon = {
+                if (state.searchInput.isNotEmpty()) {
+                    IconButton(onClick = { viewModel.updateSearchInput("") }) {
+                        Icon(Icons.Default.Close, contentDescription = "검색어 지우기")
+                    }
+                }
+            },
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(
+                onSearch = {
+                    focus.clearFocus()
+                    viewModel.submitSearch()
+                },
+            ),
+        )
+        state.searchSuggestions.forEach { item ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { viewModel.applySearchSuggestion(item) }
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                Text(
+                    text = item.tag,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = "${item.ns} · ${item.count}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
 }
 
 @Composable

@@ -39,6 +39,7 @@ class DesktopViewModel(
     private var readerJob: Job? = null
     private var countUpdateJob: Job? = null
     private var downloadCatalogJob: Job? = null
+    private var suggestJob: Job? = null
 
     private val catalogCache = mutableMapOf<BrowseTab, List<ToonItem>>()
     private val catalogPages = mutableMapOf<BrowseTab, Pair<Int, Int>>()
@@ -304,6 +305,7 @@ class DesktopViewModel(
             it.copy(
                 activeSourceId = resolved,
                 browseTabs = tabs,
+                searchSuggestions = emptyList(),
             )
         }
         selectTab(nextTab)
@@ -453,6 +455,7 @@ class DesktopViewModel(
             it.copy(
                 searchQuery = q,
                 searchInput = q,
+                searchSuggestions = emptyList(),
                 items = emptyList(),
                 page = 1,
                 lastPage = 1,
@@ -486,6 +489,32 @@ class DesktopViewModel(
 
     fun updateSearchInput(input: String) {
         _state.update { it.copy(searchInput = input) }
+        requestSuggestions(input)
+    }
+
+    fun applySearchSuggestion(suggestion: com.comics8.core.source.SearchSuggestion) {
+        updateSearchInput(com.comics8.core.source.hitomi.HitomiSuggest.apply(_state.value.searchInput, suggestion))
+    }
+
+    private fun requestSuggestions(value: String) {
+        suggestJob?.cancel()
+        if (value.isBlank() || _state.value.activeSourceId != "hitomi") {
+            _state.update { it.copy(searchSuggestions = emptyList()) }
+            return
+        }
+        suggestJob = scope.launch {
+            kotlinx.coroutines.delay(200)
+            try {
+                val items = repository.suggest(value, _state.value.activeSourceId)
+                _state.update { current ->
+                    if (current.searchInput == value) current.copy(searchSuggestions = items) else current
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _state.update { it.copy(searchSuggestions = emptyList()) }
+            }
+        }
     }
 
     fun toggleSearchBar() {
@@ -494,6 +523,7 @@ class DesktopViewModel(
             it.copy(
                 searchExpanded = nextExpanded,
                 searchInput = if (!nextExpanded) "" else it.searchInput,
+                searchSuggestions = if (!nextExpanded) emptyList() else it.searchSuggestions,
             )
         }
     }
@@ -703,7 +733,7 @@ class DesktopViewModel(
                     updated
                 }
                 if (current.tab !is BrowseTab.Favorite) {
-                    catalogCache.remove(BrowseTab.Favorite)
+                    catalogCache.remove(BrowseTab.Favorite(item.sourceId.ifBlank { WorkId.DEFAULT_SOURCE }))
                 }
                 if (!current.isSearch) {
                     catalogCache[current.tab] = visible
@@ -802,7 +832,7 @@ class DesktopViewModel(
                 highlightedEpisodeId = null,
             )
         }
-        if (tab is BrowseTab.Favorite && !searching && catalogCache[BrowseTab.Favorite] == null) {
+        if (tab is BrowseTab.Favorite && !searching && catalogCache[tab] == null) {
             loadPage(1, replace = true)
         }
     }
@@ -919,7 +949,9 @@ class DesktopViewModel(
     fun loadDownloads() {
         scope.launch {
             _state.update { it.copy(downloadLoading = it.downloadSummaries.isEmpty()) }
-            val items = repository.downloadManager?.getDownloadedToonSummaries().orEmpty()
+            val items = repository.downloadManager
+                ?.getDownloadedToonSummaries(_state.value.activeSourceId)
+                .orEmpty()
             _state.update { it.copy(downloadSummaries = items, downloadLoading = false) }
         }
     }

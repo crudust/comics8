@@ -37,7 +37,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.comics8.core.model.BrowseTab
 import com.comics8.desktop.data.ToonItem
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
@@ -80,7 +79,7 @@ fun BrowsePane(
                             item = item,
                             onClick = { viewModel.onListingOpen(item) },
                             onToggleFavorite = { viewModel.toggleFavorite(item) },
-                            showSourceChip = state.tab is BrowseTab.Favorite && !state.isSearch,
+                            showSourceChip = false,
                         )
                     }
                 }

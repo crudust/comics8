@@ -67,7 +67,7 @@ fun DesktopDownloadsPane(
             }
             state.downloadSummaries.isEmpty() -> {
                 ErrorPane(
-                    message = "다운로드된 만화가 없습니다.",
+                    message = "이 사이트에 저장된 만화가 없습니다.",
                     actionLabel = "목록으로",
                     onRetry = viewModel::closeDownloads,
                     modifier = Modifier.weight(1f),

@@ -12,6 +12,7 @@ import com.comics8.core.source.HttpResult
 import com.comics8.core.source.NotificationMode
 import com.comics8.core.source.RequestPolicy
 import com.comics8.core.source.SearchQuery
+import com.comics8.core.source.SearchSuggestion
 import com.comics8.core.source.SourceCatalog
 import com.comics8.core.source.SourceConfig
 import com.comics8.core.source.SourceHttp
@@ -60,7 +61,7 @@ class HitomiSource(
     }
 
     override suspend fun search(query: SearchQuery, http: SourceHttp): List<ToonItem> {
-        val tokens = HitomiSearch.parse(query.text) ?: return emptyList()
+        val tokens = HitomiSearch.parse(query.text)
         if (tokens.isEmpty() && query.language.isNullOrBlank() && query.type.isNullOrBlank()) {
             return emptyList()
         }
@@ -73,6 +74,9 @@ class HitomiSource(
         if (!query.type.isNullOrBlank() && filters.none { it.ns == "type" }) {
             filters += SearchToken("type", query.type)
         }
+        if (filters.size == 1 && filters[0].ns in HitomiSearch.seriesNamespaces) {
+            return listOf(nsSeriesItem(filters[0].ns, filters[0].value, http, lang))
+        }
         val urls = if (filters.isEmpty()) {
             listOf(HitomiUrls.indexNozomi(lang))
         } else {
@@ -81,11 +85,18 @@ class HitomiSource(
         return loadGalleryCards(collectSearchIds(urls, http), http)
     }
 
+    override suspend fun suggest(query: SearchQuery, http: SourceHttp): List<SearchSuggestion> {
+        val url = HitomiSuggest.url(query.text) ?: return emptyList()
+        val result = fetchWithBackoff(http, FetchSpec(url, defaultPolicy)) ?: return emptyList()
+        if (result.code !in 200..299) return emptyList()
+        return HitomiSuggest.parse(result.body.toString(Charsets.UTF_8))
+    }
+
     override suspend fun loadEpisodes(item: ToonItem, page: Int, http: SourceHttp): EpisodePage {
         val p = page.coerceAtLeast(1)
-        val artistSlug = artistSlugOf(item.id)
-        if (artistSlug != null) {
-            val result = fetchNozomiPage(HitomiUrls.nsNozomi("artist", artistSlug, language), p, http)
+        val nsItem = nsSlugOf(item.id)
+        if (nsItem != null) {
+            val result = fetchNozomiPage(HitomiUrls.nsNozomi(nsItem.first, nsItem.second, language), p, http)
             val ids = NozomiIndex.parseIds(result.body)
             val lastPage = NozomiIndex.lastPage(p, ids, result.totalLength())
             val episodes = loadGalleryInfos(ids, http).map { it.toEpisodeItem() }
@@ -318,7 +329,40 @@ class HitomiSource(
     )
 
     private fun artistSlugOf(toonId: String): String? =
-        if (toonId.startsWith(ARTIST_PREFIX)) toonId.removePrefix(ARTIST_PREFIX).ifBlank { null } else null
+        nsSlugOf(toonId)?.takeIf { it.first == "artist" }?.second
+
+    private fun nsSlugOf(toonId: String): Pair<String, String>? {
+        val idx = toonId.indexOf(':')
+        if (idx <= 0) return null
+        val ns = toonId.substring(0, idx)
+        val slug = toonId.substring(idx + 1)
+        if (ns !in HitomiSearch.seriesNamespaces || slug.isBlank()) return null
+        return ns to slug
+    }
+
+    private suspend fun nsSeriesItem(
+        ns: String,
+        slug: String,
+        http: SourceHttp,
+        lang: String,
+    ): ToonItem {
+        val cover = try {
+            val ids = NozomiIndex.parseIds(fetchNozomiPage(HitomiUrls.nsNozomi(ns, slug, lang), 1, http).body)
+            ids.firstOrNull()?.let { fetchGalleryInfo(it.toString(), http) }
+        } catch (_: Exception) {
+            null
+        }
+        return ToonItem(
+            id = "$ns:$slug",
+            title = slug.replace('_', ' '),
+            thumbUrl = cover?.files?.firstOrNull()?.let { HitomiUrls.thumbUrl(it.hash) }.orEmpty(),
+            href = HitomiUrls.nsPage(ns, slug),
+            genre = cover?.type ?: ns,
+            updatedAt = cover?.updatedAt,
+            sourceId = id,
+            entryEpisodeId = cover?.id,
+        )
+    }
 
     private fun galleryIdOf(item: ToonItem): String? {
         item.entryEpisodeId?.takeIf { it.isNotBlank() }?.let { return it }

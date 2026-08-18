@@ -44,7 +44,9 @@ object HitomiUrls {
 
     fun galleryPage(id: String): String = "$ORIGIN/galleries/$id.html"
 
-    fun artistPage(slug: String): String = "$ORIGIN/artist/${enc(slug)}-all.html"
+    fun artistPage(slug: String): String = nsPage("artist", slug)
+
+    fun nsPage(ns: String, slug: String): String = "$ORIGIN/$ns/${enc(slug)}-all.html"
 
     fun rangeHeader(page: Int): String {
         val p = page.coerceAtLeast(1)

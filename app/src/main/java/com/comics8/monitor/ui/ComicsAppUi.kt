@@ -266,7 +266,7 @@ private fun BrowseTabsPager(
                         scrollToTopTrigger = state.scrollToTopTrigger,
                         onOpen = viewModel::onListingOpen,
                         onToggleFavorite = viewModel::toggleFavorite,
-                        showSourceChip = pageCatalog is BrowseTab.Favorite,
+                        showSourceChip = false,
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                     )
                     if (pageCatalog.paginated && state.lastPage > 1) {

@@ -7,7 +7,7 @@ sealed interface BrowseTab {
     val label: String
     val paginated: Boolean
 
-    data object Favorite : BrowseTab {
+    data class Favorite(val sourceId: String) : BrowseTab {
         override val label: String = "즐겨찾기"
         override val paginated: Boolean = false
     }
@@ -23,27 +23,39 @@ sealed interface BrowseTab {
     companion object {
         const val FAVORITE_ID = "FAVORITE"
 
-        fun forSource(source: ComicSource): List<BrowseTab> =
-            source.catalogs.map { Remote(source.id, it) } + Favorite
+        fun forSource(source: ComicSource): List<BrowseTab> {
+            val remotes = source.catalogs.map { Remote(source.id, it) }
+            val favorite = Favorite(source.id)
+            val latestAt = remotes.indexOfFirst { it.catalog.id.equals("LATEST", ignoreCase = true) }
+            return if (latestAt >= 0) {
+                remotes.take(latestAt + 1) + favorite + remotes.drop(latestAt + 1)
+            } else {
+                remotes + favorite
+            }
+        }
 
         fun resolveLaunchTarget(targetId: String?, tabs: List<BrowseTab>): BrowseTab {
             val key = targetId?.trim().orEmpty()
+            val favorite = tabs.firstOrNull { it is Favorite }
+                ?: Favorite(com.comics8.core.source.WorkId.DEFAULT_SOURCE)
             if (key.isEmpty() || key.equals(FAVORITE_ID, ignoreCase = true)) {
-                return Favorite
+                return favorite
             }
             return tabs.firstOrNull { tab ->
                 tab is Remote && tab.catalog.id.equals(key, ignoreCase = true)
-            } ?: Favorite
+            } ?: favorite
         }
 
         fun afterSourceChange(current: BrowseTab, nextTabs: List<BrowseTab>): BrowseTab {
-            if (current is Favorite) return Favorite
+            if (current is Favorite) {
+                return nextTabs.firstOrNull { it is Favorite } ?: nextTabs.firstOrNull() ?: current
+            }
             if (current is Remote) {
                 return nextTabs.firstOrNull { tab ->
                     tab is Remote && tab.catalog.id == current.catalog.id
-                } ?: nextTabs.firstOrNull() ?: Favorite
+                } ?: nextTabs.firstOrNull() ?: Favorite(current.sourceId)
             }
-            return nextTabs.firstOrNull() ?: Favorite
+            return nextTabs.firstOrNull() ?: Favorite(com.comics8.core.source.WorkId.DEFAULT_SOURCE)
         }
     }
 }
