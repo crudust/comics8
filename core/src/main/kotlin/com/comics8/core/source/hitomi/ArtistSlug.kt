@@ -14,6 +14,10 @@ object ArtistSlug {
     fun normalize(raw: String): String =
         raw.trim().lowercase(Locale.ROOT).replace(Regex("\\s+"), "_")
 
+    /** Nozomi/HTML path segment: Hitomi uses spaces (`%20`), not underscores. */
+    fun forIndexPath(raw: String): String =
+        normalize(raw).replace('_', ' ')
+
     fun fromArtistUrl(url: String?): String? {
         if (url.isNullOrBlank()) return null
         val encoded = artistUrlRegex.find(url)?.groupValues?.get(1) ?: return null

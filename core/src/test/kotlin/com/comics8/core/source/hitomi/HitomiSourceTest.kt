@@ -61,7 +61,7 @@ class HitomiSourceTest {
             sourceId = "hitomi",
         )
         val page = source().loadEpisodes(item, 1, http)
-        assertThat(http.recorded.any { it.url.contains("/artist/demo_artist-korean.nozomi") }).isTrue()
+        assertThat(http.recorded.any { it.url.contains("/artist/demo%20artist-korean.nozomi") }).isTrue()
         assertThat(page.items.map { it.wrId }).contains("1001")
         assertThat(page.items.first { it.wrId == "1001" }.href).isEqualTo(HitomiUrls.reader("1001"))
     }
@@ -119,7 +119,7 @@ class HitomiSourceTest {
         assertThat(items).hasSize(1)
         assertThat(items.single().id).isEqualTo("artist:demo_artist")
         assertThat(items.single().thumbUrl).isNotEmpty()
-        assertThat(http.recorded.any { it.url.contains("/artist/demo_artist-") }).isTrue()
+        assertThat(http.recorded.any { it.url.contains("/artist/demo%20artist-") }).isTrue()
     }
 
     @Test
@@ -130,8 +130,8 @@ class HitomiSourceTest {
         val ranged = http.recorded.filter { it.url.endsWith(".nozomi") }
         assertThat(ranged).isNotEmpty()
         assertThat(ranged.all { it.headers["Range"] != null }).isTrue()
-        assertThat(ranged.any { it.url.contains("/artist/demo_artist-") }).isTrue()
-        assertThat(ranged.any { it.url.contains("/female/sole_female-") }).isTrue()
+        assertThat(ranged.any { it.url.contains("/artist/demo%20artist-") }).isTrue()
+        assertThat(ranged.any { it.url.contains("/female/sole%20female-") }).isTrue()
     }
 
     @Test
@@ -236,7 +236,8 @@ class HitomiSourceTest {
                 return HttpResult(429, emptyMap(), ByteArray(0))
             }
             val ids = when {
-                url.contains("/artist/demo_artist-") -> listOf(1001L, 2002L)
+                url.contains("/artist/demo%20artist-") || url.contains("/artist/demo_artist-") ->
+                    listOf(1001L, 2002L)
                 url.contains("/female/") -> listOf(1001L, 3003L)
                 url.contains("/index-") -> listingIds
                 else -> listingIds

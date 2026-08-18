@@ -10,6 +10,13 @@ class ArtistSlugTest {
     }
 
     @Test
+    fun indexPathUsesSpacesForNozomi() {
+        assertThat(ArtistSlug.forIndexPath("fujitaka_kinsei")).isEqualTo("fujitaka kinsei")
+        assertThat(ArtistSlug.forIndexPath("Fujitaka Kinsei")).isEqualTo("fujitaka kinsei")
+        assertThat(ArtistSlug.forIndexPath("asanagi")).isEqualTo("asanagi")
+    }
+
+    @Test
     fun fromArtistUrlStripsLangSuffix() {
         assertThat(ArtistSlug.fromArtistUrl("https://hitomi.la/artist/first_person-all.html"))
             .isEqualTo("first_person")

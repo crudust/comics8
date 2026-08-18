@@ -34,7 +34,7 @@ object HitomiUrls {
         "$LTN/popular/$period-${lang.ifBlank { DEFAULT_LANGUAGE }}.nozomi"
 
     fun nsNozomi(ns: String, slug: String, lang: String): String =
-        "$LTN/$ns/${enc(slug)}-${lang.ifBlank { DEFAULT_LANGUAGE }}.nozomi"
+        "$LTN/$ns/${enc(ArtistSlug.forIndexPath(slug))}-${lang.ifBlank { DEFAULT_LANGUAGE }}.nozomi"
 
     fun galleryJs(id: String): String = "$LTN/galleries/$id.js"
 
@@ -46,7 +46,8 @@ object HitomiUrls {
 
     fun artistPage(slug: String): String = nsPage("artist", slug)
 
-    fun nsPage(ns: String, slug: String): String = "$ORIGIN/$ns/${enc(slug)}-all.html"
+    fun nsPage(ns: String, slug: String): String =
+        "$ORIGIN/$ns/${enc(ArtistSlug.forIndexPath(slug))}-all.html"
 
     fun rangeHeader(page: Int): String {
         val p = page.coerceAtLeast(1)

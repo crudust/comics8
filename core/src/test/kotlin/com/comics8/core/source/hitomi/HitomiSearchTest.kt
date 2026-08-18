@@ -9,9 +9,9 @@ class HitomiSearchTest {
         val tokens = HitomiSearch.parse("artist:demo_artist female:sole_female type:doujinshi")
         assertThat(tokens.map { it.ns }).containsExactly("artist", "female", "type").inOrder()
         assertThat(HitomiSearch.nozomiUrl(tokens[0], "korean"))
-            .isEqualTo("https://ltn.gold-usergeneratedcontent.net/artist/demo_artist-korean.nozomi")
+            .isEqualTo("https://ltn.gold-usergeneratedcontent.net/artist/demo%20artist-korean.nozomi")
         assertThat(HitomiSearch.nozomiUrl(tokens[1], "korean"))
-            .isEqualTo("https://ltn.gold-usergeneratedcontent.net/female/sole_female-korean.nozomi")
+            .isEqualTo("https://ltn.gold-usergeneratedcontent.net/female/sole%20female-korean.nozomi")
         assertThat(HitomiSearch.nozomiUrl(tokens[2], "korean"))
             .isEqualTo("https://ltn.gold-usergeneratedcontent.net/doujinshi-korean.nozomi")
     }
@@ -31,6 +31,8 @@ class HitomiSearchTest {
         assertThat(tokens[0].value).isEqualTo("asanagi")
         assertThat(HitomiSearch.parse("cle masahiro").single().value).isEqualTo("cle_masahiro")
         assertThat(HitomiSearch.parse("artist: asanagi").single().value).isEqualTo("asanagi")
+        assertThat(HitomiSearch.nozomiUrl(HitomiSearch.parse("fujitaka kinsei").single(), "korean"))
+            .isEqualTo("https://ltn.gold-usergeneratedcontent.net/artist/fujitaka%20kinsei-korean.nozomi")
     }
 
     @Test
