@@ -21,7 +21,29 @@ sealed interface BrowseTab {
     }
 
     companion object {
+        const val FAVORITE_ID = "FAVORITE"
+
         fun forSource(source: ComicSource): List<BrowseTab> =
             source.catalogs.map { Remote(source.id, it) } + Favorite
+
+        fun resolveLaunchTarget(targetId: String?, tabs: List<BrowseTab>): BrowseTab {
+            val key = targetId?.trim().orEmpty()
+            if (key.isEmpty() || key.equals(FAVORITE_ID, ignoreCase = true)) {
+                return Favorite
+            }
+            return tabs.firstOrNull { tab ->
+                tab is Remote && tab.catalog.id.equals(key, ignoreCase = true)
+            } ?: Favorite
+        }
+
+        fun afterSourceChange(current: BrowseTab, nextTabs: List<BrowseTab>): BrowseTab {
+            if (current is Favorite) return Favorite
+            if (current is Remote) {
+                return nextTabs.firstOrNull { tab ->
+                    tab is Remote && tab.catalog.id == current.catalog.id
+                } ?: nextTabs.firstOrNull() ?: Favorite
+            }
+            return nextTabs.firstOrNull() ?: Favorite
+        }
     }
 }

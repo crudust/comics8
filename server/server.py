@@ -22,6 +22,8 @@ DEFAULT_REFERER = "http://103.204.13.68:8904"
 CORS_ALLOW_HEADERS = (
     "Authorization, Content-Type, X-Sync-Key, X-Comics8-Sync-Schema, Range, Referer"
 )
+# Keep in sync with ComicSource.ownsHost() in core (ElevenToonSource, HitomiSource).
+# New sites that need the sync proxy must add their hosts here and in ownsHost.
 _EXACT_PROXY_HOSTS = {
     "hitomi.la",
     "tn.hitomi.la",

@@ -1,5 +1,6 @@
 package com.comics8.core.source
 
+import com.comics8.core.model.ArtistRef
 import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.EpisodePage
 import com.comics8.core.model.ListingPage
@@ -13,12 +14,52 @@ interface ComicSource {
     val defaultPolicy: RequestPolicy
     val searchFirstClass: Boolean
 
+    val enabledByDefault: Boolean get() = id == WorkId.DEFAULT_SOURCE
+    val notificationMode: NotificationMode get() = NotificationMode.NONE
+    val episodePageSize: Int get() = 100
+    val emptyListingOk: Boolean get() = false
+    val defaultLanguage: String? get() = null
+    val favoriteUsesLatestListing: Boolean
+        get() = notificationMode == NotificationMode.LATEST_INTERSECTION
+
     suspend fun loadListing(catalogId: String, page: Int, http: SourceHttp): ListingPage
     suspend fun search(query: SearchQuery, http: SourceHttp): List<ToonItem>
     suspend fun loadEpisodes(item: ToonItem, page: Int, http: SourceHttp): EpisodePage
     suspend fun resolveImages(episode: EpisodeItem, item: ToonItem, http: SourceHttp): List<String>
 
     fun imageFallbacks(url: String): List<String> = emptyList()
+    fun imageReferer(url: String): String = defaultPolicy.referer ?: origin
     fun coverUrl(toonId: String): String? = null
-    fun supportsChapterNotifications(item: ToonItem): Boolean = true
+    fun supportsChapterNotifications(item: ToonItem): Boolean =
+        notificationMode != NotificationMode.NONE
+
+    fun ownsHost(host: String): Boolean = false
+    fun useProxy(url: String): Boolean = true
+
+    fun listingKey(item: ToonItem): String {
+        val episode = item.entryEpisodeId
+        return if (!episode.isNullOrBlank()) {
+            "$id:g:$episode"
+        } else {
+            item.workId().storageKey()
+        }
+    }
+
+    fun resolveParent(
+        item: ToonItem,
+        choice: ArtistRef,
+        entryEpisodeId: String? = item.entryEpisodeId,
+    ): ToonItem? = null
+
+    fun notificationCandidates(favorites: List<ToonItem>): List<ToonItem> =
+        when (notificationMode) {
+            NotificationMode.NONE -> emptyList()
+            NotificationMode.LATEST_INTERSECTION,
+            NotificationMode.PER_FAVORITE,
+            -> favorites
+        }
+
+    fun applyConfig(config: SourceConfig) {}
+
+    fun searchLanguage(): String? = null
 }

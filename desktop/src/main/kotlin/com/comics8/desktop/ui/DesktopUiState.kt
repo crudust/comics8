@@ -30,7 +30,6 @@ data class DesktopUiState(
     ),
     val browseTabs: List<BrowseTab> = emptyList(),
     val activeSourceId: String = WorkId.DEFAULT_SOURCE,
-    val hitomiEnabled: Boolean = false,
     val artistPick: ArtistPickRequest? = null,
     val highlightedEpisodeId: String? = null,
     val page: Int = 1,

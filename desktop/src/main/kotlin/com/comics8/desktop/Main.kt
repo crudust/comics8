@@ -66,10 +66,14 @@ fun main() {
     application {
         val database = remember { DesktopDatabase() }
         val toonClient = remember { ToonClient() }
-        val hitomiOn = { com.comics8.desktop.data.DesktopSourcePrefs.hitomiEnabled }
+        val sourceEnabled = { id: String -> com.comics8.desktop.data.DesktopSourcePrefs.isEnabled(id) }
         val syncManager = remember { DesktopSyncManager(database, toonClient) }
         val downloadManager = remember {
-            com.comics8.desktop.data.DesktopDownloadManager(database, toonClient, hitomiEnabled = hitomiOn)
+            com.comics8.desktop.data.DesktopDownloadManager(
+                database,
+                toonClient,
+                isSourceEnabled = sourceEnabled,
+            )
         }
         val repository = remember {
             DesktopToonRepository(
@@ -77,7 +81,7 @@ fun main() {
                 database,
                 syncManager,
                 downloadManager,
-                hitomiEnabled = hitomiOn,
+                isSourceEnabled = sourceEnabled,
             )
         }
         val viewModel = remember { DesktopViewModel(repository) }

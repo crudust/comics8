@@ -51,7 +51,7 @@ class RefreshWorker(
         val intent = Intent(applicationContext, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
             putExtra(EXTRA_FROM_NOTIFICATION, true)
-            putExtra(EXTRA_TARGET_CATALOG, com.comics8.monitor.data.Catalog.FAVORITE.name)
+            putExtra(EXTRA_TARGET_TAB, com.comics8.core.model.BrowseTab.FAVORITE_ID)
         }
 
         val launch = PendingIntent.getActivity(
@@ -90,7 +90,7 @@ class RefreshWorker(
 
     companion object {
         const val EXTRA_FROM_NOTIFICATION = "from_notification"
-        const val EXTRA_TARGET_CATALOG = "target_catalog"
+        const val EXTRA_TARGET_TAB = "target_catalog"
         private const val UNIQUE_NAME = "latest-refresh"
         private const val CHANNEL_ID = "latest-updates"
         private const val NOTIFY_ID = 81

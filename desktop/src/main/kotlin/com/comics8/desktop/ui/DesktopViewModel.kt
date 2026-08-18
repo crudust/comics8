@@ -3,7 +3,6 @@ package com.comics8.desktop.ui
 import com.comics8.core.model.ArtistRef
 import com.comics8.core.model.BrowseTab
 import com.comics8.core.source.WorkId
-import com.comics8.core.source.hitomi.HitomiSource
 import com.comics8.core.sync.AppUpdateChecker
 import com.comics8.core.sync.SyncConstants
 import com.comics8.desktop.DesktopVersion
@@ -152,14 +151,14 @@ class DesktopViewModel(
 
     init {
         val storedSource = DesktopSourcePrefs.activeSourceId
-        val activeSource = if (storedSource == HitomiSource.ID) HitomiSource.ID else WorkId.DEFAULT_SOURCE
-        val hitomiOn = activeSource == HitomiSource.ID || DesktopSourcePrefs.hitomiEnabled
-        repository.applyHitomiLanguage(DesktopSourcePrefs.hitomiLanguage)
-        repository.setHitomiWrites(hitomiOn)
+        val activeSource = repository.sourceOrDefault(storedSource).id
+        repository.applyPreferences { id ->
+            DesktopSourcePrefs.language(id).ifBlank { null }
+        }
+        repository.setSourceWriteAccess(DesktopSourcePrefs::isEnabled)
         val tabs = BrowseTab.forSource(repository.source(activeSource))
         _state.update {
             it.copy(
-                hitomiEnabled = hitomiOn,
                 activeSourceId = activeSource,
                 browseTabs = tabs,
                 tab = tabs.first(),
@@ -283,22 +282,14 @@ class DesktopViewModel(
     }
 
     fun setActiveSource(sourceId: String) {
-        val resolved = if (sourceId == HitomiSource.ID) HitomiSource.ID else WorkId.DEFAULT_SOURCE
-        if (resolved == HitomiSource.ID) {
-            DesktopSourcePrefs.hitomiEnabled = true
-            repository.setHitomiWrites(true)
-            _state.update { it.copy(hitomiEnabled = true) }
+        val resolved = repository.sourceOrDefault(sourceId).id
+        if (resolved != WorkId.DEFAULT_SOURCE) {
+            DesktopSourcePrefs.setEnabled(resolved, true)
         }
+        repository.setSourceWriteAccess(DesktopSourcePrefs::isEnabled)
         DesktopSourcePrefs.activeSourceId = resolved
         val tabs = BrowseTab.forSource(repository.source(resolved))
-        val current = _state.value.tab
-        val nextTab = when {
-            current is BrowseTab.Favorite -> BrowseTab.Favorite
-            current is BrowseTab.Remote -> tabs.firstOrNull {
-                it is BrowseTab.Remote && it.catalog.id == current.catalog.id
-            } ?: tabs.first()
-            else -> tabs.first()
-        }
+        val nextTab = BrowseTab.afterSourceChange(_state.value.tab, tabs)
         _state.update {
             it.copy(
                 activeSourceId = resolved,
@@ -308,11 +299,12 @@ class DesktopViewModel(
         selectTab(nextTab)
     }
 
-    fun setHitomiEnabled(enabled: Boolean) {
-        DesktopSourcePrefs.hitomiEnabled = enabled
-        repository.setHitomiWrites(enabled)
-        _state.update { it.copy(hitomiEnabled = enabled) }
-        if (!enabled && _state.value.activeSourceId == HitomiSource.ID) {
+    fun setSourceEnabled(sourceId: String, enabled: Boolean) {
+        val resolved = repository.sourceOrDefault(sourceId).id
+        if (resolved == WorkId.DEFAULT_SOURCE) return
+        DesktopSourcePrefs.setEnabled(resolved, enabled)
+        repository.setSourceWriteAccess(DesktopSourcePrefs::isEnabled)
+        if (!enabled && _state.value.activeSourceId == resolved) {
             setActiveSource(WorkId.DEFAULT_SOURCE)
         } else {
             val tabs = BrowseTab.forSource(repository.source(_state.value.activeSourceId))
@@ -340,7 +332,11 @@ class DesktopViewModel(
     fun pickArtist(artist: ArtistRef) {
         val request = _state.value.artistPick ?: return
         dismissArtistPick()
-        openSeries(HitomiSource.artistSeriesItem(request.item, artist, request.entryEpisodeId))
+        val parent = repository.sourceOrDefault(request.item.sourceId)
+            .resolveParent(request.item, artist, request.entryEpisodeId)
+        if (parent != null) {
+            openSeries(parent)
+        }
     }
 
     private fun updateEpisodeCountsForUpdatedItems(items: List<ToonItem>) {

@@ -1,9 +1,8 @@
 package com.comics8.core.network
 
-import com.comics8.core.parser.ComicSite
-import com.comics8.core.source.hitomi.HitomiUrls
+import com.comics8.core.source.SourceRegistry
 
 object ImageReferer {
-    fun forUrl(url: String): String =
-        if (HitomiUrls.isHitomiHost(url)) HitomiUrls.REFERER else ComicSite.ORIGIN
+    fun forUrl(url: String, registry: SourceRegistry = SourceRegistry.defaults()): String =
+        registry.sourceForUrl(url).imageReferer(url)
 }

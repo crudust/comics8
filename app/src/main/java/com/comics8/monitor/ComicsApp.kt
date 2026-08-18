@@ -9,7 +9,9 @@ import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.comics8.core.network.ImageFallbacks
 import com.comics8.core.network.ImageReferer
-import com.comics8.core.source.hitomi.HitomiSource
+import com.comics8.core.source.SourcePrefs
+import com.comics8.core.source.SourceRegistry
+import com.comics8.core.source.WorkId
 import com.comics8.monitor.data.DownloadManager
 import com.comics8.monitor.data.SyncManager
 import com.comics8.monitor.data.ToonClient
@@ -30,11 +32,16 @@ class ComicsApp : Application(), ImageLoaderFactory {
             .build()
         val client = ToonClient()
         val prefs = getSharedPreferences("comics_reader_prefs", Context.MODE_PRIVATE)
-        val hitomiOn = {
-            prefs.getBoolean(HitomiSource.ENABLED_PREF_KEY, HitomiSource.ENABLED_BY_DEFAULT)
+        val isSourceEnabled: (String) -> Boolean = { id ->
+            if (id == WorkId.DEFAULT_SOURCE || id.isBlank()) {
+                true
+            } else {
+                val defaultOn = SourceRegistry.defaults().getOrNull(id)?.enabledByDefault ?: false
+                prefs.getBoolean(SourcePrefs.enabledKey(id), defaultOn)
+            }
         }
         val syncManager = SyncManager(this, db, client)
-        val downloadManager = DownloadManager(this, db, client, hitomiEnabled = hitomiOn)
+        val downloadManager = DownloadManager(this, db, client, isSourceEnabled = isSourceEnabled)
         repository = ToonRepository(
             client = client,
             seenDao = db.seenDao(),
@@ -45,12 +52,11 @@ class ComicsApp : Application(), ImageLoaderFactory {
             database = db,
             syncManager = syncManager,
             downloadManager = downloadManager,
-            hitomiEnabled = hitomiOn,
+            isSourceEnabled = isSourceEnabled,
         )
-        repository.applyHitomiLanguage(
-            prefs.getString(HitomiSource.LANGUAGE_PREF_KEY, HitomiSource.DEFAULT_LANGUAGE)
-                ?: HitomiSource.DEFAULT_LANGUAGE,
-        )
+        repository.applyPreferences { id ->
+            prefs.getString(SourcePrefs.languageKey(id), null)
+        }
         RefreshWorker.enqueue(this)
     }
 

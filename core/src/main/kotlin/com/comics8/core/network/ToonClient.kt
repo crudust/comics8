@@ -1,12 +1,12 @@
 package com.comics8.core.network
 
 import com.comics8.core.model.EpisodeItem
-import com.comics8.core.parser.ComicSite
-import com.comics8.core.source.ElevenToonSource
+import com.comics8.core.model.ToonItem
 import com.comics8.core.source.FetchSpec
 import com.comics8.core.source.HttpResult
 import com.comics8.core.source.RequestPolicy
 import com.comics8.core.source.SourceHttp
+import com.comics8.core.source.SourceRegistry
 import com.comics8.core.sync.SyncConstants
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -77,7 +77,17 @@ class ToonClient(
      */
     fun fetchImages(url: String): List<String> {
         val episode = EpisodeItem(wrId = "", title = "", date = null, thumbUrl = null, href = url)
-        return ElevenToonSource().resolveImages(episode, this)
+        val source = SourceRegistry.defaults().sourceForUrl(url)
+        val item = ToonItem(
+            id = "",
+            title = "",
+            thumbUrl = "",
+            href = url,
+            sourceId = source.id,
+        )
+        return kotlinx.coroutines.runBlocking {
+            source.resolveImages(episode, item, this@ToonClient)
+        }
     }
 
     /**
@@ -165,22 +175,8 @@ class ToonClient(
                 .followSslRedirects(true)
                 .build()
 
-        internal fun shouldUseProxy(url: String): Boolean {
-            val host = hostOf(url) ?: return true
-            if (host == "hitomi.la" || host.endsWith(".hitomi.la")) return false
-            if (host == "gold-usergeneratedcontent.net" || host.endsWith(".gold-usergeneratedcontent.net")) {
-                return false
-            }
-            return true
-        }
-
-        private fun hostOf(url: String): String? {
-            return try {
-                java.net.URI(url).host?.lowercase()
-            } catch (_: Exception) {
-                null
-            }
-        }
+        internal fun shouldUseProxy(url: String): Boolean =
+            SourceRegistry.defaults().sourceForUrl(url).useProxy(url)
 
         private fun parseBytesRange(header: String, total: Int): Pair<Int, Int>? {
             if (total <= 0) return null

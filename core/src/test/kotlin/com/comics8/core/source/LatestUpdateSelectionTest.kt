@@ -26,9 +26,20 @@ class LatestUpdateSelectionTest {
             toon(HitomiSource.ID, "gallery:99"),
             toon(HitomiSource.ID, "artist:two"),
         )
-        assertThat(LatestUpdateSelection.hitomiEligible(favs, enabled = false)).isEmpty()
-        assertThat(LatestUpdateSelection.hitomiEligible(favs, enabled = true).map { it.id })
+        val source = HitomiSource()
+        assertThat(LatestUpdateSelection.candidates(source, favs, null, sourceEnabled = false)).isEmpty()
+        assertThat(LatestUpdateSelection.candidates(source, favs, null, sourceEnabled = true).map { it.id })
             .containsExactly("artist:one", "artist:two")
+            .inOrder()
+    }
+
+    @Test
+    fun elevenUsesLatestIntersection() {
+        val source = ElevenToonSource()
+        val favs = listOf(toon("eleven", "a"), toon("eleven", "c"))
+        val latest = listOf(toon("eleven", "a"), toon("eleven", "b"))
+        assertThat(LatestUpdateSelection.candidates(source, favs, latest, sourceEnabled = true).map { it.id })
+            .containsExactly("a")
             .inOrder()
     }
 

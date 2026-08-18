@@ -23,3 +23,13 @@ data class SearchQuery(
     val language: String? = null,
     val type: String? = null,
 )
+
+data class SourceConfig(
+    val language: String? = null,
+)
+
+enum class NotificationMode {
+    LATEST_INTERSECTION,
+    PER_FAVORITE,
+    NONE,
+}

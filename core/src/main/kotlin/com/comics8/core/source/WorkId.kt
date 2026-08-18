@@ -12,14 +12,17 @@ data class WorkId(val sourceId: String, val toonId: String) {
 
         fun eleven(toonId: String): WorkId = WorkId(DEFAULT_SOURCE, toonId)
 
-        fun writable(sourceId: String, toonId: String, hitomiEnabled: Boolean = false): WorkId? {
+        fun writable(sourceId: String, toonId: String, sourceEnabled: Boolean = false): WorkId? {
             val sid = sourceId.ifBlank { DEFAULT_SOURCE }
             if (toonId.isBlank()) return null
-            return when (sid) {
-                DEFAULT_SOURCE -> WorkId(sid, toonId)
-                "hitomi" -> if (hitomiEnabled) WorkId(sid, toonId) else null
-                else -> null
+            val id = try {
+                WorkId(sid, toonId)
+            } catch (_: IllegalArgumentException) {
+                return null
             }
+            if (sid == DEFAULT_SOURCE) return id
+            if (!SourceRegistry.isRegistered(sid)) return null
+            return if (sourceEnabled) id else null
         }
 
         fun stored(sourceId: String, toonId: String): WorkId? {

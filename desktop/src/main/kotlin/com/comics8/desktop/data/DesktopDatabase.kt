@@ -2,6 +2,7 @@ package com.comics8.desktop.data
 
 import com.comics8.core.model.SyncTombstone
 import com.comics8.core.model.UpdateDates
+import com.comics8.core.source.SourceAccess
 import com.comics8.core.source.WorkId
 import java.io.File
 import java.sql.Connection
@@ -10,7 +11,7 @@ import java.sql.ResultSet
 
 class DesktopDatabase(dbFile: File? = null) {
     @Volatile
-    var allowHitomiWrites: Boolean = false
+    var isSourceEnabled: (String) -> Boolean = { false }
 
     private val dbPath: String
 
@@ -26,7 +27,7 @@ class DesktopDatabase(dbFile: File? = null) {
     }
 
     private fun writableId(sourceId: String, toonId: String): WorkId? =
-        WorkId.writable(sourceId, toonId, allowHitomiWrites)
+        SourceAccess.writable(sourceId, toonId, isSourceEnabled)
 
     private fun getConnection(): Connection =
         DriverManager.getConnection("jdbc:sqlite:$dbPath")

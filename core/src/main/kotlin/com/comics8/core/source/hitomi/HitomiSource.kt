@@ -9,9 +9,11 @@ import com.comics8.core.network.ToonClient
 import com.comics8.core.source.ComicSource
 import com.comics8.core.source.FetchSpec
 import com.comics8.core.source.HttpResult
+import com.comics8.core.source.NotificationMode
 import com.comics8.core.source.RequestPolicy
 import com.comics8.core.source.SearchQuery
 import com.comics8.core.source.SourceCatalog
+import com.comics8.core.source.SourceConfig
 import com.comics8.core.source.SourceHttp
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -41,6 +43,12 @@ class HitomiSource(
         ),
     )
     override val searchFirstClass: Boolean = true
+    override val enabledByDefault: Boolean = ENABLED_BY_DEFAULT
+    override val notificationMode: NotificationMode = NotificationMode.PER_FAVORITE
+    override val episodePageSize: Int = HitomiUrls.PAGE_SIZE
+    override val emptyListingOk: Boolean = true
+    override val defaultLanguage: String? = DEFAULT_LANGUAGE
+    override val favoriteUsesLatestListing: Boolean = false
 
     override suspend fun loadListing(catalogId: String, page: Int, http: SourceHttp): ListingPage {
         val p = page.coerceAtLeast(1)
@@ -108,10 +116,36 @@ class HitomiSource(
         }
     }
 
-    override fun imageFallbacks(url: String): List<String> =
-        listOfNotNull(HitomiUrls.altImageUrl(url))
+    override fun imageFallbacks(url: String): List<String> {
+        val out = LinkedHashSet<String>()
+        HitomiUrls.altImageUrl(url)?.let { out.add(it) }
+        out.addAll(HitomiUrls.thumbFallbacks(url))
+        return out.toList()
+    }
 
-    override fun supportsChapterNotifications(item: ToonItem): Boolean = false
+    override fun imageReferer(url: String): String = HitomiUrls.REFERER
+
+    override fun ownsHost(host: String): Boolean = HitomiUrls.isHitomiHostName(host)
+
+    override fun useProxy(url: String): Boolean = false
+
+    override fun supportsChapterNotifications(item: ToonItem): Boolean =
+        item.id.startsWith(ARTIST_PREFIX)
+
+    override fun resolveParent(
+        item: ToonItem,
+        choice: ArtistRef,
+        entryEpisodeId: String?,
+    ): ToonItem = artistSeriesItem(item, choice, entryEpisodeId)
+
+    override fun notificationCandidates(favorites: List<ToonItem>): List<ToonItem> =
+        favorites.filter { it.id.startsWith(ARTIST_PREFIX) }
+
+    override fun applyConfig(config: SourceConfig) {
+        config.language?.let { language = it.ifBlank { DEFAULT_LANGUAGE } }
+    }
+
+    override fun searchLanguage(): String? = language
 
     private fun listingNozomi(catalogId: String): String {
         val lang = language

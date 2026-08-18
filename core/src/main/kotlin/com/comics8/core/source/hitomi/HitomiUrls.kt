@@ -16,7 +16,7 @@ object HitomiUrls {
     const val ENABLED_BY_DEFAULT = false
     const val LANGUAGE_PREF_KEY = "hitomi.language"
     const val DEFAULT_LANGUAGE = "korean"
-    const val ACTIVE_SOURCE_PREF_KEY = "pref_active_source_id"
+    const val ACTIVE_SOURCE_PREF_KEY = com.comics8.core.source.SourcePrefs.ACTIVE_SOURCE_KEY
 
     fun indexNozomi(lang: String): String {
         val key = lang.ifBlank { DEFAULT_LANGUAGE }
@@ -97,12 +97,17 @@ object HitomiUrls {
         }
     }
 
+    fun isHitomiHostName(host: String): Boolean {
+        val h = host.lowercase()
+        return h == "hitomi.la" ||
+            h.endsWith(".hitomi.la") ||
+            h == CDN_HOST ||
+            h.endsWith(".$CDN_HOST")
+    }
+
     fun isHitomiHost(url: String): Boolean {
         val host = hostOf(url) ?: return false
-        return host == "hitomi.la" ||
-            host.endsWith(".hitomi.la") ||
-            host == CDN_HOST ||
-            host.endsWith(".$CDN_HOST")
+        return isHitomiHostName(host)
     }
 
     fun enc(value: String): String =

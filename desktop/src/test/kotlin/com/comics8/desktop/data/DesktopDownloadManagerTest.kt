@@ -112,12 +112,12 @@ class DesktopDownloadManagerTest {
         val root = createTempDirectory("desk-hitomi").toFile()
         root.deleteOnExit()
         val downloads = File(root, "downloads").apply { mkdirs() }
-        val db = DesktopDatabase(File(root, "comics8.db")).apply { allowHitomiWrites = true }
+        val db = DesktopDatabase(File(root, "comics8.db")).apply { isSourceEnabled = { true } }
         val client = ToonClient(hitomiClient(), isProxyEnabled = false)
         val manager = DesktopDownloadManager(
             db,
             client,
-            hitomiEnabled = { true },
+            isSourceEnabled = { true },
             baseDir = downloads,
         )
         val toonId = "gallery:1001"

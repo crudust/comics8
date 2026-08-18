@@ -1,21 +1,15 @@
 package com.comics8.core.network
 
-import com.comics8.core.parser.ComicSite
-import com.comics8.core.source.hitomi.HitomiUrls
+import com.comics8.core.source.SourceRegistry
 
 object ImageFallbacks {
-    fun forUrl(url: String): List<String> {
-        val out = LinkedHashSet<String>()
-        out.addAll(ComicSite.getFallbackImageUrls(url))
-        HitomiUrls.altImageUrl(url)?.let { out.add(it) }
-        out.addAll(HitomiUrls.thumbFallbacks(url))
-        return out.toList()
-    }
+    fun forUrl(url: String, registry: SourceRegistry = SourceRegistry.defaults()): List<String> =
+        registry.sourceForUrl(url).imageFallbacks(url)
 
-    fun urlsToTry(url: String): List<String> {
+    fun urlsToTry(url: String, registry: SourceRegistry = SourceRegistry.defaults()): List<String> {
         val out = LinkedHashSet<String>()
         out.add(url)
-        out.addAll(forUrl(url))
+        out.addAll(forUrl(url, registry))
         return out.toList()
     }
 

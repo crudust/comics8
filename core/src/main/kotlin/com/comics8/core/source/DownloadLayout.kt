@@ -1,10 +1,10 @@
 package com.comics8.core.source
 
-import com.comics8.core.source.hitomi.HitomiUrls
 import java.io.File
 
 object DownloadLayout {
-    private val sourceDirNames: Set<String> = setOf(WorkId.DEFAULT_SOURCE, HitomiUrls.SOURCE_ID)
+    private val sourceDirNames: Set<String>
+        get() = SourceRegistry.knownIds()
 
     fun episodeDir(base: File, workId: WorkId, wrId: String): File =
         File(base, "${workId.sourceId}/${workId.toonId}/$wrId")
@@ -98,8 +98,13 @@ object DownloadLayout {
     internal fun imageCount(dir: File): Int {
         if (!dir.isDirectory) return 0
         return dir.listFiles { file ->
-            file.isFile && file.length() > 0 && file.name.endsWith(".jpg", ignoreCase = true)
+            file.isFile && file.length() > 0 && isImageFile(file.name)
         }?.size ?: 0
+    }
+
+    private fun isImageFile(name: String): Boolean {
+        val lower = name.lowercase()
+        return IMAGE_EXTENSIONS.any { lower.endsWith(it) }
     }
 
     internal fun moveDir(from: File, to: File): Boolean {
@@ -121,6 +126,8 @@ object DownloadLayout {
         }
     }
 }
+
+private val IMAGE_EXTENSIONS = listOf(".jpg", ".jpeg", ".png", ".webp", ".avif", ".gif")
 
 data class MigratedDownloadDir(
     val from: File,

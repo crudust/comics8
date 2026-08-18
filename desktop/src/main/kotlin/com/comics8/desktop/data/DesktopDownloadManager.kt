@@ -6,6 +6,7 @@ import com.comics8.core.model.ToonItem
 import com.comics8.core.network.ImageFallbacks
 import com.comics8.core.network.ToonClient
 import com.comics8.core.source.DownloadLayout
+import com.comics8.core.source.SourceAccess
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
 import kotlinx.coroutines.CoroutineScope
@@ -47,7 +48,7 @@ data class DesktopDownloadProgressState(
 class DesktopDownloadManager(
     private val database: DesktopDatabase,
     private val client: ToonClient,
-    private val hitomiEnabled: () -> Boolean = { false },
+    private val isSourceEnabled: (String) -> Boolean = { false },
     baseDir: File = File(System.getProperty("user.home"), ".comics8/downloads"),
     private val sources: SourceRegistry = SourceRegistry.defaults(),
 ) {
@@ -67,7 +68,7 @@ class DesktopDownloadManager(
 
     fun enqueueEpisodes(series: ToonItem, episodes: List<EpisodeItem>) {
         if (episodes.isEmpty()) return
-        val workId = WorkId.writable(series.sourceId, series.id, hitomiEnabled()) ?: return
+        val workId = SourceAccess.writable(series.sourceId, series.id, isSourceEnabled) ?: return
         scope.launch {
             migrateLegacyDownloads()
             val existing = database.getDownloadedEpisodesByToon(workId).map { it.wrId }.toSet()

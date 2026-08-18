@@ -4,9 +4,10 @@ import com.comics8.core.model.BrowseTab
 import com.comics8.core.model.FavoriteListing
 import com.comics8.core.network.ToonClient
 import com.comics8.core.source.SearchQuery
+import com.comics8.core.source.SourceAccess
+import com.comics8.core.source.SourceConfig
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
-import com.comics8.core.source.hitomi.HitomiSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -17,19 +18,24 @@ class DesktopToonRepository(
     val downloadManager: DesktopDownloadManager? = null,
     private val now: () -> Long = { System.currentTimeMillis() },
     private val sources: SourceRegistry = SourceRegistry.defaults(),
-    private val hitomiEnabled: () -> Boolean = { false },
+    private val isSourceEnabled: (String) -> Boolean = { false },
 ) {
     fun source(id: String) = sources.get(id)
 
+    fun sourceOrDefault(id: String) = sources.getOrNull(id) ?: sources.default
+
     fun allSources() = sources.all()
 
-    fun applyHitomiLanguage(language: String) {
-        (sources.get(HitomiSource.ID) as? HitomiSource)?.language =
-            language.ifBlank { HitomiSource.DEFAULT_LANGUAGE }
+    fun applySourceConfig(config: SourceConfig) {
+        sources.applyConfig(config)
     }
 
-    fun setHitomiWrites(enabled: Boolean) {
-        database.allowHitomiWrites = enabled
+    fun applyPreferences(languageFor: (String) -> String?) {
+        sources.applyPreferences(languageFor)
+    }
+
+    fun setSourceWriteAccess(isEnabled: (String) -> Boolean) {
+        database.isSourceEnabled = isEnabled
     }
 
     suspend fun loadListing(tab: BrowseTab, page: Int): ListingPage = withContext(Dispatchers.IO) {
@@ -42,7 +48,8 @@ class DesktopToonRepository(
     private suspend fun loadFavoriteListing(): ListingPage {
         val local = database.getAllFavorites().map { it.toItem().copy(isFavorite = true) }
         val items = FavoriteListing.assembleBySource(local) { sourceId, page ->
-            if (sourceId == HitomiSource.ID) {
+            val source = sources.getOrNull(sourceId)
+            if (source == null || !source.favoriteUsesLatestListing) {
                 null
             } else {
                 fetchRemoteListing(sourceId, "LATEST", page)
@@ -56,8 +63,9 @@ class DesktopToonRepository(
     }
 
     private suspend fun fetchRemoteListing(sourceId: String, catalogId: String, page: Int): ListingPage {
-        val parsed = sources.get(sourceId).loadListing(catalogId, page, client)
-        if (parsed.items.isEmpty()) {
+        val source = sources.get(sourceId)
+        val parsed = source.loadListing(catalogId, page, client)
+        if (parsed.items.isEmpty() && !source.emptyListingOk) {
             error("목록을 읽지 못했습니다. 사이트 구조가 바뀌었을 수 있습니다.")
         }
         return parsed.copy(items = applyFlags(parsed.items))
@@ -95,7 +103,7 @@ class DesktopToonRepository(
         if (lastP <= 1) {
             return@withContext firstPage.items.size
         }
-        val pageSize = 100
+        val pageSize = sourceFor(item).episodePageSize
         try {
             val lastPageRes = loadEpisodes(item, lastP)
             (lastP - 1) * pageSize + lastPageRes.items.size
@@ -130,8 +138,7 @@ class DesktopToonRepository(
             val q = query.trim()
             if (q.isEmpty()) return@withContext emptyList()
             val source = sources.get(sourceId)
-            val language = (source as? HitomiSource)?.language
-            val items = source.search(SearchQuery(q, language = language), client)
+            val items = source.search(SearchQuery(q, language = source.searchLanguage()), client)
             applyFlags(items)
         }
 
@@ -140,7 +147,7 @@ class DesktopToonRepository(
         val nowMs = now()
         val existing = database.getSeenByIds(items.map { it.workId() })
         val rows = items.mapNotNull { item ->
-            val workId = WorkId.writable(item.sourceId, item.id, hitomiEnabled()) ?: return@mapNotNull null
+            val workId = writableId(item.sourceId, item.id) ?: return@mapNotNull null
             val prev = existing[workId.storageKey()]
             SeenRecord(
                 sourceId = workId.sourceId,
@@ -190,7 +197,7 @@ class DesktopToonRepository(
     }
 
     suspend fun toggleFavorite(item: ToonItem): Boolean? = withContext(Dispatchers.IO) {
-        val workId = WorkId.writable(item.sourceId, item.id, hitomiEnabled()) ?: return@withContext null
+        val workId = writableId(item.sourceId, item.id) ?: return@withContext null
         val exists = database.isFavorite(workId)
         val result = if (exists) {
             database.deleteFavorite(workId)
@@ -236,7 +243,7 @@ class DesktopToonRepository(
         viewMode: ViewMode,
         readDirection: ReadDirection,
     ) = withContext(Dispatchers.IO) {
-        val writable = WorkId.writable(workId.sourceId, workId.toonId, hitomiEnabled()) ?: return@withContext
+        val writable = writableId(workId) ?: return@withContext
         database.saveReaderSetting(
             ReaderSettingRecord(
                 sourceId = writable.sourceId,
@@ -250,7 +257,7 @@ class DesktopToonRepository(
     }
 
     suspend fun markEpisodeRead(workId: WorkId, wrId: String, lastPage: Int = 0): Long = withContext(Dispatchers.IO) {
-        val writable = WorkId.writable(workId.sourceId, workId.toonId, hitomiEnabled()) ?: return@withContext now()
+        val writable = writableId(workId) ?: return@withContext now()
         val readAt = now()
         database.markEpisodeRead(
             ReadEpisodeRecord(
@@ -282,7 +289,7 @@ class DesktopToonRepository(
     }
 
     suspend fun saveHistory(history: ReadHistoryRecord) = withContext(Dispatchers.IO) {
-        val workId = WorkId.writable(history.sourceId, history.toonId, hitomiEnabled()) ?: return@withContext
+        val workId = writableId(history.sourceId, history.toonId) ?: return@withContext
         database.saveHistory(history)
         database.deleteTombstone("HISTORY", workId.storageKey())
         syncManager?.triggerDebouncedPush()
@@ -316,6 +323,12 @@ class DesktopToonRepository(
     }
 
     private fun sourceFor(item: ToonItem) = sources.get(item.sourceId)
+
+    private fun writableId(workId: WorkId): WorkId? =
+        SourceAccess.writable(workId, isSourceEnabled)
+
+    private fun writableId(sourceId: String, toonId: String): WorkId? =
+        SourceAccess.writable(sourceId, toonId, isSourceEnabled)
 
     private fun notifyKey(item: ToonItem): String = "${item.workId().storageKey()}|${item.updatedAt.orEmpty()}"
 

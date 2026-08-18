@@ -1,31 +1,42 @@
 package com.comics8.desktop.data
 
+import com.comics8.core.source.SourcePrefs
+import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
-import com.comics8.core.source.hitomi.HitomiSource
 import java.util.prefs.Preferences
 
 object DesktopSourcePrefs {
     private val prefs: Preferences = Preferences.userRoot().node("com.comics8.desktop")
 
-    var hitomiEnabled: Boolean
-        get() = prefs.getBoolean(HitomiSource.ENABLED_PREF_KEY, HitomiSource.ENABLED_BY_DEFAULT)
-        set(value) {
-            prefs.putBoolean(HitomiSource.ENABLED_PREF_KEY, value)
-        }
+    fun isEnabled(sourceId: String): Boolean {
+        val id = sourceId.ifBlank { WorkId.DEFAULT_SOURCE }
+        if (id == WorkId.DEFAULT_SOURCE) return true
+        val default = SourceRegistry.defaults().getOrNull(id)?.enabledByDefault ?: false
+        return prefs.getBoolean(SourcePrefs.enabledKey(id), default)
+    }
 
-    var hitomiLanguage: String
-        get() = prefs.get(HitomiSource.LANGUAGE_PREF_KEY, HitomiSource.DEFAULT_LANGUAGE)
-            .ifBlank { HitomiSource.DEFAULT_LANGUAGE }
-        set(value) {
-            prefs.put(HitomiSource.LANGUAGE_PREF_KEY, value.ifBlank { HitomiSource.DEFAULT_LANGUAGE })
-        }
+    fun setEnabled(sourceId: String, enabled: Boolean) {
+        val id = sourceId.ifBlank { return }
+        if (id == WorkId.DEFAULT_SOURCE) return
+        prefs.putBoolean(SourcePrefs.enabledKey(id), enabled)
+    }
+
+    fun language(sourceId: String): String {
+        val fallback = SourceRegistry.defaults().getOrNull(sourceId)?.defaultLanguage.orEmpty()
+        return prefs.get(SourcePrefs.languageKey(sourceId), fallback).ifBlank { fallback }
+    }
+
+    fun setLanguage(sourceId: String, value: String) {
+        val fallback = SourceRegistry.defaults().getOrNull(sourceId)?.defaultLanguage.orEmpty()
+        prefs.put(SourcePrefs.languageKey(sourceId), value.ifBlank { fallback })
+    }
 
     var activeSourceId: String
-        get() {
-            val stored = prefs.get(HitomiSource.ACTIVE_SOURCE_PREF_KEY, WorkId.DEFAULT_SOURCE)
-            return stored.ifBlank { WorkId.DEFAULT_SOURCE }
-        }
+        get() = SourcePrefs.resolveActiveId(
+            prefs.get(SourcePrefs.ACTIVE_SOURCE_KEY, WorkId.DEFAULT_SOURCE),
+            SourceRegistry.knownIds(),
+        )
         set(value) {
-            prefs.put(HitomiSource.ACTIVE_SOURCE_PREF_KEY, value.ifBlank { WorkId.DEFAULT_SOURCE })
+            prefs.put(SourcePrefs.ACTIVE_SOURCE_KEY, value.ifBlank { WorkId.DEFAULT_SOURCE })
         }
 }

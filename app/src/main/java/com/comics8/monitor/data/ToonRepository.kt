@@ -4,10 +4,12 @@ import com.comics8.core.model.BrowseTab
 import com.comics8.core.model.FavoriteListing
 import com.comics8.core.model.UpdateDates
 import com.comics8.core.source.LatestUpdateSelection
+import com.comics8.core.source.NotificationMode
 import com.comics8.core.source.SearchQuery
+import com.comics8.core.source.SourceAccess
+import com.comics8.core.source.SourceConfig
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
-import com.comics8.core.source.hitomi.HitomiSource
 import com.comics8.monitor.data.local.AppDatabase
 import com.comics8.monitor.data.local.FavoriteDao
 import com.comics8.monitor.data.local.FavoriteToon
@@ -42,15 +44,20 @@ class ToonRepository(
     val downloadManager: DownloadManager? = null,
     private val now: () -> Long = { System.currentTimeMillis() },
     private val sources: SourceRegistry = SourceRegistry.defaults(),
-    private val hitomiEnabled: () -> Boolean = { false },
+    private val isSourceEnabled: (String) -> Boolean = { false },
 ) {
     fun source(id: String) = sources.get(id)
 
+    fun sourceOrDefault(id: String) = sources.getOrNull(id) ?: sources.default
+
     fun allSources() = sources.all()
 
-    fun applyHitomiLanguage(language: String) {
-        (sources.get(HitomiSource.ID) as? HitomiSource)?.language =
-            language.ifBlank { HitomiSource.DEFAULT_LANGUAGE }
+    fun applySourceConfig(config: SourceConfig) {
+        sources.applyConfig(config)
+    }
+
+    fun applyPreferences(languageFor: (String) -> String?) {
+        sources.applyPreferences(languageFor)
     }
 
     suspend fun loadListing(tab: BrowseTab, page: Int): ListingPage = withContext(Dispatchers.IO) {
@@ -63,7 +70,8 @@ class ToonRepository(
     private suspend fun loadFavoriteListing(): ListingPage {
         val local = favoriteDao.all().map { it.toItem().copy(isFavorite = true) }
         val items = FavoriteListing.assembleBySource(local) { sourceId, page ->
-            if (sourceId == HitomiSource.ID) {
+            val source = sources.getOrNull(sourceId)
+            if (source == null || !source.favoriteUsesLatestListing) {
                 null
             } else {
                 fetchRemoteListing(sourceId, "LATEST", page)
@@ -77,8 +85,9 @@ class ToonRepository(
     }
 
     private suspend fun fetchRemoteListing(sourceId: String, catalogId: String, page: Int): ListingPage {
-        val parsed = sources.get(sourceId).loadListing(catalogId, page, client)
-        if (parsed.items.isEmpty()) {
+        val source = sources.get(sourceId)
+        val parsed = source.loadListing(catalogId, page, client)
+        if (parsed.items.isEmpty() && !source.emptyListingOk) {
             error("목록을 읽지 못했습니다. 사이트 구조가 바뀌었을 수 있습니다.")
         }
         return parsed.copy(items = applyFlags(parsed.items))
@@ -111,7 +120,7 @@ class ToonRepository(
         if (lastP <= 1) {
             return@withContext firstPage.items.size
         }
-        val pageSize = 100
+        val pageSize = sourceFor(item).episodePageSize
         try {
             val lastPageRes = loadEpisodes(item, lastP)
             (lastP - 1) * pageSize + lastPageRes.items.size
@@ -146,8 +155,7 @@ class ToonRepository(
             val q = query.trim()
             if (q.isEmpty()) return@withContext emptyList()
             val source = sources.get(sourceId)
-            val language = (source as? HitomiSource)?.language
-            val items = source.search(SearchQuery(q, language = language), client)
+            val items = source.search(SearchQuery(q, language = source.searchLanguage()), client)
             applyFlags(items)
         }
 
@@ -180,19 +188,19 @@ class ToonRepository(
         val nowMs = now()
 
         for ((sourceId, rows) in favorites.groupBy { it.sourceId.ifBlank { WorkId.DEFAULT_SOURCE } }) {
+            val source = sources.getOrNull(sourceId) ?: continue
             val candidates = try {
-                when (sourceId) {
-                    WorkId.DEFAULT_SOURCE -> {
-                        val keys = rows.map { it.workId().storageKey() }.toSet()
-                        val page = fetchRemoteListing(sourceId, "LATEST", 1)
-                        LatestUpdateSelection.elevenIntersection(page.items, keys)
-                    }
-                    HitomiSource.ID -> LatestUpdateSelection.hitomiEligible(
-                        rows.map { it.toItem() },
-                        hitomiEnabled(),
-                    )
-                    else -> emptyList()
+                val latest = if (source.notificationMode == NotificationMode.LATEST_INTERSECTION) {
+                    fetchRemoteListing(sourceId, "LATEST", 1).items
+                } else {
+                    null
                 }
+                LatestUpdateSelection.candidates(
+                    source = source,
+                    favorites = rows.map { it.toItem() },
+                    latestItems = latest,
+                    sourceEnabled = sourceId == WorkId.DEFAULT_SOURCE || isSourceEnabled(sourceId),
+                )
             } catch (_: Exception) {
                 emptyList()
             }
@@ -328,7 +336,7 @@ class ToonRepository(
         viewMode: ViewMode,
         readDirection: ReadDirection,
     ) = withContext(Dispatchers.IO) {
-        val writable = WorkId.writable(workId.sourceId, workId.toonId, hitomiEnabled()) ?: return@withContext
+        val writable = writableId(workId) ?: return@withContext
         readerSettingDao.saveSetting(
             ReaderSetting(
                 sourceId = writable.sourceId,
@@ -342,7 +350,7 @@ class ToonRepository(
     }
 
     suspend fun markEpisodeRead(workId: WorkId, wrId: String, lastPage: Int = 0): Long = withContext(Dispatchers.IO) {
-        val writable = WorkId.writable(workId.sourceId, workId.toonId, hitomiEnabled()) ?: return@withContext now()
+        val writable = writableId(workId) ?: return@withContext now()
         val readAt = now()
         readEpisodeDao.markRead(
             ReadEpisode(
@@ -374,7 +382,7 @@ class ToonRepository(
     }
 
     suspend fun saveHistory(history: ReadHistory) = withContext(Dispatchers.IO) {
-        val workId = WorkId.writable(history.sourceId, history.toonId, hitomiEnabled()) ?: return@withContext
+        val workId = writableId(history.sourceId, history.toonId) ?: return@withContext
         val stored = if (history.sourceId == workId.sourceId) history else history.copy(sourceId = workId.sourceId)
         readHistoryDao.upsert(stored)
         database?.tombstoneDao()?.delete("HISTORY", workId.storageKey())
@@ -452,7 +460,13 @@ class ToonRepository(
     private fun sourceFor(item: ToonItem) = sources.get(item.sourceId)
 
     private fun writableWorkId(item: ToonItem): WorkId? =
-        WorkId.writable(item.sourceId, item.id, hitomiEnabled())
+        writableId(item.sourceId, item.id)
+
+    private fun writableId(workId: WorkId): WorkId? =
+        SourceAccess.writable(workId, isSourceEnabled)
+
+    private fun writableId(sourceId: String, toonId: String): WorkId? =
+        SourceAccess.writable(sourceId, toonId, isSourceEnabled)
 
     private fun FavoriteToon.toItem(): ToonItem = ToonItem(
         id = id,

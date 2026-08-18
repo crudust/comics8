@@ -143,7 +143,7 @@ class DownloadManagerTest {
                 context,
                 db,
                 client,
-                hitomiEnabled = { true },
+                isSourceEnabled = { true },
                 baseDir = downloads,
             )
             val toonId = "gallery:1001"

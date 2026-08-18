@@ -64,8 +64,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.comics8.core.source.WorkId
-import com.comics8.core.source.hitomi.HitomiSource
+import com.comics8.core.source.SourceRegistry
 import com.comics8.monitor.data.ReadDirection
 import com.comics8.monitor.data.ViewMode
 import com.comics8.monitor.ui.ListingUiState
@@ -472,7 +471,9 @@ private fun SourceTitleDropdown(
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val label = if (activeSourceId == HitomiSource.ID) "Hitomi" else "11toon"
+    val sources = remember { SourceRegistry.defaults().all() }
+    val label = sources.firstOrNull { it.id == activeSourceId }?.displayName
+        ?: SourceRegistry.chipLabel(activeSourceId)
     Box(modifier = modifier) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -495,20 +496,15 @@ private fun SourceTitleDropdown(
             )
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(
-                text = { Text("11toon") },
-                onClick = {
-                    onSelect(WorkId.DEFAULT_SOURCE)
-                    expanded = false
-                },
-            )
-            DropdownMenuItem(
-                text = { Text("Hitomi") },
-                onClick = {
-                    onSelect(HitomiSource.ID)
-                    expanded = false
-                },
-            )
+            sources.forEach { source ->
+                DropdownMenuItem(
+                    text = { Text(source.displayName) },
+                    onClick = {
+                        onSelect(source.id)
+                        expanded = false
+                    },
+                )
+            }
         }
     }
 }

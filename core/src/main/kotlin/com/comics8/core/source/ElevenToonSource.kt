@@ -26,6 +26,9 @@ class ElevenToonSource : ComicSource {
         ),
     )
     override val searchFirstClass: Boolean = true
+    override val notificationMode: NotificationMode = NotificationMode.LATEST_INTERSECTION
+    override val episodePageSize: Int = 100
+    override val emptyListingOk: Boolean = false
 
     override suspend fun loadListing(catalogId: String, page: Int, http: SourceHttp): ListingPage {
         val html = http.fetchText(listingSpec(catalogId, page))
@@ -48,6 +51,16 @@ class ElevenToonSource : ComicSource {
         resolveImages(episode, http)
 
     override fun imageFallbacks(url: String): List<String> = ComicSite.getFallbackImageUrls(url)
+
+    override fun imageReferer(url: String): String = ComicSite.ORIGIN
+
+    override fun ownsHost(host: String): Boolean {
+        val h = host.lowercase()
+        if (ELEVEN_HOST.matches(h) || PL_HOST.matches(h)) return true
+        return originHost != null && h == originHost
+    }
+
+    override fun useProxy(url: String): Boolean = true
 
     override fun coverUrl(toonId: String): String = ComicSite.coverUrl(toonId)
 
@@ -101,5 +114,13 @@ class ElevenToonSource : ComicSource {
             Catalog.COMPLETE,
             Catalog.TODAY,
         )
+        private val ELEVEN_HOST = Regex("""^(www\.)?11toon\d*\.com$""")
+        private val PL_HOST = Regex("""^(www\.)?pl\d{4}\.com$""")
+        private val originHost: String? =
+            try {
+                java.net.URI(ComicSite.ORIGIN).host?.lowercase()
+            } catch (_: Exception) {
+                null
+            }
     }
 }

@@ -8,15 +8,14 @@ import androidx.lifecycle.viewModelScope
 import com.comics8.core.model.AppUpdateState
 import com.comics8.core.model.ArtistRef
 import com.comics8.core.model.BrowseTab
+import com.comics8.core.source.SourcePrefs
 import com.comics8.core.source.WorkId
-import com.comics8.core.source.hitomi.HitomiSource
 import com.comics8.core.sync.AppUpdateChecker
 import com.comics8.core.sync.SyncConstants
 import com.comics8.monitor.BuildConfig
 import com.comics8.monitor.ComicsApp
 import com.comics8.monitor.data.AndroidUpdateManager
 import com.comics8.monitor.data.BackupStats
-import com.comics8.monitor.data.Catalog
 import com.comics8.monitor.data.EpisodeItem
 import com.comics8.monitor.data.ReadDirection
 import com.comics8.monitor.data.SyncState
@@ -44,7 +43,6 @@ data class ListingUiState(
     ),
     val browseTabs: List<BrowseTab> = emptyList(),
     val activeSourceId: String = WorkId.DEFAULT_SOURCE,
-    val hitomiEnabled: Boolean = false,
     val artistPick: ArtistPickRequest? = null,
     val highlightedEpisodeId: String? = null,
     val page: Int = 1,
@@ -257,20 +255,16 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     init {
-        val storedSource = prefs.getString(HitomiSource.ACTIVE_SOURCE_PREF_KEY, WorkId.DEFAULT_SOURCE)
-            ?: WorkId.DEFAULT_SOURCE
-        val activeSource = if (storedSource == HitomiSource.ID) HitomiSource.ID else WorkId.DEFAULT_SOURCE
-        val hitomiOn = activeSource == HitomiSource.ID ||
-            prefs.getBoolean(HitomiSource.ENABLED_PREF_KEY, HitomiSource.ENABLED_BY_DEFAULT)
-        val language = prefs.getString(HitomiSource.LANGUAGE_PREF_KEY, HitomiSource.DEFAULT_LANGUAGE)
-            ?: HitomiSource.DEFAULT_LANGUAGE
-        repository.applyHitomiLanguage(language)
+        val storedSource = prefs.getString(SourcePrefs.ACTIVE_SOURCE_KEY, WorkId.DEFAULT_SOURCE)
+        val activeSource = repository.sourceOrDefault(storedSource.orEmpty()).id
+        repository.applyPreferences { id ->
+            prefs.getString(SourcePrefs.languageKey(id), null)
+        }
         val tabs = BrowseTab.forSource(repository.source(activeSource))
         _state.update {
             it.copy(
                 viewMode = singleViewPreference,
                 readDirection = globalReadDirection,
-                hitomiEnabled = hitomiOn,
                 activeSourceId = activeSource,
                 browseTabs = tabs,
                 tab = tabs.first(),
@@ -360,16 +354,10 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun handleNotificationLaunch(targetCatalog: Catalog? = null) {
+    fun handleNotificationLaunch(targetTab: String? = null) {
         readerJob?.cancel()
         episodeJob?.cancel()
-        val dest = if (targetCatalog == Catalog.FAVORITE || targetCatalog == null) {
-            BrowseTab.Favorite
-        } else {
-            _state.value.browseTabs.firstOrNull {
-                it is BrowseTab.Remote && it.catalog.id.equals(targetCatalog.name, ignoreCase = true)
-            } ?: BrowseTab.Favorite
-        }
+        val dest = BrowseTab.resolveLaunchTarget(targetTab, _state.value.browseTabs)
         _state.update {
             it.copy(
                 screen = Screen.Browse,
@@ -426,25 +414,14 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setActiveSource(sourceId: String) {
-        val resolved = if (sourceId == HitomiSource.ID) HitomiSource.ID else WorkId.DEFAULT_SOURCE
-        if (resolved == HitomiSource.ID) {
-            prefs.edit()
-                .putBoolean(HitomiSource.ENABLED_PREF_KEY, true)
-                .putString(HitomiSource.ACTIVE_SOURCE_PREF_KEY, resolved)
-                .apply()
-            _state.update { it.copy(hitomiEnabled = true) }
-        } else {
-            prefs.edit().putString(HitomiSource.ACTIVE_SOURCE_PREF_KEY, resolved).apply()
+        val resolved = repository.sourceOrDefault(sourceId).id
+        val editor = prefs.edit().putString(SourcePrefs.ACTIVE_SOURCE_KEY, resolved)
+        if (resolved != WorkId.DEFAULT_SOURCE) {
+            editor.putBoolean(SourcePrefs.enabledKey(resolved), true)
         }
+        editor.apply()
         val tabs = BrowseTab.forSource(repository.source(resolved))
-        val current = _state.value.tab
-        val nextTab = when {
-            current is BrowseTab.Favorite -> BrowseTab.Favorite
-            current is BrowseTab.Remote -> tabs.firstOrNull {
-                it is BrowseTab.Remote && it.catalog.id == current.catalog.id
-            } ?: tabs.first()
-            else -> tabs.first()
-        }
+        val nextTab = BrowseTab.afterSourceChange(_state.value.tab, tabs)
         _state.update {
             it.copy(
                 activeSourceId = resolved,
@@ -454,10 +431,11 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         selectTab(nextTab)
     }
 
-    fun setHitomiEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean(HitomiSource.ENABLED_PREF_KEY, enabled).apply()
-        _state.update { it.copy(hitomiEnabled = enabled) }
-        if (!enabled && _state.value.activeSourceId == HitomiSource.ID) {
+    fun setSourceEnabled(sourceId: String, enabled: Boolean) {
+        val resolved = repository.sourceOrDefault(sourceId).id
+        if (resolved == WorkId.DEFAULT_SOURCE) return
+        prefs.edit().putBoolean(SourcePrefs.enabledKey(resolved), enabled).apply()
+        if (!enabled && _state.value.activeSourceId == resolved) {
             setActiveSource(WorkId.DEFAULT_SOURCE)
         } else {
             val tabs = BrowseTab.forSource(repository.source(_state.value.activeSourceId))
@@ -485,7 +463,11 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     fun pickArtist(artist: ArtistRef) {
         val request = _state.value.artistPick ?: return
         dismissArtistPick()
-        openSeries(HitomiSource.artistSeriesItem(request.item, artist, request.entryEpisodeId))
+        val parent = repository.sourceOrDefault(request.item.sourceId)
+            .resolveParent(request.item, artist, request.entryEpisodeId)
+        if (parent != null) {
+            openSeries(parent)
+        }
     }
 
     fun toggleSearchBar() {
