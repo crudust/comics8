@@ -115,6 +115,10 @@ object SyncWire {
     }
 
     fun localQuerySince(elevenSince: Long, foreignSince: Long, schema: ServerSchema): Long {
+        return minOf(elevenSince, foreignSince)
+    }
+
+    fun requestSince(elevenSince: Long, foreignSince: Long, schema: ServerSchema): Long {
         return if (schema.commitForeign) minOf(elevenSince, foreignSince) else elevenSince
     }
 
@@ -129,7 +133,7 @@ object SyncWire {
         return if (source == WorkId.DEFAULT_SOURCE) {
             rowTime > elevenSince
         } else {
-            schema.commitForeign && rowTime > foreignSince
+            rowTime > foreignSince
         }
     }
 

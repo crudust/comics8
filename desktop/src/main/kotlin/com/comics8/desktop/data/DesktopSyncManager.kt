@@ -289,7 +289,7 @@ class DesktopSyncManager(
 
             val outbound = SyncWire.filterOutbound(changesObj, schema)
             val reqObj = JSONObject().apply {
-                put("since", elevenSince)
+                put("since", SyncWire.requestSince(elevenSince, foreignSince, schema))
                 put("clientTime", System.currentTimeMillis())
                 put("schemaVersion", SyncConstants.SCHEMA_VERSION)
                 put("changes", outbound.json)

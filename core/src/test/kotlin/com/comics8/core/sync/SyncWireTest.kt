@@ -125,15 +125,25 @@ class SyncWireTest {
         val elevenSince = 100L
         val foreignSince = 0L
         val v1 = ServerSchema.Known(1)
-        assertThat(SyncWire.includeRow("hitomi", 50, elevenSince, foreignSince, v1)).isFalse()
+        assertThat(SyncWire.includeRow("hitomi", 50, elevenSince, foreignSince, v1)).isTrue()
         assertThat(SyncWire.includeRow("eleven", 150, elevenSince, foreignSince, v1)).isTrue()
-        assertThat(SyncWire.localQuerySince(elevenSince, foreignSince, v1)).isEqualTo(100L)
+        assertThat(SyncWire.localQuerySince(elevenSince, foreignSince, v1)).isEqualTo(0L)
+        assertThat(SyncWire.requestSince(elevenSince, foreignSince, v1)).isEqualTo(100L)
+        val filteredV1 = SyncWire.filterOutbound(mixedChanges(), v1)
+        assertThat(filteredV1.omittedForeignSource).isTrue()
+        assertThat(SyncWire.shouldCommitForeign(v1, filteredV1.omittedForeignSource)).isFalse()
+        assertThat(SyncWire.withOmittedHint("ok", filteredV1.omittedForeignSource, v1))
+            .contains(SyncWire.FOREIGN_OMITTED_SCHEMA1_MESSAGE)
 
         val v2 = ServerSchema.Known(2)
         assertThat(SyncWire.includeRow("hitomi", 50, elevenSince, foreignSince, v2)).isTrue()
         assertThat(SyncWire.includeRow("eleven", 50, elevenSince, foreignSince, v2)).isFalse()
         assertThat(SyncWire.localQuerySince(elevenSince, foreignSince, v2)).isEqualTo(0L)
+        assertThat(SyncWire.requestSince(elevenSince, foreignSince, v2)).isEqualTo(0L)
         assertThat(SyncWire.includeTombstone("hitomi:99", 1, elevenSince, foreignSince, v2)).isTrue()
+        val filteredV2 = SyncWire.filterOutbound(mixedChanges(), v2)
+        assertThat(filteredV2.omittedForeignSource).isFalse()
+        assertThat(SyncWire.shouldCommitForeign(v2, filteredV2.omittedForeignSource)).isTrue()
     }
 
     @Test
