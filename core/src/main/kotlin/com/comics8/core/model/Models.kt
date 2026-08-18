@@ -30,6 +30,15 @@ data class ToonItem(
         }
 
     fun workId(): WorkId = WorkId(sourceId.ifBlank { WorkId.DEFAULT_SOURCE }, id)
+
+    fun listingKey(): String {
+        val episode = entryEpisodeId
+        return if (!episode.isNullOrBlank()) {
+            "${workId().sourceId}:g:$episode"
+        } else {
+            workId().storageKey()
+        }
+    }
 }
 
 data class ListingPage(

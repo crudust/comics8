@@ -8,6 +8,7 @@ object ImageFallbacks {
         val out = LinkedHashSet<String>()
         out.addAll(ComicSite.getFallbackImageUrls(url))
         HitomiUrls.altImageUrl(url)?.let { out.add(it) }
+        out.addAll(HitomiUrls.thumbFallbacks(url))
         return out.toList()
     }
 

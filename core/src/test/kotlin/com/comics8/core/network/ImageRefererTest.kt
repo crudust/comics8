@@ -8,9 +8,9 @@ import org.junit.Test
 class ImageRefererTest {
     @Test
     fun hitomiHostsUseHitomiReferer() {
-        assertThat(ImageReferer.forUrl("https://tn.hitomi.la/webpsmalltn/c/ab/x.webp"))
+        assertThat(ImageReferer.forUrl("https://tn.gold-usergeneratedcontent.net/webpsmalltn/c/ab/x.webp"))
             .isEqualTo(HitomiUrls.REFERER)
-        assertThat(ImageReferer.forUrl("https://w2.gold-usergeneratedcontent.net/1/c/ab/x.webp"))
+        assertThat(ImageReferer.forUrl("https://w2.gold-usergeneratedcontent.net/1/3243/x.webp"))
             .isEqualTo(HitomiUrls.REFERER)
         assertThat(ImageReferer.forUrl("https://ltn.gold-usergeneratedcontent.net/gg.js"))
             .isEqualTo(HitomiUrls.REFERER)
@@ -26,17 +26,19 @@ class ImageRefererTest {
         val eleven = ImageFallbacks.forUrl("https://www.pl3040.com/kr/1.png")
         assertThat(eleven).contains("https://www.pl4050.com/kr/1.png")
         val hitomi = ImageFallbacks.forUrl(
-            "https://w2.gold-usergeneratedcontent.net/1690000000/c/ab/hash.webp",
+            "https://w2.gold-usergeneratedcontent.net/1690000000/3243/hash.webp",
         )
         assertThat(hitomi).containsExactly(
-            "https://a2.gold-usergeneratedcontent.net/1690000000/c/ab/hash.avif",
+            "https://a2.gold-usergeneratedcontent.net/1690000000/3243/hash.avif",
         )
+        val oldThumb = ImageFallbacks.forUrl("https://tn.hitomi.la/webpsmalltn/c/ab/hash.webp")
+        assertThat(oldThumb).contains("https://tn.gold-usergeneratedcontent.net/webpsmalltn/c/ab/hash.webp")
     }
 
     @Test
     fun fetchBytesRetriesHitomiWebpWithAvif() {
-        val webp = "https://w2.gold-usergeneratedcontent.net/1690000000/c/ab/hash.webp"
-        val avif = "https://a2.gold-usergeneratedcontent.net/1690000000/c/ab/hash.avif"
+        val webp = "https://w2.gold-usergeneratedcontent.net/1690000000/3243/hash.webp"
+        val avif = "https://a2.gold-usergeneratedcontent.net/1690000000/3243/hash.avif"
         val bytes = ImageFallbacks.fetchBytes(webp) { url ->
             if (url == avif) "ok".toByteArray() else error("HTTP 404")
         }

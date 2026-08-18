@@ -64,7 +64,7 @@ fun ListingGrid(
         verticalArrangement = Arrangement.spacedBy(12.dp),
         modifier = modifier.fillMaxSize(),
     ) {
-        items(items, key = { it.workId().storageKey() }) { item ->
+        items(items, key = { it.listingKey() }) { item ->
             ToonCard(
                 item = item,
                 onClick = { onOpen(item) },

@@ -181,9 +181,9 @@ class DesktopDownloadManagerTest {
         private const val HASH =
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcabc"
         private const val WEBP =
-            "https://w2.gold-usergeneratedcontent.net/1690000000/c/ab/$HASH.webp"
+            "https://w2.gold-usergeneratedcontent.net/1690000000/3243/$HASH.webp"
         private const val AVIF =
-            "https://a2.gold-usergeneratedcontent.net/1690000000/c/ab/$HASH.avif"
+            "https://a2.gold-usergeneratedcontent.net/1690000000/3243/$HASH.avif"
         private const val GG_JS = """
 var gg = {
 m: function(g) {

@@ -34,6 +34,9 @@ data class GgJsRouter(
             return "${last3[2]}${last3[0]}${last3[1]}".toIntOrNull(16) ?: 0
         }
 
+        /** Live `gg.s(h)`: last three hex digits as decimal, not a folder path. */
+        fun sFromHash(hash: String): String = gFromHash(hash).toString()
+
         fun parse(js: String): GgJsRouter {
             val b = bRegex.find(js)?.groupValues?.get(1).orEmpty()
             val cases = caseRegex.findAll(js).mapNotNull { it.groupValues[1].toIntOrNull() }.toSet()

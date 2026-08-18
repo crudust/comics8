@@ -257,10 +257,11 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     init {
-        val hitomiOn = prefs.getBoolean(HitomiSource.ENABLED_PREF_KEY, HitomiSource.ENABLED_BY_DEFAULT)
         val storedSource = prefs.getString(HitomiSource.ACTIVE_SOURCE_PREF_KEY, WorkId.DEFAULT_SOURCE)
             ?: WorkId.DEFAULT_SOURCE
-        val activeSource = if (hitomiOn && storedSource == HitomiSource.ID) HitomiSource.ID else WorkId.DEFAULT_SOURCE
+        val activeSource = if (storedSource == HitomiSource.ID) HitomiSource.ID else WorkId.DEFAULT_SOURCE
+        val hitomiOn = activeSource == HitomiSource.ID ||
+            prefs.getBoolean(HitomiSource.ENABLED_PREF_KEY, HitomiSource.ENABLED_BY_DEFAULT)
         val language = prefs.getString(HitomiSource.LANGUAGE_PREF_KEY, HitomiSource.DEFAULT_LANGUAGE)
             ?: HitomiSource.DEFAULT_LANGUAGE
         repository.applyHitomiLanguage(language)
@@ -425,9 +426,16 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setActiveSource(sourceId: String) {
-        val hitomiOn = _state.value.hitomiEnabled
-        val resolved = if (sourceId == HitomiSource.ID && hitomiOn) HitomiSource.ID else WorkId.DEFAULT_SOURCE
-        prefs.edit().putString(HitomiSource.ACTIVE_SOURCE_PREF_KEY, resolved).apply()
+        val resolved = if (sourceId == HitomiSource.ID) HitomiSource.ID else WorkId.DEFAULT_SOURCE
+        if (resolved == HitomiSource.ID) {
+            prefs.edit()
+                .putBoolean(HitomiSource.ENABLED_PREF_KEY, true)
+                .putString(HitomiSource.ACTIVE_SOURCE_PREF_KEY, resolved)
+                .apply()
+            _state.update { it.copy(hitomiEnabled = true) }
+        } else {
+            prefs.edit().putString(HitomiSource.ACTIVE_SOURCE_PREF_KEY, resolved).apply()
+        }
         val tabs = BrowseTab.forSource(repository.source(resolved))
         val current = _state.value.tab
         val nextTab = when {

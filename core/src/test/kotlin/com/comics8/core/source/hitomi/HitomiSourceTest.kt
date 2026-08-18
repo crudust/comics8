@@ -39,7 +39,7 @@ class HitomiSourceTest {
         assertThat(single.genre).isEqualTo("doujinshi")
         assertThat(single.updatedAt).isEqualTo("24.08.15")
         assertThat(single.thumbUrl).isEqualTo(
-            "https://tn.hitomi.la/webpsmalltn/c/ab/" +
+            "https://tn.gold-usergeneratedcontent.net/webpsmalltn/c/ab/" +
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcabc.webp",
         )
         val multi = page.items[1]
@@ -98,16 +98,16 @@ class HitomiSourceTest {
         val episode = source().loadEpisodes(item, 1, http).items.first { it.wrId == "1001" }
         val images = source().resolveImages(episode, item, http)
         assertThat(images[0]).isEqualTo(
-            "https://w2.gold-usergeneratedcontent.net/1690000000/c/ab/" +
+            "https://w2.gold-usergeneratedcontent.net/1690000000/3243/" +
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcabc.webp",
         )
-        assertThat(images[1]).startsWith("https://w1.gold-usergeneratedcontent.net/1690000000/f/de/")
+        assertThat(images[1]).startsWith("https://w1.gold-usergeneratedcontent.net/1690000000/4062/")
         assertThat(images[2]).isEqualTo(
-            "https://a1.gold-usergeneratedcontent.net/1690000000/1/11/" +
+            "https://a1.gold-usergeneratedcontent.net/1690000000/273/" +
                 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa111.avif",
         )
         assertThat(source().imageFallbacks(images[0])).containsExactly(
-            "https://a2.gold-usergeneratedcontent.net/1690000000/c/ab/" +
+            "https://a2.gold-usergeneratedcontent.net/1690000000/3243/" +
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcabc.avif",
         )
     }

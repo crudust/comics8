@@ -55,14 +55,31 @@ object HitomiUrls {
 
     fun thumbUrl(hash: String): String {
         if (hash.length < 3) return ""
-        val last = hash.last()
-        val mid = hash.takeLast(3).dropLast(1)
-        return "https://tn.hitomi.la/webpsmalltn/$last/$mid/$hash.webp"
+        val s = GgJsRouter.pathFromHash(hash)
+        return "https://tn.$CDN_HOST/webpsmalltn/$s/$hash.webp"
+    }
+
+    fun thumbFallbacks(url: String): List<String> {
+        if (url.isBlank()) return emptyList()
+        val out = LinkedHashSet<String>()
+        val rewritten = url
+            .replace("://tn.hitomi.la/", "://tn.$CDN_HOST/")
+            .replace("://atn.hitomi.la/", "://atn.$CDN_HOST/")
+        if (rewritten != url) out.add(rewritten)
+        val hostSwap = rewritten
+            .replace("://tn.$CDN_HOST/", "://atn.$CDN_HOST/")
+            .replace("://tn.hitomi.la/", "://atn.$CDN_HOST/")
+        if (hostSwap != rewritten && hostSwap != url) out.add(hostSwap)
+        if (rewritten.contains("/webpsmalltn/") && rewritten.endsWith(".webp")) {
+            out.add(rewritten.replace("/webpsmalltn/", "/avifsmalltn/").replace(Regex("""\.webp$"""), ".avif"))
+            out.add(rewritten.replace("/webpsmalltn/", "/webpbigtn/"))
+        }
+        return out.toList()
     }
 
     fun imageUrl(hash: String, b: String, n: Int, ext: String = "webp"): String {
         val hostPrefix = if (ext.equals("avif", ignoreCase = true)) "a" else "w"
-        val s = GgJsRouter.pathFromHash(hash)
+        val s = GgJsRouter.sFromHash(hash)
         val prefix = if (b.endsWith("/")) b else if (b.isEmpty()) "" else "$b/"
         return "https://$hostPrefix$n.$CDN_HOST/$prefix$s/$hash.$ext"
     }

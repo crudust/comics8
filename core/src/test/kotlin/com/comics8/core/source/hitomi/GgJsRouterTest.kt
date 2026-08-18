@@ -10,11 +10,12 @@ class GgJsRouterTest {
         val hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcabc"
         assertThat(GgJsRouter.pathFromHash(hash)).isEqualTo("c/ab")
         assertThat(GgJsRouter.gFromHash(hash)).isEqualTo(0xCAB)
+        assertThat(GgJsRouter.sFromHash(hash)).isEqualTo("3243")
         assertThat(gg.m(0xCAB)).isEqualTo(1)
         assertThat(gg.subdomainIndex(hash)).isEqualTo(2)
         assertThat(HitomiUrls.imageUrl(hash, gg.b, gg.subdomainIndex(hash)))
             .isEqualTo(
-                "https://w2.gold-usergeneratedcontent.net/1690000000/c/ab/" +
+                "https://w2.gold-usergeneratedcontent.net/1690000000/3243/" +
                     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcabc.webp",
             )
     }
@@ -31,7 +32,7 @@ class GgJsRouterTest {
     fun thumbUsesLastThreeHashChars() {
         val hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcabc"
         assertThat(HitomiUrls.thumbUrl(hash))
-            .isEqualTo("https://tn.hitomi.la/webpsmalltn/c/ab/$hash.webp")
+            .isEqualTo("https://tn.gold-usergeneratedcontent.net/webpsmalltn/c/ab/$hash.webp")
     }
 
     @Test

@@ -151,9 +151,9 @@ class DesktopViewModel(
     }
 
     init {
-        val hitomiOn = DesktopSourcePrefs.hitomiEnabled
         val storedSource = DesktopSourcePrefs.activeSourceId
-        val activeSource = if (hitomiOn && storedSource == HitomiSource.ID) HitomiSource.ID else WorkId.DEFAULT_SOURCE
+        val activeSource = if (storedSource == HitomiSource.ID) HitomiSource.ID else WorkId.DEFAULT_SOURCE
+        val hitomiOn = activeSource == HitomiSource.ID || DesktopSourcePrefs.hitomiEnabled
         repository.applyHitomiLanguage(DesktopSourcePrefs.hitomiLanguage)
         repository.setHitomiWrites(hitomiOn)
         val tabs = BrowseTab.forSource(repository.source(activeSource))
@@ -283,8 +283,12 @@ class DesktopViewModel(
     }
 
     fun setActiveSource(sourceId: String) {
-        val hitomiOn = _state.value.hitomiEnabled
-        val resolved = if (sourceId == HitomiSource.ID && hitomiOn) HitomiSource.ID else WorkId.DEFAULT_SOURCE
+        val resolved = if (sourceId == HitomiSource.ID) HitomiSource.ID else WorkId.DEFAULT_SOURCE
+        if (resolved == HitomiSource.ID) {
+            DesktopSourcePrefs.hitomiEnabled = true
+            repository.setHitomiWrites(true)
+            _state.update { it.copy(hitomiEnabled = true) }
+        }
         DesktopSourcePrefs.activeSourceId = resolved
         val tabs = BrowseTab.forSource(repository.source(resolved))
         val current = _state.value.tab
