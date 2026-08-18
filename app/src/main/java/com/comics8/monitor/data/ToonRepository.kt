@@ -410,8 +410,9 @@ class ToonRepository(
         readEpisodeDao.getReadEpisode(workId, wrId)
     }
 
-    suspend fun getHistory(): List<ReadHistory> = withContext(Dispatchers.IO) {
-        readHistoryDao.all()
+    suspend fun getHistory(sourceId: String): List<ReadHistory> = withContext(Dispatchers.IO) {
+        val sid = sourceId.ifBlank { WorkId.DEFAULT_SOURCE }
+        readHistoryDao.bySource(sid)
     }
 
     suspend fun getHistory(workId: WorkId): ReadHistory? = withContext(Dispatchers.IO) {
@@ -449,14 +450,15 @@ class ToonRepository(
         syncManager?.triggerDebouncedPush()
     }
 
-    suspend fun clearHistory() = withContext(Dispatchers.IO) {
-        val all = readHistoryDao.all()
-        all.forEach {
+    suspend fun clearHistory(sourceId: String) = withContext(Dispatchers.IO) {
+        val sid = sourceId.ifBlank { WorkId.DEFAULT_SOURCE }
+        val rows = readHistoryDao.bySource(sid)
+        rows.forEach {
             database?.tombstoneDao()?.insert(
                 com.comics8.monitor.data.local.Tombstone("HISTORY", it.workId().storageKey(), now()),
             )
         }
-        readHistoryDao.clearAll()
+        readHistoryDao.clearBySource(sid)
         syncManager?.triggerDebouncedPush()
     }
 

@@ -690,6 +690,23 @@ class DesktopDatabase(dbFile: File? = null) {
         return list
     }
 
+    fun getHistoryBySource(sourceId: String): List<ReadHistoryRecord> {
+        val sid = sourceId.ifBlank { WorkId.DEFAULT_SOURCE }
+        val list = mutableListOf<ReadHistoryRecord>()
+        getConnection().use { conn ->
+            conn.prepareStatement(
+                "SELECT * FROM read_history WHERE sourceId = ? ORDER BY lastReadAt DESC",
+            ).use { stmt ->
+                stmt.setString(1, sid)
+                val rs = stmt.executeQuery()
+                while (rs.next()) {
+                    list.add(historyFrom(rs))
+                }
+            }
+        }
+        return list
+    }
+
     fun getHistorySince(since: Long): List<ReadHistoryRecord> {
         val list = mutableListOf<ReadHistoryRecord>()
         getConnection().use { conn ->
@@ -761,6 +778,16 @@ class DesktopDatabase(dbFile: File? = null) {
             conn.prepareStatement("DELETE FROM read_history WHERE sourceId = ? AND toonId = ?").use { stmt ->
                 stmt.setString(1, workId.sourceId)
                 stmt.setString(2, workId.toonId)
+                stmt.executeUpdate()
+            }
+        }
+    }
+
+    fun clearHistoryBySource(sourceId: String) {
+        val sid = sourceId.ifBlank { WorkId.DEFAULT_SOURCE }
+        getConnection().use { conn ->
+            conn.prepareStatement("DELETE FROM read_history WHERE sourceId = ?").use { stmt ->
+                stmt.setString(1, sid)
                 stmt.executeUpdate()
             }
         }

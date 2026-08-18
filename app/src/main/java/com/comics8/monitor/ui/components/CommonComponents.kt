@@ -108,19 +108,20 @@ fun PageBar(
     onNext: () -> Unit,
     onJump: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
         modifier = modifier.fillMaxWidth(),
     ) {
-        IconButton(onClick = onPrev, enabled = page > 1) {
+        IconButton(onClick = onPrev, enabled = enabled && page > 1) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "이전 페이지")
         }
-        TextButton(onClick = onJump) {
+        TextButton(onClick = onJump, enabled = enabled) {
             Text("$page / $lastPage", fontWeight = FontWeight.SemiBold)
         }
-        IconButton(onClick = onNext, enabled = page < lastPage) {
+        IconButton(onClick = onNext, enabled = enabled && page < lastPage) {
             Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "다음 페이지")
         }
     }

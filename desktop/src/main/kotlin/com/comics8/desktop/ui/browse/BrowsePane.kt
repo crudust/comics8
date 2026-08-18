@@ -30,6 +30,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,7 +55,10 @@ fun BrowsePane(
 ) {
     when {
         state.loading && state.items.isEmpty() -> {
-            LoadingPane(modifier = modifier)
+            Column(modifier = modifier.fillMaxSize()) {
+                LoadingPane(Modifier.weight(1f).fillMaxWidth())
+                BrowsePageBar(state, viewModel)
+            }
         }
         state.error != null && state.items.isEmpty() -> {
             ErrorPane(
@@ -66,6 +70,11 @@ fun BrowsePane(
         else -> {
             Column(modifier = modifier.fillMaxSize()) {
                 val gridState = rememberLazyGridState()
+                LaunchedEffect(state.scrollToTopTrigger) {
+                    if (state.scrollToTopTrigger > 0) {
+                        gridState.scrollToItem(0)
+                    }
+                }
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 160.dp),
                     state = gridState,
@@ -84,44 +93,51 @@ fun BrowsePane(
                     }
                 }
 
-                // Pagination
-                if (state.tab.paginated && !state.isSearch && state.lastPage > 1) {
-                    Row(
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-                            .padding(vertical = 8.dp),
-                    ) {
-                        IconButton(
-                            onClick = { viewModel.goToPage(state.page - 1) },
-                            enabled = state.page > 1,
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "이전")
-                        }
-
-                        FilledTonalButton(
-                            onClick = { viewModel.togglePageJump(true) },
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                        ) {
-                            Text(
-                                text = "${state.page} / ${state.lastPage}",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                            )
-                        }
-
-                        IconButton(
-                            onClick = { viewModel.goToPage(state.page + 1) },
-                            enabled = state.page < state.lastPage,
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "다음")
-                        }
-                    }
-                }
+                BrowsePageBar(state, viewModel)
             }
+        }
+    }
+}
+
+@Composable
+private fun BrowsePageBar(
+    state: DesktopUiState,
+    viewModel: DesktopViewModel,
+) {
+    if (!state.tab.paginated || state.isSearch || state.lastPage <= 1) return
+    Row(
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+            .padding(vertical = 8.dp),
+    ) {
+        IconButton(
+            onClick = { viewModel.goToPage(state.page - 1) },
+            enabled = !state.loading && state.page > 1,
+        ) {
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "이전")
+        }
+
+        FilledTonalButton(
+            onClick = { viewModel.togglePageJump(true) },
+            enabled = !state.loading,
+            shape = RoundedCornerShape(8.dp),
+            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+        ) {
+            Text(
+                text = "${state.page} / ${state.lastPage}",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+
+        IconButton(
+            onClick = { viewModel.goToPage(state.page + 1) },
+            enabled = !state.loading && state.page < state.lastPage,
+        ) {
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "다음")
         }
     }
 }

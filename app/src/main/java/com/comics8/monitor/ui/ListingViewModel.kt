@@ -445,6 +445,12 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             )
         }
         selectTab(nextTab)
+        if (_state.value.screen == Screen.History) {
+            loadHistory()
+        }
+        if (_state.value.screen == Screen.Downloads) {
+            loadDownloads()
+        }
     }
 
     fun setSourceEnabled(sourceId: String, enabled: Boolean) {
@@ -583,6 +589,16 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         val current = _state.value
         val target = page.coerceIn(1, current.lastPage.coerceAtLeast(1))
         if (!current.tab.paginated) return
+        _state.update {
+            it.copy(
+                items = emptyList(),
+                loading = true,
+                error = null,
+                page = target,
+                showPageJump = false,
+                scrollToTopTrigger = it.scrollToTopTrigger + 1,
+            )
+        }
         loadPage(target, replace = true)
     }
 
@@ -801,7 +817,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     fun loadHistory() {
         viewModelScope.launch {
             _state.update { it.copy(historyLoading = it.historyItems.isEmpty()) }
-            val items = repository.getHistory()
+            val items = repository.getHistory(_state.value.activeSourceId)
             _state.update { it.copy(historyItems = items, historyLoading = false) }
         }
     }
@@ -933,7 +949,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
     fun clearAllHistory() {
         viewModelScope.launch {
-            repository.clearHistory()
+            repository.clearHistory(_state.value.activeSourceId)
             _state.update { current ->
                 val updatedItems = current.items.map { it.copy(readProgress = null) }
                 current.copy(
@@ -958,7 +974,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             val res = repository.syncManager?.syncFull()
             if (res?.success == true) {
                 loadPage(page = _state.value.page, replace = true)
-                val updatedHistory = repository.getHistory()
+                val updatedHistory = repository.getHistory(_state.value.activeSourceId)
                 _state.update { it.copy(historyItems = updatedHistory) }
             }
         }

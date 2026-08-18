@@ -225,6 +225,9 @@ interface ReadHistoryDao {
     @Query("SELECT * FROM read_history ORDER BY lastReadAt DESC")
     suspend fun all(): List<ReadHistory>
 
+    @Query("SELECT * FROM read_history WHERE sourceId = :sourceId ORDER BY lastReadAt DESC")
+    suspend fun bySource(sourceId: String): List<ReadHistory>
+
     @Query("SELECT * FROM read_history WHERE lastReadAt > :since ORDER BY lastReadAt DESC")
     suspend fun getSince(since: Long): List<ReadHistory>
 
@@ -239,6 +242,9 @@ interface ReadHistoryDao {
 
     @Query("DELETE FROM read_history WHERE sourceId = :sourceId AND toonId = :toonId")
     suspend fun delete(sourceId: String, toonId: String)
+
+    @Query("DELETE FROM read_history WHERE sourceId = :sourceId")
+    suspend fun clearBySource(sourceId: String)
 
     @Query("DELETE FROM read_history")
     suspend fun clearAll()

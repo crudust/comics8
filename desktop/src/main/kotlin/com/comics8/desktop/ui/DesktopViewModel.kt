@@ -309,6 +309,12 @@ class DesktopViewModel(
             )
         }
         selectTab(nextTab)
+        if (_state.value.screen == Screen.History) {
+            loadHistory()
+        }
+        if (_state.value.screen == Screen.Downloads) {
+            loadDownloads()
+        }
     }
 
     fun setSourceEnabled(sourceId: String, enabled: Boolean) {
@@ -703,7 +709,17 @@ class DesktopViewModel(
     fun goToPage(page: Int) {
         if (!_state.value.tab.paginated) return
         val clamped = page.coerceIn(1, _state.value.lastPage.coerceAtLeast(1))
-        loadPage(clamped)
+        _state.update {
+            it.copy(
+                items = emptyList(),
+                loading = true,
+                error = null,
+                page = clamped,
+                showPageJump = false,
+                scrollToTopTrigger = it.scrollToTopTrigger + 1,
+            )
+        }
+        loadPage(clamped, replace = true)
     }
 
     fun togglePageJump(show: Boolean) {
@@ -849,7 +865,7 @@ class DesktopViewModel(
     fun loadHistory() {
         scope.launch {
             _state.update { it.copy(historyLoading = it.historyItems.isEmpty()) }
-            val items = repository.getHistory()
+            val items = repository.getHistory(_state.value.activeSourceId)
             _state.update { it.copy(historyItems = items, historyLoading = false) }
         }
     }
@@ -981,7 +997,7 @@ class DesktopViewModel(
 
     fun clearAllHistory() {
         scope.launch {
-            repository.clearHistory()
+            repository.clearHistory(_state.value.activeSourceId)
             _state.update { current ->
                 val updatedItems = current.items.map { it.copy(readProgress = null) }
                 current.copy(
@@ -1006,7 +1022,7 @@ class DesktopViewModel(
             val res = repository.syncManager?.syncFull()
             if (res?.success == true) {
                 loadPage(_state.value.page, replace = true)
-                val updatedHistory = repository.getHistory()
+                val updatedHistory = repository.getHistory(_state.value.activeSourceId)
                 _state.update { it.copy(historyItems = updatedHistory) }
             }
         }

@@ -21,6 +21,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import java.util.concurrent.ConcurrentHashMap
 
 class HitomiSource(
     language: String = HitomiUrls.DEFAULT_LANGUAGE,
@@ -30,6 +31,7 @@ class HitomiSource(
     var language: String = language
     @Volatile
     private var ggCache: CachedGg? = null
+    private val galleryCache = ConcurrentHashMap<String, CachedGallery>()
 
     override val id: String = HitomiUrls.SOURCE_ID
     override val displayName: String = "Hitomi"
@@ -261,21 +263,73 @@ class HitomiSource(
                 return cached.router
             }
         }
-        val result = fetchWithBackoff(http, FetchSpec(HitomiUrls.ggJs(), defaultPolicy))
-            ?: error("만화 이미지를 불러오지 못했습니다.")
-        val router = GgJsRouter.parse(result.body.toString(Charsets.UTF_8))
-        if (router.b.isBlank()) {
-            error("만화 이미지를 불러오지 못했습니다.")
+        val spec = FetchSpec(HitomiUrls.ggJs(), defaultPolicy)
+        val delays = BACKOFF_MS
+        for (attempt in 0..delays.size) {
+            val result = try {
+                http.fetch(spec)
+            } catch (_: Exception) {
+                if (attempt == delays.size) break
+                delayMillis(delays[attempt])
+                continue
+            }
+            if (result.code in 200..299) {
+                val router = GgJsRouter.parse(result.body.toString(Charsets.UTF_8))
+                if (router.b.isNotBlank()) {
+                    ggCache = CachedGg(System.currentTimeMillis(), router)
+                    return router
+                }
+            } else if (!retryableStatus(result.code)) {
+                break
+            }
+            if (attempt == delays.size) break
+            delayMillis(delays[attempt])
         }
-        ggCache = CachedGg(now, router)
-        return router
+        error("만화 이미지를 불러오지 못했습니다.")
     }
 
     private suspend fun fetchGalleryInfo(id: String, http: SourceHttp): GalleryInfo? {
+        cachedGallery(id)?.let { return it }
         val spec = FetchSpec(HitomiUrls.galleryJs(id), defaultPolicy)
-        val result = fetchWithBackoff(http, spec) ?: return null
-        if (result.code !in 200..299) return null
-        return GalleryInfoParser.parse(result.body.toString(Charsets.UTF_8))
+        val delays = BACKOFF_MS
+        for (attempt in 0..delays.size) {
+            val result = try {
+                http.fetch(spec)
+            } catch (_: Exception) {
+                if (attempt == delays.size) return null
+                delayMillis(delays[attempt])
+                continue
+            }
+            if (result.code in 200..299) {
+                val parsed = GalleryInfoParser.parse(result.body.toString(Charsets.UTF_8))
+                if (parsed != null) {
+                    rememberGallery(parsed)
+                    return parsed
+                }
+            } else if (!retryableStatus(result.code)) {
+                return null
+            }
+            if (attempt == delays.size) return null
+            delayMillis(delays[attempt])
+        }
+        return null
+    }
+
+    private fun cachedGallery(id: String): GalleryInfo? {
+        val cached = galleryCache[id] ?: return null
+        if (System.currentTimeMillis() - cached.loadedAt >= GALLERY_TTL_MS) {
+            galleryCache.remove(id, cached)
+            return null
+        }
+        return cached.info
+    }
+
+    private fun rememberGallery(info: GalleryInfo) {
+        if (galleryCache.size >= GALLERY_CACHE_MAX) {
+            val oldest = galleryCache.minByOrNull { it.value.loadedAt }?.key
+            if (oldest != null) galleryCache.remove(oldest)
+        }
+        galleryCache[info.id] = CachedGallery(System.currentTimeMillis(), info)
     }
 
     private suspend fun fetchWithBackoff(http: SourceHttp, spec: FetchSpec): HttpResult? {
@@ -289,7 +343,7 @@ class HitomiSource(
                 continue
             }
             if (result.code in 200..299) return result
-            if (result.code == 429 || result.code == 503) {
+            if (retryableStatus(result.code)) {
                 if (attempt == delays.size) return null
                 delayMillis(delays[attempt])
                 continue
@@ -298,6 +352,11 @@ class HitomiSource(
         }
         return null
     }
+
+    private fun retryableStatus(code: Int): Boolean =
+        code == 403 || code == 408 || code == 425 || code == 429 ||
+            code == 500 || code == 502 || code == 503 || code == 504 ||
+            code in 520..524
 
     private fun toListingItem(info: GalleryInfo): ToonItem? {
         if (info.type.equals("anime", ignoreCase = true)) return null
@@ -401,9 +460,13 @@ class HitomiSource(
 
         private const val GALLERY_CONCURRENCY = 4
         private const val GG_TTL_MS = 10 * 60 * 1000L
+        private const val GALLERY_TTL_MS = 10 * 60 * 1000L
+        private const val GALLERY_CACHE_MAX = 200
         private val BACKOFF_MS = listOf(250L, 1_000L, 4_000L)
 
         private data class CachedGg(val loadedAt: Long, val router: GgJsRouter)
+
+        private data class CachedGallery(val loadedAt: Long, val info: GalleryInfo)
 
         private val CATALOGS = listOf(
             SourceCatalog("LATEST", "최신", paginated = true),

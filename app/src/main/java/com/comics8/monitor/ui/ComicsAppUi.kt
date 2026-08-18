@@ -245,7 +245,22 @@ private fun BrowseTabsPager(
         }
         val isCurrent = pageCatalog == state.tab
         when {
-            isCurrent && state.loading && state.items.isEmpty() -> LoadingPane()
+            isCurrent && state.loading && state.items.isEmpty() -> {
+                Column(Modifier.fillMaxSize()) {
+                    LoadingPane(Modifier.weight(1f).fillMaxWidth())
+                    if (pageCatalog.paginated && state.lastPage > 1) {
+                        PageBar(
+                            page = state.page,
+                            lastPage = state.lastPage,
+                            onPrev = viewModel::prevPage,
+                            onNext = viewModel::nextPage,
+                            onJump = { viewModel.togglePageJump(true) },
+                            enabled = !state.loading,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+            }
             isCurrent && state.error != null && state.items.isEmpty() -> ErrorPane(
                 message = state.error!!,
                 onRetry = { viewModel.refresh(force = true) },
@@ -276,6 +291,7 @@ private fun BrowseTabsPager(
                             onPrev = viewModel::prevPage,
                             onNext = viewModel::nextPage,
                             onJump = { viewModel.togglePageJump(true) },
+                            enabled = !state.loading,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))

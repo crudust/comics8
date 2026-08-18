@@ -317,8 +317,8 @@ class DesktopToonRepository(
         database.getReadEpisode(workId, wrId)
     }
 
-    suspend fun getHistory(): List<ReadHistoryRecord> = withContext(Dispatchers.IO) {
-        database.getAllHistory()
+    suspend fun getHistory(sourceId: String): List<ReadHistoryRecord> = withContext(Dispatchers.IO) {
+        database.getHistoryBySource(sourceId)
     }
 
     suspend fun getHistory(workId: WorkId): ReadHistoryRecord? = withContext(Dispatchers.IO) {
@@ -338,12 +338,12 @@ class DesktopToonRepository(
         syncManager?.triggerDebouncedPush()
     }
 
-    suspend fun clearHistory() = withContext(Dispatchers.IO) {
-        val all = database.getAllHistory()
-        all.forEach {
+    suspend fun clearHistory(sourceId: String) = withContext(Dispatchers.IO) {
+        val rows = database.getHistoryBySource(sourceId)
+        rows.forEach {
             database.recordTombstone("HISTORY", it.workId().storageKey(), now())
         }
-        database.clearAllHistory()
+        database.clearHistoryBySource(sourceId)
         syncManager?.triggerDebouncedPush()
     }
 

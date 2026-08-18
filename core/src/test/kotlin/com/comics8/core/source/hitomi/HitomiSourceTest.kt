@@ -1,5 +1,6 @@
 package com.comics8.core.source.hitomi
 
+import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.ToonItem
 import com.comics8.core.source.FetchSpec
 import com.comics8.core.source.HttpResult
@@ -156,6 +157,43 @@ class HitomiSourceTest {
     }
 
     @Test
+    fun galleryinfoRetriesOn502() = runBlocking<Unit> {
+        val http = FakeHitomiHttp(failFirst = setOf("1001"), failFirstCode = 502)
+        val delays = mutableListOf<Long>()
+        val page = HitomiSource(delayMillis = { ms: Long -> delays += ms }).loadListing("LATEST", 1, http)
+        assertThat(page.items.any { it.entryEpisodeId == "1001" }).isTrue()
+        assertThat(delays).contains(250L)
+        assertThat(http.galleryHits["1001"]?.get()).isAtLeast(2)
+    }
+
+    @Test
+    fun resolveImagesReusesListingGalleryinfo() = runBlocking<Unit> {
+        val http = FakeHitomiHttp()
+        val src = source()
+        src.loadListing("LATEST", 1, http)
+        val hitsAfterListing = http.galleryHits["1001"]?.get() ?: 0
+        assertThat(hitsAfterListing).isGreaterThan(0)
+        val item = ToonItem(
+            id = "artist:demo_artist",
+            title = "x",
+            thumbUrl = "",
+            href = "",
+            sourceId = "hitomi",
+            entryEpisodeId = "1001",
+        )
+        val episode = EpisodeItem(
+            wrId = "1001",
+            title = "ep",
+            date = null,
+            thumbUrl = null,
+            href = HitomiUrls.reader("1001"),
+        )
+        val images = src.resolveImages(episode, item, http)
+        assertThat(images).isNotEmpty()
+        assertThat(http.galleryHits["1001"]?.get()).isEqualTo(hitsAfterListing)
+    }
+
+    @Test
     fun listingNozomiRetriesOn429() = runBlocking<Unit> {
         val http = FakeHitomiHttp(failFirstNozomi = true)
         val delays = mutableListOf<Long>()
@@ -186,6 +224,7 @@ class HitomiSourceTest {
         private val includeLength: Boolean = true,
         private val listingIds: List<Long> = listOf(1001L, 2002L, 3003L, 4004L, 9999L),
         private val failFirst: Set<String> = emptySet(),
+        private val failFirstCode: Int = 429,
         private val failFirstNozomi: Boolean = false,
         private val missingNozomi: Set<String> = emptySet(),
     ) : SourceHttp {
@@ -221,7 +260,7 @@ class HitomiSourceTest {
         private fun gallery(id: String): HttpResult {
             val hits = galleryHits.getOrPut(id) { AtomicInteger(0) }.incrementAndGet()
             if (id in failFirst && hits == 1) {
-                return HttpResult(429, emptyMap(), ByteArray(0))
+                return HttpResult(failFirstCode, emptyMap(), ByteArray(0))
             }
             val body = fixtures[id] ?: return HttpResult(404, emptyMap(), ByteArray(0))
             return ok(body.toByteArray())
