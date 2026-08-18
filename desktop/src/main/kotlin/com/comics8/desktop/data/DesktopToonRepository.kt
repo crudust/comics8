@@ -2,9 +2,8 @@ package com.comics8.desktop.data
 
 import com.comics8.core.model.FavoriteListing
 import com.comics8.core.network.ToonClient
-import com.comics8.core.parser.ComicSite
-import com.comics8.core.parser.HtmlParsers
-import com.comics8.core.parser.SearchParser
+import com.comics8.core.source.SearchQuery
+import com.comics8.core.source.SourceRegistry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -14,6 +13,7 @@ class DesktopToonRepository(
     val syncManager: DesktopSyncManager? = null,
     val downloadManager: DesktopDownloadManager? = null,
     private val now: () -> Long = { System.currentTimeMillis() },
+    private val sources: SourceRegistry = SourceRegistry.defaults(),
 ) {
     suspend fun loadListing(catalog: Catalog, page: Int): ListingPage = withContext(Dispatchers.IO) {
         if (catalog == Catalog.FAVORITE) {
@@ -35,8 +35,7 @@ class DesktopToonRepository(
     }
 
     private suspend fun fetchRemoteListing(catalog: Catalog, page: Int): ListingPage {
-        val html = client.fetch(ComicSite.listingUrl(catalog, page))
-        val parsed = HtmlParsers.parseListing(html)
+        val parsed = sources.default.loadListing(catalog.name, page, client)
         if (parsed.items.isEmpty()) {
             error("목록을 읽지 못했습니다. 사이트 구조가 바뀌었을 수 있습니다.")
         }
@@ -44,8 +43,7 @@ class DesktopToonRepository(
     }
 
     suspend fun loadEpisodes(item: ToonItem, page: Int): EpisodePage = withContext(Dispatchers.IO) {
-        val html = client.fetch(ComicSite.seriesUrl(item.id, item.title, page))
-        val parsed = HtmlParsers.parseEpisodes(html)
+        val parsed = sourceFor(item).loadEpisodes(item, page, client)
         if (parsed.items.isEmpty()) {
             error("회차 목록을 읽지 못했습니다.")
         }
@@ -91,7 +89,13 @@ class DesktopToonRepository(
                 return@withContext localImages
             }
         }
-        val parsed = client.fetchImages(episode.href)
+        val item = ToonItem(
+            id = toonId.orEmpty(),
+            title = "",
+            thumbUrl = "",
+            href = episode.href,
+        )
+        val parsed = sourceFor(item).resolveImages(episode, item, client)
         if (parsed.isEmpty()) {
             error("만화 이미지를 불러오지 못했습니다.")
         }
@@ -101,8 +105,7 @@ class DesktopToonRepository(
     suspend fun search(query: String): List<ToonItem> = withContext(Dispatchers.IO) {
         val q = query.trim()
         if (q.isEmpty()) return@withContext emptyList()
-        val json = client.fetch(ComicSite.searchUrl(q))
-        val items = SearchParser.parse(json)
+        val items = sources.default.search(SearchQuery(q), client)
         applyFlags(items)
     }
 
@@ -270,6 +273,8 @@ class DesktopToonRepository(
     suspend fun getBackupStats(): DesktopBackupStats = withContext(Dispatchers.IO) {
         DesktopBackupManager.getStats(database)
     }
+
+    private fun sourceFor(item: ToonItem) = sources.get(item.sourceId)
 
     private fun notifyKey(item: ToonItem): String = "${item.id}|${item.updatedAt.orEmpty()}"
 

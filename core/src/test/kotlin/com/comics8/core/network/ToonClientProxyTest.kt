@@ -30,4 +30,15 @@ class ToonClientProxyTest {
         assertThat(proxyUrlFromBase).startsWith("https://homeassistant.tail1946af.ts.net/api/comics8/proxy?url=")
         assertThat(proxyUrlFromBase).doesNotContain("/proxy/proxy")
     }
+
+    @Test
+    fun hitomiHostsGoDirect() {
+        assertThat(ToonClient.shouldUseProxy("https://hitomi.la/galleries/1.html")).isFalse()
+        assertThat(ToonClient.shouldUseProxy("https://tn.hitomi.la/webpsmalltn/1.webp")).isFalse()
+        assertThat(ToonClient.shouldUseProxy("https://aa.gold-usergeneratedcontent.net/1.webp")).isFalse()
+        assertThat(ToonClient.shouldUseProxy("https://gold-usergeneratedcontent.net/1.webp")).isFalse()
+        assertThat(ToonClient.shouldUseProxy("https://evilgold-usergeneratedcontent.net/1.webp")).isTrue()
+        assertThat(ToonClient.shouldUseProxy("http://103.204.13.68:8904/bbs/board.php")).isTrue()
+        assertThat(ToonClient.shouldUseProxy("https://www.pl3040.com/kr/1.png")).isTrue()
+    }
 }
