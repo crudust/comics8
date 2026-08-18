@@ -1,6 +1,7 @@
 package com.comics8.desktop.data
 
 import com.comics8.core.source.WorkId
+import com.comics8.core.sync.SyncWire
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -213,14 +214,5 @@ object DesktopBackupManager {
 }
 
 object DesktopBackupJson {
-    fun workId(obj: JSONObject, preferId: Boolean): WorkId? {
-        val sourceId = obj.optString("sourceId").ifBlank { WorkId.DEFAULT_SOURCE }
-        val local = if (preferId) {
-            obj.optString("id").ifBlank { obj.optString("toonId") }
-        } else {
-            obj.optString("toonId").ifBlank { obj.optString("id") }
-        }
-        if (local.isBlank()) return null
-        return WorkId.writable(sourceId, local)
-    }
+    fun workId(obj: JSONObject, preferId: Boolean): WorkId? = SyncWire.workId(obj, preferId)
 }

@@ -3,6 +3,9 @@ package com.comics8.monitor.data
 import android.content.Context
 import android.content.SharedPreferences
 import com.comics8.core.source.WorkId
+import com.comics8.core.sync.SyncConstants
+import com.comics8.core.sync.SyncWire
+import com.comics8.core.sync.addComics8SyncHeaders
 import com.comics8.monitor.data.local.AppDatabase
 import com.comics8.monitor.data.local.FavoriteToon
 import com.comics8.monitor.data.local.ReadEpisode
@@ -194,6 +197,7 @@ class SyncManager(
                 localFavs.forEach { f ->
                     favArr.put(JSONObject().apply {
                         put("id", f.id)
+                        put("sourceId", f.sourceId)
                         put("title", f.title)
                         put("thumbUrl", f.thumbUrl)
                         put("href", f.href)
@@ -208,6 +212,7 @@ class SyncManager(
                 localHist.forEach { h ->
                     histArr.put(JSONObject().apply {
                         put("toonId", h.toonId)
+                        put("sourceId", h.sourceId)
                         put("toonTitle", h.toonTitle)
                         put("toonThumbUrl", h.toonThumbUrl)
                         put("toonHref", h.toonHref)
@@ -229,6 +234,7 @@ class SyncManager(
                 localEps.forEach { ep ->
                     epArr.put(JSONObject().apply {
                         put("toonId", ep.toonId)
+                        put("sourceId", ep.sourceId)
                         put("wrId", ep.wrId)
                         put("readAt", ep.readAt)
                         put("lastPage", ep.lastPage)
@@ -240,6 +246,7 @@ class SyncManager(
                 localSettings.forEach { s ->
                     setArr.put(JSONObject().apply {
                         put("toonId", s.toonId)
+                        put("sourceId", s.sourceId)
                         put("viewMode", s.viewMode)
                         put("readDirection", s.readDirection)
                         put("updatedAt", s.updatedAt)
@@ -258,18 +265,20 @@ class SyncManager(
                 put("tombstones", tombArr)
             }
 
+            val serverSchema = SyncWire.probeServerSchema(client, state.serverUrl, key)
+            val outbound = SyncWire.filterOutbound(changesObj, serverSchema)
             val reqObj = JSONObject().apply {
                 put("since", since)
                 put("clientTime", System.currentTimeMillis())
-                put("changes", changesObj)
+                put("schemaVersion", SyncConstants.SCHEMA_VERSION)
+                put("changes", outbound.json)
             }
 
             val mediaType = "application/json; charset=utf-8".toMediaType()
             val reqBody = reqObj.toString().toRequestBody(mediaType)
             val req = Request.Builder()
                 .url(deltaUrl)
-                .addHeader("Authorization", "Bearer $key")
-                .addHeader("X-Sync-Key", key)
+                .addComics8SyncHeaders(key)
                 .post(reqBody)
                 .build()
 
@@ -393,7 +402,10 @@ class SyncManager(
 
             prefs.edit().putLong(KEY_LAST_SYNCED_AT, serverTime).apply()
 
-            val msg = "증분 동기화 완료: 수신 (즐겨찾기 ${favList.size}개, 기록 ${histList.size}개)"
+            val msg = SyncWire.withOmittedHint(
+                "증분 동기화 완료: 수신 (즐겨찾기 ${favList.size}개, 기록 ${histList.size}개)",
+                outbound.omittedHitomi,
+            )
             _syncState.value = _syncState.value.copy(
                 isSyncing = false,
                 isSuccess = true,
@@ -423,8 +435,7 @@ class SyncManager(
         try {
             val req = Request.Builder()
                 .url(url)
-                .addHeader("Authorization", "Bearer $key")
-                .addHeader("X-Sync-Key", key)
+                .addComics8SyncHeaders(key)
                 .get()
                 .build()
 
@@ -487,14 +498,16 @@ class SyncManager(
         }
 
         try {
-            val backupJson = BackupManager.createBackupJson(database)
+            val backupJson = JSONObject(BackupManager.createBackupJson(database))
+            backupJson.put("schemaVersion", SyncConstants.SCHEMA_VERSION)
+            val serverSchema = SyncWire.probeServerSchema(client, state.serverUrl, key)
+            val outbound = SyncWire.filterOutbound(backupJson, serverSchema)
             val mediaType = "application/json; charset=utf-8".toMediaType()
-            val reqBody = backupJson.toRequestBody(mediaType)
+            val reqBody = outbound.json.toString().toRequestBody(mediaType)
 
             val req = Request.Builder()
                 .url(url)
-                .addHeader("Authorization", "Bearer $key")
-                .addHeader("X-Sync-Key", key)
+                .addComics8SyncHeaders(key)
                 .post(reqBody)
                 .build()
 
@@ -511,7 +524,10 @@ class SyncManager(
             prefs.edit().putLong(KEY_LAST_SYNCED_AT, nowMs).apply()
 
             val stats = BackupManager.getStats(database)
-            val successMsg = "서버 동기화 완료: 즐겨찾기 ${stats.favoriteCount}개, 기록 ${stats.historyCount}개"
+            val successMsg = SyncWire.withOmittedHint(
+                "서버 동기화 완료: 즐겨찾기 ${stats.favoriteCount}개, 기록 ${stats.historyCount}개",
+                outbound.omittedHitomi,
+            )
             _syncState.value = _syncState.value.copy(
                 isSyncing = false,
                 isSuccess = true,

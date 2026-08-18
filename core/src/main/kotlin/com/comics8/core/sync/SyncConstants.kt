@@ -7,6 +7,8 @@ object SyncConstants {
     const val KEY_LAST_SYNCED_AT = "sync_last_at"
     const val KEY_USE_SERVER_PROXY = "sync_use_server_proxy"
     const val DEFAULT_SERVER_URL = "https://homeassistant.tail1946af.ts.net/api/comics8/sync"
+    const val SCHEMA_VERSION = 2
+    const val SCHEMA_HEADER = "X-Comics8-Sync-Schema"
 
     fun generateSyncKey(): String {
         val chars = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
@@ -19,6 +21,15 @@ object SyncConstants {
             base.substringBeforeLast("/sync") + "/version"
         } else {
             "$base/version"
+        }
+    }
+
+    fun healthUrl(serverUrl: String = DEFAULT_SERVER_URL): String {
+        val base = serverUrl.trimEnd('/')
+        return if (base.endsWith("/sync")) {
+            base.substringBeforeLast("/sync") + "/health"
+        } else {
+            "$base/health"
         }
     }
 
