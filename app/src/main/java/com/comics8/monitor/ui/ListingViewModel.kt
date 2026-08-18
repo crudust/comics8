@@ -127,6 +127,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     private var listJob: Job? = null
     private var episodeJob: Job? = null
     private var readerJob: Job? = null
+    private var countUpdateJob: Job? = null
 
     private val catalogCache = mutableMapOf<Catalog, List<ToonItem>>()
     private val catalogPages = mutableMapOf<Catalog, Pair<Int, Int>>()
@@ -1082,6 +1083,47 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         loadEpisodes(series, target)
     }
 
+    private fun updateEpisodeCountsForUpdatedItems(items: List<ToonItem>) {
+        val targets = items.filter { it.isNew && it.readProgress != null }
+        if (targets.isEmpty()) return
+
+        countUpdateJob?.cancel()
+        countUpdateJob = viewModelScope.launch(Dispatchers.IO) {
+            for (target in targets) {
+                try {
+                    val exactTotal = repository.fetchTotalEpisodes(target)
+                    if (exactTotal <= 0) continue
+
+                    toonTotalCounts[target.id] = exactTotal
+                    val existing = repository.getHistory().firstOrNull { it.toonId == target.id }
+                    if (existing != null) {
+                        val safeOrder = existing.lastReadOrder.coerceIn(1, exactTotal)
+                        val hasNew = safeOrder < exactTotal
+                        val updated = existing.copy(
+                            totalEpisodes = exactTotal,
+                            lastReadOrder = safeOrder,
+                            hasNew = hasNew,
+                        )
+                        repository.saveHistory(updated)
+                        val progressText = "${updated.lastReadOrder}/${updated.totalEpisodes}"
+                        _state.update { curr ->
+                            val updatedItems = curr.items.map { row ->
+                                if (row.id == target.id) row.copy(readProgress = progressText) else row
+                            }
+                            if (!curr.isSearch) {
+                                catalogCache[curr.catalog] = updatedItems
+                            }
+                            curr.copy(
+                                items = updatedItems,
+                                seriesHistory = if (curr.series?.id == target.id) updated else curr.seriesHistory,
+                            )
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
     private fun runSearch(query: String, asRefresh: Boolean) {
         listJob?.cancel()
         listJob = viewModelScope.launch {
@@ -1106,6 +1148,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                         error = null,
                     )
                 }
+                updateEpisodeCountsForUpdatedItems(items)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -1148,6 +1191,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                         error = null,
                     )
                 }
+                updateEpisodeCountsForUpdatedItems(result.items)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

@@ -83,6 +83,22 @@ class DesktopToonRepository(
         parsed.copy(items = enriched)
     }
 
+    suspend fun fetchTotalEpisodes(item: ToonItem): Int = withContext(Dispatchers.IO) {
+        val firstPage = loadEpisodes(item, 1)
+        if (firstPage.items.isEmpty()) return@withContext 0
+        val lastP = firstPage.lastPage.coerceAtLeast(1)
+        if (lastP <= 1) {
+            return@withContext firstPage.items.size
+        }
+        val pageSize = 100
+        try {
+            val lastPageRes = loadEpisodes(item, lastP)
+            (lastP - 1) * pageSize + lastPageRes.items.size
+        } catch (_: Exception) {
+            (lastP - 1) * pageSize + firstPage.items.size
+        }
+    }
+
     suspend fun loadImages(episode: EpisodeItem, toonId: String? = null): List<String> = withContext(Dispatchers.IO) {
         if (!toonId.isNullOrBlank() && downloadManager != null) {
             val localImages = downloadManager.getLocalEpisodeImages(toonId, episode.wrId)
@@ -142,8 +158,9 @@ class DesktopToonRepository(
         return items.map { item ->
             val prev = existing[item.id]
             val history = historyMap[item.id]
+            val isUpdated = prev != null && !item.updatedAt.isNullOrBlank() && prev.updatedAt != item.updatedAt
             item.copy(
-                isNew = total > 0 && prev == null,
+                isNew = total > 0 && (prev == null || isUpdated),
                 isFavorite = item.id in favoriteIds,
                 readProgress = history?.let { "${it.lastReadOrder}/${it.totalEpisodes}" },
             )

@@ -34,6 +34,7 @@ class DesktopViewModel(
     private var loadJob: Job? = null
     private var episodeJob: Job? = null
     private var readerJob: Job? = null
+    private var countUpdateJob: Job? = null
 
     private val toonTotalCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
     private val toonLastPageCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
@@ -144,6 +145,44 @@ class DesktopViewModel(
         loadPage(1)
     }
 
+    private fun updateEpisodeCountsForUpdatedItems(items: List<ToonItem>) {
+        val targets = items.filter { it.isNew && it.readProgress != null }
+        if (targets.isEmpty()) return
+
+        countUpdateJob?.cancel()
+        countUpdateJob = scope.launch(Dispatchers.IO) {
+            for (target in targets) {
+                try {
+                    val exactTotal = repository.fetchTotalEpisodes(target)
+                    if (exactTotal <= 0) continue
+
+                    toonTotalCounts[target.id] = exactTotal
+                    val existing = repository.getHistory().firstOrNull { it.toonId == target.id }
+                    if (existing != null) {
+                        val safeOrder = existing.lastReadOrder.coerceIn(1, exactTotal)
+                        val hasNew = safeOrder < exactTotal
+                        val updated = existing.copy(
+                            totalEpisodes = exactTotal,
+                            lastReadOrder = safeOrder,
+                            hasNew = hasNew,
+                        )
+                        repository.saveHistory(updated)
+                        val progressText = "${updated.lastReadOrder}/${updated.totalEpisodes}"
+                        _state.update { curr ->
+                            val updatedItems = curr.items.map { row ->
+                                if (row.id == target.id) row.copy(readProgress = progressText) else row
+                            }
+                            curr.copy(
+                                items = updatedItems,
+                                seriesHistory = if (curr.series?.id == target.id) updated else curr.seriesHistory,
+                            )
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
     fun loadPage(page: Int, replace: Boolean = false) {
         loadJob?.cancel()
         val catalog = _state.value.catalog
@@ -172,6 +211,7 @@ class DesktopViewModel(
                 if (result.items.isNotEmpty() && catalog != Catalog.FAVORITE) {
                     repository.markSeen(result.items)
                 }
+                updateEpisodeCountsForUpdatedItems(result.items)
             } catch (e: Exception) {
                 if (e is CancellationException) return@launch
                 _state.update {
@@ -221,6 +261,7 @@ class DesktopViewModel(
                         error = if (results.isEmpty()) "'$q' 검색 결과가 없습니다." else null,
                     )
                 }
+                updateEpisodeCountsForUpdatedItems(results)
             } catch (e: Exception) {
                 if (e is CancellationException) return@launch
                 _state.update {
