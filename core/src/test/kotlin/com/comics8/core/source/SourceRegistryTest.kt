@@ -17,5 +17,7 @@ class SourceRegistryTest {
         assertThat(WorkId.writable(HitomiSource.ID, "artist:demo")).isNull()
         assertThat(WorkId.writable(HitomiSource.ID, "artist:demo", hitomiEnabled = true))
             .isEqualTo(WorkId(HitomiSource.ID, "artist:demo"))
+        assertThat(SourceRegistry.chipLabel(HitomiSource.ID)).isEqualTo(registry.get(HitomiSource.ID).displayName)
+        assertThat(SourceRegistry.chipLabel("")).isEqualTo(registry.default.displayName)
     }
 }

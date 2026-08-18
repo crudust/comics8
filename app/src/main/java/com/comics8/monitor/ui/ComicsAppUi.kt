@@ -138,7 +138,7 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                                     scrollToTopTrigger = state.scrollToTopTrigger,
                                     onOpen = viewModel::onListingOpen,
                                     onToggleFavorite = viewModel::toggleFavorite,
-                                    showSourceChip = true,
+                                    showSourceChip = false,
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             }

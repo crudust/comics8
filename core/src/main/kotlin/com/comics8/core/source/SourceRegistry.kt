@@ -23,5 +23,14 @@ class SourceRegistry(private val sources: List<ComicSource>) {
         fun defaults(): SourceRegistry = SourceRegistry(
             listOf(ElevenToonSource(), HitomiSource()),
         )
+
+        private val chipLabels by lazy {
+            defaults().all().associate { it.id to it.displayName }
+        }
+
+        fun chipLabel(sourceId: String): String {
+            val key = sourceId.ifBlank { WorkId.DEFAULT_SOURCE }
+            return chipLabels[key] ?: chipLabels.getValue(WorkId.DEFAULT_SOURCE)
+        }
     }
 }

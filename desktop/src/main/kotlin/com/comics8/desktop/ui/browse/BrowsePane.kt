@@ -80,7 +80,7 @@ fun BrowsePane(
                             item = item,
                             onClick = { viewModel.onListingOpen(item) },
                             onToggleFavorite = { viewModel.toggleFavorite(item) },
-                            showSourceChip = state.tab is BrowseTab.Favorite || state.isSearch,
+                            showSourceChip = state.tab is BrowseTab.Favorite && !state.isSearch,
                         )
                     }
                 }
