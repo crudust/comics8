@@ -1,4 +1,4 @@
-package com.comics8.core.parser
+package com.comics8.core.source.eleven
 
 import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.EpisodePage

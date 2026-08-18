@@ -1,6 +1,7 @@
 package com.comics8.core.source
 
 import com.comics8.core.model.ToonItem
+import com.comics8.core.source.eleven.ElevenToonSource
 import com.comics8.core.source.hitomi.HitomiSource
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
@@ -14,7 +15,7 @@ class LatestUpdateSelectionTest {
             toon("eleven", "c"),
         )
         val keys = setOf("eleven:a", "eleven:c", "hitomi:artist:x")
-        assertThat(LatestUpdateSelection.elevenIntersection(latest, keys).map { it.id })
+        assertThat(LatestUpdateSelection.intersection(latest, keys).map { it.id })
             .containsExactly("a", "c")
             .inOrder()
     }

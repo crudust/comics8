@@ -1,24 +1,28 @@
 package com.comics8.core.network
 
-import com.comics8.core.parser.ComicSite
-import com.comics8.core.source.hitomi.HitomiUrls
+import com.comics8.core.source.SourceRegistry
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 
 class ImageRefererTest {
     @Test
     fun hitomiHostsUseHitomiReferer() {
+        val expected = SourceRegistry.defaults().sourceForUrl(
+            "https://tn.gold-usergeneratedcontent.net/webpsmalltn/c/ab/x.webp",
+        ).imageReferer("https://tn.gold-usergeneratedcontent.net/webpsmalltn/c/ab/x.webp")
         assertThat(ImageReferer.forUrl("https://tn.gold-usergeneratedcontent.net/webpsmalltn/c/ab/x.webp"))
-            .isEqualTo(HitomiUrls.REFERER)
+            .isEqualTo(expected)
         assertThat(ImageReferer.forUrl("https://w2.gold-usergeneratedcontent.net/1/3243/x.webp"))
-            .isEqualTo(HitomiUrls.REFERER)
+            .isEqualTo(expected)
         assertThat(ImageReferer.forUrl("https://ltn.gold-usergeneratedcontent.net/gg.js"))
-            .isEqualTo(HitomiUrls.REFERER)
+            .isEqualTo(expected)
     }
 
     @Test
     fun elevenHostsKeepOrigin() {
-        assertThat(ImageReferer.forUrl("https://www.pl3040.com/kr/1.png")).isEqualTo(ComicSite.ORIGIN)
+        val url = "https://www.pl3040.com/kr/1.png"
+        assertThat(ImageReferer.forUrl(url))
+            .isEqualTo(SourceRegistry.defaults().sourceForUrl(url).imageReferer(url))
     }
 
     @Test

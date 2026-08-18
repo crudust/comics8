@@ -1,18 +1,16 @@
-package com.comics8.core.parser
-
-import com.comics8.core.model.Catalog
+package com.comics8.core.source.eleven
 
 object ComicSite {
     const val ORIGIN = "http://103.204.13.68:8904"
     const val COVER_HOST = "https://11toon8.com"
 
-    fun listingUrl(catalog: Catalog, page: Int): String = ORIGIN + catalog.listingPath(page)
+    fun listingUrl(catalog: ElevenCatalog, page: Int): String = ORIGIN + catalog.listingPath(page)
 
     fun searchUrl(query: String): String =
-        "$ORIGIN/bbs/ajax.search.php?search_key=${Catalog.enc(query)}"
+        "$ORIGIN/bbs/ajax.search.php?search_key=${ElevenCatalog.enc(query)}"
 
     fun seriesUrl(id: String, title: String, page: Int = 1): String {
-        val stx = Catalog.enc(title)
+        val stx = ElevenCatalog.enc(title)
         return "$ORIGIN/bbs/board.php?bo_table=toons&stx=$stx&is=$id&page=$page"
     }
 

@@ -31,6 +31,13 @@ data class SearchSuggestion(
 ) {
     val queryToken: String
         get() = "$ns:${tag.trim().replace(' ', '_')}"
+
+    fun applyTo(input: String): String {
+        val trimmed = input.trimEnd()
+        val cut = trimmed.lastIndexOf(' ')
+        val prefix = if (cut >= 0) trimmed.substring(0, cut + 1) else ""
+        return "$prefix$queryToken "
+    }
 }
 
 data class SourceConfig(

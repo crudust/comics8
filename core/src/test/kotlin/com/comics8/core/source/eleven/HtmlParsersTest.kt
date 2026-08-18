@@ -1,4 +1,4 @@
-package com.comics8.core.parser
+package com.comics8.core.source.eleven
 
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test

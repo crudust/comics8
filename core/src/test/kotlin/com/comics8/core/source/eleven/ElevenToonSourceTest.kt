@@ -1,6 +1,10 @@
-package com.comics8.core.source
+package com.comics8.core.source.eleven
 
-import com.comics8.core.model.Catalog
+import com.comics8.core.source.FetchSpec
+import com.comics8.core.source.HttpResult
+import com.comics8.core.source.RequestPolicy
+import com.comics8.core.source.SourceHttp
+import com.comics8.core.source.WorkId
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
@@ -10,19 +14,19 @@ class ElevenToonSourceTest {
     fun catalogsExcludeFavorite() {
         val catalogs = ElevenToonSource().catalogs
         assertThat(catalogs.map { it.id }).containsExactly(
-            Catalog.LATEST.name,
-            Catalog.POPULAR.name,
-            Catalog.COMPLETE.name,
-            Catalog.TODAY.name,
+            ElevenCatalog.LATEST.name,
+            ElevenCatalog.POPULAR.name,
+            ElevenCatalog.COMPLETE.name,
+            ElevenCatalog.TODAY.name,
         ).inOrder()
-        assertThat(catalogs.none { it.id == Catalog.FAVORITE.name }).isTrue()
+        assertThat(catalogs.none { it.id == ElevenCatalog.FAVORITE.name }).isTrue()
     }
 
     @Test
     fun loadListingUsesPrivateListingSpec() = runBlocking {
         val html = readFixture("listing_latest.html")
         val http = RecordingHttp(html)
-        val page = ElevenToonSource().loadListing(Catalog.LATEST.name, 1, http)
+        val page = ElevenToonSource().loadListing(ElevenCatalog.LATEST.name, 1, http)
         assertThat(http.urls).hasSize(1)
         assertThat(http.urls[0]).contains("bo_table=toon_c")
         assertThat(http.urls[0]).contains("type=upd")

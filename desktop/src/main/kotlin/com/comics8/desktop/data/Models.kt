@@ -1,6 +1,5 @@
 package com.comics8.desktop.data
 
-import com.comics8.core.model.Catalog
 import com.comics8.core.model.DualSpread
 import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.EpisodePage
@@ -19,7 +18,6 @@ typealias ToonItem = ToonItem
 typealias EpisodeItem = EpisodeItem
 typealias ListingPage = ListingPage
 typealias EpisodePage = EpisodePage
-typealias Catalog = Catalog
 typealias DualSpread = DualSpread
 typealias DownloadedToonSummary = DownloadedToonSummary
 

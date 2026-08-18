@@ -505,12 +505,12 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun applySearchSuggestion(suggestion: com.comics8.core.source.SearchSuggestion) {
-        updateSearchInput(com.comics8.core.source.hitomi.HitomiSuggest.apply(_state.value.searchInput, suggestion))
+        updateSearchInput(suggestion.applyTo(_state.value.searchInput))
     }
 
     private fun requestSuggestions(value: String) {
         suggestJob?.cancel()
-        if (value.isBlank() || _state.value.activeSourceId != "hitomi") {
+        if (value.isBlank()) {
             _state.update { it.copy(searchSuggestions = emptyList()) }
             return
         }

@@ -22,6 +22,6 @@ object LatestUpdateSelection {
         }
     }
 
-    fun elevenIntersection(latest: List<ToonItem>, favoriteKeys: Set<String>): List<ToonItem> =
+    fun intersection(latest: List<ToonItem>, favoriteKeys: Set<String>): List<ToonItem> =
         latest.filter { it.workId().storageKey() in favoriteKeys }
 }

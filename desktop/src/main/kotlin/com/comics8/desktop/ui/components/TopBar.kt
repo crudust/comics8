@@ -115,7 +115,7 @@ fun TopBar(
                     text = when (state.screen) {
                         Screen.Reader -> state.currentEpisode?.title.orEmpty().ifBlank { "만화 보기" }
                         Screen.Series -> state.series?.title.orEmpty()
-                        Screen.Browse -> "11toon"
+                        Screen.Browse -> SourceRegistry.chipLabel(state.activeSourceId)
                         Screen.History -> "히스토리"
                         Screen.Downloads -> "${SourceRegistry.chipLabel(state.activeSourceId)} 저장소"
                     },
@@ -315,13 +315,7 @@ fun TopBar(
                         value = state.searchInput,
                         onValueChange = viewModel::updateSearchInput,
                         placeholder = {
-                            Text(
-                                if (state.activeSourceId == "hitomi") {
-                                    "작가 검색 (artist: 이름)"
-                                } else {
-                                    "만화 제목 검색..."
-                                },
-                            )
+                            Text(SourceRegistry.searchPlaceholder(state.activeSourceId))
                         },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),

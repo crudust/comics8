@@ -1,14 +1,18 @@
-package com.comics8.core.source
+package com.comics8.core.source.eleven
 
-import com.comics8.core.model.Catalog
 import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.EpisodePage
 import com.comics8.core.model.ListingPage
 import com.comics8.core.model.ToonItem
 import com.comics8.core.network.ToonClient
-import com.comics8.core.parser.ComicSite
-import com.comics8.core.parser.HtmlParsers
-import com.comics8.core.parser.SearchParser
+import com.comics8.core.source.ComicSource
+import com.comics8.core.source.FetchSpec
+import com.comics8.core.source.NotificationMode
+import com.comics8.core.source.RequestPolicy
+import com.comics8.core.source.SearchQuery
+import com.comics8.core.source.SourceCatalog
+import com.comics8.core.source.SourceHttp
+import com.comics8.core.source.WorkId
 
 class ElevenToonSource : ComicSource {
     override val id: String = WorkId.DEFAULT_SOURCE
@@ -26,6 +30,7 @@ class ElevenToonSource : ComicSource {
         ),
     )
     override val searchFirstClass: Boolean = true
+    override val searchPlaceholder: String = "제목 검색"
     override val notificationMode: NotificationMode = NotificationMode.LATEST_INTERSECTION
     override val episodePageSize: Int = 100
     override val emptyListingOk: Boolean = false
@@ -95,10 +100,10 @@ class ElevenToonSource : ComicSource {
         return FetchSpec(ComicSite.listingUrl(catalog, page), defaultPolicy)
     }
 
-    private fun catalogFromId(catalogId: String): Catalog {
-        val catalog = Catalog.entries.find { it.name.equals(catalogId, ignoreCase = true) }
+    private fun catalogFromId(catalogId: String): ElevenCatalog {
+        val catalog = ElevenCatalog.entries.find { it.name.equals(catalogId, ignoreCase = true) }
             ?: error("Unknown catalog: $catalogId")
-        if (catalog == Catalog.FAVORITE) {
+        if (catalog == ElevenCatalog.FAVORITE) {
             error("즐겨찾기는 로컬 목록입니다.")
         }
         return catalog
@@ -108,11 +113,13 @@ class ElevenToonSource : ComicSource {
         page.copy(items = page.items.map { it.copy(sourceId = id) })
 
     companion object {
+        const val ID = WorkId.DEFAULT_SOURCE
+
         private val REMOTE_CATALOGS = listOf(
-            Catalog.LATEST,
-            Catalog.POPULAR,
-            Catalog.COMPLETE,
-            Catalog.TODAY,
+            ElevenCatalog.LATEST,
+            ElevenCatalog.POPULAR,
+            ElevenCatalog.COMPLETE,
+            ElevenCatalog.TODAY,
         )
         private val ELEVEN_HOST = Regex("""^(www\.)?11toon\d*\.com$""")
         private val PL_HOST = Regex("""^(www\.)?pl\d{4}\.com$""")

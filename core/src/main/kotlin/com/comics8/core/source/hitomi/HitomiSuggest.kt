@@ -50,10 +50,5 @@ object HitomiSuggest {
         return out
     }
 
-    fun apply(input: String, suggestion: SearchSuggestion): String {
-        val trimmed = input.trimEnd()
-        val cut = trimmed.lastIndexOf(' ')
-        val prefix = if (cut >= 0) trimmed.substring(0, cut + 1) else ""
-        return "$prefix${suggestion.queryToken} "
-    }
+    fun apply(input: String, suggestion: SearchSuggestion): String = suggestion.applyTo(input)
 }

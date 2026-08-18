@@ -13,6 +13,7 @@ interface ComicSource {
     val catalogs: List<SourceCatalog>
     val defaultPolicy: RequestPolicy
     val searchFirstClass: Boolean
+    val searchPlaceholder: String get() = "제목 검색"
 
     val enabledByDefault: Boolean get() = id == WorkId.DEFAULT_SOURCE
     val notificationMode: NotificationMode get() = NotificationMode.NONE

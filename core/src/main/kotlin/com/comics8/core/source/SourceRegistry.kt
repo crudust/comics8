@@ -1,6 +1,5 @@
 package com.comics8.core.source
 
-import com.comics8.core.source.hitomi.HitomiSource
 import java.net.URI
 
 class SourceRegistry(private val sources: List<ComicSource>) {
@@ -57,9 +56,7 @@ class SourceRegistry(private val sources: List<ComicSource>) {
     }
 
     companion object {
-        fun defaults(): SourceRegistry = SourceRegistry(
-            listOf(ElevenToonSource(), HitomiSource()),
-        )
+        fun defaults(): SourceRegistry = SourceRegistry(BuiltInSources.all())
 
         fun isRegistered(sourceId: String): Boolean {
             val key = sourceId.ifBlank { WorkId.DEFAULT_SOURCE }
@@ -71,6 +68,11 @@ class SourceRegistry(private val sources: List<ComicSource>) {
         fun chipLabel(sourceId: String): String {
             val key = sourceId.ifBlank { WorkId.DEFAULT_SOURCE }
             return chipLabels[key] ?: chipLabels.getValue(WorkId.DEFAULT_SOURCE)
+        }
+
+        fun searchPlaceholder(sourceId: String): String {
+            val key = sourceId.ifBlank { WorkId.DEFAULT_SOURCE }
+            return searchPlaceholders[key] ?: cachedDefaults.default.searchPlaceholder
         }
 
         fun hostOf(url: String): String? =
@@ -86,6 +88,10 @@ class SourceRegistry(private val sources: List<ComicSource>) {
 
         private val chipLabels by lazy {
             cachedDefaults.all().associate { it.id to it.displayName }
+        }
+
+        private val searchPlaceholders by lazy {
+            cachedDefaults.all().associate { it.id to it.searchPlaceholder }
         }
     }
 }

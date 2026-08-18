@@ -1,9 +1,9 @@
-package com.comics8.core.model
+package com.comics8.core.source.eleven
 
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
-enum class Catalog(
+enum class ElevenCatalog(
     val label: String,
     val paginated: Boolean,
 ) {
