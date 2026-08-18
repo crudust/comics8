@@ -18,11 +18,13 @@ import com.comics8.monitor.data.SyncManager
 import com.comics8.monitor.data.ToonRepository
 import com.comics8.monitor.data.local.AppDatabase
 import com.comics8.monitor.work.RefreshWorker
-import okhttp3.OkHttpClient
+import java.io.File
 
 class ComicsApp : Application(), ImageLoaderFactory {
     lateinit var repository: ToonRepository
         private set
+
+    private lateinit var toonClient: ToonClient
 
     override fun onCreate() {
         super.onCreate()
@@ -30,7 +32,8 @@ class ComicsApp : Application(), ImageLoaderFactory {
             .addMigrations(AppDatabase.MIGRATION_9_10)
             .fallbackToDestructiveMigrationFrom(1, 2, 3, 4, 5, 6, 7, 8)
             .build()
-        val client = ToonClient()
+        toonClient = ToonClient(ToonClient.defaultClient(File(cacheDir, "http")))
+        val client = toonClient
         val prefs = getSharedPreferences("comics_reader_prefs", Context.MODE_PRIVATE)
         val isSourceEnabled: (String) -> Boolean = { id ->
             if (id == WorkId.DEFAULT_SOURCE || id.isBlank()) {
@@ -61,9 +64,7 @@ class ComicsApp : Application(), ImageLoaderFactory {
     }
 
     override fun newImageLoader(): ImageLoader {
-        val http = OkHttpClient.Builder()
-            .followRedirects(true)
-            .followSslRedirects(true)
+        val http = toonClient.httpClient.newBuilder()
             .addInterceptor { chain ->
                 val originalUrl = chain.request().url.toString()
                 val request = chain.request().newBuilder()
@@ -104,8 +105,8 @@ class ComicsApp : Application(), ImageLoaderFactory {
             }
             .diskCache {
                 DiskCache.Builder()
-                    .directory(cacheDir.resolve("covers"))
-                    .maxSizeBytes(80L * 1024L * 1024L)
+                    .directory(cacheDir.resolve("images"))
+                    .maxSizeBytes(200L * 1024L * 1024L)
                     .build()
             }
             .build()

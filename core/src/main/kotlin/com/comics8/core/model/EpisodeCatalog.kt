@@ -1,5 +1,11 @@
 package com.comics8.core.model
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+
 data class OfflineEpisodeRef(
     val wrId: String,
     val title: String,
@@ -31,10 +37,16 @@ object EpisodeCatalog {
         val first = loadPage(1)
         val lastP = first.lastPage.coerceAtLeast(1)
         if (lastP <= 1) return first.items
-        val all = first.items.toMutableList()
-        for (page in 2..lastP) {
-            all.addAll(loadPage(page).items)
+        val remaining = coroutineScope {
+            val semaphore = Semaphore(2)
+            (2..lastP).map { page ->
+                async {
+                    semaphore.withPermit { page to loadPage(page) }
+                }
+            }.awaitAll()
+                .sortedBy { it.first }
+                .flatMap { it.second.items }
         }
-        return all
+        return first.items + remaining
     }
 }

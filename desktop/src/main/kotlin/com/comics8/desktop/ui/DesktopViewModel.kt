@@ -40,6 +40,8 @@ class DesktopViewModel(
     private var countUpdateJob: Job? = null
     private var downloadCatalogJob: Job? = null
     private var suggestJob: Job? = null
+    private var pageSaveJob: Job? = null
+    private var pendingPageSave: Triple<WorkId, String, Int>? = null
 
     private val catalogCache = mutableMapOf<BrowseTab, List<ToonItem>>()
     private val catalogPages = mutableMapOf<BrowseTab, Pair<Int, Int>>()
@@ -1406,19 +1408,35 @@ class DesktopViewModel(
             totalImages = totalImages,
             seenThroughPage = seenThroughPage,
         )
+        if (episode.lastReadPage == targetPage) return
 
         _state.update { state ->
-            val updatedEpisode = state.currentEpisode?.copy(lastReadPage = targetPage)
-            val updatedEpisodes = state.episodes.map {
-                if (it.wrId == episode.wrId) it.copy(lastReadPage = targetPage) else it
-            }
             state.copy(
-                currentEpisode = updatedEpisode,
-                episodes = updatedEpisodes,
+                currentEpisode = state.currentEpisode?.copy(lastReadPage = targetPage),
             )
         }
-        scope.launch {
-            repository.saveEpisodePage(series.workId(), episode.wrId, targetPage)
+        val workId = series.workId()
+        val wrId = episode.wrId
+        pendingPageSave = Triple(workId, wrId, targetPage)
+        pageSaveJob?.cancel()
+        pageSaveJob = scope.launch {
+            kotlinx.coroutines.delay(400)
+            repository.saveEpisodePage(workId, wrId, targetPage)
+            if (pendingPageSave == Triple(workId, wrId, targetPage)) {
+                pendingPageSave = null
+            }
+        }
+    }
+
+    private fun flushPendingPageSave() {
+        pageSaveJob?.cancel()
+        pageSaveJob = null
+        val pending = pendingPageSave
+        pendingPageSave = null
+        if (pending != null) {
+            scope.launch {
+                repository.saveEpisodePage(pending.first, pending.second, pending.third)
+            }
         }
     }
 
@@ -1449,6 +1467,7 @@ class DesktopViewModel(
     }
 
     fun closeReader() {
+        flushPendingPageSave()
         readerJob?.cancel()
         val current = _state.value
         lastViewedEpisode = current.currentEpisode

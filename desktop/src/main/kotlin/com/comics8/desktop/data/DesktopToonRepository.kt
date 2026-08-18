@@ -206,11 +206,11 @@ class DesktopToonRepository(
 
     private suspend fun applyFlags(items: List<ToonItem>): List<ToonItem> {
         if (items.isEmpty()) return items
-        val favoriteIds = database.getFavoriteIds()
-        val favoriteKeys = favoriteIds.map { it.storageKey() }.toSet()
+        val workIds = items.map { it.workId() }
+        val favoriteKeys = database.getFavoritesByToonIds(workIds).map { it.workId().storageKey() }.toSet()
         val total = database.getSeenCount()
-        val existing = if (total == 0) emptyMap() else database.getSeenByIds(items.map { it.workId() })
-        val historyMap = database.getAllHistory().associateBy { it.workId().storageKey() }
+        val existing = if (total == 0) emptyMap() else database.getSeenByIds(workIds)
+        val historyMap = database.getHistoryByToonIds(workIds).associateBy { it.workId().storageKey() }
 
         for (item in items) {
             val uDate = item.updatedAt

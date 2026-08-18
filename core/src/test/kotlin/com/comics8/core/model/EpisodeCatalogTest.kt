@@ -24,10 +24,11 @@ class EpisodeCatalogTest {
         )
         val seen = mutableListOf<Int>()
         val loaded = EpisodeCatalog.loadAllPages { page ->
-            seen += page
+            synchronized(seen) { seen += page }
             EpisodePage(pages.getValue(page), currentPage = page, lastPage = 3)
         }
-        assertThat(seen).containsExactly(1, 2, 3).inOrder()
+        assertThat(seen.first()).isEqualTo(1)
+        assertThat(seen).containsExactly(1, 2, 3)
         assertThat(loaded.map { it.wrId }).containsExactly("a", "b", "c", "d", "e").inOrder()
     }
 

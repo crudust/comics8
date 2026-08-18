@@ -39,6 +39,11 @@ import com.comics8.monitor.data.local.getSetting
 import com.comics8.monitor.data.local.updateLastPage
 import com.comics8.monitor.data.local.updateUpdatedAt
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
 class ToonRepository(
@@ -249,45 +254,55 @@ class ToonRepository(
             }
             if (candidates.isEmpty()) continue
             val existing = seenByWorkIds(candidates.map { it.workId() })
-            for (item in candidates) {
-                try {
-                    val workId = writableWorkId(item) ?: continue
-                    val epPage = loadEpisodes(item, 1)
-                    val latestEp = epPage.items.firstOrNull() ?: continue
-                    val latestWrId = latestEp.wrId
-                    val notifyKey = "${workId.storageKey()}|$latestWrId"
+            val semaphore = Semaphore(3)
+            val outcomes = coroutineScope {
+                candidates.map { item ->
+                    async {
+                        semaphore.withPermit {
+                            try {
+                                val workId = writableWorkId(item) ?: return@withPermit null
+                                val epPage = loadEpisodes(item, 1)
+                                val latestEp = epPage.items.firstOrNull() ?: return@withPermit null
+                                val latestWrId = latestEp.wrId
+                                val notifyKey = "${workId.storageKey()}|$latestWrId"
 
-                    if (existing[workId.storageKey()]?.notifiedKey == notifyKey) {
-                        continue
+                                if (existing[workId.storageKey()]?.notifiedKey == notifyKey) {
+                                    return@withPermit null
+                                }
+
+                                val isRead = readEpisodeDao.getReadEpisode(workId, latestWrId) != null ||
+                                    readHistoryDao.get(workId)?.lastWrId == latestWrId
+
+                                val prev = existing[workId.storageKey()]
+                                val seen = SeenToon(
+                                    sourceId = workId.sourceId,
+                                    id = workId.toonId,
+                                    title = item.title,
+                                    updatedAt = item.updatedAt,
+                                    firstSeenAt = prev?.firstSeenAt ?: nowMs,
+                                    lastSeenAt = nowMs,
+                                    notifiedKey = notifyKey,
+                                )
+                                val unseenItem = if (!isRead) {
+                                    item.copy(
+                                        href = latestEp.href,
+                                        updatedAt = latestEp.date ?: item.updatedAt,
+                                    )
+                                } else {
+                                    null
+                                }
+                                seen to unseenItem
+                            } catch (_: Exception) {
+                                null
+                            }
+                        }
                     }
-
-                    val isRead = readEpisodeDao.getReadEpisode(workId, latestWrId) != null ||
-                        readHistoryDao.get(workId)?.lastWrId == latestWrId
-
-                    val prev = existing[workId.storageKey()]
-                    updatedSeen.add(
-                        SeenToon(
-                            sourceId = workId.sourceId,
-                            id = workId.toonId,
-                            title = item.title,
-                            updatedAt = item.updatedAt,
-                            firstSeenAt = prev?.firstSeenAt ?: nowMs,
-                            lastSeenAt = nowMs,
-                            notifiedKey = notifyKey,
-                        )
-                    )
-
-                    if (!isRead) {
-                        unseen.add(
-                            item.copy(
-                                href = latestEp.href,
-                                updatedAt = latestEp.date ?: item.updatedAt,
-                            )
-                        )
-                    }
-                } catch (_: Exception) {
-                    // Ignore transient network errors on individual comic episode check
-                }
+                }.awaitAll()
+            }
+            for (outcome in outcomes) {
+                if (outcome == null) continue
+                updatedSeen.add(outcome.first)
+                outcome.second?.let { unseen.add(it) }
             }
         }
 
@@ -300,11 +315,26 @@ class ToonRepository(
 
     private suspend fun applyFlags(items: List<ToonItem>): List<ToonItem> {
         if (items.isEmpty()) return items
-        val favoriteKeys = favoriteDao.all().map { it.workId().storageKey() }.toSet()
+        val ids = items.map { it.id }.distinct()
+        val wanted = items.map { it.workId().storageKey() }.toSet()
+        val favoriteKeys = if (ids.isEmpty()) {
+            emptySet()
+        } else {
+            favoriteDao.byToonIds(ids)
+                .filter { it.workId().storageKey() in wanted }
+                .map { it.workId().storageKey() }
+                .toSet()
+        }
         val total = seenDao.count()
         val existing = if (total == 0) emptyMap() else seenByWorkIds(items.map { it.workId() })
         val historyMap = try {
-            readHistoryDao.all().associateBy { it.workId().storageKey() }
+            if (ids.isEmpty()) {
+                emptyMap()
+            } else {
+                readHistoryDao.byToonIds(ids)
+                    .filter { it.workId().storageKey() in wanted }
+                    .associateBy { it.workId().storageKey() }
+            }
         } catch (_: Exception) {
             emptyMap()
         }

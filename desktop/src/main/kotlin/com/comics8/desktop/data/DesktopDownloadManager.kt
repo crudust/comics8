@@ -3,6 +3,7 @@ package com.comics8.desktop.data
 import com.comics8.core.model.DownloadedToonSummary
 import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.ToonItem
+import com.comics8.core.network.ImageBatchDownload
 import com.comics8.core.network.ImageFallbacks
 import com.comics8.core.network.ToonClient
 import com.comics8.core.source.DownloadLayout
@@ -14,7 +15,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -139,23 +139,14 @@ class DesktopDownloadManager(
 
             _progress.update { it.copy(totalImages = imageUrls.size) }
 
-            var downloadedBytes = 0L
-            val downloadedFiles = mutableListOf<File>()
-
-            for ((index, url) in imageUrls.withIndex()) {
-                val imgIndex = index + 1
-                _progress.update { it.copy(currentImage = imgIndex) }
-                val imgFile = File(epDir, String.format("%04d.jpg", imgIndex))
-                if (!imgFile.exists() || imgFile.length() == 0L) {
-                    val bytes = ImageFallbacks.fetchBytes(url) { client.fetchBytes(it) }
-                    imgFile.writeBytes(bytes)
-                    downloadedBytes += bytes.size
-                } else {
-                    downloadedBytes += imgFile.length()
-                }
-                downloadedFiles.add(imgFile)
-                delay(150) // Rate limit protection
-            }
+            val batch = ImageBatchDownload.toNumberedFiles(
+                urls = imageUrls,
+                destDir = epDir,
+                fetchBytes = { url -> ImageFallbacks.fetchBytes(url) { client.fetchBytes(it) } },
+                onProgress = { completed, total ->
+                    _progress.update { it.copy(currentImage = completed, totalImages = total) }
+                },
+            )
 
             val entity = DownloadedEpisodeRecord(
                 sourceId = task.sourceId,
@@ -166,8 +157,8 @@ class DesktopDownloadManager(
                 toonHref = task.toonHref,
                 episodeTitle = task.episode.title,
                 episodeHref = task.episode.href,
-                imageCount = downloadedFiles.size,
-                totalBytes = downloadedBytes,
+                imageCount = batch.files.size,
+                totalBytes = batch.totalBytes,
                 downloadedAt = System.currentTimeMillis(),
                 localDirPath = epDir.absolutePath,
             )

@@ -56,16 +56,20 @@ class DesktopDatabaseMigrationTest {
         }
 
         val db = DesktopDatabase(file)
-        assertThat(db.userVersion()).isEqualTo(1)
-        val favs = db.getAllFavorites()
-        assertThat(favs).hasSize(1)
-        assertThat(favs[0].sourceId).isEqualTo(WorkId.DEFAULT_SOURCE)
-        assertThat(favs[0].id).isEqualTo("123")
-        val tombs = db.getTombstonesSince(0)
-        assertThat(tombs).hasSize(1)
-        assertThat(tombs[0].entityId).isEqualTo("eleven:456")
-        val seen = db.getSeenByIds(listOf(WorkId.eleven("123")))
-        assertThat(seen).hasSize(1)
-        assertThat(seen.values.single().notifiedKey).isEqualTo("eleven:123|999")
+        try {
+            assertThat(db.userVersion()).isEqualTo(1)
+            val favs = db.getAllFavorites()
+            assertThat(favs).hasSize(1)
+            assertThat(favs[0].sourceId).isEqualTo(WorkId.DEFAULT_SOURCE)
+            assertThat(favs[0].id).isEqualTo("123")
+            val tombs = db.getTombstonesSince(0)
+            assertThat(tombs).hasSize(1)
+            assertThat(tombs[0].entityId).isEqualTo("eleven:456")
+            val seen = db.getSeenByIds(listOf(WorkId.eleven("123")))
+            assertThat(seen).hasSize(1)
+            assertThat(seen.values.single().notifiedKey).isEqualTo("eleven:123|999")
+        } finally {
+            db.close()
+        }
     }
 }

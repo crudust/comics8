@@ -13,8 +13,8 @@ android {
         applicationId = "com.comics8.monitor"
         minSdk = 26
         targetSdk = 35
-        versionCode = 18
-        versionName = "1.3.9"
+        versionCode = 19
+        versionName = "1.4.0"
     }
 
     signingConfigs {
@@ -32,7 +32,8 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

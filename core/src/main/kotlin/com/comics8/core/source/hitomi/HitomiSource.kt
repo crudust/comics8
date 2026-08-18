@@ -21,7 +21,8 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
-import java.util.concurrent.ConcurrentHashMap
+import java.util.Collections
+import java.util.LinkedHashMap
 
 class HitomiSource(
     language: String = HitomiUrls.DEFAULT_LANGUAGE,
@@ -31,7 +32,12 @@ class HitomiSource(
     var language: String = language
     @Volatile
     private var ggCache: CachedGg? = null
-    private val galleryCache = ConcurrentHashMap<String, CachedGallery>()
+    private val galleryCache: MutableMap<String, CachedGallery> = Collections.synchronizedMap(
+        object : LinkedHashMap<String, CachedGallery>(16, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CachedGallery>?): Boolean =
+                size > GALLERY_CACHE_MAX
+        },
+    )
 
     override val id: String = HitomiUrls.SOURCE_ID
     override val displayName: String = "Hitomi"
@@ -317,17 +323,13 @@ class HitomiSource(
     private fun cachedGallery(id: String): GalleryInfo? {
         val cached = galleryCache[id] ?: return null
         if (System.currentTimeMillis() - cached.loadedAt >= GALLERY_TTL_MS) {
-            galleryCache.remove(id, cached)
+            galleryCache.remove(id)
             return null
         }
         return cached.info
     }
 
     private fun rememberGallery(info: GalleryInfo) {
-        if (galleryCache.size >= GALLERY_CACHE_MAX) {
-            val oldest = galleryCache.minByOrNull { it.value.loadedAt }?.key
-            if (oldest != null) galleryCache.remove(oldest)
-        }
         galleryCache[info.id] = CachedGallery(System.currentTimeMillis(), info)
     }
 
@@ -457,7 +459,7 @@ class HitomiSource(
             entryEpisodeId = entryEpisodeId,
         )
 
-        private const val GALLERY_CONCURRENCY = 4
+        private const val GALLERY_CONCURRENCY = 6
         private const val GG_TTL_MS = 10 * 60 * 1000L
         private const val GALLERY_TTL_MS = 10 * 60 * 1000L
         private const val GALLERY_CACHE_MAX = 200

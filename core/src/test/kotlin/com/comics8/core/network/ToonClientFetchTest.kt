@@ -70,4 +70,96 @@ class ToonClientFetchTest {
         val text = client.fetch("http://103.204.13.68:8904/bbs/board.php")
         assertThat(text).isEqualTo("direct-ok")
     }
+
+    @Test
+    fun afterThreeProxyFailuresSkipsProxy() {
+        val urls = mutableListOf<String>()
+        val client = failingProxyClient(urls)
+        repeat(3) { client.fetch(PROXY_TARGET) }
+        assertThat(urls.count { it.contains("/proxy") }).isEqualTo(3)
+        urls.clear()
+        client.fetch(PROXY_TARGET)
+        assertThat(urls.none { it.contains("/proxy") }).isTrue()
+        assertThat(urls).isNotEmpty()
+    }
+
+    @Test
+    fun proxyTriedAgainAfterCooldown() {
+        val urls = mutableListOf<String>()
+        var now = 1_000_000L
+        val client = failingProxyClient(urls)
+        client.clock = { now }
+        repeat(3) { client.fetch(PROXY_TARGET) }
+        now += ToonClient.PROXY_COOLDOWN_MS
+        urls.clear()
+        client.fetch(PROXY_TARGET)
+        assertThat(urls.any { it.contains("/proxy") }).isTrue()
+    }
+
+    @Test
+    fun proxySuccessResetsFailureCount() {
+        val urls = mutableListOf<String>()
+        var proxyCode = 502
+        val http = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val url = chain.request().url.toString()
+                urls += url
+                val (code, text) = if (url.contains("/proxy?url=")) {
+                    proxyCode to if (proxyCode in 200..299) "proxy-ok" else "bad gateway"
+                } else {
+                    200 to "direct-ok"
+                }
+                Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(code)
+                    .message("x")
+                    .body(text.toByteArray().toResponseBody("text/plain".toMediaType()))
+                    .build()
+            }
+            .build()
+        val client = ToonClient(
+            client = http,
+            proxyBaseUrl = "https://example.test/proxy",
+            isProxyEnabled = true,
+        )
+        repeat(2) { client.fetch(PROXY_TARGET) }
+        proxyCode = 200
+        client.fetch(PROXY_TARGET)
+        proxyCode = 502
+        client.fetch(PROXY_TARGET)
+        urls.clear()
+        client.fetch(PROXY_TARGET)
+        assertThat(urls.count { it.contains("/proxy") }).isEqualTo(1)
+    }
+
+    private fun failingProxyClient(urls: MutableList<String>): ToonClient {
+        val http = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val url = chain.request().url.toString()
+                urls += url
+                val (code, text) = if (url.contains("/proxy?url=")) {
+                    502 to "bad gateway"
+                } else {
+                    200 to "direct-ok"
+                }
+                Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(code)
+                    .message("x")
+                    .body(text.toByteArray().toResponseBody("text/plain".toMediaType()))
+                    .build()
+            }
+            .build()
+        return ToonClient(
+            client = http,
+            proxyBaseUrl = "https://example.test/proxy",
+            isProxyEnabled = true,
+        )
+    }
+
+    companion object {
+        private const val PROXY_TARGET = "http://103.204.13.68:8904/bbs/board.php"
+    }
 }

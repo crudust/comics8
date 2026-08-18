@@ -52,6 +52,9 @@ interface FavoriteDao {
     @Query("SELECT * FROM favorites ORDER BY COALESCE(updatedAt, '') DESC, savedAt DESC")
     suspend fun all(): List<FavoriteToon>
 
+    @Query("SELECT * FROM favorites WHERE toonId IN (:toonIds)")
+    suspend fun byToonIds(toonIds: List<String>): List<FavoriteToon>
+
     @Query("SELECT * FROM favorites WHERE savedAt > :since ORDER BY savedAt DESC")
     suspend fun getSince(since: Long): List<FavoriteToon>
 
@@ -224,6 +227,9 @@ data class ReadHistory(
 interface ReadHistoryDao {
     @Query("SELECT * FROM read_history ORDER BY lastReadAt DESC")
     suspend fun all(): List<ReadHistory>
+
+    @Query("SELECT * FROM read_history WHERE toonId IN (:toonIds)")
+    suspend fun byToonIds(toonIds: List<String>): List<ReadHistory>
 
     @Query("SELECT * FROM read_history WHERE sourceId = :sourceId ORDER BY lastReadAt DESC")
     suspend fun bySource(sourceId: String): List<ReadHistory>

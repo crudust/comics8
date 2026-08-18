@@ -25,6 +25,7 @@ import com.comics8.monitor.data.local.ReadHistory
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -149,6 +150,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     private var countUpdateJob: Job? = null
     private var downloadCatalogJob: Job? = null
     private var suggestJob: Job? = null
+    private var savePageJob: Job? = null
 
     private val catalogCache = mutableMapOf<BrowseTab, List<ToonItem>>()
     private val catalogPages = mutableMapOf<BrowseTab, Pair<Int, Int>>()
@@ -1292,18 +1294,14 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             totalImages = totalImages,
             seenThroughPage = seenThroughPage,
         )
+        if (episode.lastReadPage == targetPage) return
 
         _state.update { state ->
-            val updatedEpisode = state.currentEpisode?.copy(lastReadPage = targetPage)
-            val updatedEpisodes = state.episodes.map {
-                if (it.wrId == episode.wrId) it.copy(lastReadPage = targetPage) else it
-            }
-            state.copy(
-                currentEpisode = updatedEpisode,
-                episodes = updatedEpisodes,
-            )
+            state.copy(currentEpisode = state.currentEpisode?.copy(lastReadPage = targetPage))
         }
-        viewModelScope.launch {
+        savePageJob?.cancel()
+        savePageJob = viewModelScope.launch {
+            delay(400)
             repository.saveEpisodePage(series.workId(), episode.wrId, targetPage)
         }
     }
@@ -1312,6 +1310,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         readerJob?.cancel()
         val current = _state.value
         lastViewedEpisode = current.currentEpisode
+        flushPendingPageSave(current)
         _state.update {
             it.copy(
                 screen = Screen.Series,
@@ -1325,7 +1324,20 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun onAppBackgrounded() {
+        flushPendingPageSave(_state.value)
         repository.syncManager?.triggerDebouncedPush()
+    }
+
+    private fun flushPendingPageSave(current: ListingUiState) {
+        val pending = savePageJob
+        savePageJob?.cancel()
+        savePageJob = null
+        if (pending == null) return
+        val series = current.series ?: return
+        val episode = current.currentEpisode ?: return
+        viewModelScope.launch {
+            repository.saveEpisodePage(series.workId(), episode.wrId, episode.lastReadPage)
+        }
     }
 
     fun openNextEpisode() {

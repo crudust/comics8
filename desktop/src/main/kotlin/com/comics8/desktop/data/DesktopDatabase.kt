@@ -9,31 +9,72 @@ import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.ResultSet
 
-class DesktopDatabase(dbFile: File? = null) {
+class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
     @Volatile
     var isSourceEnabled: (String) -> Boolean = { false }
 
-    private val dbPath: String
-
-    init {
+    private val dbPath: String = run {
         try {
             Class.forName("org.sqlite.JDBC")
         } catch (_: Exception) {
         }
         val file = dbFile ?: File(System.getProperty("user.home"), ".comics8/comics8.db")
         file.parentFile?.mkdirs()
-        dbPath = file.absolutePath
+        file.absolutePath
+    }
+
+    private val connectionLock = Any()
+    private val connection: Connection = DriverManager.getConnection("jdbc:sqlite:$dbPath").also { conn ->
+        conn.createStatement().use { stmt ->
+            stmt.execute("PRAGMA journal_mode=WAL")
+            stmt.execute("PRAGMA busy_timeout=5000")
+            stmt.execute("PRAGMA foreign_keys=ON")
+        }
+    }
+
+    init {
         initTables()
     }
 
     private fun writableId(sourceId: String, toonId: String): WorkId? =
         SourceAccess.writable(sourceId, toonId, isSourceEnabled)
 
-    private fun getConnection(): Connection =
-        DriverManager.getConnection("jdbc:sqlite:$dbPath")
+    private inline fun <T> withConnection(block: (Connection) -> T): T {
+        synchronized(connectionLock) {
+            return block(connection)
+        }
+    }
+
+    private inline fun <T> withTransaction(block: (Connection) -> T): T =
+        withConnection { conn ->
+            val previous = conn.autoCommit
+            conn.autoCommit = false
+            try {
+                val result = block(conn)
+                conn.commit()
+                result
+            } catch (e: Exception) {
+                try {
+                    conn.rollback()
+                } catch (_: Exception) {
+                }
+                throw e
+            } finally {
+                conn.autoCommit = previous
+            }
+        }
+
+    override fun close() {
+        synchronized(connectionLock) {
+            try {
+                if (!connection.isClosed) connection.close()
+            } catch (_: Exception) {
+            }
+        }
+    }
 
     fun userVersion(): Int {
-        getConnection().use { conn ->
+        withConnection { conn ->
             return userVersion(conn)
         }
     }
@@ -47,7 +88,7 @@ class DesktopDatabase(dbFile: File? = null) {
     }
 
     private fun initTables() {
-        getConnection().use { conn ->
+        withConnection { conn ->
             val version = userVersion(conn)
             if (version < 1) {
                 rebuildIfLegacy(conn)
@@ -402,7 +443,7 @@ class DesktopDatabase(dbFile: File? = null) {
 
     // --- Tombstones ---
     fun recordTombstone(entityType: String, entityId: String, deletedAt: Long = System.currentTimeMillis()) {
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement(
                 """
                 INSERT OR REPLACE INTO tombstones (entityType, entityId, deletedAt)
@@ -418,7 +459,7 @@ class DesktopDatabase(dbFile: File? = null) {
     }
 
     fun deleteTombstone(entityType: String, entityId: String) {
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement("DELETE FROM tombstones WHERE entityType = ? AND entityId = ?").use { stmt ->
                 stmt.setString(1, entityType)
                 stmt.setString(2, entityId)
@@ -429,7 +470,7 @@ class DesktopDatabase(dbFile: File? = null) {
 
     fun getTombstonesSince(since: Long): List<SyncTombstone> {
         val list = mutableListOf<SyncTombstone>()
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement("SELECT entityType, entityId, deletedAt FROM tombstones WHERE deletedAt > ?").use { stmt ->
                 stmt.setLong(1, since)
                 val rs = stmt.executeQuery()
@@ -448,7 +489,7 @@ class DesktopDatabase(dbFile: File? = null) {
     }
 
     fun deleteTombstonesOlderThan(cutoff: Long) {
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement("DELETE FROM tombstones WHERE deletedAt < ?").use { stmt ->
                 stmt.setLong(1, cutoff)
                 stmt.executeUpdate()
@@ -459,7 +500,7 @@ class DesktopDatabase(dbFile: File? = null) {
     // --- Favorites ---
     fun getAllFavorites(): List<FavoriteRecord> {
         val list = mutableListOf<FavoriteRecord>()
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement("SELECT * FROM favorites ORDER BY COALESCE(updatedAt, '') DESC, savedAt DESC").use { stmt ->
                 val rs = stmt.executeQuery()
                 while (rs.next()) {
@@ -472,7 +513,7 @@ class DesktopDatabase(dbFile: File? = null) {
 
     fun getFavoritesSince(since: Long): List<FavoriteRecord> {
         val list = mutableListOf<FavoriteRecord>()
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement("SELECT * FROM favorites WHERE savedAt > ? ORDER BY savedAt DESC").use { stmt ->
                 stmt.setLong(1, since)
                 val rs = stmt.executeQuery()
@@ -485,7 +526,7 @@ class DesktopDatabase(dbFile: File? = null) {
     }
 
     fun isFavorite(workId: WorkId): Boolean {
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement("SELECT 1 FROM favorites WHERE sourceId = ? AND toonId = ?").use { stmt ->
                 stmt.setString(1, workId.sourceId)
                 stmt.setString(2, workId.toonId)
@@ -496,7 +537,7 @@ class DesktopDatabase(dbFile: File? = null) {
     }
 
     fun getFavorite(workId: WorkId): FavoriteRecord? {
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement("SELECT * FROM favorites WHERE sourceId = ? AND toonId = ?").use { stmt ->
                 stmt.setString(1, workId.sourceId)
                 stmt.setString(2, workId.toonId)
@@ -512,7 +553,7 @@ class DesktopDatabase(dbFile: File? = null) {
         val current = getFavorite(workId) ?: return
         if (!UpdateDates.shouldReplace(current.updatedAt, updatedAt)) return
         val stored = UpdateDates.toListingDate(updatedAt) ?: updatedAt
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement(
                 "UPDATE favorites SET updatedAt = ? WHERE sourceId = ? AND toonId = ?",
             ).use { stmt ->
@@ -526,7 +567,7 @@ class DesktopDatabase(dbFile: File? = null) {
 
     fun getFavoriteIds(): Set<WorkId> {
         val set = mutableSetOf<WorkId>()
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement("SELECT sourceId, toonId FROM favorites").use { stmt ->
                 val rs = stmt.executeQuery()
                 while (rs.next()) {
@@ -537,9 +578,30 @@ class DesktopDatabase(dbFile: File? = null) {
         return set
     }
 
+    fun getFavoritesByToonIds(ids: List<WorkId>): List<FavoriteRecord> {
+        if (ids.isEmpty()) return emptyList()
+        val wanted = ids.map { it.storageKey() }.toSet()
+        val toonIds = ids.map { it.toonId }.distinct()
+        val list = mutableListOf<FavoriteRecord>()
+        withConnection { conn ->
+            val placeholders = toonIds.joinToString(",") { "?" }
+            conn.prepareStatement("SELECT * FROM favorites WHERE toonId IN ($placeholders)").use { stmt ->
+                toonIds.forEachIndexed { index, id -> stmt.setString(index + 1, id) }
+                val rs = stmt.executeQuery()
+                while (rs.next()) {
+                    val record = favoriteFrom(rs)
+                    if (record.workId().storageKey() in wanted) {
+                        list.add(record)
+                    }
+                }
+            }
+        }
+        return list
+    }
+
     fun saveFavorite(item: FavoriteRecord) {
         val workId = writableId(item.sourceId, item.id) ?: return
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement(
                 """
                 INSERT OR REPLACE INTO favorites (sourceId, toonId, title, thumbUrl, href, genre, updatedAt, savedAt)
@@ -560,8 +622,7 @@ class DesktopDatabase(dbFile: File? = null) {
     }
 
     fun saveAllFavorites(items: List<FavoriteRecord>) {
-        getConnection().use { conn ->
-            conn.autoCommit = false
+        withTransaction { conn ->
             conn.prepareStatement(
                 """
                 INSERT OR REPLACE INTO favorites (sourceId, toonId, title, thumbUrl, href, genre, updatedAt, savedAt)
@@ -582,12 +643,11 @@ class DesktopDatabase(dbFile: File? = null) {
                 }
                 stmt.executeBatch()
             }
-            conn.commit()
         }
     }
 
     fun deleteFavorite(workId: WorkId) {
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement("DELETE FROM favorites WHERE sourceId = ? AND toonId = ?").use { stmt ->
                 stmt.setString(1, workId.sourceId)
                 stmt.setString(2, workId.toonId)
@@ -609,7 +669,7 @@ class DesktopDatabase(dbFile: File? = null) {
 
     // --- Seen Toons ---
     fun getSeenCount(): Int {
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement("SELECT COUNT(*) FROM seen_toons").use { stmt ->
                 val rs = stmt.executeQuery()
                 return if (rs.next()) rs.getInt(1) else 0
@@ -622,7 +682,7 @@ class DesktopDatabase(dbFile: File? = null) {
         val wanted = ids.map { it.storageKey() }.toSet()
         val toonIds = ids.map { it.toonId }.distinct()
         val map = mutableMapOf<String, SeenRecord>()
-        getConnection().use { conn ->
+        withConnection { conn ->
             val placeholders = toonIds.joinToString(",") { "?" }
             conn.prepareStatement("SELECT * FROM seen_toons WHERE toonId IN ($placeholders)").use { stmt ->
                 toonIds.forEachIndexed { index, id -> stmt.setString(index + 1, id) }
@@ -641,8 +701,7 @@ class DesktopDatabase(dbFile: File? = null) {
 
     fun saveAllSeen(items: List<SeenRecord>) {
         if (items.isEmpty()) return
-        getConnection().use { conn ->
-            conn.autoCommit = false
+        withTransaction { conn ->
             conn.prepareStatement(
                 """
                 INSERT OR REPLACE INTO seen_toons (sourceId, toonId, title, updatedAt, firstSeenAt, lastSeenAt, notifiedKey)
@@ -662,7 +721,6 @@ class DesktopDatabase(dbFile: File? = null) {
                 }
                 stmt.executeBatch()
             }
-            conn.commit()
         }
     }
 
@@ -679,7 +737,7 @@ class DesktopDatabase(dbFile: File? = null) {
     // --- Read History ---
     fun getAllHistory(): List<ReadHistoryRecord> {
         val list = mutableListOf<ReadHistoryRecord>()
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement("SELECT * FROM read_history ORDER BY lastReadAt DESC").use { stmt ->
                 val rs = stmt.executeQuery()
                 while (rs.next()) {
@@ -690,10 +748,31 @@ class DesktopDatabase(dbFile: File? = null) {
         return list
     }
 
+    fun getHistoryByToonIds(ids: List<WorkId>): List<ReadHistoryRecord> {
+        if (ids.isEmpty()) return emptyList()
+        val wanted = ids.map { it.storageKey() }.toSet()
+        val toonIds = ids.map { it.toonId }.distinct()
+        val list = mutableListOf<ReadHistoryRecord>()
+        withConnection { conn ->
+            val placeholders = toonIds.joinToString(",") { "?" }
+            conn.prepareStatement("SELECT * FROM read_history WHERE toonId IN ($placeholders)").use { stmt ->
+                toonIds.forEachIndexed { index, id -> stmt.setString(index + 1, id) }
+                val rs = stmt.executeQuery()
+                while (rs.next()) {
+                    val record = historyFrom(rs)
+                    if (record.workId().storageKey() in wanted) {
+                        list.add(record)
+                    }
+                }
+            }
+        }
+        return list
+    }
+
     fun getHistoryBySource(sourceId: String): List<ReadHistoryRecord> {
         val sid = sourceId.ifBlank { WorkId.DEFAULT_SOURCE }
         val list = mutableListOf<ReadHistoryRecord>()
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement(
                 "SELECT * FROM read_history WHERE sourceId = ? ORDER BY lastReadAt DESC",
             ).use { stmt ->
@@ -709,7 +788,7 @@ class DesktopDatabase(dbFile: File? = null) {
 
     fun getHistorySince(since: Long): List<ReadHistoryRecord> {
         val list = mutableListOf<ReadHistoryRecord>()
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement("SELECT * FROM read_history WHERE lastReadAt > ? ORDER BY lastReadAt DESC").use { stmt ->
                 stmt.setLong(1, since)
                 val rs = stmt.executeQuery()
@@ -722,7 +801,7 @@ class DesktopDatabase(dbFile: File? = null) {
     }
 
     fun getHistory(workId: WorkId): ReadHistoryRecord? {
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement("SELECT * FROM read_history WHERE sourceId = ? AND toonId = ?").use { stmt ->
                 stmt.setString(1, workId.sourceId)
                 stmt.setString(2, workId.toonId)
@@ -737,7 +816,7 @@ class DesktopDatabase(dbFile: File? = null) {
 
     fun saveHistory(history: ReadHistoryRecord) {
         val workId = writableId(history.sourceId, history.toonId) ?: return
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement(
                 """
                 INSERT OR REPLACE INTO read_history 
@@ -753,8 +832,7 @@ class DesktopDatabase(dbFile: File? = null) {
 
     fun saveAllHistory(items: List<ReadHistoryRecord>) {
         if (items.isEmpty()) return
-        getConnection().use { conn ->
-            conn.autoCommit = false
+        withTransaction { conn ->
             conn.prepareStatement(
                 """
                 INSERT OR REPLACE INTO read_history 
@@ -769,12 +847,11 @@ class DesktopDatabase(dbFile: File? = null) {
                 }
                 stmt.executeBatch()
             }
-            conn.commit()
         }
     }
 
     fun deleteHistory(workId: WorkId) {
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement("DELETE FROM read_history WHERE sourceId = ? AND toonId = ?").use { stmt ->
                 stmt.setString(1, workId.sourceId)
                 stmt.setString(2, workId.toonId)
@@ -785,7 +862,7 @@ class DesktopDatabase(dbFile: File? = null) {
 
     fun clearHistoryBySource(sourceId: String) {
         val sid = sourceId.ifBlank { WorkId.DEFAULT_SOURCE }
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement("DELETE FROM read_history WHERE sourceId = ?").use { stmt ->
                 stmt.setString(1, sid)
                 stmt.executeUpdate()
@@ -794,7 +871,7 @@ class DesktopDatabase(dbFile: File? = null) {
     }
 
     fun clearAllHistory() {
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement("DELETE FROM read_history").use { stmt ->
                 stmt.executeUpdate()
             }
@@ -804,7 +881,7 @@ class DesktopDatabase(dbFile: File? = null) {
     // --- Read Episodes ---
     fun getAllReadEpisodes(): List<ReadEpisodeRecord> {
         val list = mutableListOf<ReadEpisodeRecord>()
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement("SELECT * FROM read_episodes").use { stmt ->
                 val rs = stmt.executeQuery()
                 while (rs.next()) {
@@ -817,7 +894,7 @@ class DesktopDatabase(dbFile: File? = null) {
 
     fun getReadEpisodesSince(since: Long): List<ReadEpisodeRecord> {
         val list = mutableListOf<ReadEpisodeRecord>()
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement("SELECT * FROM read_episodes WHERE readAt > ?").use { stmt ->
                 stmt.setLong(1, since)
                 val rs = stmt.executeQuery()
@@ -831,7 +908,7 @@ class DesktopDatabase(dbFile: File? = null) {
 
     fun getReadEpisodesByToon(workId: WorkId): List<ReadEpisodeRecord> {
         val list = mutableListOf<ReadEpisodeRecord>()
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement("SELECT * FROM read_episodes WHERE sourceId = ? AND toonId = ?").use { stmt ->
                 stmt.setString(1, workId.sourceId)
                 stmt.setString(2, workId.toonId)
@@ -845,7 +922,7 @@ class DesktopDatabase(dbFile: File? = null) {
     }
 
     fun getReadEpisode(workId: WorkId, wrId: String): ReadEpisodeRecord? {
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement("SELECT * FROM read_episodes WHERE sourceId = ? AND toonId = ? AND wrId = ?").use { stmt ->
                 stmt.setString(1, workId.sourceId)
                 stmt.setString(2, workId.toonId)
@@ -861,7 +938,7 @@ class DesktopDatabase(dbFile: File? = null) {
 
     fun markEpisodeRead(record: ReadEpisodeRecord) {
         val workId = writableId(record.sourceId, record.toonId) ?: return
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement(
                 """
                 INSERT OR REPLACE INTO read_episodes (sourceId, toonId, wrId, readAt, lastPage)
@@ -880,8 +957,7 @@ class DesktopDatabase(dbFile: File? = null) {
 
     fun markAllEpisodesRead(items: List<ReadEpisodeRecord>) {
         if (items.isEmpty()) return
-        getConnection().use { conn ->
-            conn.autoCommit = false
+        withTransaction { conn ->
             conn.prepareStatement(
                 """
                 INSERT OR REPLACE INTO read_episodes (sourceId, toonId, wrId, readAt, lastPage)
@@ -899,12 +975,11 @@ class DesktopDatabase(dbFile: File? = null) {
                 }
                 stmt.executeBatch()
             }
-            conn.commit()
         }
     }
 
     fun updateLastPage(workId: WorkId, wrId: String, page: Int, readAt: Long = System.currentTimeMillis()) {
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement(
                 "UPDATE read_episodes SET lastPage = ?, readAt = ? WHERE sourceId = ? AND toonId = ? AND wrId = ?",
             ).use { stmt ->
@@ -919,7 +994,7 @@ class DesktopDatabase(dbFile: File? = null) {
     }
 
     fun deleteReadEpisodesByToon(workId: WorkId) {
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement("DELETE FROM read_episodes WHERE sourceId = ? AND toonId = ?").use { stmt ->
                 stmt.setString(1, workId.sourceId)
                 stmt.setString(2, workId.toonId)
@@ -931,7 +1006,7 @@ class DesktopDatabase(dbFile: File? = null) {
     // --- Reader Settings ---
     fun getAllReaderSettings(): List<ReaderSettingRecord> {
         val list = mutableListOf<ReaderSettingRecord>()
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement("SELECT * FROM reader_settings").use { stmt ->
                 val rs = stmt.executeQuery()
                 while (rs.next()) {
@@ -944,7 +1019,7 @@ class DesktopDatabase(dbFile: File? = null) {
 
     fun getReaderSettingsSince(since: Long): List<ReaderSettingRecord> {
         val list = mutableListOf<ReaderSettingRecord>()
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement("SELECT * FROM reader_settings WHERE updatedAt > ?").use { stmt ->
                 stmt.setLong(1, since)
                 val rs = stmt.executeQuery()
@@ -957,7 +1032,7 @@ class DesktopDatabase(dbFile: File? = null) {
     }
 
     fun getReaderSetting(workId: WorkId): ReaderSettingRecord? {
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement("SELECT * FROM reader_settings WHERE sourceId = ? AND toonId = ?").use { stmt ->
                 stmt.setString(1, workId.sourceId)
                 stmt.setString(2, workId.toonId)
@@ -972,7 +1047,7 @@ class DesktopDatabase(dbFile: File? = null) {
 
     fun saveReaderSetting(setting: ReaderSettingRecord) {
         val workId = writableId(setting.sourceId, setting.toonId) ?: return
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement(
                 """
                 INSERT OR REPLACE INTO reader_settings (sourceId, toonId, viewMode, readDirection, updatedAt)
@@ -991,8 +1066,7 @@ class DesktopDatabase(dbFile: File? = null) {
 
     fun saveAllReaderSettings(items: List<ReaderSettingRecord>) {
         if (items.isEmpty()) return
-        getConnection().use { conn ->
-            conn.autoCommit = false
+        withTransaction { conn ->
             conn.prepareStatement(
                 """
                 INSERT OR REPLACE INTO reader_settings (sourceId, toonId, viewMode, readDirection, updatedAt)
@@ -1010,14 +1084,13 @@ class DesktopDatabase(dbFile: File? = null) {
                 }
                 stmt.executeBatch()
             }
-            conn.commit()
         }
     }
 
     // --- Downloaded Episodes ---
     fun getAllDownloadedEpisodes(): List<DownloadedEpisodeRecord> {
         val list = mutableListOf<DownloadedEpisodeRecord>()
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement("SELECT * FROM downloaded_episodes ORDER BY downloadedAt DESC").use { stmt ->
                 val rs = stmt.executeQuery()
                 while (rs.next()) {
@@ -1031,7 +1104,7 @@ class DesktopDatabase(dbFile: File? = null) {
     fun getDownloadedEpisodesBySource(sourceId: String): List<DownloadedEpisodeRecord> {
         val sid = sourceId.ifBlank { WorkId.DEFAULT_SOURCE }
         val list = mutableListOf<DownloadedEpisodeRecord>()
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement(
                 "SELECT * FROM downloaded_episodes WHERE sourceId = ? ORDER BY downloadedAt DESC",
             ).use { stmt ->
@@ -1047,7 +1120,7 @@ class DesktopDatabase(dbFile: File? = null) {
 
     fun getDownloadedEpisodesByToon(workId: WorkId): List<DownloadedEpisodeRecord> {
         val list = mutableListOf<DownloadedEpisodeRecord>()
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement(
                 "SELECT * FROM downloaded_episodes WHERE sourceId = ? AND toonId = ? ORDER BY downloadedAt DESC",
             ).use { stmt ->
@@ -1063,7 +1136,7 @@ class DesktopDatabase(dbFile: File? = null) {
     }
 
     fun getDownloadedEpisode(workId: WorkId, wrId: String): DownloadedEpisodeRecord? {
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement(
                 "SELECT * FROM downloaded_episodes WHERE sourceId = ? AND toonId = ? AND wrId = ?",
             ).use { stmt ->
@@ -1081,7 +1154,7 @@ class DesktopDatabase(dbFile: File? = null) {
 
     fun saveDownloadedEpisode(item: DownloadedEpisodeRecord) {
         val workId = writableId(item.sourceId, item.toonId) ?: return
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement(
                 """
                 INSERT OR REPLACE INTO downloaded_episodes
@@ -1107,7 +1180,7 @@ class DesktopDatabase(dbFile: File? = null) {
     }
 
     fun deleteDownloadedEpisode(workId: WorkId, wrId: String) {
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement(
                 "DELETE FROM downloaded_episodes WHERE sourceId = ? AND toonId = ? AND wrId = ?",
             ).use { stmt ->
@@ -1120,7 +1193,7 @@ class DesktopDatabase(dbFile: File? = null) {
     }
 
     fun deleteDownloadedEpisodesByToon(workId: WorkId) {
-        getConnection().use { conn ->
+        withConnection { conn ->
             conn.prepareStatement("DELETE FROM downloaded_episodes WHERE sourceId = ? AND toonId = ?").use { stmt ->
                 stmt.setString(1, workId.sourceId)
                 stmt.setString(2, workId.toonId)

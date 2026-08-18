@@ -6,15 +6,26 @@ import com.comics8.core.source.RequestPolicy
 import com.comics8.core.source.SourceHttp
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.sync.SyncConstants
+import okhttp3.Cache
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.io.File
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 class ToonClient(
     private val client: OkHttpClient = defaultClient(),
     @Volatile var proxyBaseUrl: String? = SyncConstants.proxyBaseUrl(),
     @Volatile var isProxyEnabled: Boolean = true,
 ) : SourceHttp {
+    val httpClient: OkHttpClient get() = client
+
+    internal var clock: () -> Long = { System.currentTimeMillis() }
+
+    @Volatile
+    private var proxyCoolDownUntil = 0L
+    private val consecutiveProxyFailures = AtomicInteger(0)
+
     private val defaultHtmlPolicy = RequestPolicy(
         userAgent = USER_AGENT,
         extraHeaders = mapOf(
@@ -30,20 +41,32 @@ class ToonClient(
         if (isProxyEnabled &&
             !proxyBase.isNullOrBlank() &&
             !spec.url.contains("/proxy?url=") &&
-            shouldUseProxy(spec.url)
+            shouldUseProxy(spec.url) &&
+            clock() >= proxyCoolDownUntil
         ) {
             val proxiedUrl = SyncConstants.proxyUrl(spec.url, proxyBase)
             try {
                 val proxied = executeFetch(spec.copy(url = proxiedUrl))
                 if (proxied.code in 200..299) {
+                    consecutiveProxyFailures.set(0)
                     return proxied
                 }
                 System.err.println("ToonClient: Proxy fetch failed ($proxiedUrl): HTTP ${proxied.code}. Falling back to direct fetch.")
+                recordProxyFailure()
             } catch (e: Exception) {
                 System.err.println("ToonClient: Proxy fetch failed ($proxiedUrl): ${e.message}. Falling back to direct fetch.")
+                recordProxyFailure()
             }
         }
         return executeFetch(spec)
+    }
+
+    private fun recordProxyFailure() {
+        val failures = consecutiveProxyFailures.incrementAndGet()
+        if (failures >= PROXY_FAILURE_THRESHOLD) {
+            proxyCoolDownUntil = clock() + PROXY_COOLDOWN_MS
+            consecutiveProxyFailures.set(0)
+        }
     }
 
     override fun fetchText(spec: FetchSpec): String {
@@ -139,14 +162,22 @@ class ToonClient(
     companion object {
         const val USER_AGENT =
             "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+        const val HTTP_CACHE_MAX_BYTES = 20L * 1024 * 1024
+        const val PROXY_FAILURE_THRESHOLD = 3
+        const val PROXY_COOLDOWN_MS = 60_000L
 
-        fun defaultClient(): OkHttpClient =
-            OkHttpClient.Builder()
+        fun defaultClient(cacheDirectory: File? = null): OkHttpClient {
+            val builder = OkHttpClient.Builder()
                 .connectTimeout(20, TimeUnit.SECONDS)
                 .readTimeout(40, TimeUnit.SECONDS)
                 .followRedirects(true)
                 .followSslRedirects(true)
-                .build()
+            if (cacheDirectory != null) {
+                cacheDirectory.mkdirs()
+                builder.cache(Cache(cacheDirectory, HTTP_CACHE_MAX_BYTES))
+            }
+            return builder.build()
+        }
 
         internal fun shouldUseProxy(url: String): Boolean =
             SourceRegistry.defaults().sourceForUrl(url).useProxy(url)

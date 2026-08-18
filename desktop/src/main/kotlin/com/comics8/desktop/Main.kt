@@ -27,6 +27,7 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.comics8.core.network.ToonClient
 import com.comics8.desktop.data.DesktopDatabase
+import java.io.File
 import com.comics8.desktop.data.DesktopSyncManager
 import com.comics8.desktop.data.DesktopToonRepository
 import com.comics8.desktop.ui.DesktopUiState
@@ -66,7 +67,12 @@ fun main() {
 
     application {
         val database = remember { DesktopDatabase() }
-        val toonClient = remember { ToonClient() }
+        val cacheDir = File(System.getProperty("user.home"), ".comics8/http-cache")
+        val toonClient = remember {
+            ToonClient(ToonClient.defaultClient(cacheDir)).also { client ->
+                com.comics8.desktop.ui.util.DesktopImageCache.shareHttpClient(client.httpClient)
+            }
+        }
         val sourceEnabled = { id: String -> com.comics8.desktop.data.DesktopSourcePrefs.isEnabled(id) }
         val syncManager = remember { DesktopSyncManager(database, toonClient) }
         val downloadManager = remember {

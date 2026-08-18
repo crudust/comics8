@@ -38,20 +38,47 @@ import okhttp3.Request
 import org.jetbrains.skia.Image
 import java.io.File
 import java.security.MessageDigest
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 object DesktopImageCache {
-    private val memoryCache = ConcurrentHashMap<String, ImageBitmap>()
+    private const val MEMORY_MAX_ENTRIES = 48
+    private const val DISK_HARD_LIMIT_BYTES = 200L * 1024 * 1024
+    private const val DISK_TARGET_BYTES = 160L * 1024 * 1024
+
+    private val memoryLock = Any()
+    private val memoryCache = object : LinkedHashMap<String, ImageBitmap>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ImageBitmap>?): Boolean =
+            size > MEMORY_MAX_ENTRIES
+    }
     private val diskCacheDir = File(System.getProperty("user.home"), ".comics8/cache").apply { mkdirs() }
-    private val httpClient = OkHttpClient.Builder()
+
+    @Volatile
+    var httpClient: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
+    fun shareHttpClient(client: OkHttpClient) {
+        httpClient = client
+    }
+
     fun get(url: String): ImageBitmap? {
         if (url.isBlank()) return null
-        return memoryCache[url]
+        synchronized(memoryLock) {
+            return memoryCache[url]
+        }
+    }
+
+    private fun putMemory(url: String, bitmap: ImageBitmap) {
+        synchronized(memoryLock) {
+            memoryCache[url] = bitmap
+        }
+    }
+
+    private fun containsMemory(url: String): Boolean {
+        synchronized(memoryLock) {
+            return memoryCache.containsKey(url)
+        }
     }
 
     private fun hashUrl(url: String): String {
@@ -61,7 +88,7 @@ object DesktopImageCache {
 
     suspend fun loadImage(url: String): ImageBitmap? = withContext(Dispatchers.IO) {
         if (url.isBlank()) return@withContext null
-        memoryCache[url]?.let { return@withContext it }
+        get(url)?.let { return@withContext it }
 
         val hash = hashUrl(url)
         val cachedFile = File(diskCacheDir, "$hash.img")
@@ -100,6 +127,7 @@ object DesktopImageCache {
                         fetchedBytes = result
                         try {
                             cachedFile.writeBytes(result)
+                            evictDiskIfNeeded(cachedFile)
                         } catch (_: Exception) {
                         }
                         break
@@ -114,7 +142,7 @@ object DesktopImageCache {
             try {
                 val skiaImage = Image.makeFromEncoded(bytes)
                 val bitmap = skiaImage.toComposeImageBitmap()
-                memoryCache[url] = bitmap
+                putMemory(url, bitmap)
                 bitmap
             } catch (_: Exception) {
                 null
@@ -126,9 +154,29 @@ object DesktopImageCache {
 
     suspend fun preload(urls: List<String>) = withContext(Dispatchers.IO) {
         for (url in urls) {
-            if (url.isNotBlank() && !memoryCache.containsKey(url)) {
+            if (url.isNotBlank() && !containsMemory(url)) {
                 loadImage(url)
             }
+        }
+    }
+
+    private fun evictDiskIfNeeded(keep: File) {
+        try {
+            val files = diskCacheDir.listFiles()?.filter { it.isFile } ?: return
+            var total = files.sumOf { it.length() }
+            if (total <= DISK_HARD_LIMIT_BYTES) return
+            val keepPath = keep.absolutePath
+            val oldestFirst = files
+                .filter { it.absolutePath != keepPath }
+                .sortedBy { it.lastModified() }
+            for (file in oldestFirst) {
+                if (total <= DISK_TARGET_BYTES) break
+                val size = file.length()
+                if (file.delete()) {
+                    total -= size
+                }
+            }
+        } catch (_: Exception) {
         }
     }
 }
