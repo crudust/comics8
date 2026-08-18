@@ -6,6 +6,7 @@ import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
+import com.comics8.core.network.ImageReferer
 import com.comics8.core.parser.ComicSite
 import com.comics8.monitor.data.DownloadManager
 import com.comics8.monitor.data.SyncManager
@@ -47,9 +48,10 @@ class ComicsApp : Application(), ImageLoaderFactory {
             .followRedirects(true)
             .followSslRedirects(true)
             .addInterceptor { chain ->
+                val originalUrl = chain.request().url.toString()
                 val request = chain.request().newBuilder()
                     .header("User-Agent", ToonClient.USER_AGENT)
-                    .header("Referer", ComicSite.ORIGIN)
+                    .header("Referer", ImageReferer.forUrl(originalUrl))
                     .build()
                 var response = chain.proceed(request)
                 if (!response.isSuccessful && (response.code == 404 || response.code >= 500)) {
@@ -57,7 +59,10 @@ class ComicsApp : Application(), ImageLoaderFactory {
                     val fallbacks = ComicSite.getFallbackImageUrls(urlStr)
                     for (fallback in fallbacks) {
                         response.close()
-                        val retryReq = request.newBuilder().url(fallback).build()
+                        val retryReq = request.newBuilder()
+                            .url(fallback)
+                            .header("Referer", ImageReferer.forUrl(fallback))
+                            .build()
                         val retryResp = try {
                             chain.proceed(retryReq)
                         } catch (_: Exception) {

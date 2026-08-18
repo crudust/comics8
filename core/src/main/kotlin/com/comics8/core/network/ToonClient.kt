@@ -67,7 +67,7 @@ class ToonClient(
 
     fun isUrlAccessible(url: String?): Boolean {
         if (url.isNullOrBlank()) return false
-        return isAccessible(url, RequestPolicy(userAgent = USER_AGENT, referer = ComicSite.ORIGIN))
+        return isAccessible(url, RequestPolicy(userAgent = USER_AGENT, referer = ImageReferer.forUrl(url)))
     }
 
     /**
@@ -88,7 +88,7 @@ class ToonClient(
             .url(url)
             .header("User-Agent", USER_AGENT)
             .header("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
-            .header("Referer", ComicSite.ORIGIN)
+            .header("Referer", ImageReferer.forUrl(url))
             .get()
             .build()
         client.newCall(request).execute().use { response ->

@@ -50,6 +50,7 @@ data class EpisodeItem(
     val isRead: Boolean = false,
     val readAt: Long? = null,
     val lastReadPage: Int = 0,
+    val artistChoices: List<ArtistRef> = emptyList(),
 )
 
 data class EpisodePage(

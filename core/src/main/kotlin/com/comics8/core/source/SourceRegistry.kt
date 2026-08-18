@@ -1,5 +1,7 @@
 package com.comics8.core.source
 
+import com.comics8.core.source.hitomi.HitomiSource
+
 class SourceRegistry(private val sources: List<ComicSource>) {
     init {
         require(sources.isNotEmpty()) { "at least one ComicSource is required" }
@@ -18,6 +20,8 @@ class SourceRegistry(private val sources: List<ComicSource>) {
     fun all(): List<ComicSource> = sources
 
     companion object {
-        fun defaults(): SourceRegistry = SourceRegistry(listOf(ElevenToonSource()))
+        fun defaults(): SourceRegistry = SourceRegistry(
+            listOf(ElevenToonSource(), HitomiSource()),
+        )
     }
 }
