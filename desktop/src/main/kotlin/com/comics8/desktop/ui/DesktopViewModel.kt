@@ -23,28 +23,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 
-sealed interface DesktopNavEntry {
-    data class Browse(
-        val catalog: Catalog,
-        val page: Int = 1,
-        val searchQuery: String? = null,
-    ) : DesktopNavEntry
-
-    data class Series(
-        val series: ToonItem,
-        val episodePage: Int = 1,
-    ) : DesktopNavEntry
-
-    data class Reader(
-        val series: ToonItem,
-        val episode: EpisodeItem,
-        val episodePage: Int = 1,
-    ) : DesktopNavEntry
-
-    data object History : DesktopNavEntry
-    data object Downloads : DesktopNavEntry
-}
-
 class DesktopViewModel(
     val repository: DesktopToonRepository,
 ) {
@@ -61,97 +39,11 @@ class DesktopViewModel(
     private val toonTotalCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
     private val toonLastPageCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
-    private val backStack = mutableListOf<DesktopNavEntry>()
-    private val forwardStack = mutableListOf<DesktopNavEntry>()
-    private var isNavigatingHistory = false
-
-    private fun currentNavEntry(): DesktopNavEntry {
-        val s = _state.value
-        return when (s.screen) {
-            Screen.Reader -> {
-                val series = s.series
-                val ep = s.currentEpisode
-                if (series != null && ep != null) {
-                    DesktopNavEntry.Reader(series, ep, s.episodePage)
-                } else {
-                    DesktopNavEntry.Browse(s.catalog, s.page, s.searchQuery)
-                }
-            }
-            Screen.Series -> {
-                val series = s.series
-                if (series != null) {
-                    DesktopNavEntry.Series(series, s.episodePage)
-                } else {
-                    DesktopNavEntry.Browse(s.catalog, s.page, s.searchQuery)
-                }
-            }
-            Screen.History -> DesktopNavEntry.History
-            Screen.Downloads -> DesktopNavEntry.Downloads
-            Screen.Browse -> DesktopNavEntry.Browse(s.catalog, s.page, s.searchQuery)
-        }
-    }
-
-    private fun pushHistory(newEntry: DesktopNavEntry) {
-        if (isNavigatingHistory) return
-        val current = currentNavEntry()
-        if (current != newEntry) {
-            backStack.add(current)
-            forwardStack.clear()
-            if (backStack.size > 50) backStack.removeAt(0)
-        }
-    }
-
-    private fun restoreNavEntry(entry: DesktopNavEntry) {
-        when (entry) {
-            is DesktopNavEntry.Browse -> {
-                if (entry.searchQuery != null) {
-                    search(entry.searchQuery)
-                } else {
-                    if (_state.value.catalog != entry.catalog) {
-                        selectCatalog(entry.catalog)
-                    } else if (_state.value.page != entry.page) {
-                        loadPage(entry.page)
-                    } else {
-                        _state.update {
-                            it.copy(
-                                screen = Screen.Browse,
-                                searchQuery = null,
-                                searchInput = "",
-                                series = null,
-                                currentEpisode = null,
-                            )
-                        }
-                    }
-                }
-            }
-            is DesktopNavEntry.Series -> {
-                _state.update {
-                    it.copy(
-                        screen = Screen.Series,
-                        series = entry.series,
-                        currentEpisode = null,
-                        readerImages = emptyList(),
-                    )
-                }
-                loadEpisodes(entry.series, entry.episodePage)
-            }
-            is DesktopNavEntry.Reader -> {
-                _state.update {
-                    it.copy(
-                        series = entry.series,
-                        episodePage = entry.episodePage,
-                    )
-                }
-                openEpisode(entry.episode)
-            }
-            is DesktopNavEntry.History -> {
-                openHistory()
-            }
-            is DesktopNavEntry.Downloads -> {
-                openDownloads()
-            }
-        }
-    }
+    // 계층적 내비게이션 상태 (그리드 <-> 회차리스트 <-> 뷰어)
+    private var lastViewedSeries: ToonItem? = null
+    private var lastViewedEpisodePage: Int = 1
+    private var lastViewedEpisode: EpisodeItem? = null
+    private var previousScreenBeforeSeries: Screen = Screen.Browse
 
     fun goBack(): Boolean {
         val current = _state.value
@@ -172,43 +64,32 @@ class DesktopViewModel(
             return true
         }
 
-        if (backStack.isNotEmpty()) {
-            val currentEntry = currentNavEntry()
-            val target = backStack.removeAt(backStack.lastIndex)
-            forwardStack.add(currentEntry)
-            if (forwardStack.size > 50) forwardStack.removeAt(0)
-
-            isNavigatingHistory = true
-            try {
-                restoreNavEntry(target)
-            } finally {
-                isNavigatingHistory = false
-            }
-            return true
-        }
-
         return when (current.screen) {
             Screen.Reader -> {
-                val currentEntry = currentNavEntry()
-                forwardStack.add(currentEntry)
+                // 3단계(뷰어) -> 2단계(회차리스트)로 즉시 복귀
+                lastViewedEpisode = current.currentEpisode
                 closeReader()
                 true
             }
             Screen.Series -> {
-                val currentEntry = currentNavEntry()
-                forwardStack.add(currentEntry)
-                closeSeries()
+                // 2단계(회차리스트) -> 1단계(그리드/히스토리/다운로드)로 즉시 복귀
+                lastViewedSeries = current.series
+                lastViewedEpisodePage = current.episodePage
+                val prev = previousScreenBeforeSeries
+                if (prev == Screen.History) {
+                    openHistory()
+                } else if (prev == Screen.Downloads) {
+                    openDownloads()
+                } else {
+                    closeSeries()
+                }
                 true
             }
             Screen.History -> {
-                val currentEntry = currentNavEntry()
-                forwardStack.add(currentEntry)
                 closeHistory()
                 true
             }
             Screen.Downloads -> {
-                val currentEntry = currentNavEntry()
-                forwardStack.add(currentEntry)
                 closeDownloads()
                 true
             }
@@ -224,19 +105,38 @@ class DesktopViewModel(
     }
 
     fun goForward(): Boolean {
-        if (forwardStack.isEmpty()) return false
-        val currentEntry = currentNavEntry()
-        val target = forwardStack.removeAt(forwardStack.lastIndex)
-        backStack.add(currentEntry)
-        if (backStack.size > 50) backStack.removeAt(0)
-
-        isNavigatingHistory = true
-        try {
-            restoreNavEntry(target)
-        } finally {
-            isNavigatingHistory = false
+        val current = _state.value
+        return when (current.screen) {
+            Screen.Browse, Screen.History, Screen.Downloads -> {
+                // 1단계(그리드) -> 2단계(회차리스트)로 이동
+                val targetSeries = lastViewedSeries ?: current.items.firstOrNull()
+                if (targetSeries != null) {
+                    openSeries(targetSeries)
+                    if (lastViewedEpisodePage > 1) {
+                        goToEpisodePage(lastViewedEpisodePage)
+                    }
+                    true
+                } else false
+            }
+            Screen.Series -> {
+                // 2단계(회차리스트) -> 3단계(뷰어)로 이동
+                val targetEp = lastViewedEpisode
+                    ?: current.seriesHistory?.let { h -> current.episodes.firstOrNull { it.wrId == h.lastWrId } }
+                    ?: current.episodes.lastOrNull() // 1화
+                    ?: current.episodes.firstOrNull()
+                if (targetEp != null) {
+                    openEpisode(targetEp)
+                    true
+                } else false
+            }
+            Screen.Reader -> {
+                // 3단계(뷰어) -> 다음 회차가 있으면 다음 회차로 이동
+                if (current.hasNextEpisode) {
+                    openNextEpisode()
+                    true
+                } else false
+            }
         }
-        return true
     }
 
     init {
@@ -328,7 +228,6 @@ class DesktopViewModel(
             refresh()
             return
         }
-        pushHistory(DesktopNavEntry.Browse(catalog, 1))
         loadJob?.cancel()
         _state.update {
             it.copy(
@@ -439,7 +338,6 @@ class DesktopViewModel(
     fun search(query: String) {
         val q = query.trim()
         if (q.isEmpty()) return
-        pushHistory(DesktopNavEntry.Browse(_state.value.catalog, 1, q))
         loadJob?.cancel()
         _state.update {
             it.copy(
@@ -491,7 +389,11 @@ class DesktopViewModel(
     }
 
     fun openSeries(item: ToonItem) {
-        pushHistory(DesktopNavEntry.Series(item, 1))
+        val currentScreen = _state.value.screen
+        if (currentScreen != Screen.Series && currentScreen != Screen.Reader) {
+            previousScreenBeforeSeries = currentScreen
+        }
+        lastViewedSeries = item
         episodeJob?.cancel()
         _state.update {
             it.copy(
@@ -742,8 +644,11 @@ class DesktopViewModel(
     fun closeSeries() {
         readerJob?.cancel()
         episodeJob?.cancel()
-        val catalog = _state.value.catalog
-        val searching = _state.value.isSearch
+        val current = _state.value
+        lastViewedSeries = current.series
+        lastViewedEpisodePage = current.episodePage
+        val catalog = current.catalog
+        val searching = current.isSearch
         _state.update {
             it.copy(
                 screen = Screen.Browse,
@@ -764,7 +669,6 @@ class DesktopViewModel(
     }
 
     fun openHistory() {
-        pushHistory(DesktopNavEntry.History)
         loadHistory()
         _state.update { it.copy(screen = Screen.History) }
     }
@@ -800,7 +704,6 @@ class DesktopViewModel(
     }
 
     fun openDownloads() {
-        pushHistory(DesktopNavEntry.Downloads)
         readerJob?.cancel()
         episodeJob?.cancel()
         _state.update {
@@ -1081,8 +984,10 @@ class DesktopViewModel(
         val current = _state.value
         val series = current.series
         if (series != null) {
-            pushHistory(DesktopNavEntry.Reader(series, episode, current.episodePage))
+            lastViewedSeries = series
+            lastViewedEpisodePage = current.episodePage
         }
+        lastViewedEpisode = episode
         val nowMs = System.currentTimeMillis()
         val episodes = current.episodes
         val idx = episodes.indexOfFirst { it.wrId == episode.wrId }
@@ -1304,6 +1209,8 @@ class DesktopViewModel(
 
     fun closeReader() {
         readerJob?.cancel()
+        val current = _state.value
+        lastViewedEpisode = current.currentEpisode
         _state.update {
             it.copy(
                 screen = Screen.Series,

@@ -80,28 +80,6 @@ data class ListingUiState(
         get() = (currentEpisodeIndex in 0 until (episodes.size - 1)) || (currentEpisodeIndex == episodes.size - 1 && episodePage < episodeLastPage)
 }
 
-sealed interface AndroidNavEntry {
-    data class Browse(
-        val catalog: Catalog,
-        val page: Int = 1,
-        val searchQuery: String? = null,
-    ) : AndroidNavEntry
-
-    data class Series(
-        val series: ToonItem,
-        val episodePage: Int = 1,
-    ) : AndroidNavEntry
-
-    data class Reader(
-        val series: ToonItem,
-        val episode: EpisodeItem,
-        val episodePage: Int = 1,
-    ) : AndroidNavEntry
-
-    data object History : AndroidNavEntry
-    data object Downloads : AndroidNavEntry
-}
-
 sealed interface Screen {
     data object Browse : Screen
     data object Series : Screen
@@ -157,107 +135,11 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     private val toonTotalCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
     private val toonLastPageCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
-    private val backStack = mutableListOf<AndroidNavEntry>()
-    private val forwardStack = mutableListOf<AndroidNavEntry>()
-    private var isNavigatingHistory = false
-
-    private fun currentNavEntry(): AndroidNavEntry {
-        val s = _state.value
-        return when (s.screen) {
-            Screen.Reader -> {
-                val series = s.series
-                val ep = s.currentEpisode
-                if (series != null && ep != null) {
-                    AndroidNavEntry.Reader(series, ep, s.episodePage)
-                } else {
-                    AndroidNavEntry.Browse(s.catalog, s.page, s.searchQuery)
-                }
-            }
-            Screen.Series -> {
-                val series = s.series
-                if (series != null) {
-                    AndroidNavEntry.Series(series, s.episodePage)
-                } else {
-                    AndroidNavEntry.Browse(s.catalog, s.page, s.searchQuery)
-                }
-            }
-            Screen.History -> AndroidNavEntry.History
-            Screen.Downloads -> AndroidNavEntry.Downloads
-            Screen.Browse -> AndroidNavEntry.Browse(s.catalog, s.page, s.searchQuery)
-        }
-    }
-
-    private fun pushHistory(newEntry: AndroidNavEntry) {
-        if (isNavigatingHistory) return
-        val current = currentNavEntry()
-        if (current != newEntry) {
-            backStack.add(current)
-            forwardStack.clear()
-            if (backStack.size > 50) backStack.removeAt(0)
-        }
-    }
-
-    private fun restoreNavEntry(entry: AndroidNavEntry) {
-        when (entry) {
-            is AndroidNavEntry.Browse -> {
-                if (entry.searchQuery != null) {
-                    _state.update {
-                        it.copy(
-                            searchQuery = entry.searchQuery,
-                            searchInput = entry.searchQuery,
-                            screen = Screen.Browse,
-                            series = null,
-                            episodes = emptyList(),
-                            currentEpisode = null,
-                        )
-                    }
-                    runSearch(entry.searchQuery, asRefresh = false)
-                } else {
-                    if (_state.value.catalog != entry.catalog) {
-                        selectCatalog(entry.catalog)
-                    } else if (_state.value.page != entry.page) {
-                        loadPage(entry.page, replace = true)
-                    } else {
-                        _state.update {
-                            it.copy(
-                                screen = Screen.Browse,
-                                searchQuery = null,
-                                searchInput = "",
-                                series = null,
-                                currentEpisode = null,
-                            )
-                        }
-                    }
-                }
-            }
-            is AndroidNavEntry.Series -> {
-                _state.update {
-                    it.copy(
-                        screen = Screen.Series,
-                        series = entry.series,
-                        currentEpisode = null,
-                        readerImages = emptyList(),
-                    )
-                }
-                loadEpisodes(entry.series, entry.episodePage)
-            }
-            is AndroidNavEntry.Reader -> {
-                _state.update {
-                    it.copy(
-                        series = entry.series,
-                        episodePage = entry.episodePage,
-                    )
-                }
-                openEpisode(entry.episode)
-            }
-            is AndroidNavEntry.History -> {
-                openHistory()
-            }
-            is AndroidNavEntry.Downloads -> {
-                openDownloads()
-            }
-        }
-    }
+    // 계층적 내비게이션 상태 (그리드 <-> 회차리스트 <-> 뷰어)
+    private var lastViewedSeries: ToonItem? = null
+    private var lastViewedEpisodePage: Int = 1
+    private var lastViewedEpisode: EpisodeItem? = null
+    private var previousScreenBeforeSeries: Screen = Screen.Browse
 
     fun goBack(): Boolean {
         val current = _state.value
@@ -278,43 +160,32 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             return true
         }
 
-        if (backStack.isNotEmpty()) {
-            val currentEntry = currentNavEntry()
-            val target = backStack.removeAt(backStack.lastIndex)
-            forwardStack.add(currentEntry)
-            if (forwardStack.size > 50) forwardStack.removeAt(0)
-
-            isNavigatingHistory = true
-            try {
-                restoreNavEntry(target)
-            } finally {
-                isNavigatingHistory = false
-            }
-            return true
-        }
-
         return when (current.screen) {
             Screen.Reader -> {
-                val currentEntry = currentNavEntry()
-                forwardStack.add(currentEntry)
+                // 3단계(뷰어) -> 2단계(회차리스트)로 즉시 복귀
+                lastViewedEpisode = current.currentEpisode
                 closeReader()
                 true
             }
             Screen.Series -> {
-                val currentEntry = currentNavEntry()
-                forwardStack.add(currentEntry)
-                closeSeries()
+                // 2단계(회차리스트) -> 1단계(그리드/히스토리/다운로드)로 즉시 복귀
+                lastViewedSeries = current.series
+                lastViewedEpisodePage = current.episodePage
+                val prev = previousScreenBeforeSeries
+                if (prev == Screen.History) {
+                    openHistory()
+                } else if (prev == Screen.Downloads) {
+                    openDownloads()
+                } else {
+                    closeSeries()
+                }
                 true
             }
             Screen.History -> {
-                val currentEntry = currentNavEntry()
-                forwardStack.add(currentEntry)
                 closeHistory()
                 true
             }
             Screen.Downloads -> {
-                val currentEntry = currentNavEntry()
-                forwardStack.add(currentEntry)
                 closeDownloads()
                 true
             }
@@ -330,19 +201,38 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun goForward(): Boolean {
-        if (forwardStack.isEmpty()) return false
-        val currentEntry = currentNavEntry()
-        val target = forwardStack.removeAt(forwardStack.lastIndex)
-        backStack.add(currentEntry)
-        if (backStack.size > 50) backStack.removeAt(0)
-
-        isNavigatingHistory = true
-        try {
-            restoreNavEntry(target)
-        } finally {
-            isNavigatingHistory = false
+        val current = _state.value
+        return when (current.screen) {
+            Screen.Browse, Screen.History, Screen.Downloads -> {
+                // 1단계(그리드) -> 2단계(회차리스트)로 이동
+                val targetSeries = lastViewedSeries ?: current.items.firstOrNull()
+                if (targetSeries != null) {
+                    openSeries(targetSeries)
+                    if (lastViewedEpisodePage > 1) {
+                        goToEpisodePage(lastViewedEpisodePage)
+                    }
+                    true
+                } else false
+            }
+            Screen.Series -> {
+                // 2단계(회차리스트) -> 3단계(뷰어)로 이동
+                val targetEp = lastViewedEpisode
+                    ?: current.seriesHistory?.let { h -> current.episodes.firstOrNull { it.wrId == h.lastWrId } }
+                    ?: current.episodes.lastOrNull() // 1화
+                    ?: current.episodes.firstOrNull()
+                if (targetEp != null) {
+                    openEpisode(targetEp)
+                    true
+                } else false
+            }
+            Screen.Reader -> {
+                // 3단계(뷰어) -> 다음 회차가 있으면 다음 회차로 이동
+                if (current.hasNextEpisode) {
+                    openNextEpisode()
+                    true
+                } else false
+            }
         }
-        return true
     }
 
     init {
@@ -467,7 +357,6 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             _state.value.screen == Screen.Browse &&
             !_state.value.isSearch
         ) return
-        pushHistory(AndroidNavEntry.Browse(catalog, 1))
         readerJob?.cancel()
         episodeJob?.cancel()
         val cached = catalogCache[catalog]
@@ -516,7 +405,6 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     fun submitSearch() {
         val query = _state.value.searchInput.trim()
         if (query.isEmpty()) return
-        pushHistory(AndroidNavEntry.Browse(_state.value.catalog, 1, query))
         readerJob?.cancel()
         episodeJob?.cancel()
         _state.update {
@@ -528,11 +416,11 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 episodes = emptyList(),
                 items = emptyList(),
                 error = null,
-                page = 1,
-                lastPage = 1,
+                loading = true,
                 currentEpisode = null,
                 readerImages = emptyList(),
                 readerError = null,
+                scrollToTopTrigger = it.scrollToTopTrigger + 1,
             )
         }
         runSearch(query, asRefresh = false)
@@ -596,7 +484,11 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun openSeries(item: ToonItem) {
-        pushHistory(AndroidNavEntry.Series(item, 1))
+        val currentScreen = _state.value.screen
+        if (currentScreen != Screen.Series && currentScreen != Screen.Reader) {
+            previousScreenBeforeSeries = currentScreen
+        }
+        lastViewedSeries = item
         episodeJob?.cancel()
         val targetMode = if (currentScreenWidthDp >= 600) ViewMode.DUAL else singleViewPreference
         _state.update {
@@ -727,8 +619,11 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     fun closeSeries() {
         readerJob?.cancel()
         episodeJob?.cancel()
-        val catalog = _state.value.catalog
-        val searching = _state.value.isSearch
+        val current = _state.value
+        lastViewedSeries = current.series
+        lastViewedEpisodePage = current.episodePage
+        val catalog = current.catalog
+        val searching = current.isSearch
         _state.update {
             it.copy(
                 screen = Screen.Browse,
@@ -749,7 +644,6 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun openHistory() {
-        pushHistory(AndroidNavEntry.History)
         readerJob?.cancel()
         episodeJob?.cancel()
         _state.update {
@@ -792,7 +686,6 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun openDownloads() {
-        pushHistory(AndroidNavEntry.Downloads)
         readerJob?.cancel()
         episodeJob?.cancel()
         _state.update {
@@ -1087,8 +980,10 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         val current = _state.value
         val series = current.series
         if (series != null) {
-            pushHistory(AndroidNavEntry.Reader(series, episode, current.episodePage))
+            lastViewedSeries = series
+            lastViewedEpisodePage = current.episodePage
         }
+        lastViewedEpisode = episode
         val nowMs = System.currentTimeMillis()
         val episodes = current.episodes
         val idx = episodes.indexOfFirst { it.wrId == episode.wrId }
@@ -1204,6 +1099,8 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
     fun closeReader() {
         readerJob?.cancel()
+        val current = _state.value
+        lastViewedEpisode = current.currentEpisode
         _state.update {
             it.copy(
                 screen = Screen.Series,
