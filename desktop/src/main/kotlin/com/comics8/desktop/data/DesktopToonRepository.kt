@@ -189,8 +189,8 @@ class DesktopToonRepository(
         database.isFavorite(workId)
     }
 
-    suspend fun toggleFavorite(item: ToonItem): Boolean = withContext(Dispatchers.IO) {
-        val workId = WorkId.writable(item.sourceId, item.id, hitomiEnabled()) ?: return@withContext false
+    suspend fun toggleFavorite(item: ToonItem): Boolean? = withContext(Dispatchers.IO) {
+        val workId = WorkId.writable(item.sourceId, item.id, hitomiEnabled()) ?: return@withContext null
         val exists = database.isFavorite(workId)
         val result = if (exists) {
             database.deleteFavorite(workId)

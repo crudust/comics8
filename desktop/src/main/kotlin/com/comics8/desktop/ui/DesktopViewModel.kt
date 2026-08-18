@@ -658,7 +658,7 @@ class DesktopViewModel(
 
     fun toggleFavorite(item: ToonItem) {
         scope.launch {
-            val favorited = repository.toggleFavorite(item)
+            val favorited = repository.toggleFavorite(item) ?: return@launch
             _state.update { current ->
                 val updated = current.items.map { row ->
                     if (row.workId() == item.workId()) row.copy(isFavorite = favorited) else row
@@ -919,7 +919,9 @@ class DesktopViewModel(
 
     fun reopenHistoryEpisode(item: ReadHistoryRecord, startPage: Int = 0) {
         val toon = item.toToonItem()
-        previousScreenBeforeSeries = Screen.History
+        if (_state.value.screen == Screen.History) {
+            previousScreenBeforeSeries = Screen.History
+        }
         episodeJob?.cancel()
         readerJob?.cancel()
         _state.update {
@@ -928,6 +930,7 @@ class DesktopViewModel(
                 series = toon,
                 episodes = emptyList(),
                 episodeLoading = true,
+                highlightedEpisodeId = item.lastWrId,
                 readerLoading = true,
                 readerError = null,
                 readerImages = emptyList(),
@@ -959,6 +962,7 @@ class DesktopViewModel(
                         episodes = epPage.items,
                         episodePage = actualPage,
                         episodeLastPage = epPage.lastPage,
+                        episodeLoading = false,
                     )
                 }
 
@@ -972,6 +976,7 @@ class DesktopViewModel(
                 )).copy(lastReadPage = pageToFetch)
                 openEpisode(epToOpen)
             } catch (_: Exception) {
+                _state.update { it.copy(episodeLoading = false) }
                 val fallback = EpisodeItem(
                     wrId = item.lastWrId,
                     title = item.lastEpisodeTitle,
@@ -987,7 +992,9 @@ class DesktopViewModel(
 
     fun continueHistoryEpisode(item: ReadHistoryRecord) {
         val toon = item.toToonItem()
-        previousScreenBeforeSeries = Screen.History
+        if (_state.value.screen == Screen.History) {
+            previousScreenBeforeSeries = Screen.History
+        }
         episodeJob?.cancel()
         readerJob?.cancel()
         _state.update {
@@ -996,6 +1003,7 @@ class DesktopViewModel(
                 series = toon,
                 episodes = emptyList(),
                 episodeLoading = true,
+                highlightedEpisodeId = item.lastWrId,
                 readerLoading = true,
                 readerError = null,
                 readerImages = emptyList(),
@@ -1014,6 +1022,7 @@ class DesktopViewModel(
                         episodes = epPage.items,
                         episodePage = epPage.currentPage,
                         episodeLastPage = epPage.lastPage,
+                        episodeLoading = false,
                     )
                 }
 
@@ -1059,6 +1068,7 @@ class DesktopViewModel(
                     openEpisode(fallback)
                 }
             } catch (_: Exception) {
+                _state.update { it.copy(episodeLoading = false) }
                 val fallback = EpisodeItem(
                     wrId = item.lastWrId,
                     title = item.lastEpisodeTitle,

@@ -625,7 +625,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
     fun toggleFavorite(item: ToonItem) {
         viewModelScope.launch {
-            val favorited = repository.toggleFavorite(item)
+            val favorited = repository.toggleFavorite(item) ?: return@launch
             _state.update { current ->
                 val updated = current.items.map { row ->
                     if (row.workId() == item.workId()) row.copy(isFavorite = favorited) else row
@@ -892,7 +892,9 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
     fun reopenHistoryEpisode(item: ReadHistory, startPage: Int = 0) {
         val toon = item.toToonItem()
-        previousScreenBeforeSeries = Screen.History
+        if (_state.value.screen == Screen.History) {
+            previousScreenBeforeSeries = Screen.History
+        }
         episodeJob?.cancel()
         readerJob?.cancel()
         val targetMode = if (currentScreenWidthDp >= 600) ViewMode.DUAL else singleViewPreference
@@ -902,6 +904,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 series = toon,
                 episodes = emptyList(),
                 episodeLoading = true,
+                highlightedEpisodeId = item.lastWrId,
                 readerLoading = true,
                 readerError = null,
                 readerImages = emptyList(),
@@ -935,6 +938,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                         episodes = epPage.items,
                         episodePage = actualPage,
                         episodeLastPage = epPage.lastPage,
+                        episodeLoading = false,
                     )
                 }
 
@@ -948,6 +952,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 )).copy(lastReadPage = pageToFetch)
                 openEpisode(epToOpen)
             } catch (_: Exception) {
+                _state.update { it.copy(episodeLoading = false) }
                 val fallback = EpisodeItem(
                     wrId = item.lastWrId,
                     title = item.lastEpisodeTitle,
@@ -967,7 +972,9 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
     fun continueHistoryEpisode(item: ReadHistory) {
         val toon = item.toToonItem()
-        previousScreenBeforeSeries = Screen.History
+        if (_state.value.screen == Screen.History) {
+            previousScreenBeforeSeries = Screen.History
+        }
         episodeJob?.cancel()
         readerJob?.cancel()
         val targetMode = if (currentScreenWidthDp >= 600) ViewMode.DUAL else singleViewPreference
@@ -977,6 +984,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 series = toon,
                 episodes = emptyList(),
                 episodeLoading = true,
+                highlightedEpisodeId = item.lastWrId,
                 readerLoading = true,
                 readerError = null,
                 readerImages = emptyList(),
@@ -1006,6 +1014,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                         episodes = epPage.items,
                         episodePage = actualPage,
                         episodeLastPage = epPage.lastPage,
+                        episodeLoading = false,
                     )
                 }
 
@@ -1050,6 +1059,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                     openEpisode(fallback)
                 }
             } catch (_: Exception) {
+                _state.update { it.copy(episodeLoading = false) }
                 val fallback = EpisodeItem(
                     wrId = item.lastWrId,
                     title = item.lastEpisodeTitle,

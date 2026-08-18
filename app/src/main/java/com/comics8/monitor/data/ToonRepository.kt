@@ -3,6 +3,7 @@ package com.comics8.monitor.data
 import com.comics8.core.model.BrowseTab
 import com.comics8.core.model.FavoriteListing
 import com.comics8.core.model.UpdateDates
+import com.comics8.core.source.LatestUpdateSelection
 import com.comics8.core.source.SearchQuery
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
@@ -179,17 +180,21 @@ class ToonRepository(
         val nowMs = now()
 
         for ((sourceId, rows) in favorites.groupBy { it.sourceId.ifBlank { WorkId.DEFAULT_SOURCE } }) {
-            val candidates = when (sourceId) {
-                WorkId.DEFAULT_SOURCE -> {
-                    val keys = rows.map { it.workId().storageKey() }.toSet()
-                    val page = fetchRemoteListing(sourceId, "LATEST", 1)
-                    page.items.filter { it.workId().storageKey() in keys }
+            val candidates = try {
+                when (sourceId) {
+                    WorkId.DEFAULT_SOURCE -> {
+                        val keys = rows.map { it.workId().storageKey() }.toSet()
+                        val page = fetchRemoteListing(sourceId, "LATEST", 1)
+                        LatestUpdateSelection.elevenIntersection(page.items, keys)
+                    }
+                    HitomiSource.ID -> LatestUpdateSelection.hitomiEligible(
+                        rows.map { it.toItem() },
+                        hitomiEnabled(),
+                    )
+                    else -> emptyList()
                 }
-                HitomiSource.ID -> {
-                    if (!hitomiEnabled()) emptyList()
-                    else rows.filter { it.id.startsWith(HitomiSource.ARTIST_PREFIX) }.map { it.toItem() }
-                }
-                else -> emptyList()
+            } catch (_: Exception) {
+                emptyList()
             }
             if (candidates.isEmpty()) continue
             val existing = seenByWorkIds(candidates.map { it.workId() })
@@ -274,8 +279,8 @@ class ToonRepository(
         favoriteDao.exists(workId)
     }
 
-    suspend fun toggleFavorite(item: ToonItem): Boolean = withContext(Dispatchers.IO) {
-        val workId = writableWorkId(item) ?: return@withContext false
+    suspend fun toggleFavorite(item: ToonItem): Boolean? = withContext(Dispatchers.IO) {
+        val workId = writableWorkId(item) ?: return@withContext null
         val exists = favoriteDao.exists(workId)
         val result = if (exists) {
             favoriteDao.delete(workId)

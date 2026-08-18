@@ -86,7 +86,9 @@ class FavoriteListingTest {
             toon("hitomi-new", "08.18").copy(sourceId = "hitomi"),
             toon("eleven-mid", "08.16").copy(sourceId = "eleven"),
         )
-        val result = FavoriteListing.assembleBySource(local) { sourceId, _ ->
+        val fetched = mutableListOf<String>()
+        val result = FavoriteListing.assembleBySource(local) { sourceId, page ->
+            fetched += "$sourceId:$page"
             if (sourceId == "hitomi") {
                 null
             } else {
@@ -99,6 +101,8 @@ class FavoriteListingTest {
         }
         assertThat(result.map { it.id }).containsExactly("hitomi-new", "eleven-mid", "eleven-old").inOrder()
         assertThat(result[1].updatedAt).isEqualTo("08.17")
+        assertThat(fetched).containsExactly("eleven:1", "hitomi:1")
+        return@runBlocking
     }
 
     private fun toon(id: String, updatedAt: String) = ToonItem(

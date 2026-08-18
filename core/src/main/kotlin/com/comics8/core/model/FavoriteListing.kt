@@ -41,9 +41,17 @@ object FavoriteListing {
         if (localFavorites.isEmpty()) return emptyList()
         val groups = localFavorites.groupBy { it.sourceId.ifBlank { WorkId.DEFAULT_SOURCE } }
         val assembled = groups.flatMap { (sourceId, items) ->
-            assemble(items) { page ->
-                fetchLatestPage(sourceId, page) ?: ListingPage(emptyList(), 1, 1)
-            }
+            val first = fetchLatestPage(sourceId, 1)
+            assemble(
+                items,
+                fetchLatestPage = if (first == null) {
+                    null
+                } else {
+                    { page ->
+                        if (page == 1) first else fetchLatestPage(sourceId, page) ?: ListingPage(emptyList(), page, 1)
+                    }
+                },
+            )
         }
         return assembled.sortedByDescending { UpdateDates.parseScore(it.updatedAt) }
     }
