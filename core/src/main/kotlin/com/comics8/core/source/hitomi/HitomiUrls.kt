@@ -14,7 +14,9 @@ object HitomiUrls {
     const val ID_BYTES = 4
     const val ENABLED_PREF_KEY = "sources.hitomi.enabled"
     const val ENABLED_BY_DEFAULT = false
+    const val LANGUAGE_PREF_KEY = "hitomi.language"
     const val DEFAULT_LANGUAGE = "korean"
+    const val ACTIVE_SOURCE_PREF_KEY = "pref_active_source_id"
 
     fun indexNozomi(lang: String): String {
         val key = lang.ifBlank { DEFAULT_LANGUAGE }

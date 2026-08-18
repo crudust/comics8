@@ -20,9 +20,11 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 
 class HitomiSource(
-    private val language: String = HitomiUrls.DEFAULT_LANGUAGE,
+    language: String = HitomiUrls.DEFAULT_LANGUAGE,
     private val delayMillis: suspend (Long) -> Unit = { kotlinx.coroutines.delay(it) },
 ) : ComicSource {
+    @Volatile
+    var language: String = language
     @Volatile
     private var ggCache: CachedGg? = null
 
@@ -297,10 +299,27 @@ class HitomiSource(
         const val ID = HitomiUrls.SOURCE_ID
         const val ENABLED_PREF_KEY = HitomiUrls.ENABLED_PREF_KEY
         const val ENABLED_BY_DEFAULT = HitomiUrls.ENABLED_BY_DEFAULT
+        const val LANGUAGE_PREF_KEY = HitomiUrls.LANGUAGE_PREF_KEY
         const val DEFAULT_LANGUAGE = HitomiUrls.DEFAULT_LANGUAGE
+        const val ACTIVE_SOURCE_PREF_KEY = HitomiUrls.ACTIVE_SOURCE_PREF_KEY
+        const val ARTIST_PREFIX = "artist:"
+        const val GALLERY_PREFIX = "gallery:"
 
-        private const val ARTIST_PREFIX = "artist:"
-        private const val GALLERY_PREFIX = "gallery:"
+        fun artistSeriesItem(
+            from: ToonItem,
+            artist: ArtistRef,
+            entryEpisodeId: String? = from.entryEpisodeId,
+        ): ToonItem = ToonItem(
+            id = "$ARTIST_PREFIX${artist.slug}",
+            title = artist.displayName,
+            thumbUrl = from.thumbUrl,
+            href = HitomiUrls.artistPage(artist.slug),
+            genre = from.genre,
+            updatedAt = from.updatedAt,
+            sourceId = ID,
+            entryEpisodeId = entryEpisodeId,
+        )
+
         private const val GALLERY_CONCURRENCY = 4
         private const val GG_TTL_MS = 10 * 60 * 1000L
         private val BACKOFF_MS = listOf(250L, 1_000L, 4_000L)

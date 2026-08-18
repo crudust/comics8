@@ -20,6 +20,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
+fun sourceChipLabel(sourceId: String): String =
+    if (sourceId == "hitomi") "Hitomi" else "11toon"
+
 @Composable
 fun Badge(
     text: String,

@@ -196,6 +196,28 @@ fun SyncDialog(
                     }
                 }
 
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Hitomi 소스",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Text(
+                            text = "실험적 소스. 켜면 브라우즈에서 전환할 수 있습니다.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = state.hitomiEnabled,
+                        onCheckedChange = { viewModel.setHitomiEnabled(it) },
+                    )
+                }
+
                 // Auto-sync Toggle
                 Row(
                     verticalAlignment = Alignment.CenterVertically,

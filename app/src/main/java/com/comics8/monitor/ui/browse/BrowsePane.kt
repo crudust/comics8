@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.SubcomposeAsyncImage
 import com.comics8.monitor.data.ToonItem
 import com.comics8.monitor.ui.components.Badge
+import com.comics8.monitor.ui.components.sourceChipLabel
 
 @Composable
 fun ListingGrid(
@@ -45,6 +46,7 @@ fun ListingGrid(
     onToggleFavorite: (ToonItem) -> Unit,
     modifier: Modifier = Modifier,
     scrollToTopTrigger: Int = 0,
+    showSourceChip: Boolean = false,
 ) {
     val gridState = rememberLazyGridState()
 
@@ -67,6 +69,7 @@ fun ListingGrid(
                 item = item,
                 onClick = { onOpen(item) },
                 onToggleFavorite = { onToggleFavorite(item) },
+                showSourceChip = showSourceChip,
             )
         }
     }
@@ -78,6 +81,7 @@ fun ToonCard(
     onClick: () -> Unit,
     onToggleFavorite: () -> Unit,
     modifier: Modifier = Modifier,
+    showSourceChip: Boolean = false,
 ) {
     Column(
         modifier = modifier
@@ -109,14 +113,19 @@ fun ToonCard(
                     }
                 },
             )
-            if (item.isNew) {
+            if (item.isNew || showSourceChip) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .padding(6.dp),
                 ) {
-                    Badge("NEW")
+                    if (showSourceChip) {
+                        Badge(sourceChipLabel(item.sourceId))
+                    }
+                    if (item.isNew) {
+                        Badge("NEW")
+                    }
                 }
             }
             val progress = item.readProgress

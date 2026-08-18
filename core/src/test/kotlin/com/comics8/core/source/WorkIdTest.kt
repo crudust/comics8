@@ -47,6 +47,15 @@ class WorkIdTest {
         assertThat(WorkId.writable("eleven", "1")).isEqualTo(WorkId.eleven("1"))
         assertThat(WorkId.writable("", "1")).isEqualTo(WorkId.eleven("1"))
         assertThat(WorkId.writable("hitomi", "1")).isNull()
+        assertThat(WorkId.writable("hitomi", "artist:demo", hitomiEnabled = false)).isNull()
+    }
+
+    @Test
+    fun writableAllowsHitomiWhenFlagOn() {
+        assertThat(WorkId.writable("hitomi", "artist:demo", hitomiEnabled = true))
+            .isEqualTo(WorkId("hitomi", "artist:demo"))
+        assertThat(WorkId.writable("hitomi", "", hitomiEnabled = true)).isNull()
+        assertThat(WorkId.writable("other", "1", hitomiEnabled = true)).isNull()
     }
 
     @Test

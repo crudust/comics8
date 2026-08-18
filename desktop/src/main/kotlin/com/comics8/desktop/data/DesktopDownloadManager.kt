@@ -43,6 +43,7 @@ data class DesktopDownloadProgressState(
 class DesktopDownloadManager(
     private val database: DesktopDatabase,
     private val client: ToonClient,
+    private val hitomiEnabled: () -> Boolean = { false },
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val baseDir = File(System.getProperty("user.home"), ".comics8/downloads").apply { mkdirs() }
@@ -54,7 +55,7 @@ class DesktopDownloadManager(
 
     fun enqueueEpisodes(series: ToonItem, episodes: List<EpisodeItem>) {
         if (episodes.isEmpty()) return
-        val workId = WorkId.writable(series.sourceId, series.id) ?: return
+        val workId = WorkId.writable(series.sourceId, series.id, hitomiEnabled()) ?: return
         scope.launch {
             val existing = database.getDownloadedEpisodesByToon(workId).map { it.wrId }.toSet()
             val newEpisodes = episodes.filter { it.wrId !in existing }

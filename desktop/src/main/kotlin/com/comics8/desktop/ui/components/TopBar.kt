@@ -51,7 +51,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.comics8.desktop.data.Catalog
+import com.comics8.core.source.WorkId
+import com.comics8.core.source.hitomi.HitomiSource
 import com.comics8.desktop.data.ReadDirection
 import com.comics8.desktop.data.ViewMode
 import com.comics8.desktop.ui.DesktopUiState
@@ -304,7 +305,7 @@ fun TopBar(
                         if (state.searchInput.isNotEmpty()) {
                             IconButton(onClick = {
                                 viewModel.updateSearchInput("")
-                                if (state.isSearch) viewModel.selectCatalog(state.catalog)
+                                if (state.isSearch) viewModel.selectTab(state.tab)
                             }) {
                                 Icon(Icons.Default.Close, contentDescription = "검색어 지우기")
                             }
@@ -328,11 +329,31 @@ fun TopBar(
                     .fillMaxWidth()
                     .padding(top = 8.dp),
             ) {
-                Catalog.entries.forEach { catalog ->
+                if (state.hitomiEnabled) {
                     FilterChip(
-                        selected = state.catalog == catalog,
-                        onClick = { viewModel.selectCatalog(catalog) },
-                        label = { Text(catalog.label) },
+                        selected = state.activeSourceId == WorkId.DEFAULT_SOURCE,
+                        onClick = { viewModel.setActiveSource(WorkId.DEFAULT_SOURCE) },
+                        label = { Text("11toon") },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.secondary,
+                            selectedLabelColor = MaterialTheme.colorScheme.onSecondary,
+                        ),
+                    )
+                    FilterChip(
+                        selected = state.activeSourceId == HitomiSource.ID,
+                        onClick = { viewModel.setActiveSource(HitomiSource.ID) },
+                        label = { Text("Hitomi") },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.secondary,
+                            selectedLabelColor = MaterialTheme.colorScheme.onSecondary,
+                        ),
+                    )
+                }
+                state.browseTabs.forEach { tab ->
+                    FilterChip(
+                        selected = state.tab == tab,
+                        onClick = { viewModel.selectTab(tab) },
+                        label = { Text(tab.label) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = MaterialTheme.colorScheme.primary,
                             selectedLabelColor = MaterialTheme.colorScheme.onPrimary,

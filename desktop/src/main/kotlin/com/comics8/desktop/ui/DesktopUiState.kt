@@ -1,12 +1,13 @@
 package com.comics8.desktop.ui
 
-import com.comics8.desktop.data.Catalog
+import com.comics8.core.model.BrowseTab
+import com.comics8.core.model.ToonItem
+import com.comics8.core.source.WorkId
 import com.comics8.desktop.data.DesktopBackupStats
 import com.comics8.desktop.data.DesktopSyncState
 import com.comics8.desktop.data.EpisodeItem
 import com.comics8.desktop.data.ReadDirection
 import com.comics8.desktop.data.ReadHistoryRecord
-import com.comics8.desktop.data.ToonItem
 import com.comics8.desktop.data.ViewMode
 
 enum class Screen {
@@ -17,8 +18,21 @@ enum class Screen {
     Downloads,
 }
 
+data class ArtistPickRequest(
+    val item: ToonItem,
+    val entryEpisodeId: String? = item.entryEpisodeId,
+)
+
 data class DesktopUiState(
-    val catalog: Catalog = Catalog.LATEST,
+    val tab: BrowseTab = BrowseTab.Remote(
+        WorkId.DEFAULT_SOURCE,
+        com.comics8.core.source.SourceCatalog("LATEST", "최신", paginated = true),
+    ),
+    val browseTabs: List<BrowseTab> = emptyList(),
+    val activeSourceId: String = WorkId.DEFAULT_SOURCE,
+    val hitomiEnabled: Boolean = false,
+    val artistPick: ArtistPickRequest? = null,
+    val highlightedEpisodeId: String? = null,
     val page: Int = 1,
     val lastPage: Int = 1,
     val items: List<ToonItem> = emptyList(),

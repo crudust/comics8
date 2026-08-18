@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -79,7 +80,18 @@ fun SeriesPane(
                     items(state.episodes, key = { it.wrId }) { ep ->
                         EpisodeCard(
                             episode = ep,
+                            highlighted = ep.wrId == state.highlightedEpisodeId,
                             onClick = { viewModel.openEpisode(ep) },
+                            onPickArtist = if (ep.artistChoices.size >= 2) {
+                                {
+                                    viewModel.openArtistPicker(
+                                        series.copy(artistChoices = ep.artistChoices),
+                                        entryEpisodeId = ep.wrId,
+                                    )
+                                }
+                            } else {
+                                null
+                            },
                         )
                     }
                 }
@@ -131,13 +143,15 @@ fun EpisodeCard(
     episode: EpisodeItem,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    highlighted: Boolean = false,
+    onPickArtist: (() -> Unit)? = null,
 ) {
     Surface(
         shape = RoundedCornerShape(10.dp),
-        color = if (episode.isRead) {
-            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-        } else {
-            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+        color = when {
+            highlighted -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+            episode.isRead -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+            else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
         },
         modifier = modifier
             .fillMaxWidth()
@@ -177,6 +191,14 @@ fun EpisodeCard(
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.outline,
                 )
+            }
+            if (onPickArtist != null) {
+                IconButton(onClick = onPickArtist) {
+                    Icon(
+                        imageVector = Icons.Filled.MoreVert,
+                        contentDescription = "다른 작가",
+                    )
+                }
             }
         }
     }

@@ -1,10 +1,12 @@
 package com.comics8.desktop.data
 
+import com.comics8.core.model.BrowseTab
 import com.comics8.core.model.FavoriteListing
 import com.comics8.core.network.ToonClient
 import com.comics8.core.source.SearchQuery
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
+import com.comics8.core.source.hitomi.HitomiSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -15,18 +17,36 @@ class DesktopToonRepository(
     val downloadManager: DesktopDownloadManager? = null,
     private val now: () -> Long = { System.currentTimeMillis() },
     private val sources: SourceRegistry = SourceRegistry.defaults(),
+    private val hitomiEnabled: () -> Boolean = { false },
 ) {
-    suspend fun loadListing(catalog: Catalog, page: Int): ListingPage = withContext(Dispatchers.IO) {
-        if (catalog == Catalog.FAVORITE) {
-            return@withContext loadFavoriteListing()
+    fun source(id: String) = sources.get(id)
+
+    fun allSources() = sources.all()
+
+    fun applyHitomiLanguage(language: String) {
+        (sources.get(HitomiSource.ID) as? HitomiSource)?.language =
+            language.ifBlank { HitomiSource.DEFAULT_LANGUAGE }
+    }
+
+    fun setHitomiWrites(enabled: Boolean) {
+        database.allowHitomiWrites = enabled
+    }
+
+    suspend fun loadListing(tab: BrowseTab, page: Int): ListingPage = withContext(Dispatchers.IO) {
+        when (tab) {
+            BrowseTab.Favorite -> loadFavoriteListing()
+            is BrowseTab.Remote -> fetchRemoteListing(tab.sourceId, tab.catalog.id, page)
         }
-        fetchRemoteListing(catalog, page)
     }
 
     private suspend fun loadFavoriteListing(): ListingPage {
         val local = database.getAllFavorites().map { it.toItem().copy(isFavorite = true) }
-        val items = FavoriteListing.assemble(local) { page ->
-            fetchRemoteListing(Catalog.LATEST, page)
+        val items = FavoriteListing.assembleBySource(local) { sourceId, page ->
+            if (sourceId == HitomiSource.ID) {
+                null
+            } else {
+                fetchRemoteListing(sourceId, "LATEST", page)
+            }
         }
         return ListingPage(
             items = applyFlags(items),
@@ -35,8 +55,8 @@ class DesktopToonRepository(
         )
     }
 
-    private suspend fun fetchRemoteListing(catalog: Catalog, page: Int): ListingPage {
-        val parsed = sources.default.loadListing(catalog.name, page, client)
+    private suspend fun fetchRemoteListing(sourceId: String, catalogId: String, page: Int): ListingPage {
+        val parsed = sources.get(sourceId).loadListing(catalogId, page, client)
         if (parsed.items.isEmpty()) {
             error("목록을 읽지 못했습니다. 사이트 구조가 바뀌었을 수 있습니다.")
         }
@@ -105,19 +125,22 @@ class DesktopToonRepository(
         parsed
     }
 
-    suspend fun search(query: String): List<ToonItem> = withContext(Dispatchers.IO) {
-        val q = query.trim()
-        if (q.isEmpty()) return@withContext emptyList()
-        val items = sources.default.search(SearchQuery(q), client)
-        applyFlags(items)
-    }
+    suspend fun search(query: String, sourceId: String = WorkId.DEFAULT_SOURCE): List<ToonItem> =
+        withContext(Dispatchers.IO) {
+            val q = query.trim()
+            if (q.isEmpty()) return@withContext emptyList()
+            val source = sources.get(sourceId)
+            val language = (source as? HitomiSource)?.language
+            val items = source.search(SearchQuery(q, language = language), client)
+            applyFlags(items)
+        }
 
     suspend fun markSeen(items: List<ToonItem>) = withContext(Dispatchers.IO) {
         if (items.isEmpty()) return@withContext
         val nowMs = now()
         val existing = database.getSeenByIds(items.map { it.workId() })
         val rows = items.mapNotNull { item ->
-            val workId = WorkId.writable(item.sourceId, item.id) ?: return@mapNotNull null
+            val workId = WorkId.writable(item.sourceId, item.id, hitomiEnabled()) ?: return@mapNotNull null
             val prev = existing[workId.storageKey()]
             SeenRecord(
                 sourceId = workId.sourceId,
@@ -167,7 +190,7 @@ class DesktopToonRepository(
     }
 
     suspend fun toggleFavorite(item: ToonItem): Boolean = withContext(Dispatchers.IO) {
-        val workId = WorkId.writable(item.sourceId, item.id) ?: return@withContext false
+        val workId = WorkId.writable(item.sourceId, item.id, hitomiEnabled()) ?: return@withContext false
         val exists = database.isFavorite(workId)
         val result = if (exists) {
             database.deleteFavorite(workId)
@@ -213,7 +236,7 @@ class DesktopToonRepository(
         viewMode: ViewMode,
         readDirection: ReadDirection,
     ) = withContext(Dispatchers.IO) {
-        val writable = WorkId.writable(workId.sourceId, workId.toonId) ?: return@withContext
+        val writable = WorkId.writable(workId.sourceId, workId.toonId, hitomiEnabled()) ?: return@withContext
         database.saveReaderSetting(
             ReaderSettingRecord(
                 sourceId = writable.sourceId,
@@ -227,7 +250,7 @@ class DesktopToonRepository(
     }
 
     suspend fun markEpisodeRead(workId: WorkId, wrId: String, lastPage: Int = 0): Long = withContext(Dispatchers.IO) {
-        val writable = WorkId.writable(workId.sourceId, workId.toonId) ?: return@withContext now()
+        val writable = WorkId.writable(workId.sourceId, workId.toonId, hitomiEnabled()) ?: return@withContext now()
         val readAt = now()
         database.markEpisodeRead(
             ReadEpisodeRecord(
@@ -259,7 +282,7 @@ class DesktopToonRepository(
     }
 
     suspend fun saveHistory(history: ReadHistoryRecord) = withContext(Dispatchers.IO) {
-        val workId = WorkId.writable(history.sourceId, history.toonId) ?: return@withContext
+        val workId = WorkId.writable(history.sourceId, history.toonId, hitomiEnabled()) ?: return@withContext
         database.saveHistory(history)
         database.deleteTombstone("HISTORY", workId.storageKey())
         syncManager?.triggerDebouncedPush()

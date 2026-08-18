@@ -66,9 +66,20 @@ fun main() {
     application {
         val database = remember { DesktopDatabase() }
         val toonClient = remember { ToonClient() }
+        val hitomiOn = { com.comics8.desktop.data.DesktopSourcePrefs.hitomiEnabled }
         val syncManager = remember { DesktopSyncManager(database, toonClient) }
-        val downloadManager = remember { com.comics8.desktop.data.DesktopDownloadManager(database, toonClient) }
-        val repository = remember { DesktopToonRepository(toonClient, database, syncManager, downloadManager) }
+        val downloadManager = remember {
+            com.comics8.desktop.data.DesktopDownloadManager(database, toonClient, hitomiEnabled = hitomiOn)
+        }
+        val repository = remember {
+            DesktopToonRepository(
+                toonClient,
+                database,
+                syncManager,
+                downloadManager,
+                hitomiEnabled = hitomiOn,
+            )
+        }
         val viewModel = remember { DesktopViewModel(repository) }
         val state by viewModel.state.collectAsState()
 
@@ -190,6 +201,15 @@ fun ComicsDesktopApp(
                 updateState = state.updateState,
                 onDismiss = viewModel::closeUpdateDialog,
                 onConfirmUpdate = viewModel::startUpdate,
+            )
+        }
+
+        val artistPick = state.artistPick
+        if (artistPick != null) {
+            com.comics8.desktop.ui.components.ArtistPickDialog(
+                artists = artistPick.item.artistChoices,
+                onPick = viewModel::pickArtist,
+                onDismiss = viewModel::dismissArtistPick,
             )
         }
     }

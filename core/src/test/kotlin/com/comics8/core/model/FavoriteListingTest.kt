@@ -72,6 +72,35 @@ class FavoriteListingTest {
         assertThat(result[0].updatedAt).isEqualTo("08.16")
     }
 
+    @Test
+    fun nullLatestFetchKeepsLocalDateOrder() = runBlocking {
+        val local = listOf(toon("older", "08.10"), toon("newer", "08.16"))
+        val result = FavoriteListing.assemble(local, fetchLatestPage = null)
+        assertThat(result.map { it.id }).containsExactly("newer", "older").inOrder()
+    }
+
+    @Test
+    fun assembleBySourceMergesByUpdateScore() = runBlocking {
+        val local = listOf(
+            toon("eleven-old", "08.10").copy(sourceId = "eleven"),
+            toon("hitomi-new", "08.18").copy(sourceId = "hitomi"),
+            toon("eleven-mid", "08.16").copy(sourceId = "eleven"),
+        )
+        val result = FavoriteListing.assembleBySource(local) { sourceId, _ ->
+            if (sourceId == "hitomi") {
+                null
+            } else {
+                ListingPage(
+                    items = listOf(toon("eleven-mid", "08.17").copy(sourceId = "eleven")),
+                    currentPage = 1,
+                    lastPage = 1,
+                )
+            }
+        }
+        assertThat(result.map { it.id }).containsExactly("hitomi-new", "eleven-mid", "eleven-old").inOrder()
+        assertThat(result[1].updatedAt).isEqualTo("08.17")
+    }
+
     private fun toon(id: String, updatedAt: String) = ToonItem(
         id = id,
         title = id,

@@ -83,6 +83,9 @@ fun ErrorPane(
     }
 }
 
+fun sourceChipLabel(sourceId: String): String =
+    if (sourceId == "hitomi") "Hitomi" else "11toon"
+
 @Composable
 fun Badge(text: String, modifier: Modifier = Modifier) {
     Text(

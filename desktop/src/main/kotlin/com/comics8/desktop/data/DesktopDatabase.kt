@@ -9,6 +9,9 @@ import java.sql.DriverManager
 import java.sql.ResultSet
 
 class DesktopDatabase(dbFile: File? = null) {
+    @Volatile
+    var allowHitomiWrites: Boolean = false
+
     private val dbPath: String
 
     init {
@@ -21,6 +24,9 @@ class DesktopDatabase(dbFile: File? = null) {
         dbPath = file.absolutePath
         initTables()
     }
+
+    private fun writableId(sourceId: String, toonId: String): WorkId? =
+        WorkId.writable(sourceId, toonId, allowHitomiWrites)
 
     private fun getConnection(): Connection =
         DriverManager.getConnection("jdbc:sqlite:$dbPath")
@@ -531,7 +537,7 @@ class DesktopDatabase(dbFile: File? = null) {
     }
 
     fun saveFavorite(item: FavoriteRecord) {
-        val workId = WorkId.writable(item.sourceId, item.id) ?: return
+        val workId = writableId(item.sourceId, item.id) ?: return
         getConnection().use { conn ->
             conn.prepareStatement(
                 """
@@ -643,7 +649,7 @@ class DesktopDatabase(dbFile: File? = null) {
                 """.trimIndent(),
             ).use { stmt ->
                 for (item in items) {
-                    val workId = WorkId.writable(item.sourceId, item.id) ?: continue
+                    val workId = writableId(item.sourceId, item.id) ?: continue
                     stmt.setString(1, workId.sourceId)
                     stmt.setString(2, workId.toonId)
                     stmt.setString(3, item.title)
@@ -712,7 +718,7 @@ class DesktopDatabase(dbFile: File? = null) {
     }
 
     fun saveHistory(history: ReadHistoryRecord) {
-        val workId = WorkId.writable(history.sourceId, history.toonId) ?: return
+        val workId = writableId(history.sourceId, history.toonId) ?: return
         getConnection().use { conn ->
             conn.prepareStatement(
                 """
@@ -826,7 +832,7 @@ class DesktopDatabase(dbFile: File? = null) {
     }
 
     fun markEpisodeRead(record: ReadEpisodeRecord) {
-        val workId = WorkId.writable(record.sourceId, record.toonId) ?: return
+        val workId = writableId(record.sourceId, record.toonId) ?: return
         getConnection().use { conn ->
             conn.prepareStatement(
                 """
@@ -937,7 +943,7 @@ class DesktopDatabase(dbFile: File? = null) {
     }
 
     fun saveReaderSetting(setting: ReaderSettingRecord) {
-        val workId = WorkId.writable(setting.sourceId, setting.toonId) ?: return
+        val workId = writableId(setting.sourceId, setting.toonId) ?: return
         getConnection().use { conn ->
             conn.prepareStatement(
                 """
@@ -1029,7 +1035,7 @@ class DesktopDatabase(dbFile: File? = null) {
     }
 
     fun saveDownloadedEpisode(item: DownloadedEpisodeRecord) {
-        val workId = WorkId.writable(item.sourceId, item.toonId) ?: return
+        val workId = writableId(item.sourceId, item.toonId) ?: return
         getConnection().use { conn ->
             conn.prepareStatement(
                 """

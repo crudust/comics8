@@ -57,7 +57,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.comics8.monitor.data.Catalog
+import com.comics8.core.source.WorkId
+import com.comics8.core.source.hitomi.HitomiSource
 import com.comics8.monitor.data.ReadDirection
 import com.comics8.monitor.data.ViewMode
 import com.comics8.monitor.ui.ListingUiState
@@ -370,10 +371,38 @@ fun TopBar(
                     modifier = Modifier.padding(top = 4.dp),
                 )
             }
+            if (state.hitomiEnabled) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                ) {
+                    FilterChip(
+                        selected = state.activeSourceId == WorkId.DEFAULT_SOURCE,
+                        onClick = { viewModel.setActiveSource(WorkId.DEFAULT_SOURCE) },
+                        label = { Text("11toon") },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.secondary,
+                            selectedLabelColor = MaterialTheme.colorScheme.onSecondary,
+                        ),
+                    )
+                    FilterChip(
+                        selected = state.activeSourceId == HitomiSource.ID,
+                        onClick = { viewModel.setActiveSource(HitomiSource.ID) },
+                        label = { Text("Hitomi") },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.secondary,
+                            selectedLabelColor = MaterialTheme.colorScheme.onSecondary,
+                        ),
+                    )
+                }
+            }
             val chipScrollState = rememberScrollState()
-            val catalogsList = remember { Catalog.entries }
-            LaunchedEffect(state.catalog) {
-                val idx = catalogsList.indexOf(state.catalog)
+            val catalogsList = state.browseTabs
+            LaunchedEffect(state.tab, catalogsList) {
+                val idx = catalogsList.indexOf(state.tab)
                 if (idx >= 0) {
                     chipScrollState.animateScrollTo((idx * 75).coerceAtLeast(0))
                 }
@@ -385,11 +414,11 @@ fun TopBar(
                     .fillMaxWidth()
                     .horizontalScroll(chipScrollState),
             ) {
-                catalogsList.forEach { catalog ->
+                catalogsList.forEach { tab ->
                     FilterChip(
-                        selected = !state.isSearch && state.catalog == catalog,
-                        onClick = { viewModel.selectCatalog(catalog) },
-                        label = { Text(catalog.label) },
+                        selected = !state.isSearch && state.tab == tab,
+                        onClick = { viewModel.selectTab(tab) },
+                        label = { Text(tab.label) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = MaterialTheme.colorScheme.primary,
                             selectedLabelColor = MaterialTheme.colorScheme.onPrimary,

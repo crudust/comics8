@@ -55,6 +55,7 @@ class DownloadManager(
     private val context: Context,
     private val database: AppDatabase,
     private val client: ToonClient,
+    private val hitomiEnabled: () -> Boolean = { false },
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val baseDir = File(context.filesDir, "downloads").apply { mkdirs() }
@@ -85,7 +86,7 @@ class DownloadManager(
 
     fun enqueueEpisodes(series: ToonItem, episodes: List<EpisodeItem>) {
         if (episodes.isEmpty()) return
-        val workId = WorkId.writable(series.sourceId, series.id) ?: return
+        val workId = WorkId.writable(series.sourceId, series.id, hitomiEnabled()) ?: return
         scope.launch {
             val existing = database.downloadedEpisodeDao().byToon(workId).map { it.wrId }.toSet()
             val newEpisodes = episodes.filter { it.wrId !in existing }

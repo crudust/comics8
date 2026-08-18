@@ -1,6 +1,7 @@
 package com.comics8.monitor
 
 import android.app.Application
+import android.content.Context
 import androidx.room.Room
 import coil.ImageLoader
 import coil.ImageLoaderFactory
@@ -8,6 +9,7 @@ import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.comics8.core.network.ImageFallbacks
 import com.comics8.core.network.ImageReferer
+import com.comics8.core.source.hitomi.HitomiSource
 import com.comics8.monitor.data.DownloadManager
 import com.comics8.monitor.data.SyncManager
 import com.comics8.monitor.data.ToonClient
@@ -27,8 +29,12 @@ class ComicsApp : Application(), ImageLoaderFactory {
             .fallbackToDestructiveMigrationFrom(1, 2, 3, 4, 5, 6, 7, 8)
             .build()
         val client = ToonClient()
+        val prefs = getSharedPreferences("comics_reader_prefs", Context.MODE_PRIVATE)
+        val hitomiOn = {
+            prefs.getBoolean(HitomiSource.ENABLED_PREF_KEY, HitomiSource.ENABLED_BY_DEFAULT)
+        }
         val syncManager = SyncManager(this, db, client)
-        val downloadManager = DownloadManager(this, db, client)
+        val downloadManager = DownloadManager(this, db, client, hitomiEnabled = hitomiOn)
         repository = ToonRepository(
             client = client,
             seenDao = db.seenDao(),
@@ -39,6 +45,11 @@ class ComicsApp : Application(), ImageLoaderFactory {
             database = db,
             syncManager = syncManager,
             downloadManager = downloadManager,
+            hitomiEnabled = hitomiOn,
+        )
+        repository.applyHitomiLanguage(
+            prefs.getString(HitomiSource.LANGUAGE_PREF_KEY, HitomiSource.DEFAULT_LANGUAGE)
+                ?: HitomiSource.DEFAULT_LANGUAGE,
         )
         RefreshWorker.enqueue(this)
     }

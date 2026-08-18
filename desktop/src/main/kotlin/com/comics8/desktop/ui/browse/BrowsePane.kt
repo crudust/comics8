@@ -37,12 +37,14 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.comics8.core.model.BrowseTab
 import com.comics8.desktop.data.ToonItem
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
 import com.comics8.desktop.ui.components.Badge
 import com.comics8.desktop.ui.components.ErrorPane
 import com.comics8.desktop.ui.components.LoadingPane
+import com.comics8.desktop.ui.components.sourceChipLabel
 import com.comics8.desktop.ui.util.DesktopAsyncImage
 
 @Composable
@@ -76,14 +78,15 @@ fun BrowsePane(
                     items(state.items, key = { it.workId().storageKey() }) { item ->
                         ToonCard(
                             item = item,
-                            onClick = { viewModel.openSeries(item) },
+                            onClick = { viewModel.onListingOpen(item) },
                             onToggleFavorite = { viewModel.toggleFavorite(item) },
+                            showSourceChip = state.tab is BrowseTab.Favorite || state.isSearch,
                         )
                     }
                 }
 
                 // Pagination
-                if (state.catalog.paginated && !state.isSearch && state.lastPage > 1) {
+                if (state.tab.paginated && !state.isSearch && state.lastPage > 1) {
                     Row(
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically,
@@ -130,6 +133,7 @@ fun ToonCard(
     onClick: () -> Unit,
     onToggleFavorite: () -> Unit,
     modifier: Modifier = Modifier,
+    showSourceChip: Boolean = false,
 ) {
     Column(
         modifier = modifier
@@ -151,13 +155,19 @@ fun ToonCard(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
             )
-            if (item.isNew) {
-                Box(
+            if (item.isNew || showSourceChip) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .padding(6.dp),
                 ) {
-                    Badge("NEW")
+                    if (showSourceChip) {
+                        Badge(sourceChipLabel(item.sourceId))
+                    }
+                    if (item.isNew) {
+                        Badge("NEW")
+                    }
                 }
             }
             val progress = item.readProgress

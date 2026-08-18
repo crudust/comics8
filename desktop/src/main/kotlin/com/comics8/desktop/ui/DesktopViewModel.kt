@@ -1,10 +1,13 @@
 package com.comics8.desktop.ui
 
+import com.comics8.core.model.ArtistRef
+import com.comics8.core.model.BrowseTab
 import com.comics8.core.source.WorkId
+import com.comics8.core.source.hitomi.HitomiSource
 import com.comics8.core.sync.AppUpdateChecker
 import com.comics8.core.sync.SyncConstants
 import com.comics8.desktop.DesktopVersion
-import com.comics8.desktop.data.Catalog
+import com.comics8.desktop.data.DesktopSourcePrefs
 import com.comics8.desktop.data.DesktopToonRepository
 import com.comics8.desktop.data.DesktopUpdateManager
 import com.comics8.desktop.data.EpisodeItem
@@ -37,8 +40,8 @@ class DesktopViewModel(
     private var readerJob: Job? = null
     private var countUpdateJob: Job? = null
 
-    private val catalogCache = mutableMapOf<Catalog, List<ToonItem>>()
-    private val catalogPages = mutableMapOf<Catalog, Pair<Int, Int>>()
+    private val catalogCache = mutableMapOf<BrowseTab, List<ToonItem>>()
+    private val catalogPages = mutableMapOf<BrowseTab, Pair<Int, Int>>()
 
     private val toonTotalCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
     private val toonLastPageCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
@@ -51,6 +54,10 @@ class DesktopViewModel(
 
     fun goBack(): Boolean {
         val current = _state.value
+        if (current.artistPick != null) {
+            dismissArtistPick()
+            return true
+        }
         if (current.showPageJump) {
             togglePageJump(false)
             return true
@@ -99,7 +106,7 @@ class DesktopViewModel(
             }
             Screen.Browse -> {
                 if (current.isSearch) {
-                    selectCatalog(current.catalog)
+                    selectTab(current.tab)
                     true
                 } else {
                     false
@@ -144,6 +151,20 @@ class DesktopViewModel(
     }
 
     init {
+        val hitomiOn = DesktopSourcePrefs.hitomiEnabled
+        val storedSource = DesktopSourcePrefs.activeSourceId
+        val activeSource = if (hitomiOn && storedSource == HitomiSource.ID) HitomiSource.ID else WorkId.DEFAULT_SOURCE
+        repository.applyHitomiLanguage(DesktopSourcePrefs.hitomiLanguage)
+        repository.setHitomiWrites(hitomiOn)
+        val tabs = BrowseTab.forSource(repository.source(activeSource))
+        _state.update {
+            it.copy(
+                hitomiEnabled = hitomiOn,
+                activeSourceId = activeSource,
+                browseTabs = tabs,
+                tab = tabs.first(),
+            )
+        }
         loadPage(1)
         checkForUpdate()
         repository.syncManager?.let { sm ->
@@ -227,20 +248,20 @@ class DesktopViewModel(
         }
     }
 
-    fun selectCatalog(catalog: Catalog) {
+    fun selectTab(tab: BrowseTab) {
         if (
-            catalog == _state.value.catalog &&
+            tab == _state.value.tab &&
             _state.value.screen == Screen.Browse &&
             !_state.value.isSearch
         ) return
         loadJob?.cancel()
         episodeJob?.cancel()
         readerJob?.cancel()
-        val cached = catalogCache[catalog]
-        val (cachedPage, cachedLastPage) = catalogPages[catalog] ?: Pair(1, 1)
+        val cached = catalogCache[tab]
+        val (cachedPage, cachedLastPage) = catalogPages[tab] ?: Pair(1, 1)
         _state.update {
             it.copy(
-                catalog = catalog,
+                tab = tab,
                 page = cachedPage,
                 lastPage = cachedLastPage,
                 items = cached ?: emptyList(),
@@ -259,6 +280,63 @@ class DesktopViewModel(
         if (cached == null) {
             loadPage(cachedPage)
         }
+    }
+
+    fun setActiveSource(sourceId: String) {
+        val hitomiOn = _state.value.hitomiEnabled
+        val resolved = if (sourceId == HitomiSource.ID && hitomiOn) HitomiSource.ID else WorkId.DEFAULT_SOURCE
+        DesktopSourcePrefs.activeSourceId = resolved
+        val tabs = BrowseTab.forSource(repository.source(resolved))
+        val current = _state.value.tab
+        val nextTab = when {
+            current is BrowseTab.Favorite -> BrowseTab.Favorite
+            current is BrowseTab.Remote -> tabs.firstOrNull {
+                it is BrowseTab.Remote && it.catalog.id == current.catalog.id
+            } ?: tabs.first()
+            else -> tabs.first()
+        }
+        _state.update {
+            it.copy(
+                activeSourceId = resolved,
+                browseTabs = tabs,
+            )
+        }
+        selectTab(nextTab)
+    }
+
+    fun setHitomiEnabled(enabled: Boolean) {
+        DesktopSourcePrefs.hitomiEnabled = enabled
+        repository.setHitomiWrites(enabled)
+        _state.update { it.copy(hitomiEnabled = enabled) }
+        if (!enabled && _state.value.activeSourceId == HitomiSource.ID) {
+            setActiveSource(WorkId.DEFAULT_SOURCE)
+        } else {
+            val tabs = BrowseTab.forSource(repository.source(_state.value.activeSourceId))
+            _state.update { it.copy(browseTabs = tabs) }
+        }
+    }
+
+    fun onListingOpen(item: ToonItem) {
+        if (item.artistChoices.size >= 2) {
+            _state.update { it.copy(artistPick = ArtistPickRequest(item)) }
+        } else {
+            openSeries(item)
+        }
+    }
+
+    fun openArtistPicker(item: ToonItem, entryEpisodeId: String? = item.entryEpisodeId) {
+        if (item.artistChoices.size < 2) return
+        _state.update { it.copy(artistPick = ArtistPickRequest(item, entryEpisodeId)) }
+    }
+
+    fun dismissArtistPick() {
+        _state.update { it.copy(artistPick = null) }
+    }
+
+    fun pickArtist(artist: ArtistRef) {
+        val request = _state.value.artistPick ?: return
+        dismissArtistPick()
+        openSeries(HitomiSource.artistSeriesItem(request.item, artist, request.entryEpisodeId))
     }
 
     private fun updateEpisodeCountsForUpdatedItems(items: List<ToonItem>) {
@@ -289,7 +367,7 @@ class DesktopViewModel(
                                 if (row.workId() == target.workId()) row.copy(readProgress = progressText) else row
                             }
                             if (!curr.isSearch) {
-                                catalogCache[curr.catalog] = updatedItems
+                                catalogCache[curr.tab] = updatedItems
                             }
                             curr.copy(
                                 items = updatedItems,
@@ -304,7 +382,7 @@ class DesktopViewModel(
 
     fun loadPage(page: Int, replace: Boolean = false) {
         loadJob?.cancel()
-        val catalog = _state.value.catalog
+        val tab = _state.value.tab
         val targetPage = page.coerceAtLeast(1)
 
         loadJob = scope.launch {
@@ -316,9 +394,9 @@ class DesktopViewModel(
                 )
             }
             try {
-                val result = repository.loadListing(catalog, targetPage)
-                catalogCache[catalog] = result.items
-                catalogPages[catalog] = Pair(result.currentPage, result.lastPage)
+                val result = repository.loadListing(tab, targetPage)
+                catalogCache[tab] = result.items
+                catalogPages[tab] = Pair(result.currentPage, result.lastPage)
                 _state.update {
                     it.copy(
                         page = result.currentPage,
@@ -329,7 +407,7 @@ class DesktopViewModel(
                         error = null,
                     )
                 }
-                if (result.items.isNotEmpty() && catalog != Catalog.FAVORITE) {
+                if (result.items.isNotEmpty() && tab !is BrowseTab.Favorite) {
                     repository.markSeen(result.items)
                 }
                 updateEpisodeCountsForUpdatedItems(result.items)
@@ -352,7 +430,7 @@ class DesktopViewModel(
             val query = _state.value.searchQuery.orEmpty()
             if (query.isNotEmpty()) search(query)
         } else {
-            catalogCache.remove(_state.value.catalog)
+            catalogCache.remove(_state.value.tab)
             loadPage(_state.value.page, replace = true)
         }
     }
@@ -375,7 +453,7 @@ class DesktopViewModel(
         }
         loadJob = scope.launch {
             try {
-                val results = repository.search(q)
+                val results = repository.search(q, _state.value.activeSourceId)
                 _state.update {
                     it.copy(
                         items = results,
@@ -427,6 +505,7 @@ class DesktopViewModel(
                 episodeLastPage = 1,
                 episodeError = null,
                 seriesFavorited = false,
+                highlightedEpisodeId = item.entryEpisodeId,
             )
         }
         loadEpisodes(item, 1)
@@ -563,6 +642,7 @@ class DesktopViewModel(
     }
 
     fun goToPage(page: Int) {
+        if (!_state.value.tab.paginated) return
         val clamped = page.coerceIn(1, _state.value.lastPage.coerceAtLeast(1))
         loadPage(clamped)
     }
@@ -585,7 +665,7 @@ class DesktopViewModel(
                 }
                 val visible = if (
                     !favorited &&
-                    current.catalog == Catalog.FAVORITE &&
+                    current.tab is BrowseTab.Favorite &&
                     current.screen == Screen.Browse &&
                     !current.isSearch
                 ) {
@@ -593,11 +673,11 @@ class DesktopViewModel(
                 } else {
                     updated
                 }
-                if (current.catalog != Catalog.FAVORITE) {
-                    catalogCache.remove(Catalog.FAVORITE)
+                if (current.tab !is BrowseTab.Favorite) {
+                    catalogCache.remove(BrowseTab.Favorite)
                 }
                 if (!current.isSearch) {
-                    catalogCache[current.catalog] = visible
+                    catalogCache[current.tab] = visible
                 }
                 current.copy(
                     seriesFavorited = if (current.series?.workId() == item.workId()) favorited else current.seriesFavorited,
@@ -676,7 +756,7 @@ class DesktopViewModel(
         val current = _state.value
         lastViewedSeries = current.series
         lastViewedEpisodePage = current.episodePage
-        val catalog = current.catalog
+        val tab = current.tab
         val searching = current.isSearch
         _state.update {
             it.copy(
@@ -690,9 +770,10 @@ class DesktopViewModel(
                 currentEpisode = null,
                 readerImages = emptyList(),
                 readerError = null,
+                highlightedEpisodeId = null,
             )
         }
-        if (catalog == Catalog.FAVORITE && !searching && catalogCache[Catalog.FAVORITE] == null) {
+        if (tab is BrowseTab.Favorite && !searching && catalogCache[BrowseTab.Favorite] == null) {
             loadPage(1, replace = true)
         }
     }
@@ -838,13 +919,15 @@ class DesktopViewModel(
 
     fun reopenHistoryEpisode(item: ReadHistoryRecord, startPage: Int = 0) {
         val toon = item.toToonItem()
+        previousScreenBeforeSeries = Screen.History
         episodeJob?.cancel()
         readerJob?.cancel()
         _state.update {
             it.copy(
-                screen = Screen.Reader,
+                screen = Screen.Series,
                 series = toon,
                 episodes = emptyList(),
+                episodeLoading = true,
                 readerLoading = true,
                 readerError = null,
                 readerImages = emptyList(),
@@ -904,13 +987,15 @@ class DesktopViewModel(
 
     fun continueHistoryEpisode(item: ReadHistoryRecord) {
         val toon = item.toToonItem()
+        previousScreenBeforeSeries = Screen.History
         episodeJob?.cancel()
         readerJob?.cancel()
         _state.update {
             it.copy(
-                screen = Screen.Reader,
+                screen = Screen.Series,
                 series = toon,
                 episodes = emptyList(),
+                episodeLoading = true,
                 readerLoading = true,
                 readerError = null,
                 readerImages = emptyList(),

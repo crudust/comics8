@@ -35,9 +35,9 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.comics8.monitor.data.Catalog
-import com.comics8.monitor.data.ViewMode
+import com.comics8.core.model.BrowseTab
 import com.comics8.monitor.ui.browse.ListingGrid
+import com.comics8.monitor.ui.components.ArtistPickDialog
 import com.comics8.monitor.ui.components.ErrorPane
 import com.comics8.monitor.ui.components.LoadingPane
 import com.comics8.monitor.ui.components.PageBar
@@ -62,23 +62,23 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
     val context = LocalContext.current
     val config = LocalConfiguration.current
 
-    val catalogs = remember { Catalog.entries.toTypedArray() }
+    val catalogs = state.browseTabs
     val browsePagerState = rememberPagerState(
-        initialPage = catalogs.indexOf(state.catalog).coerceAtLeast(0),
-        pageCount = { catalogs.size },
+        initialPage = catalogs.indexOf(state.tab).coerceAtLeast(0),
+        pageCount = { catalogs.size.coerceAtLeast(1) },
     )
 
-    LaunchedEffect(state.catalog) {
-        val targetIndex = catalogs.indexOf(state.catalog)
+    LaunchedEffect(state.tab, catalogs) {
+        val targetIndex = catalogs.indexOf(state.tab)
         if (targetIndex >= 0 && browsePagerState.currentPage != targetIndex) {
             browsePagerState.animateScrollToPage(targetIndex)
         }
     }
 
-    LaunchedEffect(browsePagerState.currentPage) {
-        val targetCatalog = catalogs[browsePagerState.currentPage]
-        if (targetCatalog != state.catalog && !state.isSearch && state.screen == Screen.Browse) {
-            viewModel.selectCatalog(targetCatalog)
+    LaunchedEffect(browsePagerState.currentPage, catalogs) {
+        val targetCatalog = catalogs.getOrNull(browsePagerState.currentPage) ?: return@LaunchedEffect
+        if (targetCatalog != state.tab && !state.isSearch && state.screen == Screen.Browse) {
+            viewModel.selectTab(targetCatalog)
         }
     }
 
@@ -111,7 +111,7 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
         }
     }
 
-    val canGoBack = state.screen != Screen.Browse || state.isSearch || state.showPageJump || state.showSyncDialog || state.showUpdateDialog || state.showDownloadOptions
+    val canGoBack = state.screen != Screen.Browse || state.isSearch || state.showPageJump || state.showSyncDialog || state.showUpdateDialog || state.showDownloadOptions || state.artistPick != null
     BackHandler(enabled = canGoBack) {
         viewModel.goBack()
     }
@@ -149,13 +149,14 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                                 state.items.isEmpty() -> ErrorPane(
                                     message = "\"${state.searchQuery}\" 검색 결과가 없습니다.",
                                     actionLabel = "목록으로",
-                                    onRetry = { viewModel.selectCatalog(state.catalog) },
+                                    onRetry = { viewModel.selectTab(state.tab) },
                                 )
                                 else -> ListingGrid(
                                     items = state.items,
                                     scrollToTopTrigger = state.scrollToTopTrigger,
-                                    onOpen = viewModel::openSeries,
+                                    onOpen = viewModel::onListingOpen,
                                     onToggleFavorite = viewModel::toggleFavorite,
+                                    showSourceChip = true,
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             }
@@ -166,25 +167,30 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                                 modifier = Modifier.fillMaxSize(),
                             ) { pageIndex ->
                                 val pageCatalog = catalogs[pageIndex]
-                                val isCurrent = pageCatalog == state.catalog
+                                val isCurrent = pageCatalog == state.tab
                                 when {
                                     isCurrent && state.loading && state.items.isEmpty() -> LoadingPane()
                                     isCurrent && state.error != null && state.items.isEmpty() -> ErrorPane(
                                         message = state.error!!,
                                         onRetry = { viewModel.refresh(force = true) },
                                     )
-                                    isCurrent && pageCatalog == Catalog.FAVORITE && state.items.isEmpty() -> ErrorPane(
+                                    isCurrent && pageCatalog is BrowseTab.Favorite && state.items.isEmpty() -> ErrorPane(
                                         message = "즐겨찾기한 작품이 없습니다.",
                                         actionLabel = "최신으로",
-                                        onRetry = { viewModel.selectCatalog(Catalog.LATEST) },
+                                        onRetry = {
+                                            viewModel.selectTab(
+                                                state.browseTabs.firstOrNull { it is BrowseTab.Remote } ?: state.tab,
+                                            )
+                                        },
                                     )
                                     isCurrent -> {
                                         Column(Modifier.fillMaxSize()) {
                                             ListingGrid(
                                                 items = state.items,
                                                 scrollToTopTrigger = state.scrollToTopTrigger,
-                                                onOpen = viewModel::openSeries,
+                                                onOpen = viewModel::onListingOpen,
                                                 onToggleFavorite = viewModel::toggleFavorite,
+                                                showSourceChip = pageCatalog is BrowseTab.Favorite,
                                                 modifier = Modifier.weight(1f).fillMaxWidth(),
                                             )
                                             if (pageCatalog.paginated && state.lastPage > 1) {
@@ -247,6 +253,14 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                 updateState = state.updateState,
                 onDismiss = viewModel::dismissUpdateDialog,
                 onConfirmUpdate = viewModel::startUpdate,
+            )
+        }
+        val artistPick = state.artistPick
+        if (artistPick != null) {
+            ArtistPickDialog(
+                artists = artistPick.item.artistChoices,
+                onPick = viewModel::pickArtist,
+                onDismiss = viewModel::dismissArtistPick,
             )
         }
     }
