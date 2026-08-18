@@ -23,8 +23,3 @@ data class SearchQuery(
     val language: String? = null,
     val type: String? = null,
 )
-
-data class ArtistRef(
-    val slug: String,
-    val displayName: String,
-)

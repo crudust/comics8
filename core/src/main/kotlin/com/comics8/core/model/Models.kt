@@ -1,7 +1,9 @@
 package com.comics8.core.model
 
-import com.comics8.core.source.ArtistRef
-import com.comics8.core.source.WorkId
+data class ArtistRef(
+    val slug: String,
+    val displayName: String,
+)
 
 data class ToonItem(
     val id: String,
@@ -14,7 +16,7 @@ data class ToonItem(
     val isNew: Boolean = false,
     val isFavorite: Boolean = false,
     val readProgress: String? = null,
-    val sourceId: String = WorkId.DEFAULT_SOURCE,
+    val sourceId: String = "eleven",
     val entryEpisodeId: String? = null,
     val artistChoices: List<ArtistRef> = emptyList(),
 ) {

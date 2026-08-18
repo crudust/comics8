@@ -36,7 +36,11 @@ class ToonClient(
         ) {
             val proxiedUrl = SyncConstants.proxyUrl(spec.url, proxyBase)
             try {
-                return executeFetch(spec.copy(url = proxiedUrl))
+                val proxied = executeFetch(spec.copy(url = proxiedUrl))
+                if (proxied.code in 200..299) {
+                    return proxied
+                }
+                System.err.println("ToonClient: Proxy fetch failed ($proxiedUrl): HTTP ${proxied.code}. Falling back to direct fetch.")
             } catch (e: Exception) {
                 System.err.println("ToonClient: Proxy fetch failed ($proxiedUrl): ${e.message}. Falling back to direct fetch.")
             }
@@ -144,10 +148,8 @@ class ToonClient(
         if (start == 0 && endInclusive == total - 1) return result
         val sliced = result.body.copyOfRange(start, endInclusive + 1)
         val headers = LinkedHashMap(result.headers)
-        putHeader(headers, "Content-Length", total.toString())
-        if (result.header("Content-Range") == null) {
-            putHeader(headers, "Content-Range", "bytes */$total")
-        }
+        putHeader(headers, "Content-Length", sliced.size.toString())
+        putHeader(headers, "Content-Range", "bytes $start-$endInclusive/$total")
         return HttpResult(result.code, headers, sliced)
     }
 

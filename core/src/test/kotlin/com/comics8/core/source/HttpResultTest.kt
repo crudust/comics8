@@ -28,6 +28,19 @@ class HttpResultTest {
     }
 
     @Test
+    fun totalLengthReadsSatisfiedRangeForm() {
+        val result = HttpResult(
+            code = 200,
+            headers = mapOf(
+                "Content-Range" to "bytes 0-99/4096",
+                "Content-Length" to "100",
+            ),
+            body = ByteArray(100),
+        )
+        assertThat(result.totalLength()).isEqualTo(4096)
+    }
+
+    @Test
     fun totalLengthFallsBackToContentLength() {
         val result = HttpResult(
             code = 200,
