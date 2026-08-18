@@ -8,8 +8,10 @@ import androidx.core.app.NotificationManagerCompat
 import com.comics8.core.model.DownloadedToonSummary
 import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.ToonItem
+import com.comics8.core.network.ImageFallbacks
 import com.comics8.core.network.ToonClient
 import com.comics8.core.source.DownloadLayout
+import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
 import com.comics8.monitor.data.local.AppDatabase
 import com.comics8.monitor.data.local.DownloadedEpisode
@@ -27,6 +29,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -56,17 +60,22 @@ class DownloadManager(
     private val database: AppDatabase,
     private val client: ToonClient,
     private val hitomiEnabled: () -> Boolean = { false },
+    baseDir: File = File(context.filesDir, "downloads"),
+    private val sources: SourceRegistry = SourceRegistry.defaults(),
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val baseDir = File(context.filesDir, "downloads").apply { mkdirs() }
+    private val baseDir = baseDir.apply { mkdirs() }
     private val taskQueue = ConcurrentLinkedQueue<DownloadTask>()
     private var workerJob: Job? = null
+    private val migrateMutex = Mutex()
+    private var migrated = false
 
     private val _progress = MutableStateFlow(DownloadProgressState())
     val progress: StateFlow<DownloadProgressState> = _progress.asStateFlow()
 
     init {
         createNotificationChannel()
+        scope.launch { migrateLegacyDownloads() }
     }
 
     private fun createNotificationChannel() {
@@ -88,6 +97,7 @@ class DownloadManager(
         if (episodes.isEmpty()) return
         val workId = WorkId.writable(series.sourceId, series.id, hitomiEnabled()) ?: return
         scope.launch {
+            migrateLegacyDownloads()
             val existing = database.downloadedEpisodeDao().byToon(workId).map { it.wrId }.toSet()
             val newEpisodes = episodes.filter { it.wrId !in existing }
             if (newEpisodes.isEmpty()) return@launch
@@ -141,6 +151,7 @@ class DownloadManager(
     }
 
     private suspend fun processTask(task: DownloadTask) {
+        migrateLegacyDownloads()
         val epDir = DownloadLayout.episodeDir(baseDir, task.workId(), task.episode.wrId).apply { mkdirs() }
         try {
             updateNotification(
@@ -170,7 +181,7 @@ class DownloadManager(
                 )
                 val imgFile = File(epDir, String.format("%04d.jpg", imgIndex))
                 if (!imgFile.exists() || imgFile.length() == 0L) {
-                    val bytes = client.fetchBytes(url)
+                    val bytes = fetchImageBytes(task.sourceId, url)
                     imgFile.writeBytes(bytes)
                     downloadedBytes += bytes.size
                 } else {
@@ -246,14 +257,17 @@ class DownloadManager(
     }
 
     suspend fun isEpisodeDownloaded(workId: WorkId, wrId: String): Boolean = withContext(Dispatchers.IO) {
+        migrateLegacyDownloads()
         database.downloadedEpisodeDao().get(workId, wrId) != null
     }
 
     suspend fun getDownloadedEpisode(workId: WorkId, wrId: String): DownloadedEpisode? = withContext(Dispatchers.IO) {
+        migrateLegacyDownloads()
         database.downloadedEpisodeDao().get(workId, wrId)
     }
 
     suspend fun getLocalEpisodeImages(workId: WorkId, wrId: String): List<String>? = withContext(Dispatchers.IO) {
+        migrateLegacyDownloads()
         val entity = database.downloadedEpisodeDao().get(workId, wrId)
         val dir = DownloadLayout.resolveEpisodeDir(baseDir, workId, wrId, entity?.localDirPath)
             ?: return@withContext null
@@ -264,6 +278,7 @@ class DownloadManager(
     }
 
     suspend fun deleteToonDownloads(workId: WorkId) = withContext(Dispatchers.IO) {
+        migrateLegacyDownloads()
         database.downloadedEpisodeDao().deleteByToon(workId)
         val toonDir = DownloadLayout.toonDir(baseDir, workId)
         if (toonDir.exists()) {
@@ -276,6 +291,7 @@ class DownloadManager(
     }
 
     suspend fun deleteEpisodeDownload(workId: WorkId, wrId: String) = withContext(Dispatchers.IO) {
+        migrateLegacyDownloads()
         database.downloadedEpisodeDao().delete(workId, wrId)
         val epDir = DownloadLayout.episodeDir(baseDir, workId, wrId)
         if (epDir.exists()) {
@@ -288,6 +304,7 @@ class DownloadManager(
     }
 
     suspend fun getDownloadedToonSummaries(): List<DownloadedToonSummary> = withContext(Dispatchers.IO) {
+        migrateLegacyDownloads()
         val all = database.downloadedEpisodeDao().all()
         val grouped = all.groupBy { it.workId().storageKey() }
         grouped.map { (_, epList) ->
@@ -308,7 +325,52 @@ class DownloadManager(
     }
 
     suspend fun getDownloadedEpisodes(workId: WorkId): List<DownloadedEpisode> = withContext(Dispatchers.IO) {
+        migrateLegacyDownloads()
         database.downloadedEpisodeDao().byToon(workId)
+    }
+
+    internal suspend fun migrateLegacyDownloads() = migrateMutex.withLock {
+        if (migrated) return
+        DownloadLayout.migrateLegacyElevenDirs(baseDir)
+        val dao = database.downloadedEpisodeDao()
+        for (entity in dao.all()) {
+            val workId = entity.workId()
+            if (workId.sourceId == WorkId.DEFAULT_SOURCE) {
+                DownloadLayout.migrateLegacyEpisode(baseDir, entity.toonId, entity.wrId)
+            }
+            val resolved = DownloadLayout.resolveEpisodeDir(
+                baseDir,
+                workId,
+                entity.wrId,
+                entity.localDirPath,
+            )
+            if (resolved != null && entity.localDirPath != resolved.absolutePath) {
+                dao.upsert(entity.copy(localDirPath = resolved.absolutePath))
+            }
+        }
+        migrated = true
+    }
+
+    private fun fetchImageBytes(sourceId: String, url: String): ByteArray {
+        val extras = try {
+            sources.get(sourceId).imageFallbacks(url)
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val candidates = LinkedHashSet<String>().apply {
+            addAll(ImageFallbacks.urlsToTry(url))
+            addAll(extras)
+        }
+        var lastError: Exception? = null
+        for (candidate in candidates) {
+            try {
+                val bytes = client.fetchBytes(candidate)
+                if (bytes.isNotEmpty()) return bytes
+            } catch (e: Exception) {
+                lastError = e
+            }
+        }
+        throw lastError ?: IllegalStateException("empty image response: $url")
     }
 
     companion object {

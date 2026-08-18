@@ -32,4 +32,15 @@ class ImageRefererTest {
             "https://a2.gold-usergeneratedcontent.net/1690000000/c/ab/hash.avif",
         )
     }
+
+    @Test
+    fun fetchBytesRetriesHitomiWebpWithAvif() {
+        val webp = "https://w2.gold-usergeneratedcontent.net/1690000000/c/ab/hash.webp"
+        val avif = "https://a2.gold-usergeneratedcontent.net/1690000000/c/ab/hash.avif"
+        val bytes = ImageFallbacks.fetchBytes(webp) { url ->
+            if (url == avif) "ok".toByteArray() else error("HTTP 404")
+        }
+        assertThat(bytes.toString(Charsets.UTF_8)).isEqualTo("ok")
+        assertThat(ImageFallbacks.urlsToTry(webp)).containsExactly(webp, avif).inOrder()
+    }
 }

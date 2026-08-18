@@ -35,4 +35,52 @@ class DownloadLayoutTest {
         val resolved = DownloadLayout.resolveEpisodeDir(base, workId, "999")
         assertThat(resolved).isEqualTo(neu)
     }
+
+    @Test
+    fun migrateMovesLegacyToonTreeUnderEleven() {
+        val base = createTempDirectory("dl-mig").toFile()
+        base.deleteOnExit()
+        val legacy = DownloadLayout.legacyEpisodeDir(base, "123", "999")
+        legacy.mkdirs()
+        File(legacy, "0001.jpg").writeText("img")
+
+        val results = DownloadLayout.migrateLegacyElevenDirs(base)
+        assertThat(results).hasSize(1)
+        assertThat(results[0].moved).isTrue()
+
+        val neu = DownloadLayout.episodeDir(base, WorkId.eleven("123"), "999")
+        assertThat(File(neu, "0001.jpg").readText()).isEqualTo("img")
+        assertThat(legacy.exists()).isFalse()
+        assertThat(DownloadLayout.legacyToonDir(base, "123").exists()).isFalse()
+    }
+
+    @Test
+    fun migrateLeavesExistingElevenDirAndKeepsLegacyReadable() {
+        val base = createTempDirectory("dl-mig-skip").toFile()
+        base.deleteOnExit()
+        val workId = WorkId.eleven("123")
+        val neu = DownloadLayout.episodeDir(base, workId, "999")
+        neu.mkdirs()
+        File(neu, "0001.jpg").writeText("new")
+        val legacy = DownloadLayout.legacyEpisodeDir(base, "123", "999")
+        legacy.mkdirs()
+        File(legacy, "0001.jpg").writeText("old")
+
+        val results = DownloadLayout.migrateLegacyElevenDirs(base)
+        assertThat(results.single().moved).isFalse()
+        assertThat(File(neu, "0001.jpg").readText()).isEqualTo("new")
+        assertThat(File(legacy, "0001.jpg").readText()).isEqualTo("old")
+    }
+
+    @Test
+    fun migrateDoesNotTouchHitomiTree() {
+        val base = createTempDirectory("dl-hitomi").toFile()
+        base.deleteOnExit()
+        val hitomi = DownloadLayout.episodeDir(base, WorkId("hitomi", "abc"), "1")
+        hitomi.mkdirs()
+        File(hitomi, "0001.jpg").writeText("h")
+
+        DownloadLayout.migrateLegacyElevenDirs(base)
+        assertThat(File(hitomi, "0001.jpg").readText()).isEqualTo("h")
+    }
 }
