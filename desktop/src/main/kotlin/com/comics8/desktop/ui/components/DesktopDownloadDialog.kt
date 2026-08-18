@@ -7,12 +7,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -44,6 +46,7 @@ private enum class DownloadMode {
 fun DesktopDownloadDialog(
     series: ToonItem,
     episodes: List<EpisodeItem>,
+    catalogLoading: Boolean = false,
     onDismiss: () -> Unit,
     onConfirm: (List<EpisodeItem>) -> Unit,
 ) {
@@ -51,6 +54,8 @@ fun DesktopDownloadDialog(
     var afterOrderInput by remember { mutableStateOf("1") }
 
     val unreadEpisodes = remember(episodes) { episodes.filter { !it.isRead } }
+    val countLabel = if (catalogLoading) "불러오는 중..." else "${episodes.size}개 회차"
+    val unreadLabel = if (catalogLoading) "불러오는 중..." else "아직 읽지 않은 ${unreadEpisodes.size}개 회차"
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -79,16 +84,34 @@ fun DesktopDownloadDialog(
                 )
                 Spacer(Modifier.height(12.dp))
 
+                if (catalogLoading) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(bottom = 12.dp),
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "전체 회차 목록을 불러오는 중...",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
                 OptionRow(
                     title = "전체 다운로드",
-                    subtitle = "총 ${episodes.size}개 회차",
+                    subtitle = "총 $countLabel",
                     selected = selectedMode == DownloadMode.ALL,
                     onClick = { selectedMode = DownloadMode.ALL },
                 )
 
                 OptionRow(
                     title = "미열람 회차만 다운로드",
-                    subtitle = "아직 읽지 않은 ${unreadEpisodes.size}개 회차",
+                    subtitle = unreadLabel,
                     selected = selectedMode == DownloadMode.UNREAD,
                     onClick = { selectedMode = DownloadMode.UNREAD },
                 )
@@ -109,7 +132,11 @@ fun DesktopDownloadDialog(
                                 afterOrderInput = input
                             }
                         },
-                        label = { Text("시작 번호 (1 ~ ${episodes.size})") },
+                        label = {
+                            Text(
+                                if (catalogLoading) "시작 번호" else "시작 번호 (1 ~ ${episodes.size})",
+                            )
+                        },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true,
                         modifier = Modifier
@@ -129,6 +156,7 @@ fun DesktopDownloadDialog(
         },
         confirmButton = {
             TextButton(
+                enabled = !catalogLoading && episodes.isNotEmpty(),
                 onClick = {
                     val targetList = when (selectedMode) {
                         DownloadMode.ALL -> episodes

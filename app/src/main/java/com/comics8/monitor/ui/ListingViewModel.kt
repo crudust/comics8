@@ -81,6 +81,9 @@ data class ListingUiState(
     val downloadSummaries: List<com.comics8.core.model.DownloadedToonSummary> = emptyList(),
     val downloadLoading: Boolean = false,
     val showDownloadOptions: Boolean = false,
+    val downloadCatalog: List<EpisodeItem> = emptyList(),
+    val downloadCatalogLoading: Boolean = false,
+    val downloadedWrIds: Set<String> = emptySet(),
     val downloadProgress: com.comics8.monitor.data.DownloadProgressState = com.comics8.monitor.data.DownloadProgressState(),
 ) {
     val isSearch: Boolean get() = searchQuery != null
@@ -143,6 +146,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     private var episodeJob: Job? = null
     private var readerJob: Job? = null
     private var countUpdateJob: Job? = null
+    private var downloadCatalogJob: Job? = null
 
     private val catalogCache = mutableMapOf<BrowseTab, List<ToonItem>>()
     private val catalogPages = mutableMapOf<BrowseTab, Pair<Int, Int>>()
@@ -286,7 +290,16 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         repository.downloadManager?.let { dm ->
             viewModelScope.launch {
                 dm.progress.collect { p ->
+                    val prev = _state.value.downloadProgress
                     _state.update { it.copy(downloadProgress = p) }
+                    val prevWrId = prev.currentTask?.episode?.wrId
+                    val nextWrId = p.currentTask?.episode?.wrId
+                    if ((prev.isRunning && !p.isRunning) || (prevWrId != null && prevWrId != nextWrId)) {
+                        refreshDownloadedWrIds()
+                        if (_state.value.screen == Screen.Downloads) {
+                            loadDownloads()
+                        }
+                    }
                 }
             }
         }
@@ -589,6 +602,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 highlightedEpisodeId = item.entryEpisodeId,
                 viewMode = targetMode,
                 readDirection = globalReadDirection,
+                downloadedWrIds = emptySet(),
             )
         }
         loadEpisodes(item, 1)
@@ -763,17 +777,75 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun openDownloadOptions() {
-        _state.update { it.copy(showDownloadOptions = true) }
+        val series = _state.value.series ?: return
+        downloadCatalogJob?.cancel()
+        _state.update {
+            it.copy(
+                showDownloadOptions = true,
+                downloadCatalog = emptyList(),
+                downloadCatalogLoading = true,
+            )
+        }
+        downloadCatalogJob = viewModelScope.launch {
+            try {
+                val all = repository.loadAllEpisodes(series)
+                _state.update {
+                    it.copy(
+                        downloadCatalog = all,
+                        downloadCatalogLoading = false,
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _state.update { current ->
+                    current.copy(
+                        downloadCatalog = current.episodes,
+                        downloadCatalogLoading = false,
+                    )
+                }
+            }
+        }
     }
 
     fun closeDownloadOptions() {
-        _state.update { it.copy(showDownloadOptions = false) }
+        downloadCatalogJob?.cancel()
+        _state.update {
+            it.copy(
+                showDownloadOptions = false,
+                downloadCatalog = emptyList(),
+                downloadCatalogLoading = false,
+            )
+        }
     }
 
     fun startDownloadEpisodes(episodesToDownload: List<EpisodeItem>) {
         val series = _state.value.series ?: return
         closeDownloadOptions()
         repository.downloadManager?.enqueueEpisodes(series, episodesToDownload)
+    }
+
+    fun startDownloadEpisode(episode: EpisodeItem) {
+        val series = _state.value.series ?: return
+        repository.downloadManager?.enqueueEpisodes(series, listOf(episode))
+    }
+
+    private fun refreshDownloadedWrIds() {
+        val series = _state.value.series ?: return
+        viewModelScope.launch {
+            val ids = repository.downloadManager
+                ?.getDownloadedEpisodes(series.workId())
+                .orEmpty()
+                .map { it.wrId }
+                .toSet()
+            _state.update { current ->
+                if (current.series?.workId() == series.workId()) {
+                    current.copy(downloadedWrIds = ids)
+                } else {
+                    current
+                }
+            }
+        }
     }
 
     fun cancelDownloads() {
@@ -1162,13 +1234,16 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun savePage(page: Int) {
+    fun savePage(page: Int, seenThroughPage: Int = page) {
         val current = _state.value
         val series = current.series ?: return
         val episode = current.currentEpisode ?: return
         val totalImages = current.readerImages.size
-        val isLastPage = totalImages > 0 && page >= totalImages - 1
-        val targetPage = if (isLastPage) 0 else page.coerceAtLeast(0)
+        val targetPage = com.comics8.core.model.ReaderProgress.persistPage(
+            page = page,
+            totalImages = totalImages,
+            seenThroughPage = seenThroughPage,
+        )
 
         _state.update { state ->
             val updatedEpisode = state.currentEpisode?.copy(lastReadPage = targetPage)
@@ -1412,14 +1487,25 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     private fun loadEpisodes(item: ToonItem, page: Int, asRefresh: Boolean = false) {
         episodeJob?.cancel()
         episodeJob = viewModelScope.launch {
+            val local = if (page <= 1) {
+                repository.loadLocalEpisodes(item)
+            } else {
+                com.comics8.core.model.EpisodePage(emptyList(), page, 1)
+            }
+            val hasLocal = local.items.isNotEmpty()
             _state.update {
                 it.copy(
-                    episodeLoading = it.episodes.isEmpty() || !asRefresh,
+                    episodeLoading = !hasLocal && (it.episodes.isEmpty() || !asRefresh),
                     episodeError = null,
-                    episodePage = page,
+                    episodePage = if (hasLocal) 1 else page,
+                    episodeLastPage = if (hasLocal) 1 else it.episodeLastPage,
+                    episodes = if (hasLocal) local.items else it.episodes,
                     refreshing = asRefresh,
                     showPageJump = false,
                 )
+            }
+            if (hasLocal) {
+                refreshDownloadedWrIds()
             }
             try {
                 val result = repository.loadEpisodes(item, page)
@@ -1433,6 +1519,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                         episodeError = null,
                     )
                 }
+                refreshDownloadedWrIds()
                 if (result.items.isNotEmpty()) {
                     val lastP = result.lastPage.coerceAtLeast(1)
                     val currP = result.currentPage.coerceIn(1, lastP)
@@ -1514,11 +1601,12 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                val keepLocal = hasLocal || _state.value.episodes.isNotEmpty()
                 _state.update {
                     it.copy(
                         episodeLoading = false,
                         refreshing = false,
-                        episodeError = humanError("회차를 불러오지 못했습니다.", e),
+                        episodeError = if (keepLocal) null else humanError("회차를 불러오지 못했습니다.", e),
                     )
                 }
             }

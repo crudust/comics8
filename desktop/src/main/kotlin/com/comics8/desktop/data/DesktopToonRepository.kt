@@ -1,7 +1,10 @@
 package com.comics8.desktop.data
 
 import com.comics8.core.model.BrowseTab
+import com.comics8.core.model.EpisodeCatalog
+import com.comics8.core.model.EpisodePage
 import com.comics8.core.model.FavoriteListing
+import com.comics8.core.model.OfflineEpisodeRef
 import com.comics8.core.network.ToonClient
 import com.comics8.core.source.SearchQuery
 import com.comics8.core.source.SourceAccess
@@ -94,6 +97,31 @@ class DesktopToonRepository(
             }
         }
         parsed.copy(items = enriched)
+    }
+
+    suspend fun loadAllEpisodes(item: ToonItem): List<EpisodeItem> =
+        EpisodeCatalog.loadAllPages { page -> loadEpisodes(item, page) }
+
+    suspend fun loadLocalEpisodes(item: ToonItem): EpisodePage = withContext(Dispatchers.IO) {
+        val workId = item.workId()
+        val rows = downloadManager?.getDownloadedEpisodes(workId).orEmpty()
+        if (rows.isEmpty()) {
+            return@withContext EpisodePage(emptyList(), 1, 1)
+        }
+        val readMap = database.getReadEpisodesByToon(workId).associateBy { it.wrId }
+        val items = EpisodeCatalog.fromOffline(
+            rows = rows.map { row ->
+                OfflineEpisodeRef(
+                    wrId = row.wrId,
+                    title = row.episodeTitle,
+                    href = row.episodeHref,
+                    thumbUrl = row.toonThumbUrl.ifBlank { null },
+                )
+            },
+            readAtByWrId = readMap.mapValues { it.value.readAt },
+            lastPageByWrId = readMap.mapValues { it.value.lastPage },
+        )
+        EpisodePage(items = items, currentPage = 1, lastPage = 1)
     }
 
     suspend fun fetchTotalEpisodes(item: ToonItem): Int = withContext(Dispatchers.IO) {

@@ -14,8 +14,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -70,7 +72,10 @@ fun SeriesPane(
                         EpisodeRow(
                             episode = episode,
                             highlighted = episode.wrId == state.highlightedEpisodeId,
+                            isDownloaded = episode.wrId in state.downloadedWrIds,
+                            isDownloading = state.downloadProgress.currentTask?.episode?.wrId == episode.wrId,
                             onClick = { viewModel.openEpisode(episode) },
+                            onDownload = { viewModel.startDownloadEpisode(episode) },
                             onPickArtist = if (episode.artistChoices.size >= 2) {
                                 {
                                     val series = state.series ?: return@EpisodeRow
@@ -107,8 +112,11 @@ fun SeriesPane(
 fun EpisodeRow(
     episode: EpisodeItem,
     onClick: () -> Unit,
+    onDownload: () -> Unit,
     modifier: Modifier = Modifier,
     highlighted: Boolean = false,
+    isDownloaded: Boolean = false,
+    isDownloading: Boolean = false,
     onPickArtist: (() -> Unit)? = null,
 ) {
     androidx.compose.foundation.layout.Row(
@@ -207,17 +215,29 @@ fun EpisodeRow(
                 )
             }
         }
-        Icon(
-            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-            contentDescription = "회차 보기",
-            tint = if (episode.isRead) {
-                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-            },
-            modifier = Modifier
-                .padding(end = 4.dp)
-                .size(18.dp),
-        )
+        IconButton(
+            onClick = onDownload,
+            enabled = !isDownloaded && !isDownloading,
+            modifier = Modifier.size(36.dp),
+        ) {
+            when {
+                isDownloading -> CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                )
+                isDownloaded -> Icon(
+                    imageVector = Icons.Filled.DownloadDone,
+                    contentDescription = "다운로드됨",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp),
+                )
+                else -> Icon(
+                    imageVector = Icons.Filled.Download,
+                    contentDescription = "이 회차 다운로드",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
     }
 }

@@ -30,6 +30,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import com.comics8.core.network.ImageFallbacks
 import com.comics8.core.network.ImageReferer
+import com.comics8.core.source.LocalImageUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -65,7 +66,14 @@ object DesktopImageCache {
         val hash = hashUrl(url)
         val cachedFile = File(diskCacheDir, "$hash.img")
 
-        val bytes = if (cachedFile.exists() && cachedFile.length() > 0) {
+        val localFile = LocalImageUri.toFile(url)
+        val bytes = if (localFile != null && localFile.isFile && localFile.length() > 0L) {
+            try {
+                localFile.readBytes()
+            } catch (_: Exception) {
+                null
+            }
+        } else if (cachedFile.exists() && cachedFile.length() > 0) {
             try {
                 cachedFile.readBytes()
             } catch (_: Exception) {
@@ -77,6 +85,7 @@ object DesktopImageCache {
             val urlsToTry = listOf(url) + ImageFallbacks.forUrl(url)
             var fetchedBytes: ByteArray? = null
             for (targetUrl in urlsToTry) {
+                if (LocalImageUri.toFile(targetUrl) != null) continue
                 try {
                     val request = Request.Builder()
                         .url(targetUrl)

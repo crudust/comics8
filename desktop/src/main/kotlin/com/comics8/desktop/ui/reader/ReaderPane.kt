@@ -609,7 +609,11 @@ private fun ReaderDualView(
                 is DualSpread.Single -> spread.index
                 is DualSpread.Dual -> spread.firstIndex
             }
-            viewModel.savePage(firstPage)
+            val lastVisible = when (spread) {
+                is DualSpread.Single -> spread.index
+                is DualSpread.Dual -> spread.secondIndex
+            }
+            viewModel.savePage(firstPage, seenThroughPage = lastVisible)
         }
     }
 

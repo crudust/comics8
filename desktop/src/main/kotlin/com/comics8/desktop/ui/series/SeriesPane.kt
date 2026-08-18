@@ -7,23 +7,21 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -33,14 +31,25 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.comics8.desktop.data.EpisodeItem
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
 import com.comics8.desktop.ui.components.ErrorPane
 import com.comics8.desktop.ui.components.LoadingPane
+import com.comics8.desktop.ui.util.DesktopAsyncImage
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+private fun formatReadDate(millis: Long): String {
+    val sdf = SimpleDateFormat("yy.MM.dd", Locale.getDefault())
+    return sdf.format(Date(millis))
+}
 
 @Composable
 fun SeriesPane(
@@ -81,7 +90,10 @@ fun SeriesPane(
                         EpisodeCard(
                             episode = ep,
                             highlighted = ep.wrId == state.highlightedEpisodeId,
+                            isDownloaded = ep.wrId in state.downloadedWrIds,
+                            isDownloading = state.downloadProgress.currentTask?.episode?.wrId == ep.wrId,
                             onClick = { viewModel.openEpisode(ep) },
+                            onDownload = { viewModel.startDownloadEpisode(ep) },
                             onPickArtist = if (ep.artistChoices.size >= 2) {
                                 {
                                     viewModel.openArtistPicker(
@@ -142,8 +154,11 @@ fun SeriesPane(
 fun EpisodeCard(
     episode: EpisodeItem,
     onClick: () -> Unit,
+    onDownload: () -> Unit,
     modifier: Modifier = Modifier,
     highlighted: Boolean = false,
+    isDownloaded: Boolean = false,
+    isDownloading: Boolean = false,
     onPickArtist: (() -> Unit)? = null,
 ) {
     Surface(
@@ -151,7 +166,7 @@ fun EpisodeCard(
         color = when {
             highlighted -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
             episode.isRead -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-            else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+            else -> MaterialTheme.colorScheme.surface
         },
         modifier = modifier
             .fillMaxWidth()
@@ -161,42 +176,111 @@ fun EpisodeCard(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(8.dp),
         ) {
-            if (episode.isRead) {
-                Icon(
-                    imageVector = Icons.Default.Check,
-                    contentDescription = "읽음",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(Modifier.width(8.dp))
+            Box(
+                modifier = Modifier
+                    .size(width = 72.dp, height = 54.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+            ) {
+                val thumbUrl = episode.thumbUrl
+                if (thumbUrl != null) {
+                    DesktopAsyncImage(
+                        url = thumbUrl,
+                        contentDescription = episode.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
-
-            Text(
-                text = episode.title,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = if (episode.isRead) FontWeight.Normal else FontWeight.SemiBold,
-                color = if (episode.isRead) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-
-            val date = episode.date
-            if (!date.isNullOrBlank()) {
-                Spacer(Modifier.width(8.dp))
+            Column(
+                modifier = Modifier
+                    .padding(horizontal = 10.dp)
+                    .weight(1f),
+            ) {
                 Text(
-                    text = date,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.outline,
+                    text = episode.title,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (episode.isRead) FontWeight.Normal else FontWeight.Medium,
+                    color = if (episode.isRead) {
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
                 )
+                val date = episode.date
+                if (!date.isNullOrBlank()) {
+                    Text(
+                        text = date,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+            }
+            if (episode.isRead) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(end = 6.dp),
+                ) {
+                    Text(
+                        text = "읽음",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.85f))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                    val readAt = episode.readAt
+                    if (readAt != null) {
+                        Text(
+                            text = formatReadDate(readAt),
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
+                    }
+                }
             }
             if (onPickArtist != null) {
-                IconButton(onClick = onPickArtist) {
+                IconButton(
+                    onClick = onPickArtist,
+                    modifier = Modifier.size(28.dp),
+                ) {
                     Icon(
                         imageVector = Icons.Filled.MoreVert,
                         contentDescription = "다른 작가",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+            IconButton(
+                onClick = onDownload,
+                enabled = !isDownloaded && !isDownloading,
+                modifier = Modifier.size(36.dp),
+            ) {
+                when {
+                    isDownloading -> CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                    )
+                    isDownloaded -> Icon(
+                        imageVector = Icons.Filled.DownloadDone,
+                        contentDescription = "다운로드됨",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    else -> Icon(
+                        imageVector = Icons.Filled.Download,
+                        contentDescription = "이 회차 다운로드",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
                     )
                 }
             }

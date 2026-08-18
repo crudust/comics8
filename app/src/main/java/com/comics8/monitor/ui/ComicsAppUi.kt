@@ -185,7 +185,8 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
         if (state.showDownloadOptions && currentSeries != null) {
             com.comics8.monitor.ui.components.DownloadOptionsDialog(
                 series = currentSeries,
-                episodes = state.episodes,
+                episodes = state.downloadCatalog,
+                catalogLoading = state.downloadCatalogLoading,
                 onDismiss = viewModel::closeDownloadOptions,
                 onConfirm = viewModel::startDownloadEpisodes,
             )

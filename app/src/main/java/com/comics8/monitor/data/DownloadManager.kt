@@ -11,6 +11,7 @@ import com.comics8.core.model.ToonItem
 import com.comics8.core.network.ImageFallbacks
 import com.comics8.core.network.ToonClient
 import com.comics8.core.source.DownloadLayout
+import com.comics8.core.source.LocalImageUri
 import com.comics8.core.source.SourceAccess
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
@@ -282,7 +283,7 @@ class DownloadManager(
         val files = dir.listFiles { f -> f.isFile && f.length() > 0 && f.name.endsWith(".jpg") }
             ?.sortedBy { it.name }
         if (files.isNullOrEmpty()) return@withContext null
-        files.map { "file://${it.absolutePath}" }
+        files.map { LocalImageUri.fromFile(it) }
     }
 
     suspend fun deleteToonDownloads(workId: WorkId) = withContext(Dispatchers.IO) {

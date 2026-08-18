@@ -68,6 +68,9 @@ data class DesktopUiState(
     val downloadSummaries: List<com.comics8.core.model.DownloadedToonSummary> = emptyList(),
     val downloadLoading: Boolean = false,
     val showDownloadOptions: Boolean = false,
+    val downloadCatalog: List<EpisodeItem> = emptyList(),
+    val downloadCatalogLoading: Boolean = false,
+    val downloadedWrIds: Set<String> = emptySet(),
     val downloadProgress: com.comics8.desktop.data.DesktopDownloadProgressState = com.comics8.desktop.data.DesktopDownloadProgressState(),
 ) {
     val isSearch: Boolean get() = searchQuery != null

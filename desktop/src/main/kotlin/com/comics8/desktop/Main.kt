@@ -171,7 +171,8 @@ fun ComicsDesktopApp(
         if (state.showDownloadOptions && currentSeries != null) {
             com.comics8.desktop.ui.components.DesktopDownloadDialog(
                 series = currentSeries,
-                episodes = state.episodes,
+                episodes = state.downloadCatalog,
+                catalogLoading = state.downloadCatalogLoading,
                 onDismiss = viewModel::closeDownloadOptions,
                 onConfirm = viewModel::startDownloadEpisodes,
             )

@@ -502,7 +502,12 @@ private fun ReaderDualPagePane(
                 is DualSpread.Dual -> spread.firstIndex
                 null -> 0
             }
-            viewModel.savePage(firstPageIndex)
+            val lastVisible = when (spread) {
+                is DualSpread.Single -> spread.index
+                is DualSpread.Dual -> spread.secondIndex
+                null -> 0
+            }
+            viewModel.savePage(firstPageIndex, seenThroughPage = lastVisible)
         }
     }
 
