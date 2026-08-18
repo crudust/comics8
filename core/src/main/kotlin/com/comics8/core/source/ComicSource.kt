@@ -12,7 +12,6 @@ interface ComicSource {
     val origin: String
     val catalogs: List<SourceCatalog>
     val defaultPolicy: RequestPolicy
-    val searchFirstClass: Boolean
     val searchPlaceholder: String get() = "제목 검색"
 
     val enabledByDefault: Boolean get() = id == WorkId.DEFAULT_SOURCE
@@ -37,15 +36,6 @@ interface ComicSource {
 
     fun ownsHost(host: String): Boolean = false
     fun useProxy(url: String): Boolean = true
-
-    fun listingKey(item: ToonItem): String {
-        val episode = item.entryEpisodeId
-        return if (!episode.isNullOrBlank()) {
-            "$id:g:$episode"
-        } else {
-            item.workId().storageKey()
-        }
-    }
 
     fun resolveParent(
         item: ToonItem,

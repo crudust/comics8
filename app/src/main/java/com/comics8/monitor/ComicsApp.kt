@@ -12,9 +12,9 @@ import com.comics8.core.network.ImageReferer
 import com.comics8.core.source.SourcePrefs
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
+import com.comics8.core.network.ToonClient
 import com.comics8.monitor.data.DownloadManager
 import com.comics8.monitor.data.SyncManager
-import com.comics8.monitor.data.ToonClient
 import com.comics8.monitor.data.ToonRepository
 import com.comics8.monitor.data.local.AppDatabase
 import com.comics8.monitor.work.RefreshWorker

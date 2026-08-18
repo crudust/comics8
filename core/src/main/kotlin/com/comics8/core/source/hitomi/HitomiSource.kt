@@ -45,7 +45,6 @@ class HitomiSource(
             "Accept-Language" to "ko-KR,ko;q=0.9,en;q=0.8",
         ),
     )
-    override val searchFirstClass: Boolean = true
     override val searchPlaceholder: String = "작가 검색 (artist: 이름)"
     override val enabledByDefault: Boolean = ENABLED_BY_DEFAULT
     override val notificationMode: NotificationMode = NotificationMode.PER_FAVORITE

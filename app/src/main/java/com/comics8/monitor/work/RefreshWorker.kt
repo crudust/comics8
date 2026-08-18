@@ -17,7 +17,7 @@ import com.comics8.monitor.MainActivity
 import com.comics8.monitor.R
 import java.util.concurrent.TimeUnit
 
-import com.comics8.monitor.data.ToonItem
+import com.comics8.core.model.ToonItem
 
 class RefreshWorker(
     appContext: Context,

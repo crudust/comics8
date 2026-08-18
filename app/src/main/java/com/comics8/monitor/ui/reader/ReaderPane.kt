@@ -55,9 +55,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImagePainter
 import coil.compose.SubcomposeAsyncImage
-import com.comics8.monitor.data.ReadDirection
-import com.comics8.monitor.data.ViewMode
-import com.comics8.monitor.data.buildDualSpreads
+import com.comics8.core.model.ReadDirection
+import com.comics8.core.model.ViewMode
+import com.comics8.core.model.buildDualSpreads
 import com.comics8.monitor.ui.ListingUiState
 import com.comics8.monitor.ui.ListingViewModel
 import com.comics8.monitor.ui.components.EpisodeBoundaryPrompt

@@ -1,7 +1,5 @@
 package com.comics8.core.network
 
-import com.comics8.core.model.EpisodeItem
-import com.comics8.core.model.ToonItem
 import com.comics8.core.source.FetchSpec
 import com.comics8.core.source.HttpResult
 import com.comics8.core.source.RequestPolicy
@@ -62,31 +60,6 @@ class ToonClient(
             executeHead(FetchSpec(url, policy))
         } catch (_: Exception) {
             false
-        }
-    }
-
-    fun isUrlAccessible(url: String?): Boolean {
-        if (url.isNullOrBlank()) return false
-        return isAccessible(url, RequestPolicy(userAgent = USER_AGENT, referer = ImageReferer.forUrl(url)))
-    }
-
-    /**
-     * Fetches an episode page and extracts the image URLs to display in a reader.
-     * When multiple candidate lists (e.g. img_list and img_list_2) exist,
-     * automatically verifies and selects the working CDN image list.
-     */
-    fun fetchImages(url: String): List<String> {
-        val episode = EpisodeItem(wrId = "", title = "", date = null, thumbUrl = null, href = url)
-        val source = SourceRegistry.defaults().sourceForUrl(url)
-        val item = ToonItem(
-            id = "",
-            title = "",
-            thumbUrl = "",
-            href = url,
-            sourceId = source.id,
-        )
-        return kotlinx.coroutines.runBlocking {
-            source.resolveImages(episode, item, this@ToonClient)
         }
     }
 

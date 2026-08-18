@@ -1,14 +1,14 @@
 package com.comics8.desktop.ui
 
 import com.comics8.core.model.BrowseTab
+import com.comics8.core.model.EpisodeItem
+import com.comics8.core.model.ReadDirection
 import com.comics8.core.model.ToonItem
+import com.comics8.core.model.ViewMode
 import com.comics8.core.source.WorkId
 import com.comics8.desktop.data.DesktopBackupStats
 import com.comics8.desktop.data.DesktopSyncState
-import com.comics8.desktop.data.EpisodeItem
-import com.comics8.desktop.data.ReadDirection
 import com.comics8.desktop.data.ReadHistoryRecord
-import com.comics8.desktop.data.ViewMode
 
 enum class Screen {
     Browse,

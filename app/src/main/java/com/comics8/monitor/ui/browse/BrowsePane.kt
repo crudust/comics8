@@ -35,7 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.SubcomposeAsyncImage
-import com.comics8.monitor.data.ToonItem
+import com.comics8.core.model.ToonItem
 import com.comics8.monitor.ui.components.Badge
 import com.comics8.monitor.ui.components.sourceChipLabel
 

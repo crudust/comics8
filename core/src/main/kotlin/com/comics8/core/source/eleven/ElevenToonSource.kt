@@ -29,7 +29,6 @@ class ElevenToonSource : ComicSource {
             "Accept-Language" to "ko-KR,ko;q=0.9,en;q=0.8",
         ),
     )
-    override val searchFirstClass: Boolean = true
     override val searchPlaceholder: String = "제목 검색"
     override val notificationMode: NotificationMode = NotificationMode.LATEST_INTERSECTION
     override val episodePageSize: Int = 100

@@ -8,6 +8,10 @@ import androidx.lifecycle.viewModelScope
 import com.comics8.core.model.AppUpdateState
 import com.comics8.core.model.ArtistRef
 import com.comics8.core.model.BrowseTab
+import com.comics8.core.model.EpisodeItem
+import com.comics8.core.model.ReadDirection
+import com.comics8.core.model.ToonItem
+import com.comics8.core.model.ViewMode
 import com.comics8.core.source.SourcePrefs
 import com.comics8.core.source.WorkId
 import com.comics8.core.sync.AppUpdateChecker
@@ -16,11 +20,7 @@ import com.comics8.monitor.BuildConfig
 import com.comics8.monitor.ComicsApp
 import com.comics8.monitor.data.AndroidUpdateManager
 import com.comics8.monitor.data.BackupStats
-import com.comics8.monitor.data.EpisodeItem
-import com.comics8.monitor.data.ReadDirection
 import com.comics8.monitor.data.SyncState
-import com.comics8.monitor.data.ToonItem
-import com.comics8.monitor.data.ViewMode
 import com.comics8.monitor.data.local.ReadHistory
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers

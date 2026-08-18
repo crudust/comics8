@@ -27,10 +27,10 @@ macOS 환경 기준으로 기본 설정된 환경 변수 및 SDK 경로입니다
 export JAVA_HOME="/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"
 export ANDROID_SDK_ROOT="/opt/homebrew/share/android-commandlinetools"
 export ANDROID_HOME="$ANDROID_SDK_ROOT"
-export PATH="$JAVA_HOME/bin:$ANDROID_SDK_ROOT/emulator:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
+export PATH="$JAVA_HOME/bin:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
 ```
 
-- **AVD 에뮬레이터 이름**: `comics8` (`system-images;android-34;default;arm64-v8a`)
+Android는 에뮬레이터로 돌리지 않습니다. APK는 릴리즈 빌드 후 `deploy-release.sh`로 올리고, 기기는 인앱 업데이트로 받습니다.
 
 ---
 
@@ -39,45 +39,31 @@ export PATH="$JAVA_HOME/bin:$ANDROID_SDK_ROOT/emulator:$ANDROID_SDK_ROOT/platfor
 ### 3.1. APK 단독 빌드
 정식 서명된 Release APK 파일을 빌드할 때 사용합니다:
 ```bash
-./scripts/build-apk.sh
-# 또는
 ./gradlew assembleRelease
 ```
 - **출력 APK 경로**: `app/build/outputs/apk/release/app-release.apk`
 
-### 3.2. 에뮬레이터 기동 + 설치 + 앱 실행
-에뮬레이터가 꺼져 있으면 부팅 후 자동 설치 및 실행합니다:
-```bash
-./scripts/run-mac.sh
-```
-
-### 3.3. 실행 중인 에뮬레이터에 즉시 갱신 (Hot Install & Launch)
-에뮬레이터(`emulator-5554`)가 이미 켜져 있는 상태에서 코드 수정분을 즉시 반영할 때:
-```bash
-export JAVA_HOME="/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"
-export ANDROID_SDK_ROOT="/opt/homebrew/share/android-commandlinetools"
-export ANDROID_HOME="$ANDROID_SDK_ROOT"
-export PATH="$JAVA_HOME/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
-
-./gradlew installDebug
-adb shell am start -n "com.comics8.monitor/.MainActivity"
-```
-
-### 3.5. macOS 데스크톱 앱 실행 (Desktop Run)
+### 3.2. macOS 데스크톱 앱 실행 (Desktop Run)
 ```bash
 ./scripts/run-desktop.sh
 # 또는
 ./gradlew :desktop:run
 ```
 
-### 3.6. macOS 데스크톱 배포본 빌드 (.app)
+### 3.3. macOS 데스크톱 배포본 빌드 (.app)
 ```bash
 ./scripts/build-mac-desktop.sh
 # 또는
 ./gradlew :desktop:createDistributable
 ```
 - **출력 App 경로**: `desktop/build/compose/binaries/main/app/Comics8.app`
-### 3.7. 릴리즈 자동 빌드 및 서버 배포 (Deploy Release)
+
+### 3.4. macOS 로컬 설치 (`~/Applications`)
+```bash
+./scripts/build-mac-local.sh
+```
+
+### 3.5. 릴리즈 자동 빌드 및 서버 배포 (Deploy Release)
 Android APK + Mac Desktop 앱을 빌드하여 서버(VM 101)에 업로드하고 `version.json`을 갱신합니다:
 ```bash
 ./scripts/deploy-release.sh [versionName] [versionCode] [releaseNotes]
@@ -94,8 +80,8 @@ Comics8/
 ├── core/                       # 공통 모듈 (파서, 모델, 네트워크, 동기화 상수, 업데이트 체커)
 │   ├── build.gradle.kts
 │   └── src/main/kotlin/com/comics8/core/
-│       ├── model/              # Catalog, ToonItem, EpisodeItem, DualSpread, ViewMode, UpdateModels 등
-│       ├── parser/             # ComicSite, HtmlParsers, SearchParser
+│       ├── model/              # ToonItem, EpisodeItem, DualSpread, ViewMode, UpdateModels 등
+│       ├── source/             # ComicSource, eleven/, hitomi/
 │       ├── network/            # ToonClient
 │       └── sync/               # SyncConstants, AppUpdateChecker
 ├── app/                        # Android 모듈 (APK)
@@ -108,9 +94,8 @@ Comics8/
 │       ├── data/               # SQLite JDBC, 리포지토리, 동기화/업데이트 매니저
 │       └── ui/                 # Compose Desktop UI (Browse, Series, Reader, History)
 ├── scripts/
-│   ├── build-apk.sh            # Android Release APK 빌드
-│   ├── run-mac.sh              # Android 에뮬레이터 실행 및 설치
-│   ├── build-mac-desktop.sh    # macOS Desktop .app 및 .dmg 빌드
+│   ├── build-mac-desktop.sh    # macOS Desktop .app 빌드
+│   ├── build-mac-local.sh      # macOS Desktop을 ~/Applications 에 설치
 │   ├── run-desktop.sh          # macOS Desktop 앱 직접 실행
 │   └── deploy-release.sh       # Release 빌드 및 VM 101 서버 배포
 ├── build.gradle.kts
@@ -124,12 +109,12 @@ Comics8/
 ## 5. Agent 작업 지침 및 주의사항 (Guidelines for Agents)
 
 1. **빌드/테스트 전 환경변수 필수**:
-   - `JAVA_HOME`과 `ANDROID_SDK_ROOT`가 셸 세션에 올바르게 잡혀 있어야 `./gradlew` 및 `adb` 명령어가 정상 동작합니다.
+   - `JAVA_HOME`과 `ANDROID_SDK_ROOT`가 셸 세션에 올바르게 잡혀 있어야 `./gradlew`가 정상 동작합니다. Android는 에뮬레이터/`adb`로 실행하지 않습니다.
 2. **Android 빌드와 macOS Desktop 빌드 구분**:
-   - Android APK: `./scripts/build-apk.sh` 또는 `./gradlew assembleRelease`
-   - macOS Desktop: `./scripts/build-mac-desktop.sh` 또는 `./gradlew :desktop:createDistributable :desktop:packageDmg`
+   - Android APK: `./gradlew assembleRelease` 또는 `./scripts/deploy-release.sh`
+   - macOS Desktop: `./scripts/build-mac-desktop.sh` 또는 `./gradlew :desktop:createDistributable`
    - macOS 직접 실행: `./scripts/run-desktop.sh` 또는 `./gradlew :desktop:run`
 3. **Room Entity 변경 시 주의**:
    - Room 엔티티나 스키마 수정 시 KSP 코드 생성이 필요하며, DB 버전 업그레이드 시 마이그레이션 전략(`fallbackToDestructiveMigration()` 여부 확인)을 확인해야 합니다.
 4. **테스트 추가 및 검증**:
-   - 파싱 로직(`HtmlParsers`, `SearchParser`) 변경 시 `app/src/test/resources/`의 fixture를 활용하여 `testDebugUnitTest`를 반드시 통과시키세요.
+   - 파싱 로직 변경 시 `core/src/test/resources/` fixture로 `:core:test`를 통과시키세요. Android 모듈 테스트는 `:app:testDebugUnitTest`입니다.

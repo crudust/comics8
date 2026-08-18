@@ -60,8 +60,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.comics8.core.source.SourceRegistry
-import com.comics8.desktop.data.ReadDirection
-import com.comics8.desktop.data.ViewMode
+import com.comics8.core.model.ReadDirection
+import com.comics8.core.model.ViewMode
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
 import com.comics8.desktop.ui.Screen
