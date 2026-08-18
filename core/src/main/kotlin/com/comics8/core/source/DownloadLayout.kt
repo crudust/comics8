@@ -20,9 +20,11 @@ object DownloadLayout {
 
     fun resolveEpisodeDir(base: File, workId: WorkId, wrId: String, storedPath: String? = null): File? {
         val neu = episodeDir(base, workId, wrId)
-        if (hasImages(neu)) return neu
         val legacy = legacyEpisodeDir(base, workId.toonId, wrId)
-        if (hasImages(legacy)) return legacy
+        val neuCount = imageCount(neu)
+        val legacyCount = imageCount(legacy)
+        if (neuCount > 0 && neuCount >= legacyCount) return neu
+        if (legacyCount > 0) return legacy
         if (!storedPath.isNullOrBlank()) {
             val stored = File(storedPath)
             if (hasImages(stored)) return stored
@@ -56,7 +58,13 @@ object DownloadLayout {
 
             for (wrDir in wrDirs) {
                 val dest = episodeDir(base, workId, wrDir.name)
-                if (hasImages(dest)) {
+                val destCount = imageCount(dest)
+                val srcCount = imageCount(wrDir)
+                if (destCount > 0 && destCount >= srcCount) {
+                    results.add(MigratedDownloadDir(wrDir, dest, moved = false))
+                    continue
+                }
+                if (destCount > 0 && destCount < srcCount) {
                     results.add(MigratedDownloadDir(wrDir, dest, moved = false))
                     continue
                 }
@@ -74,27 +82,41 @@ object DownloadLayout {
     fun migrateLegacyEpisode(base: File, toonId: String, wrId: String): File? {
         val workId = WorkId.eleven(toonId)
         val dest = episodeDir(base, workId, wrId)
-        if (hasImages(dest)) return dest
         val legacy = legacyEpisodeDir(base, toonId, wrId)
-        if (!legacy.exists()) return if (dest.exists()) dest else null
+        val destCount = imageCount(dest)
+        val legacyCount = imageCount(legacy)
+        if (destCount > 0 && destCount >= legacyCount) return dest
+        if (legacyCount == 0) return dest.takeIf { destCount > 0 }
+        if (destCount > 0) return legacy
         if (dest.exists()) dest.deleteRecursively()
         dest.parentFile?.mkdirs()
         return if (moveDir(legacy, dest)) dest else legacy
     }
 
-    internal fun hasImages(dir: File): Boolean {
-        if (!dir.isDirectory) return false
-        return dir.listFiles { file -> file.isFile && file.length() > 0 }?.isNotEmpty() == true
+    internal fun hasImages(dir: File): Boolean = imageCount(dir) > 0
+
+    internal fun imageCount(dir: File): Int {
+        if (!dir.isDirectory) return 0
+        return dir.listFiles { file ->
+            file.isFile && file.length() > 0 && file.name.endsWith(".jpg", ignoreCase = true)
+        }?.size ?: 0
     }
 
-    private fun moveDir(from: File, to: File): Boolean {
+    internal fun moveDir(from: File, to: File): Boolean {
         if (!from.exists()) return false
         if (from.renameTo(to)) return true
+        val destHadImages = hasImages(to)
         return try {
             from.copyRecursively(to, overwrite = false)
+            val sourceCount = imageCount(from)
+            if (sourceCount > 0 && imageCount(to) < sourceCount) {
+                if (!destHadImages) to.deleteRecursively()
+                return false
+            }
             from.deleteRecursively()
-            to.exists()
+            hasImages(to)
         } catch (_: Exception) {
+            if (!destHadImages) to.deleteRecursively()
             false
         }
     }

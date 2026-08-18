@@ -161,7 +161,14 @@ class DownloadManager(
                 max = 0,
                 indeterminate = true,
             )
-            val imageUrls = client.fetchImages(task.episode.href)
+            val series = ToonItem(
+                id = task.toonId,
+                title = task.toonTitle,
+                thumbUrl = task.toonThumbUrl,
+                href = task.toonHref,
+                sourceId = task.sourceId,
+            )
+            val imageUrls = sources.get(task.sourceId).resolveImages(task.episode, series, client)
             if (imageUrls.isEmpty()) return
 
             _progress.update { it.copy(totalImages = imageUrls.size) }
@@ -181,7 +188,7 @@ class DownloadManager(
                 )
                 val imgFile = File(epDir, String.format("%04d.jpg", imgIndex))
                 if (!imgFile.exists() || imgFile.length() == 0L) {
-                    val bytes = fetchImageBytes(task.sourceId, url)
+                    val bytes = ImageFallbacks.fetchBytes(url) { client.fetchBytes(it) }
                     imgFile.writeBytes(bytes)
                     downloadedBytes += bytes.size
                 } else {
@@ -343,34 +350,12 @@ class DownloadManager(
                 workId,
                 entity.wrId,
                 entity.localDirPath,
-            )
-            if (resolved != null && entity.localDirPath != resolved.absolutePath) {
+            ) ?: continue
+            if (entity.localDirPath != resolved.absolutePath) {
                 dao.upsert(entity.copy(localDirPath = resolved.absolutePath))
             }
         }
         migrated = true
-    }
-
-    private fun fetchImageBytes(sourceId: String, url: String): ByteArray {
-        val extras = try {
-            sources.get(sourceId).imageFallbacks(url)
-        } catch (_: Exception) {
-            emptyList()
-        }
-        val candidates = LinkedHashSet<String>().apply {
-            addAll(ImageFallbacks.urlsToTry(url))
-            addAll(extras)
-        }
-        var lastError: Exception? = null
-        for (candidate in candidates) {
-            try {
-                val bytes = client.fetchBytes(candidate)
-                if (bytes.isNotEmpty()) return bytes
-            } catch (e: Exception) {
-                lastError = e
-            }
-        }
-        throw lastError ?: IllegalStateException("empty image response: $url")
     }
 
     companion object {

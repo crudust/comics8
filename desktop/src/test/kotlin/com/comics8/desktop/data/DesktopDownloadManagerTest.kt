@@ -5,6 +5,7 @@ import com.comics8.core.model.ToonItem
 import com.comics8.core.network.ToonClient
 import com.comics8.core.source.DownloadLayout
 import com.comics8.core.source.WorkId
+import com.comics8.core.source.hitomi.HitomiUrls
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.runBlocking
 import okhttp3.Interceptor
@@ -44,7 +45,11 @@ class DesktopDownloadManagerTest {
             ),
         )
 
-        val manager = DesktopDownloadManager(db, ToonClient(isProxyEnabled = false), downloads)
+        val manager = DesktopDownloadManager(
+            db,
+            ToonClient(isProxyEnabled = false),
+            baseDir = downloads,
+        )
         manager.migrateLegacyDownloads()
 
         val neu = DownloadLayout.episodeDir(downloads, WorkId.eleven("123"), "999")
@@ -58,46 +63,108 @@ class DesktopDownloadManagerTest {
     }
 
     @Test
-    fun hitomiWebpFallsBackToAvif() = runBlocking {
-        val root = createTempDirectory("desk-hitomi").toFile()
+    fun incompleteDestDoesNotRewriteLocalDirPath() = runBlocking {
+        val root = createTempDirectory("desk-partial").toFile()
         root.deleteOnExit()
         val downloads = File(root, "downloads").apply { mkdirs() }
         val db = DesktopDatabase(File(root, "comics8.db"))
-        val webp = "https://w2.gold-usergeneratedcontent.net/1690000000/c/ab/hash.webp"
-        val avif = "https://a2.gold-usergeneratedcontent.net/1690000000/c/ab/hash.avif"
-        val client = ToonClient(imageClient(webp, avif), isProxyEnabled = false)
-        val manager = DesktopDownloadManager(db, client, downloads)
+        val workId = WorkId.eleven("123")
+        val dest = DownloadLayout.episodeDir(downloads, workId, "999")
+        dest.mkdirs()
+        File(dest, "0001.jpg").writeText("partial")
+        val legacy = DownloadLayout.legacyEpisodeDir(downloads, "123", "999")
+        legacy.mkdirs()
+        File(legacy, "0001.jpg").writeText("1")
+        File(legacy, "0002.jpg").writeText("2")
+        db.saveDownloadedEpisode(
+            DownloadedEpisodeRecord(
+                sourceId = WorkId.DEFAULT_SOURCE,
+                toonId = "123",
+                wrId = "999",
+                toonTitle = "원피스",
+                toonThumbUrl = "t",
+                toonHref = "h",
+                episodeTitle = "1화",
+                episodeHref = "e",
+                imageCount = 2,
+                totalBytes = 2,
+                downloadedAt = 1L,
+                localDirPath = legacy.absolutePath,
+            ),
+        )
 
+        val manager = DesktopDownloadManager(
+            db,
+            ToonClient(isProxyEnabled = false),
+            baseDir = downloads,
+        )
+        manager.migrateLegacyDownloads()
+
+        val stored = db.getDownloadedEpisode(workId, "999")
+        assertThat(stored?.localDirPath).isEqualTo(legacy.absolutePath)
+        assertThat(File(legacy, "0002.jpg").exists()).isTrue()
+        val images = manager.getLocalEpisodeImages(workId, "999")
+        assertThat(images).hasSize(2)
+    }
+
+    @Test
+    fun hitomiResolveImagesRetriesWebpWithAvif() = runBlocking {
+        val root = createTempDirectory("desk-hitomi").toFile()
+        root.deleteOnExit()
+        val downloads = File(root, "downloads").apply { mkdirs() }
+        val db = DesktopDatabase(File(root, "comics8.db")).apply { allowHitomiWrites = true }
+        val client = ToonClient(hitomiClient(), isProxyEnabled = false)
+        val manager = DesktopDownloadManager(
+            db,
+            client,
+            hitomiEnabled = { true },
+            baseDir = downloads,
+        )
+        val toonId = "gallery:1001"
         manager.enqueueEpisodes(
-            ToonItem(id = "123", title = "hitomi-gal", thumbUrl = "", href = "https://example.test/toon"),
+            ToonItem(
+                id = toonId,
+                title = "hitomi-gal",
+                thumbUrl = "",
+                href = HitomiUrls.galleryPage("1001"),
+                sourceId = HitomiUrls.SOURCE_ID,
+            ),
             listOf(
                 EpisodeItem(
-                    wrId = "1",
+                    wrId = "1001",
                     title = "ep",
                     date = null,
                     thumbUrl = null,
-                    href = "https://example.test/ep",
+                    href = HitomiUrls.reader("1001"),
                 ),
             ),
         )
-        val dest = DownloadLayout.episodeDir(downloads, WorkId.eleven("123"), "1")
+        val workId = WorkId(HitomiUrls.SOURCE_ID, toonId)
+        val dest = DownloadLayout.episodeDir(downloads, workId, "1001")
         val img = File(dest, "0001.jpg")
         val deadline = System.currentTimeMillis() + 15_000
-        while (System.currentTimeMillis() < deadline && (!img.exists() || img.length() == 0L)) {
+        while (System.currentTimeMillis() < deadline) {
+            val running = manager.progress.value.isRunning || manager.progress.value.queueSize > 0
+            if (img.exists() && img.length() > 0 && !running && db.getDownloadedEpisode(workId, "1001") != null) {
+                break
+            }
             Thread.sleep(50)
         }
         assertThat(img.exists()).isTrue()
         assertThat(img.readText()).isEqualTo("avif-bytes")
+        val stored = db.getDownloadedEpisode(workId, "1001")
+        assertThat(stored?.sourceId).isEqualTo(HitomiUrls.SOURCE_ID)
     }
 
-    private fun imageClient(webp: String, avif: String): OkHttpClient =
+    private fun hitomiClient(): OkHttpClient =
         OkHttpClient.Builder()
             .addInterceptor(Interceptor { chain ->
                 val url = chain.request().url.toString()
                 val (code, body) = when {
-                    url.contains("/ep") -> 200 to """<script>var img_list = ["$webp"];</script>"""
-                    url == webp -> 404 to "missing"
-                    url == avif -> 200 to "avif-bytes"
+                    url.endsWith("/galleries/1001.js") -> 200 to ONE_FILE_GALLERY
+                    url.endsWith("/gg.js") -> 200 to GG_JS
+                    url == WEBP -> 404 to "missing"
+                    url == AVIF -> 200 to "avif-bytes"
                     else -> 404 to "no"
                 }
                 Response.Builder()
@@ -109,4 +176,49 @@ class DesktopDownloadManagerTest {
                     .build()
             })
             .build()
+
+    companion object {
+        private const val HASH =
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcabc"
+        private const val WEBP =
+            "https://w2.gold-usergeneratedcontent.net/1690000000/c/ab/$HASH.webp"
+        private const val AVIF =
+            "https://a2.gold-usergeneratedcontent.net/1690000000/c/ab/$HASH.avif"
+        private const val GG_JS = """
+var gg = {
+m: function(g) {
+switch (g) {
+case 3243:
+return 1;
+case 291:
+return 1;
+}
+return 0;
+},
+b: "1690000000/",
+s: function(h) {
+var m = /(..)(.)$/.exec(h);
+return parseInt(m[2]+m[1], 16).toString(10);
+}
+};
+"""
+        private const val ONE_FILE_GALLERY = """
+var galleryinfo = {
+  "id": 1001,
+  "title": "Single Artist Gallery",
+  "type": "doujinshi",
+  "language": "korean",
+  "date": "2024-08-15 12:34:56",
+  "artists": [{"artist": "Demo Artist"}],
+  "files": [
+    {
+      "hash": "$HASH",
+      "name": "01.jpg",
+      "haswebp": 1,
+      "hasavif": 1
+    }
+  ]
+};
+"""
+    }
 }

@@ -83,4 +83,39 @@ class DownloadLayoutTest {
         DownloadLayout.migrateLegacyElevenDirs(base)
         assertThat(File(hitomi, "0001.jpg").readText()).isEqualTo("h")
     }
+
+    @Test
+    fun incompleteDestDoesNotWinOverCompleteLegacy() {
+        val base = createTempDirectory("dl-partial").toFile()
+        base.deleteOnExit()
+        val workId = WorkId.eleven("123")
+        val neu = DownloadLayout.episodeDir(base, workId, "999")
+        neu.mkdirs()
+        File(neu, "0001.jpg").writeText("partial")
+        val legacy = DownloadLayout.legacyEpisodeDir(base, "123", "999")
+        legacy.mkdirs()
+        File(legacy, "0001.jpg").writeText("1")
+        File(legacy, "0002.jpg").writeText("2")
+
+        val results = DownloadLayout.migrateLegacyElevenDirs(base)
+        assertThat(results.single().moved).isFalse()
+        assertThat(DownloadLayout.resolveEpisodeDir(base, workId, "999")).isEqualTo(legacy)
+        assertThat(File(legacy, "0002.jpg").readText()).isEqualTo("2")
+    }
+
+    @Test
+    fun failedCopyDeletesIncompleteDestAndKeepsSource() {
+        val root = createTempDirectory("dl-copy-fail").toFile()
+        root.deleteOnExit()
+        val from = File(root, "from").apply { mkdirs() }
+        File(from, "0001.jpg").writeText("1")
+        File(from, "0002.jpg").writeText("2")
+        val to = File(root, "to")
+        to.writeText("blocker")
+
+        assertThat(DownloadLayout.moveDir(from, to)).isFalse()
+        assertThat(File(from, "0001.jpg").exists()).isTrue()
+        assertThat(File(from, "0002.jpg").exists()).isTrue()
+        assertThat(to.exists()).isFalse()
+    }
 }
