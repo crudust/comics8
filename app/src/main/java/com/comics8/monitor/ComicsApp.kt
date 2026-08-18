@@ -23,6 +23,7 @@ class ComicsApp : Application(), ImageLoaderFactory {
         super.onCreate()
         val db = Room.databaseBuilder(this, AppDatabase::class.java, "comics8.db")
             .addMigrations(AppDatabase.MIGRATION_9_10)
+            .fallbackToDestructiveMigrationFrom(1, 2, 3, 4, 5, 6, 7, 8)
             .build()
         val client = ToonClient()
         val syncManager = SyncManager(this, db, client)

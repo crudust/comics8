@@ -17,13 +17,18 @@ object DownloadLayout {
 
     fun resolveEpisodeDir(base: File, workId: WorkId, wrId: String, storedPath: String? = null): File? {
         val neu = episodeDir(base, workId, wrId)
-        if (neu.isDirectory) return neu
+        if (hasImages(neu)) return neu
         val legacy = legacyEpisodeDir(base, workId.toonId, wrId)
-        if (legacy.isDirectory) return legacy
+        if (hasImages(legacy)) return legacy
         if (!storedPath.isNullOrBlank()) {
             val stored = File(storedPath)
-            if (stored.isDirectory) return stored
+            if (hasImages(stored)) return stored
         }
         return null
+    }
+
+    private fun hasImages(dir: File): Boolean {
+        if (!dir.isDirectory) return false
+        return dir.listFiles { f -> f.isFile && f.length() > 0 }?.isNotEmpty() == true
     }
 }

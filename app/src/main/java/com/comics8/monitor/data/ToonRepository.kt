@@ -166,7 +166,7 @@ class ToonRepository(
 
         for (item in candidates) {
             try {
-                val workId = item.workId()
+                val workId = writableWorkId(item) ?: continue
                 val epPage = loadEpisodes(item, 1)
                 val latestEp = epPage.items.firstOrNull() ?: continue
                 val latestWrId = latestEp.wrId

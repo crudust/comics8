@@ -29,6 +29,19 @@ class DesktopDatabaseMigrationTest {
                 stmt.execute("INSERT INTO favorites VALUES ('123','원피스','t','h','액션','08.16',1)")
                 stmt.execute(
                     """
+                    CREATE TABLE seen_toons (
+                        id TEXT PRIMARY KEY,
+                        title TEXT,
+                        updatedAt TEXT,
+                        firstSeenAt INTEGER,
+                        lastSeenAt INTEGER,
+                        notifiedKey TEXT
+                    )
+                    """.trimIndent(),
+                )
+                stmt.execute("INSERT INTO seen_toons VALUES ('123','원피스','08.16',1,2,'123|999')")
+                stmt.execute(
+                    """
                     CREATE TABLE tombstones (
                         entityType TEXT,
                         entityId TEXT,
@@ -51,5 +64,8 @@ class DesktopDatabaseMigrationTest {
         val tombs = db.getTombstonesSince(0)
         assertThat(tombs).hasSize(1)
         assertThat(tombs[0].entityId).isEqualTo("eleven:456")
+        val seen = db.getSeenByIds(listOf(WorkId.eleven("123")))
+        assertThat(seen).hasSize(1)
+        assertThat(seen.values.single().notifiedKey).isEqualTo("eleven:123|999")
     }
 }

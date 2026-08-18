@@ -405,6 +405,7 @@ object SchemaV10 {
         """.trimIndent(),
         "DROP TABLE seen_toons",
         "ALTER TABLE seen_toons_new RENAME TO seen_toons",
+        "UPDATE seen_toons SET notifiedKey = '$DEFAULT_SOURCE:' || notifiedKey WHERE notifiedKey NOT LIKE '%:%'",
 
         """
         CREATE TABLE IF NOT EXISTS reader_settings_new (

@@ -71,9 +71,24 @@ class DesktopDatabase(dbFile: File? = null) {
     }
 
     private fun rebuildIfLegacy(conn: Connection) {
+        val previous = conn.autoCommit
+        conn.autoCommit = false
+        try {
+            rebuildIfLegacyUnlocked(conn)
+            conn.commit()
+        } catch (e: Exception) {
+            conn.rollback()
+            throw e
+        } finally {
+            conn.autoCommit = previous
+        }
+    }
+
+    private fun rebuildIfLegacyUnlocked(conn: Connection) {
         val eleven = WorkId.DEFAULT_SOURCE
         if (tableExists(conn, "favorites") && !hasColumn(conn, "favorites", "sourceId")) {
             conn.createStatement().use { stmt ->
+                stmt.execute("DROP TABLE IF EXISTS favorites_new")
                 stmt.execute(
                     """
                     CREATE TABLE favorites_new (
@@ -101,6 +116,7 @@ class DesktopDatabase(dbFile: File? = null) {
         }
         if (tableExists(conn, "seen_toons") && !hasColumn(conn, "seen_toons", "sourceId")) {
             conn.createStatement().use { stmt ->
+                stmt.execute("DROP TABLE IF EXISTS seen_toons_new")
                 stmt.execute(
                     """
                     CREATE TABLE seen_toons_new (
@@ -125,8 +141,16 @@ class DesktopDatabase(dbFile: File? = null) {
                 stmt.execute("ALTER TABLE seen_toons_new RENAME TO seen_toons")
             }
         }
+        if (tableExists(conn, "seen_toons")) {
+            conn.createStatement().use { stmt ->
+                stmt.execute(
+                    "UPDATE seen_toons SET notifiedKey = '$eleven:' || notifiedKey WHERE notifiedKey NOT LIKE '%:%'",
+                )
+            }
+        }
         if (tableExists(conn, "reader_settings") && !hasColumn(conn, "reader_settings", "sourceId")) {
             conn.createStatement().use { stmt ->
+                stmt.execute("DROP TABLE IF EXISTS reader_settings_new")
                 stmt.execute(
                     """
                     CREATE TABLE reader_settings_new (
@@ -151,6 +175,7 @@ class DesktopDatabase(dbFile: File? = null) {
         }
         if (tableExists(conn, "read_history") && !hasColumn(conn, "read_history", "sourceId")) {
             conn.createStatement().use { stmt ->
+                stmt.execute("DROP TABLE IF EXISTS read_history_new")
                 stmt.execute(
                     """
                     CREATE TABLE read_history_new (
@@ -191,6 +216,7 @@ class DesktopDatabase(dbFile: File? = null) {
         }
         if (tableExists(conn, "read_episodes") && !hasColumn(conn, "read_episodes", "sourceId")) {
             conn.createStatement().use { stmt ->
+                stmt.execute("DROP TABLE IF EXISTS read_episodes_new")
                 stmt.execute(
                     """
                     CREATE TABLE read_episodes_new (
@@ -215,6 +241,7 @@ class DesktopDatabase(dbFile: File? = null) {
         }
         if (tableExists(conn, "downloaded_episodes") && !hasColumn(conn, "downloaded_episodes", "sourceId")) {
             conn.createStatement().use { stmt ->
+                stmt.execute("DROP TABLE IF EXISTS downloaded_episodes_new")
                 stmt.execute(
                     """
                     CREATE TABLE downloaded_episodes_new (
