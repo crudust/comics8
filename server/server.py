@@ -7,7 +7,7 @@ import sqlite3
 import hashlib
 import re
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
 
 DATA_DIR = os.environ.get("DATA_DIR", os.path.expanduser("~/comics8-sync/data"))
 DOWNLOADS_DIR = os.path.join(DATA_DIR, "downloads")
@@ -35,6 +35,12 @@ _EXACT_PROXY_HOSTS = {
 }
 _PL_HOST_RE = re.compile(r"(www\.)?pl\d{4}\.com\Z")
 _TOON_HOST_RE = re.compile(r"(www\.)?11toon\d*\.com\Z")
+PROXY_REDIRECT_STATUSES = {301, 302, 303, 307, 308}
+MAX_PROXY_REDIRECTS = 5
+DEFAULT_PROXY_UA = (
+    "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/126.0.0.0 Mobile Safari/537.36"
+)
 
 
 def get_safe_user_id(key: str) -> str:
@@ -146,6 +152,112 @@ def is_allowed_proxy_host(host: str | None) -> bool:
     if _PL_HOST_RE.fullmatch(normalized):
         return True
     return False
+
+
+def allowed_proxy_url(url: str | None) -> bool:
+    if not url:
+        return False
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return False
+    return is_allowed_proxy_host(parsed.hostname)
+
+
+def next_proxy_url(current_url: str, location: str | None) -> str | None:
+    if not location or not str(location).strip():
+        return None
+    nxt = urljoin(current_url, str(location).strip())
+    if not allowed_proxy_url(nxt):
+        return None
+    return nxt
+
+
+def _incoming_header(incoming, name: str, default: str = "") -> str:
+    if incoming is None:
+        return default
+    getter = getattr(incoming, "get", None)
+    if getter:
+        value = getter(name)
+        if value:
+            return value
+    if isinstance(incoming, dict):
+        wanted = name.lower()
+        for key, value in incoming.items():
+            if str(key).lower() == wanted and value:
+                return value
+    return default
+
+
+def build_proxy_forward_headers(query: dict | None, incoming_headers, include_accept: bool = True) -> dict:
+    headers = {
+        "User-Agent": _incoming_header(incoming_headers, "User-Agent", DEFAULT_PROXY_UA),
+        "Accept-Encoding": "identity",
+    }
+    if include_accept:
+        headers["Accept"] = _incoming_header(
+            incoming_headers, "Accept", "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"
+        )
+        headers["Accept-Language"] = _incoming_header(
+            incoming_headers, "Accept-Language", "ko-KR,ko;q=0.9,en;q=0.8"
+        )
+    referer_q = ""
+    if query:
+        referer_q = (query.get("referer") or [""])[0]
+    referer = (referer_q or _incoming_header(incoming_headers, "Referer") or DEFAULT_REFERER).strip()
+    if referer:
+        headers["Referer"] = referer
+    range_header = _incoming_header(incoming_headers, "Range")
+    if range_header:
+        headers["Range"] = range_header
+    return headers
+
+
+def passthrough_proxy_headers(resp_headers, decoded: bool = False) -> list[tuple[str, str]]:
+    content_type = "text/html"
+    if resp_headers is not None and resp_headers.get("Content-Type"):
+        content_type = resp_headers.get("Content-Type")
+    headers = [("Content-Type", content_type)]
+    # Never attach compressed Content-Length/Content-Range to a decoded body.
+    if decoded:
+        return headers
+    if resp_headers is None:
+        return headers
+    for name in ("Content-Range", "Content-Length", "Content-Encoding"):
+        value = resp_headers.get(name)
+        if value:
+            headers.append((name, value))
+    return headers
+
+
+def fetch_proxied(method: str, url: str, headers: dict, timeout: int, stream: bool = False):
+    import requests
+
+    current = url
+    for _ in range(MAX_PROXY_REDIRECTS + 1):
+        if not allowed_proxy_url(current):
+            return "forbidden", None
+        resp = requests.request(
+            method,
+            current,
+            headers=headers,
+            timeout=timeout,
+            allow_redirects=False,
+            stream=stream,
+        )
+        if resp.status_code not in PROXY_REDIRECT_STATUSES:
+            return "ok", resp
+        location = resp.headers.get("Location")
+        nxt = next_proxy_url(current, location)
+        if nxt is None:
+            if not location:
+                return "ok", resp
+            resp.close()
+            return "forbidden", None
+        if resp.status_code == 303:
+            method = "GET"
+        resp.close()
+        current = nxt
+    return "redirects", None
 
 
 def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
@@ -758,33 +870,27 @@ class SyncHandler(BaseHTTPRequestHandler):
         return parse_sync_schema(self.headers.get(SYNC_SCHEMA_HEADER))
 
     def _proxy_forward_headers(self, query: dict, include_accept: bool = True) -> dict:
-        headers = {
-            "User-Agent": self.headers.get(
-                "User-Agent",
-                "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36",
-            ),
-        }
-        if include_accept:
-            headers["Accept"] = self.headers.get("Accept", "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8")
-            headers["Accept-Language"] = self.headers.get("Accept-Language", "ko-KR,ko;q=0.9,en;q=0.8")
-        referer = (query.get("referer", [""])[0] or self.headers.get("Referer") or DEFAULT_REFERER).strip()
-        if referer:
-            headers["Referer"] = referer
-        range_header = self.headers.get("Range")
-        if range_header:
-            headers["Range"] = range_header
-        return headers
+        return build_proxy_forward_headers(query, self.headers, include_accept=include_accept)
 
     def _send_proxied_headers(self, resp):
-        self.send_header("Content-Type", resp.headers.get("Content-Type", "text/html"))
-        content_range = resp.headers.get("Content-Range")
-        if content_range:
-            self.send_header("Content-Range", content_range)
-        content_length = resp.headers.get("Content-Length")
-        if content_length:
-            self.send_header("Content-Length", content_length)
+        for name, value in passthrough_proxy_headers(resp.headers, decoded=False):
+            self.send_header(name, value)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Connection", "close")
+
+    def _write_proxied_body(self, resp):
+        raw = getattr(resp, "raw", None)
+        if raw is None:
+            body = resp.content if resp.content else b""
+            if body:
+                self.wfile.write(body)
+            return
+        raw.decode_content = False
+        while True:
+            chunk = raw.read(65536)
+            if not chunk:
+                break
+            self.wfile.write(chunk)
 
     def do_HEAD(self):
         raw_path = self.path.split("?")[0].rstrip("/")
@@ -841,19 +947,25 @@ class SyncHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.close_connection = True
                 return
-            hostname = urlparse(target_url).hostname
-            if not is_allowed_proxy_host(hostname):
+            if not allowed_proxy_url(target_url):
                 self.send_response(403)
                 self.end_headers()
                 self.close_connection = True
                 return
             req_headers = self._proxy_forward_headers(query, include_accept=False)
             try:
-                import requests
-                resp = requests.head(target_url, headers=req_headers, timeout=10, allow_redirects=True)
-                self.send_response(resp.status_code)
-                self._send_proxied_headers(resp)
-                self.end_headers()
+                kind, resp = fetch_proxied("HEAD", target_url, req_headers, timeout=10, stream=False)
+                if kind != "ok" or resp is None:
+                    self.send_response(403 if kind == "forbidden" else 502)
+                    self.end_headers()
+                    self.close_connection = True
+                    return
+                try:
+                    self.send_response(resp.status_code)
+                    self._send_proxied_headers(resp)
+                    self.end_headers()
+                finally:
+                    resp.close()
                 self.close_connection = True
                 return
             except Exception:
@@ -893,21 +1005,27 @@ class SyncHandler(BaseHTTPRequestHandler):
             if not target_url or not (target_url.startswith("http://") or target_url.startswith("https://")):
                 self._send_json(400, {"error": "BadRequest", "message": "Missing or invalid 'url' parameter (must start with http:// or https://)"})
                 return
-            hostname = urlparse(target_url).hostname
-            if not is_allowed_proxy_host(hostname):
+            if not allowed_proxy_url(target_url):
                 self._send_json(403, {"error": "Forbidden", "message": "Host not allowed"})
                 return
 
             req_headers = self._proxy_forward_headers(query, include_accept=True)
             try:
                 import requests
-                resp = requests.get(target_url, headers=req_headers, timeout=20, allow_redirects=True, stream=True)
-                self.send_response(resp.status_code)
-                self._send_proxied_headers(resp)
-                self.end_headers()
-                for chunk in resp.iter_content(chunk_size=65536):
-                    if chunk:
-                        self.wfile.write(chunk)
+                kind, resp = fetch_proxied("GET", target_url, req_headers, timeout=20, stream=True)
+                if kind == "forbidden":
+                    self._send_json(403, {"error": "Forbidden", "message": "Host not allowed"})
+                    return
+                if kind != "ok" or resp is None:
+                    self._send_json(502, {"error": "BadGateway", "message": "Proxy request failed"})
+                    return
+                try:
+                    self.send_response(resp.status_code)
+                    self._send_proxied_headers(resp)
+                    self.end_headers()
+                    self._write_proxied_body(resp)
+                finally:
+                    resp.close()
                 self.close_connection = True
                 return
             except requests.exceptions.Timeout:

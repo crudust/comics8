@@ -7,7 +7,9 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(__file__))
 from server import (
+    DEFAULT_REFERER,
     apply_delta_changes,
+    build_proxy_forward_headers,
     collect_delta_changes,
     emit_favorite,
     emit_tombstone,
@@ -17,8 +19,10 @@ from server import (
     init_user_db,
     is_allowed_proxy_host,
     migrate_user_db,
+    next_proxy_url,
     parse_entity_id,
     parse_sync_schema,
+    passthrough_proxy_headers,
 )
 
 
@@ -137,6 +141,21 @@ class MigrateUserDbTest(unittest.TestCase):
         migrate_user_db(conn)
         self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 2)
 
+    def test_init_user_db_rebuilds_legacy_schema(self):
+        conn = create_legacy_user_db()
+        init_user_db(conn, "legacy")
+
+        self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 2)
+        fav_cols = {row[1] for row in conn.execute("PRAGMA table_info(favorites)")}
+        self.assertIn("sourceId", fav_cols)
+        self.assertIn("toonId", fav_cols)
+        self.assertNotIn("id", fav_cols)
+        fav = conn.execute("SELECT sourceId, toonId, title FROM favorites").fetchone()
+        self.assertEqual(fav, ("eleven", "100", "Legacy Fav"))
+        self.assertEqual(conn.execute("SELECT entityId FROM tombstones").fetchone()[0], "eleven:200")
+        pk = {row[5] for row in conn.execute("PRAGMA table_info(favorites)") if row[5]}
+        self.assertEqual(pk, {1, 2})
+
 
 class SchemaFilterTest(unittest.TestCase):
     def test_parse_sync_schema_defaults_to_one(self):
@@ -242,6 +261,62 @@ class ProxyAllowlistTest(unittest.TestCase):
         self.assertTrue(is_allowed_proxy_host("11toon8.com"))
         self.assertTrue(is_allowed_proxy_host("103.204.13.68"))
         self.assertFalse(is_allowed_proxy_host("evil.example.com"))
+
+    def test_redirects_stay_on_allowlist(self):
+        self.assertEqual(
+            next_proxy_url("https://11toon8.com/a", "https://www.pl4050.com/img.jpg"),
+            "https://www.pl4050.com/img.jpg",
+        )
+        self.assertEqual(
+            next_proxy_url("https://11toon8.com/a", "/covers/1.webp"),
+            "https://11toon8.com/covers/1.webp",
+        )
+        self.assertIsNone(next_proxy_url("https://11toon8.com/a", "https://evil.example.com/steal"))
+        self.assertIsNone(next_proxy_url("https://11toon8.com/a", "https://notevilgold-usergeneratedcontent.net/x"))
+
+    def test_forward_range_and_referer_priority(self):
+        query_wins = build_proxy_forward_headers(
+            {"referer": ["https://hitomi.la/"]},
+            {"Referer": "http://ignored.example", "Range": "bytes=0-99"},
+        )
+        self.assertEqual(query_wins["Referer"], "https://hitomi.la/")
+        self.assertEqual(query_wins["Range"], "bytes=0-99")
+        self.assertEqual(query_wins["Accept-Encoding"], "identity")
+
+        header_referer = build_proxy_forward_headers({}, {"Referer": "https://tn.hitomi.la/g/1.html"})
+        self.assertEqual(header_referer["Referer"], "https://tn.hitomi.la/g/1.html")
+        self.assertNotIn("Range", header_referer)
+
+        defaulted = build_proxy_forward_headers({}, {})
+        self.assertEqual(defaulted["Referer"], DEFAULT_REFERER)
+
+    def test_passthrough_skips_length_when_decoded(self):
+        gzip_headers = {
+            "Content-Type": "text/html",
+            "Content-Encoding": "gzip",
+            "Content-Length": "12",
+            "Content-Range": "bytes 0-11/12",
+        }
+        decoded = dict(passthrough_proxy_headers(gzip_headers, decoded=True))
+        self.assertEqual(decoded["Content-Type"], "text/html")
+        self.assertNotIn("Content-Length", decoded)
+        self.assertNotIn("Content-Range", decoded)
+        self.assertNotIn("Content-Encoding", decoded)
+
+        raw = dict(passthrough_proxy_headers(gzip_headers, decoded=False))
+        self.assertEqual(raw["Content-Length"], "12")
+        self.assertEqual(raw["Content-Range"], "bytes 0-11/12")
+        self.assertEqual(raw["Content-Encoding"], "gzip")
+
+    def test_passthrough_206_content_range(self):
+        headers = dict(passthrough_proxy_headers({
+            "Content-Type": "image/jpeg",
+            "Content-Length": "100",
+            "Content-Range": "bytes 0-99/800",
+        }, decoded=False))
+        self.assertEqual(headers["Content-Type"], "image/jpeg")
+        self.assertEqual(headers["Content-Length"], "100")
+        self.assertEqual(headers["Content-Range"], "bytes 0-99/800")
 
 
 class EntityIdTest(unittest.TestCase):
