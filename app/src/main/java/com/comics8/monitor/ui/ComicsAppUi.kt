@@ -111,16 +111,9 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
         }
     }
 
-    if (state.screen == Screen.Reader) {
-        BackHandler { viewModel.closeReader() }
-    } else if (state.screen == Screen.Series) {
-        BackHandler { viewModel.closeSeries() }
-    } else if (state.screen == Screen.History) {
-        BackHandler { viewModel.closeHistory() }
-    } else if (state.screen == Screen.Downloads) {
-        BackHandler { viewModel.closeDownloads() }
-    } else if (state.isSearch) {
-        BackHandler { viewModel.selectCatalog(state.catalog) }
+    val canGoBack = state.screen != Screen.Browse || state.isSearch || state.showPageJump || state.showSyncDialog || state.showUpdateDialog || state.showDownloadOptions
+    BackHandler(enabled = canGoBack) {
+        viewModel.goBack()
     }
 
     ComicsThemeScaffold(isImmersive = isReader) {

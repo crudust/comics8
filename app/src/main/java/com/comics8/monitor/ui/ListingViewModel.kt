@@ -80,6 +80,28 @@ data class ListingUiState(
         get() = (currentEpisodeIndex in 0 until (episodes.size - 1)) || (currentEpisodeIndex == episodes.size - 1 && episodePage < episodeLastPage)
 }
 
+sealed interface AndroidNavEntry {
+    data class Browse(
+        val catalog: Catalog,
+        val page: Int = 1,
+        val searchQuery: String? = null,
+    ) : AndroidNavEntry
+
+    data class Series(
+        val series: ToonItem,
+        val episodePage: Int = 1,
+    ) : AndroidNavEntry
+
+    data class Reader(
+        val series: ToonItem,
+        val episode: EpisodeItem,
+        val episodePage: Int = 1,
+    ) : AndroidNavEntry
+
+    data object History : AndroidNavEntry
+    data object Downloads : AndroidNavEntry
+}
+
 sealed interface Screen {
     data object Browse : Screen
     data object Series : Screen
@@ -134,6 +156,194 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
     private val toonTotalCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
     private val toonLastPageCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
+    private val backStack = mutableListOf<AndroidNavEntry>()
+    private val forwardStack = mutableListOf<AndroidNavEntry>()
+    private var isNavigatingHistory = false
+
+    private fun currentNavEntry(): AndroidNavEntry {
+        val s = _state.value
+        return when (s.screen) {
+            Screen.Reader -> {
+                val series = s.series
+                val ep = s.currentEpisode
+                if (series != null && ep != null) {
+                    AndroidNavEntry.Reader(series, ep, s.episodePage)
+                } else {
+                    AndroidNavEntry.Browse(s.catalog, s.page, s.searchQuery)
+                }
+            }
+            Screen.Series -> {
+                val series = s.series
+                if (series != null) {
+                    AndroidNavEntry.Series(series, s.episodePage)
+                } else {
+                    AndroidNavEntry.Browse(s.catalog, s.page, s.searchQuery)
+                }
+            }
+            Screen.History -> AndroidNavEntry.History
+            Screen.Downloads -> AndroidNavEntry.Downloads
+            Screen.Browse -> AndroidNavEntry.Browse(s.catalog, s.page, s.searchQuery)
+        }
+    }
+
+    private fun pushHistory(newEntry: AndroidNavEntry) {
+        if (isNavigatingHistory) return
+        val current = currentNavEntry()
+        if (current != newEntry) {
+            backStack.add(current)
+            forwardStack.clear()
+            if (backStack.size > 50) backStack.removeAt(0)
+        }
+    }
+
+    private fun restoreNavEntry(entry: AndroidNavEntry) {
+        when (entry) {
+            is AndroidNavEntry.Browse -> {
+                if (entry.searchQuery != null) {
+                    _state.update {
+                        it.copy(
+                            searchQuery = entry.searchQuery,
+                            searchInput = entry.searchQuery,
+                            screen = Screen.Browse,
+                            series = null,
+                            episodes = emptyList(),
+                            currentEpisode = null,
+                        )
+                    }
+                    runSearch(entry.searchQuery, asRefresh = false)
+                } else {
+                    if (_state.value.catalog != entry.catalog) {
+                        selectCatalog(entry.catalog)
+                    } else if (_state.value.page != entry.page) {
+                        loadPage(entry.page, replace = true)
+                    } else {
+                        _state.update {
+                            it.copy(
+                                screen = Screen.Browse,
+                                searchQuery = null,
+                                searchInput = "",
+                                series = null,
+                                currentEpisode = null,
+                            )
+                        }
+                    }
+                }
+            }
+            is AndroidNavEntry.Series -> {
+                _state.update {
+                    it.copy(
+                        screen = Screen.Series,
+                        series = entry.series,
+                        currentEpisode = null,
+                        readerImages = emptyList(),
+                    )
+                }
+                loadEpisodes(entry.series, entry.episodePage)
+            }
+            is AndroidNavEntry.Reader -> {
+                _state.update {
+                    it.copy(
+                        series = entry.series,
+                        episodePage = entry.episodePage,
+                    )
+                }
+                openEpisode(entry.episode)
+            }
+            is AndroidNavEntry.History -> {
+                openHistory()
+            }
+            is AndroidNavEntry.Downloads -> {
+                openDownloads()
+            }
+        }
+    }
+
+    fun goBack(): Boolean {
+        val current = _state.value
+        if (current.showPageJump) {
+            togglePageJump(false)
+            return true
+        }
+        if (current.showSyncDialog) {
+            closeSyncDialog()
+            return true
+        }
+        if (current.showUpdateDialog) {
+            dismissUpdateDialog()
+            return true
+        }
+        if (current.showDownloadOptions) {
+            closeDownloadOptions()
+            return true
+        }
+
+        if (backStack.isNotEmpty()) {
+            val currentEntry = currentNavEntry()
+            val target = backStack.removeAt(backStack.lastIndex)
+            forwardStack.add(currentEntry)
+            if (forwardStack.size > 50) forwardStack.removeAt(0)
+
+            isNavigatingHistory = true
+            try {
+                restoreNavEntry(target)
+            } finally {
+                isNavigatingHistory = false
+            }
+            return true
+        }
+
+        return when (current.screen) {
+            Screen.Reader -> {
+                val currentEntry = currentNavEntry()
+                forwardStack.add(currentEntry)
+                closeReader()
+                true
+            }
+            Screen.Series -> {
+                val currentEntry = currentNavEntry()
+                forwardStack.add(currentEntry)
+                closeSeries()
+                true
+            }
+            Screen.History -> {
+                val currentEntry = currentNavEntry()
+                forwardStack.add(currentEntry)
+                closeHistory()
+                true
+            }
+            Screen.Downloads -> {
+                val currentEntry = currentNavEntry()
+                forwardStack.add(currentEntry)
+                closeDownloads()
+                true
+            }
+            Screen.Browse -> {
+                if (current.isSearch) {
+                    selectCatalog(current.catalog)
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+    }
+
+    fun goForward(): Boolean {
+        if (forwardStack.isEmpty()) return false
+        val currentEntry = currentNavEntry()
+        val target = forwardStack.removeAt(forwardStack.lastIndex)
+        backStack.add(currentEntry)
+        if (backStack.size > 50) backStack.removeAt(0)
+
+        isNavigatingHistory = true
+        try {
+            restoreNavEntry(target)
+        } finally {
+            isNavigatingHistory = false
+        }
+        return true
+    }
 
     init {
         _state.update {
@@ -257,6 +467,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             _state.value.screen == Screen.Browse &&
             !_state.value.isSearch
         ) return
+        pushHistory(AndroidNavEntry.Browse(catalog, 1))
         readerJob?.cancel()
         episodeJob?.cancel()
         val cached = catalogCache[catalog]
@@ -305,6 +516,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     fun submitSearch() {
         val query = _state.value.searchInput.trim()
         if (query.isEmpty()) return
+        pushHistory(AndroidNavEntry.Browse(_state.value.catalog, 1, query))
         readerJob?.cancel()
         episodeJob?.cancel()
         _state.update {
@@ -384,6 +596,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun openSeries(item: ToonItem) {
+        pushHistory(AndroidNavEntry.Series(item, 1))
         episodeJob?.cancel()
         val targetMode = if (currentScreenWidthDp >= 600) ViewMode.DUAL else singleViewPreference
         _state.update {
@@ -536,6 +749,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun openHistory() {
+        pushHistory(AndroidNavEntry.History)
         readerJob?.cancel()
         episodeJob?.cancel()
         _state.update {
@@ -578,6 +792,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun openDownloads() {
+        pushHistory(AndroidNavEntry.Downloads)
         readerJob?.cancel()
         episodeJob?.cancel()
         _state.update {
@@ -871,6 +1086,9 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     fun openEpisode(episode: EpisodeItem) {
         val current = _state.value
         val series = current.series
+        if (series != null) {
+            pushHistory(AndroidNavEntry.Reader(series, episode, current.episodePage))
+        }
         val nowMs = System.currentTimeMillis()
         val episodes = current.episodes
         val idx = episodes.indexOfFirst { it.wrId == episode.wrId }

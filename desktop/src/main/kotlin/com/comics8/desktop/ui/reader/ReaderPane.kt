@@ -59,9 +59,13 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.utf16CodePoint
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.layout.ContentScale
@@ -163,12 +167,31 @@ fun ReaderPane(
             .focusable()
             .onKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown) {
-                    when (event.key) {
-                        Key.Escape -> {
-                            viewModel.closeReader()
+                    val key = event.key
+                    val isCmd = event.isMetaPressed
+                    val isAlt = event.isAltPressed
+                    val isCmdOrAlt = isCmd || isAlt
+                    val isBack =
+                        (isCmd && (key == Key.DirectionLeft || key == Key.LeftBracket || event.utf16CodePoint == '['.code)) ||
+                        (isAlt && (key == Key.DirectionLeft || key == Key.LeftBracket || event.utf16CodePoint == '['.code))
+                    val isForward =
+                        (isCmd && (key == Key.DirectionRight || key == Key.RightBracket || event.utf16CodePoint == ']'.code)) ||
+                        (isAlt && (key == Key.DirectionRight || key == Key.RightBracket || event.utf16CodePoint == ']'.code))
+
+                    when {
+                        key == Key.Escape -> {
+                            viewModel.goBack()
                             true
                         }
-                        Key.F -> {
+                        isBack -> {
+                            viewModel.goBack()
+                            true
+                        }
+                        isForward -> {
+                            viewModel.goForward()
+                            true
+                        }
+                        key == Key.F && !isCmdOrAlt -> {
                             viewModel.toggleFullscreen()
                             true
                         }
@@ -390,6 +413,9 @@ private fun ReaderSingleView(
             .then(wheelModifier)
             .onKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown) {
+                    if (event.isMetaPressed || event.isAltPressed || event.isCtrlPressed) {
+                        return@onKeyEvent false
+                    }
                     when (event.key) {
                         Key.DirectionRight -> {
                             if (isR2L) onRetreat() else onAdvance()
@@ -671,6 +697,9 @@ private fun ReaderDualView(
             .then(wheelModifier)
             .onKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown) {
+                    if (event.isMetaPressed || event.isAltPressed || event.isCtrlPressed) {
+                        return@onKeyEvent false
+                    }
                     when (event.key) {
                         Key.DirectionRight -> {
                             if (isR2L) onRetreat() else onAdvance()

@@ -1,6 +1,5 @@
 package com.comics8.desktop
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,16 +12,22 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.utf16CodePoint
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPlacement
-import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import com.comics8.core.network.ToonClient
 import com.comics8.desktop.data.DesktopDatabase
 import com.comics8.desktop.data.DesktopSyncManager
 import com.comics8.desktop.data.DesktopToonRepository
-import com.comics8.core.network.ToonClient
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
 import com.comics8.desktop.ui.Screen
@@ -77,6 +82,35 @@ fun main() {
             onCloseRequest = ::exitApplication,
             title = "Comics8",
             state = windowState,
+            onKeyEvent = { event ->
+                if (event.type == KeyEventType.KeyDown) {
+                    val key = event.key
+                    val isCmd = event.isMetaPressed
+                    val isAlt = event.isAltPressed
+                    val isBack =
+                        (isCmd && (key == Key.DirectionLeft || key == Key.LeftBracket || event.utf16CodePoint == '['.code)) ||
+                        (isAlt && (key == Key.DirectionLeft || key == Key.LeftBracket || event.utf16CodePoint == '['.code))
+                    val isForward =
+                        (isCmd && (key == Key.DirectionRight || key == Key.RightBracket || event.utf16CodePoint == ']'.code)) ||
+                        (isAlt && (key == Key.DirectionRight || key == Key.RightBracket || event.utf16CodePoint == ']'.code))
+
+                    when {
+                        isBack -> {
+                            viewModel.goBack()
+                            true
+                        }
+                        isForward -> {
+                            viewModel.goForward()
+                            true
+                        }
+                        key == Key.Escape -> {
+                            viewModel.goBack()
+                            true
+                        }
+                        else -> false
+                    }
+                } else false
+            },
         ) {
             MaterialTheme(colorScheme = DarkColors) {
                 Surface(
