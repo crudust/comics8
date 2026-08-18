@@ -26,7 +26,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -35,9 +35,9 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.comics8.monitor.data.Catalog
-import com.comics8.monitor.data.ViewMode
+import com.comics8.core.model.BrowseTab
 import com.comics8.monitor.ui.browse.ListingGrid
+import com.comics8.monitor.ui.components.ArtistPickDialog
 import com.comics8.monitor.ui.components.ErrorPane
 import com.comics8.monitor.ui.components.LoadingPane
 import com.comics8.monitor.ui.components.PageBar
@@ -62,25 +62,7 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
     val context = LocalContext.current
     val config = LocalConfiguration.current
 
-    val catalogs = remember { Catalog.entries.toTypedArray() }
-    val browsePagerState = rememberPagerState(
-        initialPage = catalogs.indexOf(state.catalog).coerceAtLeast(0),
-        pageCount = { catalogs.size },
-    )
-
-    LaunchedEffect(state.catalog) {
-        val targetIndex = catalogs.indexOf(state.catalog)
-        if (targetIndex >= 0 && browsePagerState.currentPage != targetIndex) {
-            browsePagerState.animateScrollToPage(targetIndex)
-        }
-    }
-
-    LaunchedEffect(browsePagerState.currentPage) {
-        val targetCatalog = catalogs[browsePagerState.currentPage]
-        if (targetCatalog != state.catalog && !state.isSearch && state.screen == Screen.Browse) {
-            viewModel.selectCatalog(targetCatalog)
-        }
-    }
+    val catalogs = state.browseTabs
 
     LaunchedEffect(config.screenWidthDp) {
         viewModel.updateScreenWidthDp(config.screenWidthDp)
@@ -111,7 +93,7 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
         }
     }
 
-    val canGoBack = state.screen != Screen.Browse || state.isSearch || state.showPageJump || state.showSyncDialog || state.showUpdateDialog || state.showDownloadOptions
+    val canGoBack = state.screen != Screen.Browse || state.isSearch || state.showPageJump || state.showSyncDialog || state.showUpdateDialog || state.showDownloadOptions || state.artistPick != null
     BackHandler(enabled = canGoBack) {
         viewModel.goBack()
     }
@@ -149,62 +131,28 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                                 state.items.isEmpty() -> ErrorPane(
                                     message = "\"${state.searchQuery}\" 검색 결과가 없습니다.",
                                     actionLabel = "목록으로",
-                                    onRetry = { viewModel.selectCatalog(state.catalog) },
+                                    onRetry = { viewModel.selectTab(state.tab) },
                                 )
                                 else -> ListingGrid(
                                     items = state.items,
                                     scrollToTopTrigger = state.scrollToTopTrigger,
-                                    onOpen = viewModel::openSeries,
+                                    onOpen = viewModel::onListingOpen,
                                     onToggleFavorite = viewModel::toggleFavorite,
+                                    showSourceChip = false,
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             }
                         }
                         else -> {
-                            HorizontalPager(
-                                state = browsePagerState,
-                                modifier = Modifier.fillMaxSize(),
-                            ) { pageIndex ->
-                                val pageCatalog = catalogs[pageIndex]
-                                val isCurrent = pageCatalog == state.catalog
-                                when {
-                                    isCurrent && state.loading && state.items.isEmpty() -> LoadingPane()
-                                    isCurrent && state.error != null && state.items.isEmpty() -> ErrorPane(
-                                        message = state.error!!,
-                                        onRetry = { viewModel.refresh(force = true) },
+                            if (catalogs.isEmpty()) {
+                                LoadingPane()
+                            } else {
+                                key(state.activeSourceId) {
+                                    BrowseTabsPager(
+                                        catalogs = catalogs,
+                                        state = state,
+                                        viewModel = viewModel,
                                     )
-                                    isCurrent && pageCatalog == Catalog.FAVORITE && state.items.isEmpty() -> ErrorPane(
-                                        message = "즐겨찾기한 작품이 없습니다.",
-                                        actionLabel = "최신으로",
-                                        onRetry = { viewModel.selectCatalog(Catalog.LATEST) },
-                                    )
-                                    isCurrent -> {
-                                        Column(Modifier.fillMaxSize()) {
-                                            ListingGrid(
-                                                items = state.items,
-                                                scrollToTopTrigger = state.scrollToTopTrigger,
-                                                onOpen = viewModel::openSeries,
-                                                onToggleFavorite = viewModel::toggleFavorite,
-                                                modifier = Modifier.weight(1f).fillMaxWidth(),
-                                            )
-                                            if (pageCatalog.paginated && state.lastPage > 1) {
-                                                PageBar(
-                                                    page = state.page,
-                                                    lastPage = state.lastPage,
-                                                    onPrev = viewModel::prevPage,
-                                                    onNext = viewModel::nextPage,
-                                                    onJump = { viewModel.togglePageJump(true) },
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-                                                        .padding(horizontal = 16.dp, vertical = 4.dp),
-                                                )
-                                            }
-                                        }
-                                    }
-                                    else -> {
-                                        LoadingPane()
-                                    }
                                 }
                             }
                         }
@@ -248,6 +196,94 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                 onDismiss = viewModel::dismissUpdateDialog,
                 onConfirmUpdate = viewModel::startUpdate,
             )
+        }
+        val artistPick = state.artistPick
+        if (artistPick != null) {
+            ArtistPickDialog(
+                artists = artistPick.item.artistChoices,
+                onPick = viewModel::pickArtist,
+                onDismiss = viewModel::dismissArtistPick,
+            )
+        }
+    }
+}
+
+@Composable
+private fun BrowseTabsPager(
+    catalogs: List<BrowseTab>,
+    state: ListingUiState,
+    viewModel: ListingViewModel,
+) {
+    val browsePagerState = rememberPagerState(
+        initialPage = catalogs.indexOf(state.tab).coerceAtLeast(0),
+        pageCount = { catalogs.size },
+    )
+
+    LaunchedEffect(state.tab, catalogs) {
+        val targetIndex = catalogs.indexOf(state.tab)
+        if (targetIndex >= 0 && browsePagerState.currentPage != targetIndex) {
+            browsePagerState.animateScrollToPage(targetIndex)
+        }
+    }
+
+    LaunchedEffect(browsePagerState.currentPage, catalogs) {
+        val targetCatalog = catalogs.getOrNull(browsePagerState.currentPage) ?: return@LaunchedEffect
+        if (targetCatalog != state.tab && !state.isSearch && state.screen == Screen.Browse) {
+            viewModel.selectTab(targetCatalog)
+        }
+    }
+
+    HorizontalPager(
+        state = browsePagerState,
+        modifier = Modifier.fillMaxSize(),
+    ) { pageIndex ->
+        val pageCatalog = catalogs.getOrNull(pageIndex)
+        if (pageCatalog == null) {
+            LoadingPane()
+            return@HorizontalPager
+        }
+        val isCurrent = pageCatalog == state.tab
+        when {
+            isCurrent && state.loading && state.items.isEmpty() -> LoadingPane()
+            isCurrent && state.error != null && state.items.isEmpty() -> ErrorPane(
+                message = state.error!!,
+                onRetry = { viewModel.refresh(force = true) },
+            )
+            isCurrent && pageCatalog is BrowseTab.Favorite && state.items.isEmpty() -> ErrorPane(
+                message = "즐겨찾기한 작품이 없습니다.",
+                actionLabel = "최신으로",
+                onRetry = {
+                    viewModel.selectTab(
+                        state.browseTabs.firstOrNull { it is BrowseTab.Remote } ?: state.tab,
+                    )
+                },
+            )
+            isCurrent -> {
+                Column(Modifier.fillMaxSize()) {
+                    ListingGrid(
+                        items = state.items,
+                        scrollToTopTrigger = state.scrollToTopTrigger,
+                        onOpen = viewModel::onListingOpen,
+                        onToggleFavorite = viewModel::toggleFavorite,
+                        showSourceChip = pageCatalog is BrowseTab.Favorite,
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                    )
+                    if (pageCatalog.paginated && state.lastPage > 1) {
+                        PageBar(
+                            page = state.page,
+                            lastPage = state.lastPage,
+                            onPrev = viewModel::prevPage,
+                            onNext = viewModel::nextPage,
+                            onJump = { viewModel.togglePageJump(true) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                        )
+                    }
+                }
+            }
+            else -> LoadingPane()
         }
     }
 }

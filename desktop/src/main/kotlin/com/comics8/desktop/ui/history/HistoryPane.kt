@@ -42,6 +42,7 @@ import com.comics8.desktop.ui.DesktopViewModel
 import com.comics8.desktop.ui.components.Badge
 import com.comics8.desktop.ui.components.ErrorPane
 import com.comics8.desktop.ui.components.LoadingPane
+import com.comics8.desktop.ui.components.sourceChipLabel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -70,13 +71,13 @@ fun HistoryPane(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = modifier.fillMaxSize(),
             ) {
-                items(state.historyItems, key = { it.toonId }) { item ->
+                items(state.historyItems, key = { it.workId().storageKey() }) { item ->
                     HistoryItemCard(
                         item = item,
                         onOpenSeries = { viewModel.openSeriesFromHistory(item) },
                         onReopen = { viewModel.reopenHistoryEpisode(item) },
                         onContinue = { viewModel.continueHistoryEpisode(item) },
-                        onDelete = { viewModel.deleteHistory(item.toonId) },
+                        onDelete = { viewModel.deleteHistory(item.workId()) },
                     )
                 }
             }
@@ -115,6 +116,8 @@ fun HistoryItemCard(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
                 )
+                Spacer(Modifier.width(6.dp))
+                Badge(sourceChipLabel(item.sourceId))
                 if (item.hasNew) {
                     Spacer(Modifier.width(6.dp))
                     Badge("NEW")

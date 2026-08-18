@@ -1,18 +1,47 @@
+from __future__ import annotations
+
 import os
 import json
 import time
 import sqlite3
 import hashlib
 import re
-import requests
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
 
 DATA_DIR = os.environ.get("DATA_DIR", os.path.expanduser("~/comics8-sync/data"))
 DOWNLOADS_DIR = os.path.join(DATA_DIR, "downloads")
 VERSION_FILE = os.path.join(DATA_DIR, "version.json")
 os.makedirs(DOWNLOADS_DIR, exist_ok=True)
 PORT = int(os.environ.get("PORT", "8905"))
+
+DEFAULT_SOURCE_ID = "eleven"
+SYNC_SCHEMA_CURRENT = 2
+SYNC_SCHEMA_HEADER = "X-Comics8-Sync-Schema"
+DEFAULT_REFERER = "http://103.204.13.68:8904"
+CORS_ALLOW_HEADERS = (
+    "Authorization, Content-Type, X-Sync-Key, X-Comics8-Sync-Schema, Range, Referer"
+)
+_EXACT_PROXY_HOSTS = {
+    "hitomi.la",
+    "tn.hitomi.la",
+    "11toon.com",
+    "11toon7.com",
+    "11toon8.com",
+    "www.11toon.com",
+    "www.11toon7.com",
+    "www.11toon8.com",
+    "103.204.13.68",
+}
+_PL_HOST_RE = re.compile(r"(www\.)?pl\d{4}\.com\Z")
+_TOON_HOST_RE = re.compile(r"(www\.)?11toon\d*\.com\Z")
+PROXY_REDIRECT_STATUSES = {301, 302, 303, 307, 308}
+MAX_PROXY_REDIRECTS = 5
+DEFAULT_PROXY_UA = (
+    "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/126.0.0.0 Mobile Safari/537.36"
+)
+
 
 def get_safe_user_id(key: str) -> str:
     cleaned = re.sub(r'[^a-zA-Z0-9_\-]', '', key.strip())
@@ -24,25 +53,383 @@ def get_user_db_path(user_id: str) -> str:
     os.makedirs(DATA_DIR, exist_ok=True)
     return os.path.join(DATA_DIR, f"user_{user_id}.db")
 
+
+def parse_sync_schema(value: str | None) -> int:
+    if value is None or str(value).strip() == "":
+        return 1
+    try:
+        return int(str(value).strip())
+    except ValueError:
+        return 1
+
+
+def parse_entity_id(entity_id: str | None) -> tuple[str, str]:
+    raw = (entity_id or "").strip()
+    if ":" in raw:
+        source, local = raw.split(":", 1)
+        if source and local:
+            return source, local
+    return DEFAULT_SOURCE_ID, raw
+
+
+def row_source_id(row: dict | None) -> str:
+    if not row:
+        return DEFAULT_SOURCE_ID
+    return (row.get("sourceId") or DEFAULT_SOURCE_ID).strip() or DEFAULT_SOURCE_ID
+
+
+def accept_inbound_row(row: dict, schema: int) -> bool:
+    return schema >= 2 or row_source_id(row) == DEFAULT_SOURCE_ID
+
+
+def favorite_local_id(row: dict) -> str | None:
+    value = row.get("id") or row.get("toonId")
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def emit_favorite(row: dict, schema: int) -> dict | None:
+    source_id = row_source_id(row)
+    if schema < 2 and source_id != DEFAULT_SOURCE_ID:
+        return None
+    toon_id = favorite_local_id(row)
+    out = {
+        "id": toon_id,
+        "title": row.get("title", ""),
+        "thumbUrl": row.get("thumbUrl", ""),
+        "href": row.get("href", ""),
+        "genre": row.get("genre", ""),
+        "updatedAt": row.get("updatedAt"),
+        "savedAt": row.get("savedAt"),
+    }
+    if schema >= 2:
+        out["sourceId"] = source_id
+    return out
+
+
+def emit_work_row(row: dict, schema: int) -> dict | None:
+    source_id = row_source_id(row)
+    if schema < 2 and source_id != DEFAULT_SOURCE_ID:
+        return None
+    out = dict(row)
+    if schema < 2:
+        out.pop("sourceId", None)
+    else:
+        out["sourceId"] = source_id
+    if "hasNew" in out:
+        out["hasNew"] = bool(out.get("hasNew"))
+    return out
+
+
+def emit_tombstone(row: dict, schema: int) -> dict | None:
+    source_id, local_id = parse_entity_id(row.get("entityId"))
+    if schema < 2 and source_id != DEFAULT_SOURCE_ID:
+        return None
+    entity_id = local_id if schema < 2 else f"{source_id}:{local_id}"
+    return {
+        "entityType": row.get("entityType"),
+        "entityId": entity_id,
+        "deletedAt": row.get("deletedAt"),
+    }
+
+
+def is_allowed_proxy_host(host: str | None) -> bool:
+    if not host:
+        return False
+    normalized = host.lower().strip().strip(".")
+    if not normalized:
+        return False
+    if normalized in _EXACT_PROXY_HOSTS:
+        return True
+    if normalized.endswith(".gold-usergeneratedcontent.net"):
+        return True
+    if normalized == "hitomi.la" or normalized.endswith(".hitomi.la"):
+        return True
+    if _TOON_HOST_RE.fullmatch(normalized):
+        return True
+    if _PL_HOST_RE.fullmatch(normalized):
+        return True
+    return False
+
+
+def allowed_proxy_url(url: str | None) -> bool:
+    if not url:
+        return False
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return False
+    return is_allowed_proxy_host(parsed.hostname)
+
+
+def next_proxy_url(current_url: str, location: str | None) -> str | None:
+    if not location or not str(location).strip():
+        return None
+    nxt = urljoin(current_url, str(location).strip())
+    if not allowed_proxy_url(nxt):
+        return None
+    return nxt
+
+
+def _incoming_header(incoming, name: str, default: str = "") -> str:
+    if incoming is None:
+        return default
+    getter = getattr(incoming, "get", None)
+    if getter:
+        value = getter(name)
+        if value:
+            return value
+    if isinstance(incoming, dict):
+        wanted = name.lower()
+        for key, value in incoming.items():
+            if str(key).lower() == wanted and value:
+                return value
+    return default
+
+
+def build_proxy_forward_headers(query: dict | None, incoming_headers, include_accept: bool = True) -> dict:
+    headers = {
+        "User-Agent": _incoming_header(incoming_headers, "User-Agent", DEFAULT_PROXY_UA),
+        "Accept-Encoding": "identity",
+    }
+    if include_accept:
+        headers["Accept"] = _incoming_header(
+            incoming_headers, "Accept", "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"
+        )
+        headers["Accept-Language"] = _incoming_header(
+            incoming_headers, "Accept-Language", "ko-KR,ko;q=0.9,en;q=0.8"
+        )
+    referer_q = ""
+    if query:
+        referer_q = (query.get("referer") or [""])[0]
+    referer = (referer_q or _incoming_header(incoming_headers, "Referer") or DEFAULT_REFERER).strip()
+    if referer:
+        headers["Referer"] = referer
+    range_header = _incoming_header(incoming_headers, "Range")
+    if range_header:
+        headers["Range"] = range_header
+    return headers
+
+
+def passthrough_proxy_headers(resp_headers, decoded: bool = False) -> list[tuple[str, str]]:
+    content_type = "text/html"
+    if resp_headers is not None and resp_headers.get("Content-Type"):
+        content_type = resp_headers.get("Content-Type")
+    headers = [("Content-Type", content_type)]
+    # Never attach compressed Content-Length/Content-Range to a decoded body.
+    if decoded:
+        return headers
+    if resp_headers is None:
+        return headers
+    for name in ("Content-Range", "Content-Length", "Content-Encoding"):
+        value = resp_headers.get(name)
+        if value:
+            headers.append((name, value))
+    return headers
+
+
+def fetch_proxied(method: str, url: str, headers: dict, timeout: int, stream: bool = False):
+    import requests
+
+    current = url
+    for _ in range(MAX_PROXY_REDIRECTS + 1):
+        if not allowed_proxy_url(current):
+            return "forbidden", None
+        resp = requests.request(
+            method,
+            current,
+            headers=headers,
+            timeout=timeout,
+            allow_redirects=False,
+            stream=stream,
+        )
+        if resp.status_code not in PROXY_REDIRECT_STATUSES:
+            return "ok", resp
+        location = resp.headers.get("Location")
+        nxt = next_proxy_url(current, location)
+        if nxt is None:
+            if not location:
+                return "ok", resp
+            resp.close()
+            return "forbidden", None
+        if resp.status_code == 303:
+            method = "GET"
+        resp.close()
+        current = nxt
+    return "redirects", None
+
+
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _ensure_user_indexes(conn: sqlite3.Connection):
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_fav_sync ON favorites(syncUpdatedAt);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_hist_sync ON history(syncUpdatedAt);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ep_sync ON read_episodes(syncUpdatedAt);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_set_sync ON reader_settings(syncUpdatedAt);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_tomb_deleted ON tombstones(deletedAt);")
+
+
+def _rebuild_user_tables_v2(conn: sqlite3.Connection):
+    conn.execute("DROP TABLE IF EXISTS favorites_new")
+    conn.execute("""
+    CREATE TABLE favorites_new (
+        sourceId TEXT NOT NULL,
+        toonId TEXT NOT NULL,
+        title TEXT,
+        thumbUrl TEXT,
+        href TEXT,
+        genre TEXT,
+        updatedAt TEXT,
+        savedAt INTEGER,
+        syncUpdatedAt INTEGER,
+        PRIMARY KEY (sourceId, toonId)
+    );
+    """)
+    conn.execute("""
+    INSERT INTO favorites_new (sourceId, toonId, title, thumbUrl, href, genre, updatedAt, savedAt, syncUpdatedAt)
+    SELECT 'eleven', id, title, thumbUrl, href, genre, updatedAt, savedAt, syncUpdatedAt FROM favorites
+    """)
+    conn.execute("DROP TABLE favorites")
+    conn.execute("ALTER TABLE favorites_new RENAME TO favorites")
+
+    conn.execute("DROP TABLE IF EXISTS history_new")
+    conn.execute("""
+    CREATE TABLE history_new (
+        sourceId TEXT NOT NULL,
+        toonId TEXT NOT NULL,
+        toonTitle TEXT,
+        toonThumbUrl TEXT,
+        toonHref TEXT,
+        lastWrId TEXT,
+        lastEpisodeTitle TEXT,
+        lastEpisodeHref TEXT,
+        lastReadOrder INTEGER,
+        totalEpisodes INTEGER,
+        lastReadAt INTEGER,
+        nextWrId TEXT,
+        nextEpisodeTitle TEXT,
+        nextEpisodeHref TEXT,
+        hasNew INTEGER DEFAULT 0,
+        syncUpdatedAt INTEGER,
+        PRIMARY KEY (sourceId, toonId)
+    );
+    """)
+    conn.execute("""
+    INSERT INTO history_new (
+        sourceId, toonId, toonTitle, toonThumbUrl, toonHref, lastWrId, lastEpisodeTitle, lastEpisodeHref,
+        lastReadOrder, totalEpisodes, lastReadAt, nextWrId, nextEpisodeTitle, nextEpisodeHref, hasNew, syncUpdatedAt
+    )
+    SELECT 'eleven', toonId, toonTitle, toonThumbUrl, toonHref, lastWrId, lastEpisodeTitle, lastEpisodeHref,
+           lastReadOrder, totalEpisodes, lastReadAt, nextWrId, nextEpisodeTitle, nextEpisodeHref, hasNew, syncUpdatedAt
+    FROM history
+    """)
+    conn.execute("DROP TABLE history")
+    conn.execute("ALTER TABLE history_new RENAME TO history")
+
+    conn.execute("DROP TABLE IF EXISTS read_episodes_new")
+    conn.execute("""
+    CREATE TABLE read_episodes_new (
+        sourceId TEXT NOT NULL,
+        toonId TEXT NOT NULL,
+        wrId TEXT NOT NULL,
+        readAt INTEGER,
+        lastPage INTEGER DEFAULT 0,
+        syncUpdatedAt INTEGER,
+        PRIMARY KEY (sourceId, toonId, wrId)
+    );
+    """)
+    conn.execute("""
+    INSERT INTO read_episodes_new (sourceId, toonId, wrId, readAt, lastPage, syncUpdatedAt)
+    SELECT 'eleven', toonId, wrId, readAt, lastPage, syncUpdatedAt FROM read_episodes
+    """)
+    conn.execute("DROP TABLE read_episodes")
+    conn.execute("ALTER TABLE read_episodes_new RENAME TO read_episodes")
+
+    conn.execute("DROP TABLE IF EXISTS reader_settings_new")
+    conn.execute("""
+    CREATE TABLE reader_settings_new (
+        sourceId TEXT NOT NULL,
+        toonId TEXT NOT NULL,
+        viewMode TEXT,
+        readDirection TEXT,
+        updatedAt INTEGER,
+        syncUpdatedAt INTEGER,
+        PRIMARY KEY (sourceId, toonId)
+    );
+    """)
+    conn.execute("""
+    INSERT INTO reader_settings_new (sourceId, toonId, viewMode, readDirection, updatedAt, syncUpdatedAt)
+    SELECT 'eleven', toonId, viewMode, readDirection, updatedAt, syncUpdatedAt FROM reader_settings
+    """)
+    conn.execute("DROP TABLE reader_settings")
+    conn.execute("ALTER TABLE reader_settings_new RENAME TO reader_settings")
+
+
+def _prefix_tombstone_entity_ids(conn: sqlite3.Connection):
+    rows = conn.execute("SELECT entityType, entityId, deletedAt FROM tombstones").fetchall()
+    for entity_type, entity_id, deleted_at in rows:
+        if not entity_id or ":" in entity_id:
+            continue
+        prefixed = f"{DEFAULT_SOURCE_ID}:{entity_id}"
+        existing = conn.execute(
+            "SELECT deletedAt FROM tombstones WHERE entityType = ? AND entityId = ?",
+            (entity_type, prefixed),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE tombstones SET deletedAt = MAX(deletedAt, ?) WHERE entityType = ? AND entityId = ?",
+                (deleted_at, entity_type, prefixed),
+            )
+            conn.execute(
+                "DELETE FROM tombstones WHERE entityType = ? AND entityId = ?",
+                (entity_type, entity_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE tombstones SET entityId = ? WHERE entityType = ? AND entityId = ?",
+                (prefixed, entity_type, entity_id),
+            )
+
+
+def migrate_user_db(conn: sqlite3.Connection):
+    user_version = conn.execute("PRAGMA user_version").fetchone()[0]
+    fav_cols = _table_columns(conn, "favorites")
+    if not fav_cols:
+        return
+    if user_version != 0 and "sourceId" in fav_cols:
+        return
+    with conn:
+        if "sourceId" not in fav_cols:
+            _rebuild_user_tables_v2(conn)
+        _prefix_tombstone_entity_ids(conn)
+        _ensure_user_indexes(conn)
+        conn.execute("PRAGMA user_version = 2")
+
+
 def init_user_db(conn: sqlite3.Connection, user_id: str):
     with conn:
         conn.execute("""
         CREATE TABLE IF NOT EXISTS favorites (
-            id TEXT PRIMARY KEY,
+            sourceId TEXT NOT NULL,
+            toonId TEXT NOT NULL,
             title TEXT,
             thumbUrl TEXT,
             href TEXT,
             genre TEXT,
             updatedAt TEXT,
             savedAt INTEGER,
-            syncUpdatedAt INTEGER
+            syncUpdatedAt INTEGER,
+            PRIMARY KEY (sourceId, toonId)
         );
         """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_fav_sync ON favorites(syncUpdatedAt);")
 
         conn.execute("""
         CREATE TABLE IF NOT EXISTS history (
-            toonId TEXT PRIMARY KEY,
+            sourceId TEXT NOT NULL,
+            toonId TEXT NOT NULL,
             toonTitle TEXT,
             toonThumbUrl TEXT,
             toonHref TEXT,
@@ -56,33 +443,34 @@ def init_user_db(conn: sqlite3.Connection, user_id: str):
             nextEpisodeTitle TEXT,
             nextEpisodeHref TEXT,
             hasNew INTEGER DEFAULT 0,
-            syncUpdatedAt INTEGER
+            syncUpdatedAt INTEGER,
+            PRIMARY KEY (sourceId, toonId)
         );
         """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_hist_sync ON history(syncUpdatedAt);")
 
         conn.execute("""
         CREATE TABLE IF NOT EXISTS read_episodes (
-            toonId TEXT,
-            wrId TEXT,
+            sourceId TEXT NOT NULL,
+            toonId TEXT NOT NULL,
+            wrId TEXT NOT NULL,
             readAt INTEGER,
             lastPage INTEGER DEFAULT 0,
             syncUpdatedAt INTEGER,
-            PRIMARY KEY (toonId, wrId)
+            PRIMARY KEY (sourceId, toonId, wrId)
         );
         """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_ep_sync ON read_episodes(syncUpdatedAt);")
 
         conn.execute("""
         CREATE TABLE IF NOT EXISTS reader_settings (
-            toonId TEXT PRIMARY KEY,
+            sourceId TEXT NOT NULL,
+            toonId TEXT NOT NULL,
             viewMode TEXT,
             readDirection TEXT,
             updatedAt INTEGER,
-            syncUpdatedAt INTEGER
+            syncUpdatedAt INTEGER,
+            PRIMARY KEY (sourceId, toonId)
         );
         """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_set_sync ON reader_settings(syncUpdatedAt);")
 
         conn.execute("""
         CREATE TABLE IF NOT EXISTS tombstones (
@@ -92,7 +480,9 @@ def init_user_db(conn: sqlite3.Connection, user_id: str):
             PRIMARY KEY (entityType, entityId)
         );
         """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_tomb_deleted ON tombstones(deletedAt);")
+        _ensure_user_indexes(conn)
+
+    migrate_user_db(conn)
 
     # Migrate from existing JSON if DB is empty
     legacy_json = os.path.join(DATA_DIR, f"user_{user_id}.json")
@@ -106,19 +496,26 @@ def init_user_db(conn: sqlite3.Connection, user_id: str):
             try:
                 with open(legacy_json, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                import_full_snapshot(conn, data, now_ms=int(time.time() * 1000))
+                import_full_snapshot(conn, data, now_ms=int(time.time() * 1000), schema=1)
             except Exception as e:
                 print(f"Error migrating legacy JSON for {user_id}: {e}")
 
-def import_full_snapshot(conn: sqlite3.Connection, data: dict, now_ms: int):
+
+def import_full_snapshot(conn: sqlite3.Connection, data: dict, now_ms: int, schema: int = 2):
     with conn:
         favs = data.get("favorites", [])
         for f in favs:
+            if not accept_inbound_row(f, schema):
+                continue
+            source_id = row_source_id(f)
+            f_id = favorite_local_id(f)
+            if not f_id:
+                continue
             saved_at = f.get("savedAt") or now_ms
             conn.execute("""
-            INSERT INTO favorites (id, title, thumbUrl, href, genre, updatedAt, savedAt, syncUpdatedAt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
+            INSERT INTO favorites (sourceId, toonId, title, thumbUrl, href, genre, updatedAt, savedAt, syncUpdatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(sourceId, toonId) DO UPDATE SET
                 title = excluded.title,
                 thumbUrl = excluded.thumbUrl,
                 href = excluded.href,
@@ -126,17 +523,23 @@ def import_full_snapshot(conn: sqlite3.Connection, data: dict, now_ms: int):
                 updatedAt = excluded.updatedAt,
                 savedAt = excluded.savedAt,
                 syncUpdatedAt = excluded.syncUpdatedAt
-            """, (f.get("id"), f.get("title", ""), f.get("thumbUrl", ""), f.get("href", ""),
+            """, (source_id, f_id, f.get("title", ""), f.get("thumbUrl", ""), f.get("href", ""),
                   f.get("genre", ""), f.get("updatedAt"), saved_at, now_ms))
 
         hist = data.get("history", [])
         for h in hist:
+            if not accept_inbound_row(h, schema):
+                continue
+            source_id = row_source_id(h)
+            toon_id = h.get("toonId")
+            if not toon_id:
+                continue
             last_read_at = h.get("lastReadAt") or now_ms
             conn.execute("""
-            INSERT INTO history (toonId, toonTitle, toonThumbUrl, toonHref, lastWrId, lastEpisodeTitle, lastEpisodeHref,
+            INSERT INTO history (sourceId, toonId, toonTitle, toonThumbUrl, toonHref, lastWrId, lastEpisodeTitle, lastEpisodeHref,
                                  lastReadOrder, totalEpisodes, lastReadAt, nextWrId, nextEpisodeTitle, nextEpisodeHref, hasNew, syncUpdatedAt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(toonId) DO UPDATE SET
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(sourceId, toonId) DO UPDATE SET
                 toonTitle = excluded.toonTitle,
                 toonThumbUrl = excluded.toonThumbUrl,
                 toonHref = excluded.toonHref,
@@ -151,7 +554,7 @@ def import_full_snapshot(conn: sqlite3.Connection, data: dict, now_ms: int):
                 nextEpisodeHref = excluded.nextEpisodeHref,
                 hasNew = excluded.hasNew,
                 syncUpdatedAt = excluded.syncUpdatedAt
-            """, (h.get("toonId"), h.get("toonTitle", ""), h.get("toonThumbUrl", ""), h.get("toonHref", ""),
+            """, (source_id, toon_id, h.get("toonTitle", ""), h.get("toonThumbUrl", ""), h.get("toonHref", ""),
                   h.get("lastWrId", ""), h.get("lastEpisodeTitle", ""), h.get("lastEpisodeHref", ""),
                   h.get("lastReadOrder", 1), h.get("totalEpisodes", 1), last_read_at,
                   h.get("nextWrId"), h.get("nextEpisodeTitle"), h.get("nextEpisodeHref"),
@@ -159,59 +562,273 @@ def import_full_snapshot(conn: sqlite3.Connection, data: dict, now_ms: int):
 
         eps = data.get("readEpisodes", [])
         for ep in eps:
+            if not accept_inbound_row(ep, schema):
+                continue
+            source_id = row_source_id(ep)
+            toon_id = ep.get("toonId")
+            wr_id = ep.get("wrId")
+            if not toon_id or not wr_id:
+                continue
             read_at = ep.get("readAt") or now_ms
             conn.execute("""
-            INSERT INTO read_episodes (toonId, wrId, readAt, lastPage, syncUpdatedAt)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(toonId, wrId) DO UPDATE SET
+            INSERT INTO read_episodes (sourceId, toonId, wrId, readAt, lastPage, syncUpdatedAt)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(sourceId, toonId, wrId) DO UPDATE SET
                 readAt = excluded.readAt,
                 lastPage = excluded.lastPage,
                 syncUpdatedAt = excluded.syncUpdatedAt
-            """, (ep.get("toonId"), ep.get("wrId"), read_at, ep.get("lastPage", 0), now_ms))
+            """, (source_id, toon_id, wr_id, read_at, ep.get("lastPage", 0), now_ms))
 
         settings = data.get("readerSettings", [])
         for s in settings:
+            if not accept_inbound_row(s, schema):
+                continue
+            source_id = row_source_id(s)
+            toon_id = s.get("toonId")
+            if not toon_id:
+                continue
             up_at = s.get("updatedAt") or now_ms
             conn.execute("""
-            INSERT INTO reader_settings (toonId, viewMode, readDirection, updatedAt, syncUpdatedAt)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(toonId) DO UPDATE SET
+            INSERT INTO reader_settings (sourceId, toonId, viewMode, readDirection, updatedAt, syncUpdatedAt)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(sourceId, toonId) DO UPDATE SET
                 viewMode = excluded.viewMode,
                 readDirection = excluded.readDirection,
                 updatedAt = excluded.updatedAt,
                 syncUpdatedAt = excluded.syncUpdatedAt
-            """, (s.get("toonId"), s.get("viewMode", "SCROLL"), s.get("readDirection", "RIGHT_TO_LEFT"), up_at, now_ms))
+            """, (source_id, toon_id, s.get("viewMode", "SCROLL"), s.get("readDirection", "RIGHT_TO_LEFT"), up_at, now_ms))
 
-def export_full_snapshot(conn: sqlite3.Connection) -> dict:
+
+def export_full_snapshot(conn: sqlite3.Connection, schema: int = 2) -> dict:
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
     favs = []
-    for row in cursor.execute("SELECT id, title, thumbUrl, href, genre, updatedAt, savedAt FROM favorites ORDER BY savedAt DESC"):
-        favs.append(dict(row))
+    for row in cursor.execute(
+        "SELECT sourceId, toonId, title, thumbUrl, href, genre, updatedAt, savedAt FROM favorites ORDER BY savedAt DESC"
+    ):
+        emitted = emit_favorite(dict(row), schema)
+        if emitted:
+            favs.append(emitted)
 
     hist = []
-    for row in cursor.execute("SELECT toonId, toonTitle, toonThumbUrl, toonHref, lastWrId, lastEpisodeTitle, lastEpisodeHref, lastReadOrder, totalEpisodes, lastReadAt, nextWrId, nextEpisodeTitle, nextEpisodeHref, hasNew FROM history ORDER BY lastReadAt DESC"):
-        d = dict(row)
-        d["hasNew"] = bool(d.get("hasNew"))
-        hist.append(d)
+    for row in cursor.execute(
+        "SELECT sourceId, toonId, toonTitle, toonThumbUrl, toonHref, lastWrId, lastEpisodeTitle, lastEpisodeHref, "
+        "lastReadOrder, totalEpisodes, lastReadAt, nextWrId, nextEpisodeTitle, nextEpisodeHref, hasNew FROM history "
+        "ORDER BY lastReadAt DESC"
+    ):
+        emitted = emit_work_row(dict(row), schema)
+        if emitted:
+            hist.append(emitted)
 
     eps = []
-    for row in cursor.execute("SELECT toonId, wrId, readAt, lastPage FROM read_episodes"):
-        eps.append(dict(row))
+    for row in cursor.execute("SELECT sourceId, toonId, wrId, readAt, lastPage FROM read_episodes"):
+        emitted = emit_work_row(dict(row), schema)
+        if emitted:
+            eps.append(emitted)
 
     settings = []
-    for row in cursor.execute("SELECT toonId, viewMode, readDirection, updatedAt FROM reader_settings"):
-        settings.append(dict(row))
+    for row in cursor.execute("SELECT sourceId, toonId, viewMode, readDirection, updatedAt FROM reader_settings"):
+        emitted = emit_work_row(dict(row), schema)
+        if emitted:
+            settings.append(emitted)
 
     return {
-        "version": 1,
+        "version": 2 if schema >= 2 else 1,
         "appName": "Comics8",
         "exportedAt": int(time.time() * 1000),
         "favorites": favs,
         "history": hist,
         "readEpisodes": eps,
         "readerSettings": settings,
+    }
+
+
+def apply_delta_changes(conn: sqlite3.Connection, changes: dict, now_ms: int, schema: int):
+    with conn:
+        tombstones = changes.get("tombstones", [])
+        for t in tombstones:
+            e_type = (t.get("entityType") or "").upper()
+            source_id, local_id = parse_entity_id(t.get("entityId", ""))
+            if schema < 2 and source_id != DEFAULT_SOURCE_ID:
+                continue
+            if not local_id:
+                continue
+            del_at = int(t.get("deletedAt", now_ms))
+            stored_id = f"{source_id}:{local_id}"
+            conn.execute("""
+            INSERT INTO tombstones (entityType, entityId, deletedAt)
+            VALUES (?, ?, ?)
+            ON CONFLICT(entityType, entityId) DO UPDATE SET deletedAt = MAX(deletedAt, excluded.deletedAt)
+            """, (e_type, stored_id, del_at))
+            if e_type == "FAVORITE":
+                conn.execute("DELETE FROM favorites WHERE sourceId = ? AND toonId = ?", (source_id, local_id))
+            elif e_type == "HISTORY":
+                conn.execute("DELETE FROM history WHERE sourceId = ? AND toonId = ?", (source_id, local_id))
+            elif e_type == "EPISODE":
+                conn.execute("DELETE FROM read_episodes WHERE sourceId = ? AND toonId = ?", (source_id, local_id))
+
+        for f in changes.get("favorites", []):
+            if not accept_inbound_row(f, schema):
+                continue
+            source_id = row_source_id(f)
+            f_id = favorite_local_id(f)
+            if not f_id:
+                continue
+            saved_at = int(f.get("savedAt", now_ms))
+            conn.execute("""
+            INSERT INTO favorites (sourceId, toonId, title, thumbUrl, href, genre, updatedAt, savedAt, syncUpdatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(sourceId, toonId) DO UPDATE SET
+                title = excluded.title,
+                thumbUrl = excluded.thumbUrl,
+                href = excluded.href,
+                genre = excluded.genre,
+                updatedAt = excluded.updatedAt,
+                savedAt = excluded.savedAt,
+                syncUpdatedAt = ?
+            WHERE excluded.savedAt >= favorites.savedAt
+            """, (source_id, f_id, f.get("title", ""), f.get("thumbUrl", ""), f.get("href", ""),
+                  f.get("genre", ""), f.get("updatedAt"), saved_at, now_ms, now_ms))
+            conn.execute(
+                "DELETE FROM tombstones WHERE entityType = 'FAVORITE' AND entityId = ? AND deletedAt < ?",
+                (f"{source_id}:{f_id}", saved_at),
+            )
+
+        for h in changes.get("history", []):
+            if not accept_inbound_row(h, schema):
+                continue
+            source_id = row_source_id(h)
+            toon_id = h.get("toonId")
+            if not toon_id:
+                continue
+            last_read_at = int(h.get("lastReadAt", now_ms))
+            conn.execute("""
+            INSERT INTO history (sourceId, toonId, toonTitle, toonThumbUrl, toonHref, lastWrId, lastEpisodeTitle, lastEpisodeHref,
+                                 lastReadOrder, totalEpisodes, lastReadAt, nextWrId, nextEpisodeTitle, nextEpisodeHref, hasNew, syncUpdatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(sourceId, toonId) DO UPDATE SET
+                toonTitle = excluded.toonTitle,
+                toonThumbUrl = excluded.toonThumbUrl,
+                toonHref = excluded.toonHref,
+                lastWrId = excluded.lastWrId,
+                lastEpisodeTitle = excluded.lastEpisodeTitle,
+                lastEpisodeHref = excluded.lastEpisodeHref,
+                lastReadOrder = excluded.lastReadOrder,
+                totalEpisodes = excluded.totalEpisodes,
+                lastReadAt = excluded.lastReadAt,
+                nextWrId = excluded.nextWrId,
+                nextEpisodeTitle = excluded.nextEpisodeTitle,
+                nextEpisodeHref = excluded.nextEpisodeHref,
+                hasNew = excluded.hasNew,
+                syncUpdatedAt = ?
+            WHERE excluded.lastReadAt >= history.lastReadAt
+            """, (source_id, toon_id, h.get("toonTitle", ""), h.get("toonThumbUrl", ""), h.get("toonHref", ""),
+                  h.get("lastWrId", ""), h.get("lastEpisodeTitle", ""), h.get("lastEpisodeHref", ""),
+                  h.get("lastReadOrder", 1), h.get("totalEpisodes", 1), last_read_at,
+                  h.get("nextWrId"), h.get("nextEpisodeTitle"), h.get("nextEpisodeHref"),
+                  1 if h.get("hasNew") else 0, now_ms, now_ms))
+            conn.execute(
+                "DELETE FROM tombstones WHERE entityType = 'HISTORY' AND entityId = ? AND deletedAt < ?",
+                (f"{source_id}:{toon_id}", last_read_at),
+            )
+
+        for ep in changes.get("readEpisodes", []):
+            if not accept_inbound_row(ep, schema):
+                continue
+            source_id = row_source_id(ep)
+            toon_id = ep.get("toonId")
+            wr_id = ep.get("wrId")
+            if not toon_id or not wr_id:
+                continue
+            read_at = int(ep.get("readAt", now_ms))
+            conn.execute("""
+            INSERT INTO read_episodes (sourceId, toonId, wrId, readAt, lastPage, syncUpdatedAt)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(sourceId, toonId, wrId) DO UPDATE SET
+                readAt = excluded.readAt,
+                lastPage = excluded.lastPage,
+                syncUpdatedAt = ?
+            WHERE excluded.readAt >= read_episodes.readAt
+            """, (source_id, toon_id, wr_id, read_at, ep.get("lastPage", 0), now_ms, now_ms))
+
+        for s in changes.get("readerSettings", []):
+            if not accept_inbound_row(s, schema):
+                continue
+            source_id = row_source_id(s)
+            toon_id = s.get("toonId")
+            if not toon_id:
+                continue
+            up_at = int(s.get("updatedAt", now_ms))
+            conn.execute("""
+            INSERT INTO reader_settings (sourceId, toonId, viewMode, readDirection, updatedAt, syncUpdatedAt)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(sourceId, toonId) DO UPDATE SET
+                viewMode = excluded.viewMode,
+                readDirection = excluded.readDirection,
+                updatedAt = excluded.updatedAt,
+                syncUpdatedAt = ?
+            WHERE excluded.updatedAt >= reader_settings.updatedAt
+            """, (source_id, toon_id, s.get("viewMode", "SCROLL"), s.get("readDirection", "RIGHT_TO_LEFT"), up_at, now_ms, now_ms))
+
+
+def collect_delta_changes(conn: sqlite3.Connection, since: int, schema: int) -> dict:
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+
+    server_favs = []
+    for r in cur.execute(
+        "SELECT sourceId, toonId, title, thumbUrl, href, genre, updatedAt, savedAt FROM favorites WHERE syncUpdatedAt > ?",
+        (since,),
+    ):
+        emitted = emit_favorite(dict(r), schema)
+        if emitted:
+            server_favs.append(emitted)
+
+    server_hist = []
+    for r in cur.execute(
+        "SELECT sourceId, toonId, toonTitle, toonThumbUrl, toonHref, lastWrId, lastEpisodeTitle, lastEpisodeHref, "
+        "lastReadOrder, totalEpisodes, lastReadAt, nextWrId, nextEpisodeTitle, nextEpisodeHref, hasNew "
+        "FROM history WHERE syncUpdatedAt > ?",
+        (since,),
+    ):
+        emitted = emit_work_row(dict(r), schema)
+        if emitted:
+            server_hist.append(emitted)
+
+    server_eps = []
+    for r in cur.execute(
+        "SELECT sourceId, toonId, wrId, readAt, lastPage FROM read_episodes WHERE syncUpdatedAt > ?",
+        (since,),
+    ):
+        emitted = emit_work_row(dict(r), schema)
+        if emitted:
+            server_eps.append(emitted)
+
+    server_settings = []
+    for r in cur.execute(
+        "SELECT sourceId, toonId, viewMode, readDirection, updatedAt FROM reader_settings WHERE syncUpdatedAt > ?",
+        (since,),
+    ):
+        emitted = emit_work_row(dict(r), schema)
+        if emitted:
+            server_settings.append(emitted)
+
+    server_tombs = []
+    for r in cur.execute(
+        "SELECT entityType, entityId, deletedAt FROM tombstones WHERE deletedAt > ?",
+        (since,),
+    ):
+        emitted = emit_tombstone(dict(r), schema)
+        if emitted:
+            server_tombs.append(emitted)
+
+    return {
+        "favorites": server_favs,
+        "history": server_hist,
+        "readEpisodes": server_eps,
+        "readerSettings": server_settings,
+        "tombstones": server_tombs,
     }
 
 class SyncHandler(BaseHTTPRequestHandler):
@@ -226,7 +843,8 @@ class SyncHandler(BaseHTTPRequestHandler):
             self.send_header("Connection", "close")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-            self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Sync-Key")
+            self.send_header("Access-Control-Allow-Headers", CORS_ALLOW_HEADERS)
+            self.send_header(SYNC_SCHEMA_HEADER, str(SYNC_SCHEMA_CURRENT))
             self.end_headers()
             self.wfile.write(body)
             self.close_connection = True
@@ -248,6 +866,32 @@ class SyncHandler(BaseHTTPRequestHandler):
             if token:
                 return token
         return None
+
+    def _request_schema(self) -> int:
+        return parse_sync_schema(self.headers.get(SYNC_SCHEMA_HEADER))
+
+    def _proxy_forward_headers(self, query: dict, include_accept: bool = True) -> dict:
+        return build_proxy_forward_headers(query, self.headers, include_accept=include_accept)
+
+    def _send_proxied_headers(self, resp):
+        for name, value in passthrough_proxy_headers(resp.headers, decoded=False):
+            self.send_header(name, value)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Connection", "close")
+
+    def _write_proxied_body(self, resp):
+        raw = getattr(resp, "raw", None)
+        if raw is None:
+            body = resp.content if resp.content else b""
+            if body:
+                self.wfile.write(body)
+            return
+        raw.decode_content = False
+        while True:
+            chunk = raw.read(65536)
+            if not chunk:
+                break
+            self.wfile.write(chunk)
 
     def do_HEAD(self):
         raw_path = self.path.split("?")[0].rstrip("/")
@@ -304,17 +948,25 @@ class SyncHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.close_connection = True
                 return
-            req_headers = {
-                "User-Agent": self.headers.get("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"),
-                "Referer": "http://103.204.13.68:8904",
-            }
-            try:
-                resp = requests.head(target_url, headers=req_headers, timeout=10, allow_redirects=True)
-                self.send_response(resp.status_code)
-                self.send_header("Content-Type", resp.headers.get("Content-Type", "text/html"))
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.send_header("Connection", "close")
+            if not allowed_proxy_url(target_url):
+                self.send_response(403)
                 self.end_headers()
+                self.close_connection = True
+                return
+            req_headers = self._proxy_forward_headers(query, include_accept=False)
+            try:
+                kind, resp = fetch_proxied("HEAD", target_url, req_headers, timeout=10, stream=False)
+                if kind != "ok" or resp is None:
+                    self.send_response(403 if kind == "forbidden" else 502)
+                    self.end_headers()
+                    self.close_connection = True
+                    return
+                try:
+                    self.send_response(resp.status_code)
+                    self._send_proxied_headers(resp)
+                    self.end_headers()
+                finally:
+                    resp.close()
                 self.close_connection = True
                 return
             except Exception:
@@ -332,7 +984,7 @@ class SyncHandler(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Sync-Key")
+        self.send_header("Access-Control-Allow-Headers", CORS_ALLOW_HEADERS)
         self.end_headers()
         self.close_connection = True
 
@@ -340,7 +992,12 @@ class SyncHandler(BaseHTTPRequestHandler):
         raw_path = self.path.split("?")[0].rstrip("/")
         parsed_path = raw_path if raw_path else "/"
         if parsed_path in ("/health", "/api/comics8/health"):
-            self._send_json(200, {"status": "ok", "service": "comics8-sync", "time": int(time.time() * 1000)})
+            self._send_json(200, {
+                "status": "ok",
+                "service": "comics8-sync",
+                "time": int(time.time() * 1000),
+                "syncSchema": SYNC_SCHEMA_CURRENT,
+            })
             return
 
         if parsed_path in ("/proxy", "/api/comics8/proxy", "/proxy/proxy", "/api/comics8/proxy/proxy") or parsed_path.endswith("/proxy"):
@@ -349,24 +1006,27 @@ class SyncHandler(BaseHTTPRequestHandler):
             if not target_url or not (target_url.startswith("http://") or target_url.startswith("https://")):
                 self._send_json(400, {"error": "BadRequest", "message": "Missing or invalid 'url' parameter (must start with http:// or https://)"})
                 return
+            if not allowed_proxy_url(target_url):
+                self._send_json(403, {"error": "Forbidden", "message": "Host not allowed"})
+                return
 
-            req_headers = {
-                "User-Agent": self.headers.get("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"),
-                "Accept": self.headers.get("Accept", "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"),
-                "Accept-Language": self.headers.get("Accept-Language", "ko-KR,ko;q=0.9,en;q=0.8"),
-                "Referer": "http://103.204.13.68:8904",
-            }
+            req_headers = self._proxy_forward_headers(query, include_accept=True)
             try:
-                resp = requests.get(target_url, headers=req_headers, timeout=20, allow_redirects=True, stream=True)
-                self.send_response(resp.status_code)
-                content_type = resp.headers.get("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Content-Type", content_type)
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.send_header("Connection", "close")
-                self.end_headers()
-                for chunk in resp.iter_content(chunk_size=65536):
-                    if chunk:
-                        self.wfile.write(chunk)
+                import requests
+                kind, resp = fetch_proxied("GET", target_url, req_headers, timeout=20, stream=True)
+                if kind == "forbidden":
+                    self._send_json(403, {"error": "Forbidden", "message": "Host not allowed"})
+                    return
+                if kind != "ok" or resp is None:
+                    self._send_json(502, {"error": "BadGateway", "message": "Proxy request failed"})
+                    return
+                try:
+                    self.send_response(resp.status_code)
+                    self._send_proxied_headers(resp)
+                    self.end_headers()
+                    self._write_proxied_body(resp)
+                finally:
+                    resp.close()
                 self.close_connection = True
                 return
             except requests.exceptions.Timeout:
@@ -446,7 +1106,7 @@ class SyncHandler(BaseHTTPRequestHandler):
             conn = sqlite3.connect(db_path)
             try:
                 init_user_db(conn, user_id)
-                snapshot = export_full_snapshot(conn)
+                snapshot = export_full_snapshot(conn, schema=self._request_schema())
                 self._send_json(200, snapshot)
             finally:
                 conn.close()
@@ -473,138 +1133,21 @@ class SyncHandler(BaseHTTPRequestHandler):
 
                 since = int(req_json.get("since", 0))
                 changes = req_json.get("changes", {})
+                schema = self._request_schema()
 
                 user_id = get_safe_user_id(key)
                 db_path = get_user_db_path(user_id)
                 conn = sqlite3.connect(db_path)
                 try:
                     init_user_db(conn, user_id)
-
-                    with conn:
-                        # 1. Process client tombstones
-                        tombstones = changes.get("tombstones", [])
-                        for t in tombstones:
-                            e_type = t.get("entityType", "").upper()
-                            e_id = t.get("entityId", "")
-                            del_at = int(t.get("deletedAt", now_ms))
-                            conn.execute("""
-                            INSERT INTO tombstones (entityType, entityId, deletedAt)
-                            VALUES (?, ?, ?)
-                            ON CONFLICT(entityType, entityId) DO UPDATE SET deletedAt = MAX(deletedAt, excluded.deletedAt)
-                            """, (e_type, e_id, del_at))
-                            if e_type == "FAVORITE":
-                                conn.execute("DELETE FROM favorites WHERE id = ?", (e_id,))
-                            elif e_type == "HISTORY":
-                                conn.execute("DELETE FROM history WHERE toonId = ?", (e_id,))
-                            elif e_type == "EPISODE":
-                                conn.execute("DELETE FROM read_episodes WHERE toonId = ?", (e_id,))
-
-                        # 2. Process client favorites
-                        for f in changes.get("favorites", []):
-                            f_id = f.get("id")
-                            saved_at = int(f.get("savedAt", now_ms))
-                            conn.execute("""
-                            INSERT INTO favorites (id, title, thumbUrl, href, genre, updatedAt, savedAt, syncUpdatedAt)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                            ON CONFLICT(id) DO UPDATE SET
-                                title = excluded.title,
-                                thumbUrl = excluded.thumbUrl,
-                                href = excluded.href,
-                                genre = excluded.genre,
-                                updatedAt = excluded.updatedAt,
-                                savedAt = excluded.savedAt,
-                                syncUpdatedAt = ?
-                            WHERE excluded.savedAt >= favorites.savedAt
-                            """, (f_id, f.get("title", ""), f.get("thumbUrl", ""), f.get("href", ""),
-                                  f.get("genre", ""), f.get("updatedAt"), saved_at, now_ms, now_ms))
-                            conn.execute("DELETE FROM tombstones WHERE entityType = 'FAVORITE' AND entityId = ? AND deletedAt < ?", (f_id, saved_at))
-
-                        # 3. Process client history
-                        for h in changes.get("history", []):
-                            toon_id = h.get("toonId")
-                            last_read_at = int(h.get("lastReadAt", now_ms))
-                            conn.execute("""
-                            INSERT INTO history (toonId, toonTitle, toonThumbUrl, toonHref, lastWrId, lastEpisodeTitle, lastEpisodeHref,
-                                                 lastReadOrder, totalEpisodes, lastReadAt, nextWrId, nextEpisodeTitle, nextEpisodeHref, hasNew, syncUpdatedAt)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            ON CONFLICT(toonId) DO UPDATE SET
-                                toonTitle = excluded.toonTitle,
-                                toonThumbUrl = excluded.toonThumbUrl,
-                                toonHref = excluded.toonHref,
-                                lastWrId = excluded.lastWrId,
-                                lastEpisodeTitle = excluded.lastEpisodeTitle,
-                                lastEpisodeHref = excluded.lastEpisodeHref,
-                                lastReadOrder = excluded.lastReadOrder,
-                                totalEpisodes = excluded.totalEpisodes,
-                                lastReadAt = excluded.lastReadAt,
-                                nextWrId = excluded.nextWrId,
-                                nextEpisodeTitle = excluded.nextEpisodeTitle,
-                                nextEpisodeHref = excluded.nextEpisodeHref,
-                                hasNew = excluded.hasNew,
-                                syncUpdatedAt = ?
-                            WHERE excluded.lastReadAt >= history.lastReadAt
-                            """, (toon_id, h.get("toonTitle", ""), h.get("toonThumbUrl", ""), h.get("toonHref", ""),
-                                  h.get("lastWrId", ""), h.get("lastEpisodeTitle", ""), h.get("lastEpisodeHref", ""),
-                                  h.get("lastReadOrder", 1), h.get("totalEpisodes", 1), last_read_at,
-                                  h.get("nextWrId"), h.get("nextEpisodeTitle"), h.get("nextEpisodeHref"),
-                                  1 if h.get("hasNew") else 0, now_ms, now_ms))
-                            conn.execute("DELETE FROM tombstones WHERE entityType = 'HISTORY' AND entityId = ? AND deletedAt < ?", (toon_id, last_read_at))
-
-                        # 4. Process client readEpisodes
-                        for ep in changes.get("readEpisodes", []):
-                            toon_id = ep.get("toonId")
-                            wr_id = ep.get("wrId")
-                            read_at = int(ep.get("readAt", now_ms))
-                            conn.execute("""
-                            INSERT INTO read_episodes (toonId, wrId, readAt, lastPage, syncUpdatedAt)
-                            VALUES (?, ?, ?, ?, ?)
-                            ON CONFLICT(toonId, wrId) DO UPDATE SET
-                                readAt = excluded.readAt,
-                                lastPage = excluded.lastPage,
-                                syncUpdatedAt = ?
-                            WHERE excluded.readAt >= read_episodes.readAt
-                            """, (toon_id, wr_id, read_at, ep.get("lastPage", 0), now_ms, now_ms))
-
-                        # 5. Process client readerSettings
-                        for s in changes.get("readerSettings", []):
-                            toon_id = s.get("toonId")
-                            up_at = int(s.get("updatedAt", now_ms))
-                            conn.execute("""
-                            INSERT INTO reader_settings (toonId, viewMode, readDirection, updatedAt, syncUpdatedAt)
-                            VALUES (?, ?, ?, ?, ?)
-                            ON CONFLICT(toonId) DO UPDATE SET
-                                viewMode = excluded.viewMode,
-                                readDirection = excluded.readDirection,
-                                updatedAt = excluded.updatedAt,
-                                syncUpdatedAt = ?
-                            WHERE excluded.updatedAt >= reader_settings.updatedAt
-                            """, (toon_id, s.get("viewMode", "SCROLL"), s.get("readDirection", "RIGHT_TO_LEFT"), up_at, now_ms, now_ms))
-
-                    # Query server changes since `since`
-                    conn.row_factory = sqlite3.Row
-                    cur = conn.cursor()
-
-                    server_favs = [dict(r) for r in cur.execute("SELECT id, title, thumbUrl, href, genre, updatedAt, savedAt FROM favorites WHERE syncUpdatedAt > ?", (since,))]
-                    server_hist = []
-                    for r in cur.execute("SELECT toonId, toonTitle, toonThumbUrl, toonHref, lastWrId, lastEpisodeTitle, lastEpisodeHref, lastReadOrder, totalEpisodes, lastReadAt, nextWrId, nextEpisodeTitle, nextEpisodeHref, hasNew FROM history WHERE syncUpdatedAt > ?", (since,)):
-                        d = dict(r)
-                        d["hasNew"] = bool(d.get("hasNew"))
-                        server_hist.append(d)
-                    server_eps = [dict(r) for r in cur.execute("SELECT toonId, wrId, readAt, lastPage FROM read_episodes WHERE syncUpdatedAt > ?", (since,))]
-                    server_settings = [dict(r) for r in cur.execute("SELECT toonId, viewMode, readDirection, updatedAt FROM reader_settings WHERE syncUpdatedAt > ?", (since,))]
-                    server_tombs = [dict(r) for r in cur.execute("SELECT entityType, entityId, deletedAt FROM tombstones WHERE deletedAt > ?", (since,))]
+                    apply_delta_changes(conn, changes, now_ms, schema)
+                    server_changes = collect_delta_changes(conn, since, schema)
 
                     self._send_json(200, {
                         "status": "success",
                         "serverTime": now_ms,
                         "userId": user_id,
-                        "changes": {
-                            "favorites": server_favs,
-                            "history": server_hist,
-                            "readEpisodes": server_eps,
-                            "readerSettings": server_settings,
-                            "tombstones": server_tombs,
-                        }
+                        "changes": server_changes,
                     })
                 finally:
                     conn.close()
@@ -627,13 +1170,14 @@ class SyncHandler(BaseHTTPRequestHandler):
                     return
                 body = self.rfile.read(content_len).decode("utf-8")
                 parsed_json = json.loads(body)
+                schema = self._request_schema()
 
                 user_id = get_safe_user_id(key)
                 db_path = get_user_db_path(user_id)
                 conn = sqlite3.connect(db_path)
                 try:
                     init_user_db(conn, user_id)
-                    import_full_snapshot(conn, parsed_json, now_ms)
+                    import_full_snapshot(conn, parsed_json, now_ms, schema=schema)
                 finally:
                     conn.close()
 
@@ -660,5 +1204,3 @@ def run():
 
 if __name__ == "__main__":
     run()
-
-

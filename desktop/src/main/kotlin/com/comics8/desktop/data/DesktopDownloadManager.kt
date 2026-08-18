@@ -3,7 +3,11 @@ package com.comics8.desktop.data
 import com.comics8.core.model.DownloadedToonSummary
 import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.ToonItem
+import com.comics8.core.network.ImageFallbacks
 import com.comics8.core.network.ToonClient
+import com.comics8.core.source.DownloadLayout
+import com.comics8.core.source.SourceRegistry
+import com.comics8.core.source.WorkId
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -14,17 +18,22 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.ConcurrentLinkedQueue
 
 data class DesktopDownloadTask(
+    val sourceId: String,
     val toonId: String,
     val toonTitle: String,
     val toonThumbUrl: String,
     val toonHref: String,
     val episode: EpisodeItem,
-)
+) {
+    fun workId(): WorkId = WorkId(sourceId, toonId)
+}
 
 data class DesktopDownloadProgressState(
     val isRunning: Boolean = false,
@@ -38,26 +47,38 @@ data class DesktopDownloadProgressState(
 class DesktopDownloadManager(
     private val database: DesktopDatabase,
     private val client: ToonClient,
+    private val hitomiEnabled: () -> Boolean = { false },
+    baseDir: File = File(System.getProperty("user.home"), ".comics8/downloads"),
+    private val sources: SourceRegistry = SourceRegistry.defaults(),
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val baseDir = File(System.getProperty("user.home"), ".comics8/downloads").apply { mkdirs() }
+    private val baseDir = baseDir.apply { mkdirs() }
     private val taskQueue = ConcurrentLinkedQueue<DesktopDownloadTask>()
     private var workerJob: Job? = null
+    private val migrateMutex = Mutex()
+    private var migrated = false
 
     private val _progress = MutableStateFlow(DesktopDownloadProgressState())
     val progress: StateFlow<DesktopDownloadProgressState> = _progress.asStateFlow()
 
+    init {
+        scope.launch { migrateLegacyDownloads() }
+    }
+
     fun enqueueEpisodes(series: ToonItem, episodes: List<EpisodeItem>) {
         if (episodes.isEmpty()) return
+        val workId = WorkId.writable(series.sourceId, series.id, hitomiEnabled()) ?: return
         scope.launch {
-            val existing = database.getDownloadedEpisodesByToon(series.id).map { it.wrId }.toSet()
+            migrateLegacyDownloads()
+            val existing = database.getDownloadedEpisodesByToon(workId).map { it.wrId }.toSet()
             val newEpisodes = episodes.filter { it.wrId !in existing }
             if (newEpisodes.isEmpty()) return@launch
 
             for (ep in newEpisodes) {
                 taskQueue.add(
                     DesktopDownloadTask(
-                        toonId = series.id,
+                        sourceId = workId.sourceId,
+                        toonId = workId.toonId,
                         toonTitle = series.title,
                         toonThumbUrl = series.thumbUrl,
                         toonHref = series.href,
@@ -101,9 +122,17 @@ class DesktopDownloadManager(
     }
 
     private suspend fun processTask(task: DesktopDownloadTask) {
-        val epDir = File(baseDir, "${task.toonId}/${task.episode.wrId}").apply { mkdirs() }
+        migrateLegacyDownloads()
+        val epDir = DownloadLayout.episodeDir(baseDir, task.workId(), task.episode.wrId).apply { mkdirs() }
         try {
-            val imageUrls = client.fetchImages(task.episode.href)
+            val series = ToonItem(
+                id = task.toonId,
+                title = task.toonTitle,
+                thumbUrl = task.toonThumbUrl,
+                href = task.toonHref,
+                sourceId = task.sourceId,
+            )
+            val imageUrls = sources.get(task.sourceId).resolveImages(task.episode, series, client)
             if (imageUrls.isEmpty()) return
 
             _progress.update { it.copy(totalImages = imageUrls.size) }
@@ -116,7 +145,7 @@ class DesktopDownloadManager(
                 _progress.update { it.copy(currentImage = imgIndex) }
                 val imgFile = File(epDir, String.format("%04d.jpg", imgIndex))
                 if (!imgFile.exists() || imgFile.length() == 0L) {
-                    val bytes = client.fetchBytes(url)
+                    val bytes = ImageFallbacks.fetchBytes(url) { client.fetchBytes(it) }
                     imgFile.writeBytes(bytes)
                     downloadedBytes += bytes.size
                 } else {
@@ -127,6 +156,7 @@ class DesktopDownloadManager(
             }
 
             val entity = DownloadedEpisodeRecord(
+                sourceId = task.sourceId,
                 toonId = task.toonId,
                 wrId = task.episode.wrId,
                 toonTitle = task.toonTitle,
@@ -159,56 +189,97 @@ class DesktopDownloadManager(
         }
     }
 
-    suspend fun isEpisodeDownloaded(toonId: String, wrId: String): Boolean = withContext(Dispatchers.IO) {
-        database.getDownloadedEpisode(toonId, wrId) != null
+    suspend fun isEpisodeDownloaded(workId: WorkId, wrId: String): Boolean = withContext(Dispatchers.IO) {
+        migrateLegacyDownloads()
+        database.getDownloadedEpisode(workId, wrId) != null
     }
 
-    suspend fun getLocalEpisodeImages(toonId: String, wrId: String): List<String>? = withContext(Dispatchers.IO) {
-        val entity = database.getDownloadedEpisode(toonId, wrId) ?: return@withContext null
-        val dir = File(entity.localDirPath)
-        if (!dir.exists() || !dir.isDirectory) return@withContext null
+    suspend fun getDownloadedEpisode(workId: WorkId, wrId: String): DownloadedEpisodeRecord? = withContext(Dispatchers.IO) {
+        migrateLegacyDownloads()
+        database.getDownloadedEpisode(workId, wrId)
+    }
+
+    suspend fun getLocalEpisodeImages(workId: WorkId, wrId: String): List<String>? = withContext(Dispatchers.IO) {
+        migrateLegacyDownloads()
+        val entity = database.getDownloadedEpisode(workId, wrId)
+        val dir = DownloadLayout.resolveEpisodeDir(baseDir, workId, wrId, entity?.localDirPath)
+            ?: return@withContext null
         val files = dir.listFiles { f -> f.isFile && f.length() > 0 && f.name.endsWith(".jpg") }
             ?.sortedBy { it.name }
         if (files.isNullOrEmpty()) return@withContext null
         files.map { "file://${it.absolutePath}" }
     }
 
-    suspend fun deleteToonDownloads(toonId: String) = withContext(Dispatchers.IO) {
-        database.deleteDownloadedEpisodesByToon(toonId)
-        val toonDir = File(baseDir, toonId)
+    suspend fun deleteToonDownloads(workId: WorkId) = withContext(Dispatchers.IO) {
+        migrateLegacyDownloads()
+        database.deleteDownloadedEpisodesByToon(workId)
+        val toonDir = DownloadLayout.toonDir(baseDir, workId)
         if (toonDir.exists()) {
             toonDir.deleteRecursively()
         }
+        val legacy = DownloadLayout.legacyToonDir(baseDir, workId.toonId)
+        if (legacy.exists()) {
+            legacy.deleteRecursively()
+        }
     }
 
-    suspend fun deleteEpisodeDownload(toonId: String, wrId: String) = withContext(Dispatchers.IO) {
-        database.deleteDownloadedEpisode(toonId, wrId)
-        val epDir = File(baseDir, "$toonId/$wrId")
+    suspend fun deleteEpisodeDownload(workId: WorkId, wrId: String) = withContext(Dispatchers.IO) {
+        migrateLegacyDownloads()
+        database.deleteDownloadedEpisode(workId, wrId)
+        val epDir = DownloadLayout.episodeDir(baseDir, workId, wrId)
         if (epDir.exists()) {
             epDir.deleteRecursively()
+        }
+        val legacy = DownloadLayout.legacyEpisodeDir(baseDir, workId.toonId, wrId)
+        if (legacy.exists()) {
+            legacy.deleteRecursively()
         }
     }
 
     suspend fun getDownloadedToonSummaries(): List<DownloadedToonSummary> = withContext(Dispatchers.IO) {
+        migrateLegacyDownloads()
         val all = database.getAllDownloadedEpisodes()
-        val grouped = all.groupBy { it.toonId }
-        grouped.map { (toonId, epList) ->
+        val grouped = all.groupBy { it.workId().storageKey() }
+        grouped.map { (_, epList) ->
             val first = epList.first()
             val totalBytes = epList.sumOf { it.totalBytes }
             val latestDownloadedAt = epList.maxOf { it.downloadedAt }
             DownloadedToonSummary(
-                toonId = toonId,
+                toonId = first.toonId,
                 toonTitle = first.toonTitle,
                 toonThumbUrl = first.toonThumbUrl,
                 toonHref = first.toonHref,
                 episodeCount = epList.size,
                 totalBytes = totalBytes,
                 latestDownloadedAt = latestDownloadedAt,
+                sourceId = first.sourceId,
             )
         }.sortedByDescending { it.latestDownloadedAt }
     }
 
-    suspend fun getDownloadedEpisodes(toonId: String): List<DownloadedEpisodeRecord> = withContext(Dispatchers.IO) {
-        database.getDownloadedEpisodesByToon(toonId)
+    suspend fun getDownloadedEpisodes(workId: WorkId): List<DownloadedEpisodeRecord> = withContext(Dispatchers.IO) {
+        migrateLegacyDownloads()
+        database.getDownloadedEpisodesByToon(workId)
+    }
+
+    internal suspend fun migrateLegacyDownloads() = migrateMutex.withLock {
+        if (migrated) return
+        DownloadLayout.migrateLegacyElevenDirs(baseDir)
+        for (entity in database.getAllDownloadedEpisodes()) {
+            val workId = entity.workId()
+            if (workId.sourceId == WorkId.DEFAULT_SOURCE) {
+                DownloadLayout.migrateLegacyEpisode(baseDir, entity.toonId, entity.wrId)
+            }
+            val resolved = DownloadLayout.resolveEpisodeDir(
+                baseDir,
+                workId,
+                entity.wrId,
+                entity.localDirPath,
+            ) ?: continue
+            if (entity.localDirPath != resolved.absolutePath) {
+                database.saveDownloadedEpisode(entity.copy(localDirPath = resolved.absolutePath))
+            }
+        }
+        migrated = true
     }
 }

@@ -1,5 +1,12 @@
 package com.comics8.core.model
 
+import com.comics8.core.source.WorkId
+
+data class ArtistRef(
+    val slug: String,
+    val displayName: String,
+)
+
 data class ToonItem(
     val id: String,
     val title: String,
@@ -11,6 +18,9 @@ data class ToonItem(
     val isNew: Boolean = false,
     val isFavorite: Boolean = false,
     val readProgress: String? = null,
+    val sourceId: String = "eleven",
+    val entryEpisodeId: String? = null,
+    val artistChoices: List<ArtistRef> = emptyList(),
 ) {
     val subtitle: String
         get() = when {
@@ -18,6 +28,17 @@ data class ToonItem(
             !updatedAt.isNullOrBlank() -> updatedAt
             else -> genre
         }
+
+    fun workId(): WorkId = WorkId(sourceId.ifBlank { WorkId.DEFAULT_SOURCE }, id)
+
+    fun listingKey(): String {
+        val episode = entryEpisodeId
+        return if (!episode.isNullOrBlank()) {
+            "${workId().sourceId}:g:$episode"
+        } else {
+            workId().storageKey()
+        }
+    }
 }
 
 data class ListingPage(
@@ -38,6 +59,7 @@ data class EpisodeItem(
     val isRead: Boolean = false,
     val readAt: Long? = null,
     val lastReadPage: Int = 0,
+    val artistChoices: List<ArtistRef> = emptyList(),
 )
 
 data class EpisodePage(
@@ -109,4 +131,7 @@ data class DownloadedToonSummary(
     val episodeCount: Int,
     val totalBytes: Long,
     val latestDownloadedAt: Long,
-)
+    val sourceId: String = "eleven",
+) {
+    fun workId(): WorkId = WorkId(sourceId.ifBlank { WorkId.DEFAULT_SOURCE }, toonId)
+}

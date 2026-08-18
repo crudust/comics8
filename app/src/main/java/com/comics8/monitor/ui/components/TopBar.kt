@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ChromeReaderMode
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PlayArrow
@@ -35,6 +36,8 @@ import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -45,7 +48,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -53,11 +59,13 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.comics8.monitor.data.Catalog
+import com.comics8.core.source.WorkId
+import com.comics8.core.source.hitomi.HitomiSource
 import com.comics8.monitor.data.ReadDirection
 import com.comics8.monitor.data.ViewMode
 import com.comics8.monitor.ui.ListingUiState
@@ -103,20 +111,29 @@ fun TopBar(
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "뒤로")
                 }
             }
-            Text(
-                text = when (state.screen) {
-                    Screen.Reader -> state.currentEpisode?.title.orEmpty().ifBlank { "만화 보기" }
-                    Screen.Series -> state.series?.title.orEmpty()
-                    Screen.Browse -> "Comics8"
-                    Screen.History -> "히스토리"
-                    Screen.Downloads -> "오프라인 저장소"
-                },
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
+            if (state.screen == Screen.Browse) {
+                SourceTitleDropdown(
+                    activeSourceId = state.activeSourceId,
+                    onSelect = viewModel::setActiveSource,
+                    titleStyle = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+            } else {
+                Text(
+                    text = when (state.screen) {
+                        Screen.Reader -> state.currentEpisode?.title.orEmpty().ifBlank { "만화 보기" }
+                        Screen.Series -> state.series?.title.orEmpty()
+                        Screen.Browse -> "11toon"
+                        Screen.History -> "히스토리"
+                        Screen.Downloads -> "오프라인 저장소"
+                    },
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            }
             if (state.updateState.hasUpdate) {
                 IconButton(onClick = viewModel::openUpdateDialog) {
                     Icon(
@@ -371,9 +388,9 @@ fun TopBar(
                 )
             }
             val chipScrollState = rememberScrollState()
-            val catalogsList = remember { Catalog.entries }
-            LaunchedEffect(state.catalog) {
-                val idx = catalogsList.indexOf(state.catalog)
+            val catalogsList = state.browseTabs
+            LaunchedEffect(state.tab, catalogsList) {
+                val idx = catalogsList.indexOf(state.tab)
                 if (idx >= 0) {
                     chipScrollState.animateScrollTo((idx * 75).coerceAtLeast(0))
                 }
@@ -385,11 +402,11 @@ fun TopBar(
                     .fillMaxWidth()
                     .horizontalScroll(chipScrollState),
             ) {
-                catalogsList.forEach { catalog ->
+                catalogsList.forEach { tab ->
                     FilterChip(
-                        selected = !state.isSearch && state.catalog == catalog,
-                        onClick = { viewModel.selectCatalog(catalog) },
-                        label = { Text(catalog.label) },
+                        selected = !state.isSearch && state.tab == tab,
+                        onClick = { viewModel.selectTab(tab) },
+                        label = { Text(tab.label) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = MaterialTheme.colorScheme.primary,
                             selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
@@ -445,4 +462,53 @@ fun SearchBar(
             },
         ),
     )
+}
+
+@Composable
+private fun SourceTitleDropdown(
+    activeSourceId: String,
+    onSelect: (String) -> Unit,
+    titleStyle: TextStyle,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val label = if (activeSourceId == HitomiSource.ID) "Hitomi" else "11toon"
+    Box(modifier = modifier) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .clickable { expanded = true }
+                .padding(end = 4.dp),
+        ) {
+            Text(
+                text = label,
+                style = titleStyle,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Icon(
+                imageVector = Icons.Filled.ArrowDropDown,
+                contentDescription = "소스 선택",
+            )
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text("11toon") },
+                onClick = {
+                    onSelect(WorkId.DEFAULT_SOURCE)
+                    expanded = false
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Hitomi") },
+                onClick = {
+                    onSelect(HitomiSource.ID)
+                    expanded = false
+                },
+            )
+        }
+    }
 }

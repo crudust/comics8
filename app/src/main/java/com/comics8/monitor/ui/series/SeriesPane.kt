@@ -15,7 +15,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -67,7 +69,19 @@ fun SeriesPane(
                     items(state.episodes, key = { it.wrId }) { episode ->
                         EpisodeRow(
                             episode = episode,
+                            highlighted = episode.wrId == state.highlightedEpisodeId,
                             onClick = { viewModel.openEpisode(episode) },
+                            onPickArtist = if (episode.artistChoices.size >= 2) {
+                                {
+                                    val series = state.series ?: return@EpisodeRow
+                                    viewModel.openArtistPicker(
+                                        series.copy(artistChoices = episode.artistChoices),
+                                        entryEpisodeId = episode.wrId,
+                                    )
+                                }
+                            } else {
+                                null
+                            },
                         )
                     }
                 }
@@ -94,13 +108,21 @@ fun EpisodeRow(
     episode: EpisodeItem,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    highlighted: Boolean = false,
+    onPickArtist: (() -> Unit)? = null,
 ) {
     androidx.compose.foundation.layout.Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .background(MaterialTheme.colorScheme.surface)
+            .background(
+                if (highlighted) {
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                } else {
+                    MaterialTheme.colorScheme.surface
+                },
+            )
             .clickable(onClick = onClick)
             .padding(8.dp),
     ) {
@@ -170,6 +192,19 @@ fun EpisodeRow(
                         modifier = Modifier.padding(top = 2.dp),
                     )
                 }
+            }
+        }
+        if (onPickArtist != null) {
+            IconButton(
+                onClick = onPickArtist,
+                modifier = Modifier.size(28.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.MoreVert,
+                    contentDescription = "다른 작가",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
             }
         }
         Icon(

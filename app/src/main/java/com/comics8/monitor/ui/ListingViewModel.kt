@@ -6,6 +6,10 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.comics8.core.model.AppUpdateState
+import com.comics8.core.model.ArtistRef
+import com.comics8.core.model.BrowseTab
+import com.comics8.core.source.WorkId
+import com.comics8.core.source.hitomi.HitomiSource
 import com.comics8.core.sync.AppUpdateChecker
 import com.comics8.core.sync.SyncConstants
 import com.comics8.monitor.BuildConfig
@@ -28,8 +32,21 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+data class ArtistPickRequest(
+    val item: ToonItem,
+    val entryEpisodeId: String? = item.entryEpisodeId,
+)
+
 data class ListingUiState(
-    val catalog: Catalog = Catalog.LATEST,
+    val tab: BrowseTab = BrowseTab.Remote(
+        WorkId.DEFAULT_SOURCE,
+        com.comics8.core.source.SourceCatalog("LATEST", "최신", paginated = true),
+    ),
+    val browseTabs: List<BrowseTab> = emptyList(),
+    val activeSourceId: String = WorkId.DEFAULT_SOURCE,
+    val hitomiEnabled: Boolean = false,
+    val artistPick: ArtistPickRequest? = null,
+    val highlightedEpisodeId: String? = null,
     val page: Int = 1,
     val lastPage: Int = 1,
     val items: List<ToonItem> = emptyList(),
@@ -129,8 +146,8 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     private var readerJob: Job? = null
     private var countUpdateJob: Job? = null
 
-    private val catalogCache = mutableMapOf<Catalog, List<ToonItem>>()
-    private val catalogPages = mutableMapOf<Catalog, Pair<Int, Int>>()
+    private val catalogCache = mutableMapOf<BrowseTab, List<ToonItem>>()
+    private val catalogPages = mutableMapOf<BrowseTab, Pair<Int, Int>>()
 
     private val toonTotalCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
     private val toonLastPageCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
@@ -143,6 +160,10 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
     fun goBack(): Boolean {
         val current = _state.value
+        if (current.artistPick != null) {
+            dismissArtistPick()
+            return true
+        }
         if (current.showPageJump) {
             togglePageJump(false)
             return true
@@ -191,7 +212,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             }
             Screen.Browse -> {
                 if (current.isSearch) {
-                    selectCatalog(current.catalog)
+                    selectTab(current.tab)
                     true
                 } else {
                     false
@@ -236,10 +257,23 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     init {
+        val storedSource = prefs.getString(HitomiSource.ACTIVE_SOURCE_PREF_KEY, WorkId.DEFAULT_SOURCE)
+            ?: WorkId.DEFAULT_SOURCE
+        val activeSource = if (storedSource == HitomiSource.ID) HitomiSource.ID else WorkId.DEFAULT_SOURCE
+        val hitomiOn = activeSource == HitomiSource.ID ||
+            prefs.getBoolean(HitomiSource.ENABLED_PREF_KEY, HitomiSource.ENABLED_BY_DEFAULT)
+        val language = prefs.getString(HitomiSource.LANGUAGE_PREF_KEY, HitomiSource.DEFAULT_LANGUAGE)
+            ?: HitomiSource.DEFAULT_LANGUAGE
+        repository.applyHitomiLanguage(language)
+        val tabs = BrowseTab.forSource(repository.source(activeSource))
         _state.update {
             it.copy(
                 viewMode = singleViewPreference,
                 readDirection = globalReadDirection,
+                hitomiEnabled = hitomiOn,
+                activeSourceId = activeSource,
+                browseTabs = tabs,
+                tab = tabs.first(),
             )
         }
         repository.syncManager?.let { sm ->
@@ -329,11 +363,17 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     fun handleNotificationLaunch(targetCatalog: Catalog? = null) {
         readerJob?.cancel()
         episodeJob?.cancel()
-        val destCatalog = targetCatalog ?: Catalog.FAVORITE
+        val dest = if (targetCatalog == Catalog.FAVORITE || targetCatalog == null) {
+            BrowseTab.Favorite
+        } else {
+            _state.value.browseTabs.firstOrNull {
+                it is BrowseTab.Remote && it.catalog.id.equals(targetCatalog.name, ignoreCase = true)
+            } ?: BrowseTab.Favorite
+        }
         _state.update {
             it.copy(
                 screen = Screen.Browse,
-                catalog = destCatalog,
+                tab = dest,
                 series = null,
                 episodes = emptyList(),
                 currentEpisode = null,
@@ -351,19 +391,19 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         loadPage(1, replace = true, asRefresh = true)
     }
 
-    fun selectCatalog(catalog: Catalog) {
+    fun selectTab(tab: BrowseTab) {
         if (
-            catalog == _state.value.catalog &&
+            tab == _state.value.tab &&
             _state.value.screen == Screen.Browse &&
             !_state.value.isSearch
         ) return
         readerJob?.cancel()
         episodeJob?.cancel()
-        val cached = catalogCache[catalog]
-        val (cachedPage, cachedLastPage) = catalogPages[catalog] ?: Pair(1, 1)
+        val cached = catalogCache[tab]
+        val (cachedPage, cachedLastPage) = catalogPages[tab] ?: Pair(1, 1)
         _state.update {
             it.copy(
-                catalog = catalog,
+                tab = tab,
                 page = cachedPage,
                 lastPage = cachedLastPage,
                 items = cached ?: emptyList(),
@@ -385,11 +425,74 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun setActiveSource(sourceId: String) {
+        val resolved = if (sourceId == HitomiSource.ID) HitomiSource.ID else WorkId.DEFAULT_SOURCE
+        if (resolved == HitomiSource.ID) {
+            prefs.edit()
+                .putBoolean(HitomiSource.ENABLED_PREF_KEY, true)
+                .putString(HitomiSource.ACTIVE_SOURCE_PREF_KEY, resolved)
+                .apply()
+            _state.update { it.copy(hitomiEnabled = true) }
+        } else {
+            prefs.edit().putString(HitomiSource.ACTIVE_SOURCE_PREF_KEY, resolved).apply()
+        }
+        val tabs = BrowseTab.forSource(repository.source(resolved))
+        val current = _state.value.tab
+        val nextTab = when {
+            current is BrowseTab.Favorite -> BrowseTab.Favorite
+            current is BrowseTab.Remote -> tabs.firstOrNull {
+                it is BrowseTab.Remote && it.catalog.id == current.catalog.id
+            } ?: tabs.first()
+            else -> tabs.first()
+        }
+        _state.update {
+            it.copy(
+                activeSourceId = resolved,
+                browseTabs = tabs,
+            )
+        }
+        selectTab(nextTab)
+    }
+
+    fun setHitomiEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(HitomiSource.ENABLED_PREF_KEY, enabled).apply()
+        _state.update { it.copy(hitomiEnabled = enabled) }
+        if (!enabled && _state.value.activeSourceId == HitomiSource.ID) {
+            setActiveSource(WorkId.DEFAULT_SOURCE)
+        } else {
+            val tabs = BrowseTab.forSource(repository.source(_state.value.activeSourceId))
+            _state.update { it.copy(browseTabs = tabs) }
+        }
+    }
+
+    fun onListingOpen(item: ToonItem) {
+        if (item.artistChoices.size >= 2) {
+            _state.update { it.copy(artistPick = ArtistPickRequest(item)) }
+        } else {
+            openSeries(item)
+        }
+    }
+
+    fun openArtistPicker(item: ToonItem, entryEpisodeId: String? = item.entryEpisodeId) {
+        if (item.artistChoices.size < 2) return
+        _state.update { it.copy(artistPick = ArtistPickRequest(item, entryEpisodeId)) }
+    }
+
+    fun dismissArtistPick() {
+        _state.update { it.copy(artistPick = null) }
+    }
+
+    fun pickArtist(artist: ArtistRef) {
+        val request = _state.value.artistPick ?: return
+        dismissArtistPick()
+        openSeries(HitomiSource.artistSeriesItem(request.item, artist, request.entryEpisodeId))
+    }
+
     fun toggleSearchBar() {
         val current = _state.value
         if (current.searchExpanded) {
             if (current.isSearch) {
-                selectCatalog(current.catalog)
+                selectTab(current.tab)
             } else {
                 _state.update { it.copy(searchExpanded = false, searchInput = "") }
             }
@@ -454,7 +557,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     fun goToPage(page: Int) {
         val current = _state.value
         val target = page.coerceIn(1, current.lastPage.coerceAtLeast(1))
-        if (!current.catalog.paginated) return
+        if (!current.tab.paginated) return
         loadPage(target, replace = true)
     }
 
@@ -501,16 +604,17 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 episodeLastPage = 1,
                 episodeError = null,
                 seriesFavorited = false,
+                highlightedEpisodeId = item.entryEpisodeId,
                 viewMode = targetMode,
                 readDirection = globalReadDirection,
             )
         }
         loadEpisodes(item, 1)
         viewModelScope.launch {
-            val favorited = repository.isFavorite(item.id)
-            val history = repository.getHistory().firstOrNull { it.toonId == item.id }
+            val favorited = repository.isFavorite(item.workId())
+            val history = repository.getHistory(item.workId())
             _state.update { current ->
-                if (current.series?.id == item.id) {
+                if (current.series?.workId() == item.workId()) {
                     current.copy(
                         seriesFavorited = favorited,
                         seriesHistory = history,
@@ -529,29 +633,29 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
     fun toggleFavorite(item: ToonItem) {
         viewModelScope.launch {
-            val favorited = repository.toggleFavorite(item)
+            val favorited = repository.toggleFavorite(item) ?: return@launch
             _state.update { current ->
                 val updated = current.items.map { row ->
-                    if (row.id == item.id) row.copy(isFavorite = favorited) else row
+                    if (row.workId() == item.workId()) row.copy(isFavorite = favorited) else row
                 }
                 val visible = if (
                     !favorited &&
-                    current.catalog == Catalog.FAVORITE &&
+                    current.tab is BrowseTab.Favorite &&
                     current.screen == Screen.Browse &&
                     !current.isSearch
                 ) {
-                    updated.filter { it.id != item.id }
+                    updated.filter { it.workId() != item.workId() }
                 } else {
                     updated
                 }
-                if (current.catalog != Catalog.FAVORITE) {
-                    catalogCache.remove(Catalog.FAVORITE)
+                if (current.tab !is BrowseTab.Favorite) {
+                    catalogCache.remove(BrowseTab.Favorite)
                 }
                 if (!current.isSearch) {
-                    catalogCache[current.catalog] = visible
+                    catalogCache[current.tab] = visible
                 }
                 current.copy(
-                    seriesFavorited = if (current.series?.id == item.id) favorited else current.seriesFavorited,
+                    seriesFavorited = if (current.series?.workId() == item.workId()) favorited else current.seriesFavorited,
                     items = visible,
                 )
             }
@@ -566,7 +670,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             return
         }
         viewModelScope.launch {
-            val readEp = repository.getReadEpisode(series.id, hist.lastWrId)
+            val readEp = repository.getReadEpisode(series.workId(), hist.lastWrId)
             val lastSavedPage = readEp?.lastPage ?: 0
             if (lastSavedPage > 0) {
                 reopenHistoryEpisode(hist, startPage = lastSavedPage)
@@ -627,7 +731,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         val current = _state.value
         lastViewedSeries = current.series
         lastViewedEpisodePage = current.episodePage
-        val catalog = current.catalog
+        val tab = current.tab
         val searching = current.isSearch
         _state.update {
             it.copy(
@@ -641,10 +745,11 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 currentEpisode = null,
                 readerImages = emptyList(),
                 readerError = null,
+                highlightedEpisodeId = null,
             )
         }
-        if (catalog == Catalog.FAVORITE && !searching) {
-            val cached = catalogCache[Catalog.FAVORITE]
+        if (tab is BrowseTab.Favorite && !searching) {
+            val cached = catalogCache[BrowseTab.Favorite]
             if (cached == null) {
                 loadPage(1, replace = true)
             }
@@ -717,24 +822,24 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun deleteToonDownloads(toonId: String) {
+    fun deleteToonDownloads(workId: WorkId) {
         viewModelScope.launch {
-            repository.downloadManager?.deleteToonDownloads(toonId)
+            repository.downloadManager?.deleteToonDownloads(workId)
             loadDownloads()
         }
     }
 
-    fun deleteHistory(toonId: String) {
+    fun deleteHistory(workId: WorkId) {
         viewModelScope.launch {
-            repository.deleteHistory(toonId)
+            repository.deleteHistory(workId)
             _state.update { current ->
                 val updatedItems = current.items.map {
-                    if (it.id == toonId) it.copy(readProgress = null) else it
+                    if (it.workId() == workId) it.copy(readProgress = null) else it
                 }
                 current.copy(
-                    historyItems = current.historyItems.filter { it.toonId != toonId },
+                    historyItems = current.historyItems.filter { it.workId() != workId },
                     items = updatedItems,
-                    seriesHistory = if (current.series?.id == toonId) null else current.seriesHistory,
+                    seriesHistory = if (current.series?.workId() == workId) null else current.seriesHistory,
                 )
             }
         }
@@ -794,22 +899,20 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun reopenHistoryEpisode(item: ReadHistory, startPage: Int = 0) {
-        val toon = ToonItem(
-            id = item.toonId,
-            title = item.toonTitle,
-            thumbUrl = item.toonThumbUrl,
-            href = item.toonHref,
-            genre = "",
-            updatedAt = null,
-        )
+        val toon = item.toToonItem()
+        if (_state.value.screen == Screen.History) {
+            previousScreenBeforeSeries = Screen.History
+        }
         episodeJob?.cancel()
         readerJob?.cancel()
         val targetMode = if (currentScreenWidthDp >= 600) ViewMode.DUAL else singleViewPreference
         _state.update {
             it.copy(
-                screen = Screen.Reader,
+                screen = Screen.Series,
                 series = toon,
                 episodes = emptyList(),
+                episodeLoading = true,
+                highlightedEpisodeId = item.lastWrId,
                 readerLoading = true,
                 readerError = null,
                 readerImages = emptyList(),
@@ -820,7 +923,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             try {
                 val pageToFetch = if (startPage == 0) {
-                    val readEp = repository.getReadEpisode(item.toonId, item.lastWrId)
+                    val readEp = repository.getReadEpisode(item.workId(), item.lastWrId)
                     readEp?.lastPage ?: 0
                 } else startPage
 
@@ -843,6 +946,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                         episodes = epPage.items,
                         episodePage = actualPage,
                         episodeLastPage = epPage.lastPage,
+                        episodeLoading = false,
                     )
                 }
 
@@ -856,6 +960,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 )).copy(lastReadPage = pageToFetch)
                 openEpisode(epToOpen)
             } catch (_: Exception) {
+                _state.update { it.copy(episodeLoading = false) }
                 val fallback = EpisodeItem(
                     wrId = item.lastWrId,
                     title = item.lastEpisodeTitle,
@@ -870,34 +975,24 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun openSeriesFromHistory(item: ReadHistory) {
-        val toon = ToonItem(
-            id = item.toonId,
-            title = item.toonTitle,
-            thumbUrl = item.toonThumbUrl,
-            href = item.toonHref,
-            genre = "",
-            updatedAt = null,
-        )
-        openSeries(toon)
+        openSeries(item.toToonItem())
     }
 
     fun continueHistoryEpisode(item: ReadHistory) {
-        val toon = ToonItem(
-            id = item.toonId,
-            title = item.toonTitle,
-            thumbUrl = item.toonThumbUrl,
-            href = item.toonHref,
-            genre = "",
-            updatedAt = null,
-        )
+        val toon = item.toToonItem()
+        if (_state.value.screen == Screen.History) {
+            previousScreenBeforeSeries = Screen.History
+        }
         episodeJob?.cancel()
         readerJob?.cancel()
         val targetMode = if (currentScreenWidthDp >= 600) ViewMode.DUAL else singleViewPreference
         _state.update {
             it.copy(
-                screen = Screen.Reader,
+                screen = Screen.Series,
                 series = toon,
                 episodes = emptyList(),
+                episodeLoading = true,
+                highlightedEpisodeId = item.lastWrId,
                 readerLoading = true,
                 readerError = null,
                 readerImages = emptyList(),
@@ -927,6 +1022,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                         episodes = epPage.items,
                         episodePage = actualPage,
                         episodeLastPage = epPage.lastPage,
+                        episodeLoading = false,
                     )
                 }
 
@@ -971,6 +1067,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                     openEpisode(fallback)
                 }
             } catch (_: Exception) {
+                _state.update { it.copy(episodeLoading = false) }
                 val fallback = EpisodeItem(
                     wrId = item.lastWrId,
                     title = item.lastEpisodeTitle,
@@ -999,9 +1096,9 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         val currentPage = current.episodePage.coerceIn(1, lastPage)
         val pageSize = 100
 
-        val seriesId = series?.id.orEmpty()
-        val knownLastPageCount = toonLastPageCounts[seriesId]
-        val knownTotalCount = toonTotalCounts[seriesId]
+        val seriesKey = series?.workId()?.storageKey().orEmpty()
+        val knownLastPageCount = toonLastPageCounts[seriesKey]
+        val knownTotalCount = toonTotalCounts[seriesKey]
 
         val totalEpCount = when {
             knownTotalCount != null && knownTotalCount > 0 -> knownTotalCount
@@ -1041,8 +1138,8 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         loadReaderImages(episode)
         if (series != null) {
             viewModelScope.launch {
-                repository.markEpisodeRead(series.id, episode.wrId, episode.lastReadPage)
-                val existingHistory = repository.getHistory().firstOrNull { it.toonId == series.id }
+                repository.markEpisodeRead(series.workId(), episode.wrId, episode.lastReadPage)
+                val existingHistory = repository.getHistory(series.workId())
 
                 val finalOrder = calculatedOrder
                     ?: existingHistory?.lastReadOrder
@@ -1053,6 +1150,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
                 val progressText = "$finalOrder/$finalTotal"
                 val savedHistory = ReadHistory(
+                    sourceId = series.sourceId,
                     toonId = series.id,
                     toonTitle = series.title,
                     toonThumbUrl = series.thumbUrl,
@@ -1071,11 +1169,11 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 repository.saveHistory(savedHistory)
                 _state.update { curr ->
                     val updatedItems = curr.items.map { item ->
-                        if (item.id == series.id) item.copy(readProgress = progressText) else item
+                        if (item.workId() == series.workId()) item.copy(readProgress = progressText) else item
                     }
                     curr.copy(
                         items = updatedItems,
-                        seriesHistory = if (curr.series?.id == series.id) savedHistory else curr.seriesHistory,
+                        seriesHistory = if (curr.series?.workId() == series.workId()) savedHistory else curr.seriesHistory,
                     )
                 }
             }
@@ -1101,7 +1199,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             )
         }
         viewModelScope.launch {
-            repository.saveEpisodePage(series.id, episode.wrId, targetPage)
+            repository.saveEpisodePage(series.workId(), episode.wrId, targetPage)
         }
     }
 
@@ -1131,7 +1229,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         val currentEp = current.currentEpisode
         if (series != null && currentEp != null) {
             viewModelScope.launch {
-                repository.saveEpisodePage(series.id, currentEp.wrId, 0)
+                repository.saveEpisodePage(series.workId(), currentEp.wrId, 0)
             }
         }
         val idx = current.currentEpisodeIndex
@@ -1217,8 +1315,8 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                     val exactTotal = repository.fetchTotalEpisodes(target)
                     if (exactTotal <= 0) continue
 
-                    toonTotalCounts[target.id] = exactTotal
-                    val existing = repository.getHistory().firstOrNull { it.toonId == target.id }
+                    toonTotalCounts[target.workId().storageKey()] = exactTotal
+                    val existing = repository.getHistory(target.workId())
                     if (existing != null) {
                         val safeOrder = existing.lastReadOrder.coerceIn(1, exactTotal)
                         val hasNew = safeOrder < exactTotal
@@ -1231,14 +1329,14 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                         val progressText = "${updated.lastReadOrder}/${updated.totalEpisodes}"
                         _state.update { curr ->
                             val updatedItems = curr.items.map { row ->
-                                if (row.id == target.id) row.copy(readProgress = progressText) else row
+                                if (row.workId() == target.workId()) row.copy(readProgress = progressText) else row
                             }
                             if (!curr.isSearch) {
-                                catalogCache[curr.catalog] = updatedItems
+                                catalogCache[curr.tab] = updatedItems
                             }
                             curr.copy(
                                 items = updatedItems,
-                                seriesHistory = if (curr.series?.id == target.id) updated else curr.seriesHistory,
+                                seriesHistory = if (curr.series?.workId() == target.workId()) updated else curr.seriesHistory,
                             )
                         }
                     }
@@ -1259,7 +1357,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 )
             }
             try {
-                val items = repository.search(query)
+                val items = repository.search(query, _state.value.activeSourceId)
                 repository.markSeen(items)
                 _state.update {
                     it.copy(
@@ -1299,11 +1397,11 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 )
             }
             try {
-                val currentCat = _state.value.catalog
-                val result = repository.loadListing(currentCat, page)
+                val currentTab = _state.value.tab
+                val result = repository.loadListing(currentTab, page)
                 repository.markSeen(result.items)
-                catalogCache[currentCat] = result.items
-                catalogPages[currentCat] = Pair(result.currentPage, result.lastPage)
+                catalogCache[currentTab] = result.items
+                catalogPages[currentTab] = Pair(result.currentPage, result.lastPage)
                 _state.update {
                     it.copy(
                         items = result.items,
@@ -1358,23 +1456,24 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                     val currP = result.currentPage.coerceIn(1, lastP)
                     val pageSize = 100
 
+                    val itemKey = item.workId().storageKey()
                     if (lastP <= 1) {
-                        toonTotalCounts[item.id] = result.items.size
-                        toonLastPageCounts[item.id] = result.items.size
+                        toonTotalCounts[itemKey] = result.items.size
+                        toonLastPageCounts[itemKey] = result.items.size
                     } else if (currP == lastP) {
-                        toonLastPageCounts[item.id] = result.items.size
+                        toonLastPageCounts[itemKey] = result.items.size
                         val total = (lastP - 1) * pageSize + result.items.size
-                        toonTotalCounts[item.id] = total
-                    } else if (!toonLastPageCounts.containsKey(item.id)) {
+                        toonTotalCounts[itemKey] = total
+                    } else if (!toonLastPageCounts.containsKey(itemKey)) {
                         viewModelScope.launch(Dispatchers.IO) {
                             try {
                                 val lastRes = repository.loadEpisodes(item, lastP)
                                 val lastCount = lastRes.items.size
-                                toonLastPageCounts[item.id] = lastCount
+                                toonLastPageCounts[itemKey] = lastCount
                                 val exactTotal = (lastP - 1) * pageSize + lastCount
-                                toonTotalCounts[item.id] = exactTotal
+                                toonTotalCounts[itemKey] = exactTotal
 
-                                val existing = repository.getHistory().firstOrNull { it.toonId == item.id }
+                                val existing = repository.getHistory(item.workId())
                                 if (existing != null) {
                                     val safeOrder = existing.lastReadOrder.coerceIn(1, exactTotal)
                                     val updated = existing.copy(
@@ -1386,11 +1485,11 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                                     val progressText = "${updated.lastReadOrder}/${updated.totalEpisodes}"
                                     _state.update { curr ->
                                         val updatedItems = curr.items.map { row ->
-                                            if (row.id == item.id) row.copy(readProgress = progressText) else row
+                                            if (row.workId() == item.workId()) row.copy(readProgress = progressText) else row
                                         }
                                         curr.copy(
                                             items = updatedItems,
-                                            seriesHistory = if (curr.series?.id == item.id) updated else curr.seriesHistory,
+                                            seriesHistory = if (curr.series?.workId() == item.workId()) updated else curr.seriesHistory,
                                         )
                                     }
                                 }
@@ -1398,7 +1497,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                         }
                     }
 
-                    val knownLast = toonLastPageCounts[item.id]
+                    val knownLast = toonLastPageCounts[itemKey]
                     val totalCalculated = when {
                         lastP <= 1 -> result.items.size
                         currP == lastP -> (lastP - 1) * pageSize + result.items.size
@@ -1406,7 +1505,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                         else -> (lastP - 1) * pageSize + result.items.size
                     }
 
-                    val existing = repository.getHistory().firstOrNull { it.toonId == item.id }
+                    val existing = repository.getHistory(item.workId())
                     if (existing != null) {
                         val safeOrder = existing.lastReadOrder.coerceIn(1, totalCalculated)
                         val hasNew = safeOrder < totalCalculated
@@ -1420,11 +1519,11 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                             val progressText = "${updated.lastReadOrder}/${updated.totalEpisodes}"
                             _state.update { curr ->
                                 val updatedItems = curr.items.map { row ->
-                                    if (row.id == item.id) row.copy(readProgress = progressText) else row
+                                    if (row.workId() == item.workId()) row.copy(readProgress = progressText) else row
                                 }
                                 curr.copy(
                                     items = updatedItems,
-                                    seriesHistory = if (curr.series?.id == item.id) updated else curr.seriesHistory,
+                                    seriesHistory = if (curr.series?.workId() == item.workId()) updated else curr.seriesHistory,
                                 )
                             }
                         }
@@ -1455,8 +1554,8 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 )
             }
             try {
-                val seriesId = _state.value.series?.id
-                val images = repository.loadImages(episode, seriesId)
+                val seriesWorkId = _state.value.series?.workId()
+                val images = repository.loadImages(episode, seriesWorkId)
                 _state.update {
                     it.copy(
                         readerImages = images,
@@ -1517,4 +1616,14 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         val detail = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
         return "$prefix\n$detail"
     }
+
+    private fun ReadHistory.toToonItem(): ToonItem = ToonItem(
+        id = toonId,
+        title = toonTitle,
+        thumbUrl = toonThumbUrl,
+        href = toonHref,
+        genre = "",
+        updatedAt = null,
+        sourceId = sourceId,
+    )
 }

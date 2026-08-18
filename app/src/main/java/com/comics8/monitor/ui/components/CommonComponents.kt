@@ -44,6 +44,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.comics8.core.source.SourceRegistry
 
 @Composable
 fun LoadingPane(modifier: Modifier = Modifier) {
@@ -82,6 +83,8 @@ fun ErrorPane(
         }
     }
 }
+
+fun sourceChipLabel(sourceId: String): String = SourceRegistry.chipLabel(sourceId)
 
 @Composable
 fun Badge(text: String, modifier: Modifier = Modifier) {

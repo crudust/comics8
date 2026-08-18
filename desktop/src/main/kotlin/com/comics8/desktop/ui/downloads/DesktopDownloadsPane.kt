@@ -79,7 +79,7 @@ fun DesktopDownloadsPane(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.weight(1f),
                 ) {
-                    items(state.downloadSummaries, key = { it.toonId }) { item ->
+                    items(state.downloadSummaries, key = { it.workId().storageKey() }) { item ->
                         DownloadedItemCard(
                             item = item,
                             onOpenSeries = {
@@ -89,10 +89,11 @@ fun DesktopDownloadsPane(
                                         title = item.toonTitle,
                                         thumbUrl = item.toonThumbUrl,
                                         href = item.toonHref,
+                                        sourceId = item.sourceId,
                                     )
                                 )
                             },
-                            onDelete = { viewModel.deleteToonDownloads(item.toonId) },
+                            onDelete = { viewModel.deleteToonDownloads(item.workId()) },
                         )
                     }
                 }

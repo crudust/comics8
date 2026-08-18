@@ -1,5 +1,7 @@
 package com.comics8.monitor.data
 
+import com.comics8.core.source.WorkId
+import com.comics8.core.sync.SyncWire
 import com.comics8.monitor.data.local.AppDatabase
 import com.comics8.monitor.data.local.FavoriteToon
 import com.comics8.monitor.data.local.ReadEpisode
@@ -25,6 +27,8 @@ data class BackupRestoreResult(
 )
 
 object BackupManager {
+    const val BACKUP_VERSION = 2
+
     suspend fun createBackupJson(database: AppDatabase): String {
         val favorites = database.favoriteDao().all()
         val history = database.readHistoryDao().all()
@@ -32,7 +36,7 @@ object BackupManager {
         val settings = database.readerSettingDao().all()
 
         val root = JSONObject()
-        root.put("version", 1)
+        root.put("version", BACKUP_VERSION)
         root.put("appName", "Comics8")
         root.put("exportedAt", System.currentTimeMillis())
 
@@ -40,6 +44,7 @@ object BackupManager {
         favorites.forEach { f ->
             val obj = JSONObject().apply {
                 put("id", f.id)
+                put("sourceId", f.sourceId)
                 put("title", f.title)
                 put("thumbUrl", f.thumbUrl)
                 put("href", f.href)
@@ -55,6 +60,7 @@ object BackupManager {
         history.forEach { h ->
             val obj = JSONObject().apply {
                 put("toonId", h.toonId)
+                put("sourceId", h.sourceId)
                 put("toonTitle", h.toonTitle)
                 put("toonThumbUrl", h.toonThumbUrl)
                 put("toonHref", h.toonHref)
@@ -77,6 +83,7 @@ object BackupManager {
         episodes.forEach { ep ->
             val obj = JSONObject().apply {
                 put("toonId", ep.toonId)
+                put("sourceId", ep.sourceId)
                 put("wrId", ep.wrId)
                 put("readAt", ep.readAt)
                 put("lastPage", ep.lastPage)
@@ -89,6 +96,7 @@ object BackupManager {
         settings.forEach { s ->
             val obj = JSONObject().apply {
                 put("toonId", s.toonId)
+                put("sourceId", s.sourceId)
                 put("viewMode", s.viewMode)
                 put("readDirection", s.readDirection)
                 put("updatedAt", s.updatedAt)
@@ -111,9 +119,11 @@ object BackupManager {
             val favorites = mutableListOf<FavoriteToon>()
             for (i in 0 until favArray.length()) {
                 val obj = favArray.getJSONObject(i)
+                val workId = BackupJson.workId(obj, preferId = true) ?: continue
                 favorites.add(
                     FavoriteToon(
-                        id = obj.getString("id"),
+                        sourceId = workId.sourceId,
+                        id = workId.toonId,
                         title = obj.getString("title"),
                         thumbUrl = obj.optString("thumbUrl", ""),
                         href = obj.optString("href", ""),
@@ -127,9 +137,11 @@ object BackupManager {
             val history = mutableListOf<ReadHistory>()
             for (i in 0 until histArray.length()) {
                 val obj = histArray.getJSONObject(i)
+                val workId = BackupJson.workId(obj, preferId = false) ?: continue
                 history.add(
                     ReadHistory(
-                        toonId = obj.getString("toonId"),
+                        sourceId = workId.sourceId,
+                        toonId = workId.toonId,
                         toonTitle = obj.getString("toonTitle"),
                         toonThumbUrl = obj.optString("toonThumbUrl", ""),
                         toonHref = obj.optString("toonHref", ""),
@@ -150,9 +162,11 @@ object BackupManager {
             val episodes = mutableListOf<ReadEpisode>()
             for (i in 0 until epArray.length()) {
                 val obj = epArray.getJSONObject(i)
+                val workId = BackupJson.workId(obj, preferId = false) ?: continue
                 episodes.add(
                     ReadEpisode(
-                        toonId = obj.getString("toonId"),
+                        sourceId = workId.sourceId,
+                        toonId = workId.toonId,
                         wrId = obj.getString("wrId"),
                         readAt = obj.optLong("readAt", System.currentTimeMillis()),
                         lastPage = obj.optInt("lastPage", 0),
@@ -163,9 +177,11 @@ object BackupManager {
             val settings = mutableListOf<ReaderSetting>()
             for (i in 0 until settingArray.length()) {
                 val obj = settingArray.getJSONObject(i)
+                val workId = BackupJson.workId(obj, preferId = false) ?: continue
                 settings.add(
                     ReaderSetting(
-                        toonId = obj.getString("toonId"),
+                        sourceId = workId.sourceId,
+                        toonId = workId.toonId,
                         viewMode = obj.optString("viewMode", "SCROLL"),
                         readDirection = obj.optString("readDirection", "RIGHT_TO_LEFT"),
                         updatedAt = obj.optLong("updatedAt", System.currentTimeMillis()),
@@ -202,4 +218,8 @@ object BackupManager {
             settingCount = database.readerSettingDao().all().size,
         )
     }
+}
+
+object BackupJson {
+    fun workId(obj: JSONObject, preferId: Boolean): WorkId? = SyncWire.workId(obj, preferId)
 }

@@ -1,7 +1,13 @@
 package com.comics8.monitor.data
 
+import com.comics8.core.model.BrowseTab
 import com.comics8.core.model.FavoriteListing
 import com.comics8.core.model.UpdateDates
+import com.comics8.core.source.LatestUpdateSelection
+import com.comics8.core.source.SearchQuery
+import com.comics8.core.source.SourceRegistry
+import com.comics8.core.source.WorkId
+import com.comics8.core.source.hitomi.HitomiSource
 import com.comics8.monitor.data.local.AppDatabase
 import com.comics8.monitor.data.local.FavoriteDao
 import com.comics8.monitor.data.local.FavoriteToon
@@ -13,6 +19,14 @@ import com.comics8.monitor.data.local.ReaderSetting
 import com.comics8.monitor.data.local.ReaderSettingDao
 import com.comics8.monitor.data.local.SeenDao
 import com.comics8.monitor.data.local.SeenToon
+import com.comics8.monitor.data.local.delete
+import com.comics8.monitor.data.local.exists
+import com.comics8.monitor.data.local.get
+import com.comics8.monitor.data.local.getReadEpisode
+import com.comics8.monitor.data.local.getReadEpisodes
+import com.comics8.monitor.data.local.getSetting
+import com.comics8.monitor.data.local.updateLastPage
+import com.comics8.monitor.data.local.updateUpdatedAt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -27,18 +41,33 @@ class ToonRepository(
     val syncManager: SyncManager? = null,
     val downloadManager: DownloadManager? = null,
     private val now: () -> Long = { System.currentTimeMillis() },
+    private val sources: SourceRegistry = SourceRegistry.defaults(),
+    private val hitomiEnabled: () -> Boolean = { false },
 ) {
-    suspend fun loadListing(catalog: Catalog, page: Int): ListingPage = withContext(Dispatchers.IO) {
-        if (catalog == Catalog.FAVORITE) {
-            return@withContext loadFavoriteListing()
+    fun source(id: String) = sources.get(id)
+
+    fun allSources() = sources.all()
+
+    fun applyHitomiLanguage(language: String) {
+        (sources.get(HitomiSource.ID) as? HitomiSource)?.language =
+            language.ifBlank { HitomiSource.DEFAULT_LANGUAGE }
+    }
+
+    suspend fun loadListing(tab: BrowseTab, page: Int): ListingPage = withContext(Dispatchers.IO) {
+        when (tab) {
+            BrowseTab.Favorite -> loadFavoriteListing()
+            is BrowseTab.Remote -> fetchRemoteListing(tab.sourceId, tab.catalog.id, page)
         }
-        fetchRemoteListing(catalog, page)
     }
 
     private suspend fun loadFavoriteListing(): ListingPage {
         val local = favoriteDao.all().map { it.toItem().copy(isFavorite = true) }
-        val items = FavoriteListing.assemble(local) { page ->
-            fetchRemoteListing(Catalog.LATEST, page)
+        val items = FavoriteListing.assembleBySource(local) { sourceId, page ->
+            if (sourceId == HitomiSource.ID) {
+                null
+            } else {
+                fetchRemoteListing(sourceId, "LATEST", page)
+            }
         }
         return ListingPage(
             items = applyFlags(items),
@@ -47,9 +76,8 @@ class ToonRepository(
         )
     }
 
-    private suspend fun fetchRemoteListing(catalog: Catalog, page: Int): ListingPage {
-        val html = client.fetch(ComicSite.listingUrl(catalog, page))
-        val parsed = HtmlParsers.parseListing(html)
+    private suspend fun fetchRemoteListing(sourceId: String, catalogId: String, page: Int): ListingPage {
+        val parsed = sources.get(sourceId).loadListing(catalogId, page, client)
         if (parsed.items.isEmpty()) {
             error("목록을 읽지 못했습니다. 사이트 구조가 바뀌었을 수 있습니다.")
         }
@@ -57,14 +85,14 @@ class ToonRepository(
     }
 
     suspend fun loadEpisodes(item: ToonItem, page: Int): EpisodePage = withContext(Dispatchers.IO) {
-        val html = client.fetch(ComicSite.seriesUrl(item.id, item.title, page))
-        val parsed = HtmlParsers.parseEpisodes(html)
+        val parsed = sourceFor(item).loadEpisodes(item, page, client)
         if (parsed.items.isEmpty()) {
             error("회차 목록을 읽지 못했습니다.")
         }
         val firstDate = parsed.items.firstOrNull()?.date
-        touchFavoriteUpdatedAt(item.id, firstDate)
-        val readMap = readEpisodeDao.getReadEpisodes(item.id).associateBy { it.wrId }
+        val workId = item.workId()
+        touchFavoriteUpdatedAt(workId, firstDate)
+        val readMap = readEpisodeDao.getReadEpisodes(workId).associateBy { it.wrId }
         val enriched = parsed.items.map { ep ->
             val read = readMap[ep.wrId]
             if (read != null) {
@@ -92,36 +120,47 @@ class ToonRepository(
         }
     }
 
-    suspend fun loadImages(episode: EpisodeItem, toonId: String? = null): List<String> = withContext(Dispatchers.IO) {
-        if (!toonId.isNullOrBlank() && downloadManager != null) {
-            val localImages = downloadManager.getLocalEpisodeImages(toonId, episode.wrId)
+    suspend fun loadImages(episode: EpisodeItem, workId: WorkId? = null): List<String> = withContext(Dispatchers.IO) {
+        if (workId != null && downloadManager != null) {
+            val localImages = downloadManager.getLocalEpisodeImages(workId, episode.wrId)
             if (!localImages.isNullOrEmpty()) {
                 return@withContext localImages
             }
         }
-        val parsed = client.fetchImages(episode.href)
+        val item = ToonItem(
+            id = workId?.toonId.orEmpty(),
+            title = "",
+            thumbUrl = "",
+            href = episode.href,
+            sourceId = workId?.sourceId ?: WorkId.DEFAULT_SOURCE,
+        )
+        val parsed = sourceFor(item).resolveImages(episode, item, client)
         if (parsed.isEmpty()) {
             error("만화 이미지를 불러오지 못했습니다.")
         }
         parsed
     }
 
-    suspend fun search(query: String): List<ToonItem> = withContext(Dispatchers.IO) {
-        val q = query.trim()
-        if (q.isEmpty()) return@withContext emptyList()
-        val json = client.fetch(ComicSite.searchUrl(q))
-        val items = SearchParser.parse(json)
-        applyFlags(items)
-    }
+    suspend fun search(query: String, sourceId: String = WorkId.DEFAULT_SOURCE): List<ToonItem> =
+        withContext(Dispatchers.IO) {
+            val q = query.trim()
+            if (q.isEmpty()) return@withContext emptyList()
+            val source = sources.get(sourceId)
+            val language = (source as? HitomiSource)?.language
+            val items = source.search(SearchQuery(q, language = language), client)
+            applyFlags(items)
+        }
 
     suspend fun markSeen(items: List<ToonItem>) = withContext(Dispatchers.IO) {
         if (items.isEmpty()) return@withContext
         val nowMs = now()
-        val existing = seenDao.byIds(items.map { it.id }).associateBy { it.id }
-        val rows = items.map { item ->
-            val prev = existing[item.id]
+        val existing = seenByWorkIds(items.map { it.workId() })
+        val rows = items.mapNotNull { item ->
+            val workId = writableWorkId(item) ?: return@mapNotNull null
+            val prev = existing[workId.storageKey()]
             SeenToon(
-                id = item.id,
+                sourceId = workId.sourceId,
+                id = workId.toonId,
                 title = item.title,
                 updatedAt = item.updatedAt,
                 firstSeenAt = prev?.firstSeenAt ?: nowMs,
@@ -129,58 +168,75 @@ class ToonRepository(
                 notifiedKey = prev?.notifiedKey.orEmpty(),
             )
         }
-        seenDao.upsertAll(rows)
+        if (rows.isNotEmpty()) seenDao.upsertAll(rows)
     }
 
     suspend fun checkLatestUpdates(): List<ToonItem> {
-        val favoriteIds = favoriteDao.ids().toSet()
-        if (favoriteIds.isEmpty()) return emptyList()
+        val favorites = favoriteDao.all()
+        if (favorites.isEmpty()) return emptyList()
 
-        val page = loadListing(Catalog.LATEST, 1)
-        val candidates = page.items.filter { it.id in favoriteIds }
-        if (candidates.isEmpty()) return emptyList()
-
-        val existing = seenDao.byIds(candidates.map { it.id }).associateBy { it.id }
         val unseen = mutableListOf<ToonItem>()
         val updatedSeen = mutableListOf<SeenToon>()
         val nowMs = now()
 
-        for (item in candidates) {
-            try {
-                val epPage = loadEpisodes(item, 1)
-                val latestEp = epPage.items.firstOrNull() ?: continue
-                val latestWrId = latestEp.wrId
-                val notifyKey = "${item.id}|$latestWrId"
-
-                if (existing[item.id]?.notifiedKey == notifyKey) {
-                    continue
-                }
-
-                val isRead = readEpisodeDao.getReadEpisode(item.id, latestWrId) != null ||
-                    readHistoryDao.get(item.id)?.lastWrId == latestWrId
-
-                val prev = existing[item.id]
-                updatedSeen.add(
-                    SeenToon(
-                        id = item.id,
-                        title = item.title,
-                        updatedAt = item.updatedAt,
-                        firstSeenAt = prev?.firstSeenAt ?: nowMs,
-                        lastSeenAt = nowMs,
-                        notifiedKey = notifyKey,
+        for ((sourceId, rows) in favorites.groupBy { it.sourceId.ifBlank { WorkId.DEFAULT_SOURCE } }) {
+            val candidates = try {
+                when (sourceId) {
+                    WorkId.DEFAULT_SOURCE -> {
+                        val keys = rows.map { it.workId().storageKey() }.toSet()
+                        val page = fetchRemoteListing(sourceId, "LATEST", 1)
+                        LatestUpdateSelection.elevenIntersection(page.items, keys)
+                    }
+                    HitomiSource.ID -> LatestUpdateSelection.hitomiEligible(
+                        rows.map { it.toItem() },
+                        hitomiEnabled(),
                     )
-                )
-
-                if (!isRead) {
-                    unseen.add(
-                        item.copy(
-                            href = latestEp.href,
-                            updatedAt = latestEp.date ?: item.updatedAt,
-                        )
-                    )
+                    else -> emptyList()
                 }
             } catch (_: Exception) {
-                // Ignore transient network errors on individual comic episode check
+                emptyList()
+            }
+            if (candidates.isEmpty()) continue
+            val existing = seenByWorkIds(candidates.map { it.workId() })
+            for (item in candidates) {
+                try {
+                    val workId = writableWorkId(item) ?: continue
+                    val epPage = loadEpisodes(item, 1)
+                    val latestEp = epPage.items.firstOrNull() ?: continue
+                    val latestWrId = latestEp.wrId
+                    val notifyKey = "${workId.storageKey()}|$latestWrId"
+
+                    if (existing[workId.storageKey()]?.notifiedKey == notifyKey) {
+                        continue
+                    }
+
+                    val isRead = readEpisodeDao.getReadEpisode(workId, latestWrId) != null ||
+                        readHistoryDao.get(workId)?.lastWrId == latestWrId
+
+                    val prev = existing[workId.storageKey()]
+                    updatedSeen.add(
+                        SeenToon(
+                            sourceId = workId.sourceId,
+                            id = workId.toonId,
+                            title = item.title,
+                            updatedAt = item.updatedAt,
+                            firstSeenAt = prev?.firstSeenAt ?: nowMs,
+                            lastSeenAt = nowMs,
+                            notifiedKey = notifyKey,
+                        )
+                    )
+
+                    if (!isRead) {
+                        unseen.add(
+                            item.copy(
+                                href = latestEp.href,
+                                updatedAt = latestEp.date ?: item.updatedAt,
+                            )
+                        )
+                    }
+                } catch (_: Exception) {
+                    // Ignore transient network errors on individual comic episode check
+                }
             }
         }
 
@@ -193,47 +249,50 @@ class ToonRepository(
 
     private suspend fun applyFlags(items: List<ToonItem>): List<ToonItem> {
         if (items.isEmpty()) return items
-        val favoriteIds = favoriteDao.ids().toSet()
+        val favoriteKeys = favoriteDao.all().map { it.workId().storageKey() }.toSet()
         val total = seenDao.count()
-        val existing = if (total == 0) emptyMap() else {
-            seenDao.byIds(items.map { it.id }).associateBy { it.id }
-        }
+        val existing = if (total == 0) emptyMap() else seenByWorkIds(items.map { it.workId() })
         val historyMap = try {
-            readHistoryDao.all().associateBy { it.toonId }
+            readHistoryDao.all().associateBy { it.workId().storageKey() }
         } catch (_: Exception) {
             emptyMap()
         }
         for (item in items) {
-            if (item.id in favoriteIds) {
-                touchFavoriteUpdatedAt(item.id, item.updatedAt)
+            if (item.workId().storageKey() in favoriteKeys) {
+                touchFavoriteUpdatedAt(item.workId(), item.updatedAt)
             }
         }
         return items.map { item ->
-            val prev = existing[item.id]
-            val history = historyMap[item.id]
+            val key = item.workId().storageKey()
+            val prev = existing[key]
+            val history = historyMap[key]
             val isUpdated = prev != null && !item.updatedAt.isNullOrBlank() && prev.updatedAt != item.updatedAt
             item.copy(
                 isNew = total > 0 && (prev == null || isUpdated),
-                isFavorite = item.id in favoriteIds,
+                isFavorite = key in favoriteKeys,
                 readProgress = history?.let { "${it.lastReadOrder}/${it.totalEpisodes}" },
             )
         }
     }
 
-    suspend fun isFavorite(id: String): Boolean = withContext(Dispatchers.IO) {
-        favoriteDao.exists(id)
+    suspend fun isFavorite(workId: WorkId): Boolean = withContext(Dispatchers.IO) {
+        favoriteDao.exists(workId)
     }
 
-    suspend fun toggleFavorite(item: ToonItem): Boolean = withContext(Dispatchers.IO) {
-        val exists = favoriteDao.exists(item.id)
+    suspend fun toggleFavorite(item: ToonItem): Boolean? = withContext(Dispatchers.IO) {
+        val workId = writableWorkId(item) ?: return@withContext null
+        val exists = favoriteDao.exists(workId)
         val result = if (exists) {
-            favoriteDao.delete(item.id)
-            database?.tombstoneDao()?.insert(com.comics8.monitor.data.local.Tombstone("FAVORITE", item.id, now()))
+            favoriteDao.delete(workId)
+            database?.tombstoneDao()?.insert(
+                com.comics8.monitor.data.local.Tombstone("FAVORITE", workId.storageKey(), now()),
+            )
             false
         } else {
             favoriteDao.upsert(
                 FavoriteToon(
-                    id = item.id,
+                    sourceId = workId.sourceId,
+                    id = workId.toonId,
                     title = item.title,
                     thumbUrl = item.thumbUrl,
                     href = item.href,
@@ -242,15 +301,15 @@ class ToonRepository(
                     savedAt = now(),
                 ),
             )
-            database?.tombstoneDao()?.delete("FAVORITE", item.id)
+            database?.tombstoneDao()?.delete("FAVORITE", workId.storageKey())
             true
         }
         syncManager?.triggerDebouncedPush()
         result
     }
 
-    suspend fun getReaderSetting(toonId: String): Pair<ViewMode, ReadDirection>? = withContext(Dispatchers.IO) {
-        val setting = readerSettingDao.getSetting(toonId) ?: return@withContext null
+    suspend fun getReaderSetting(workId: WorkId): Pair<ViewMode, ReadDirection>? = withContext(Dispatchers.IO) {
+        val setting = readerSettingDao.getSetting(workId) ?: return@withContext null
         val viewMode = try {
             ViewMode.valueOf(setting.viewMode)
         } catch (_: Exception) {
@@ -265,13 +324,15 @@ class ToonRepository(
     }
 
     suspend fun saveReaderSetting(
-        toonId: String,
+        workId: WorkId,
         viewMode: ViewMode,
         readDirection: ReadDirection,
     ) = withContext(Dispatchers.IO) {
+        val writable = WorkId.writable(workId.sourceId, workId.toonId, hitomiEnabled()) ?: return@withContext
         readerSettingDao.saveSetting(
             ReaderSetting(
-                toonId = toonId,
+                sourceId = writable.sourceId,
+                toonId = writable.toonId,
                 viewMode = viewMode.name,
                 readDirection = readDirection.name,
                 updatedAt = now(),
@@ -280,11 +341,13 @@ class ToonRepository(
         syncManager?.triggerDebouncedPush()
     }
 
-    suspend fun markEpisodeRead(toonId: String, wrId: String, lastPage: Int = 0): Long = withContext(Dispatchers.IO) {
+    suspend fun markEpisodeRead(workId: WorkId, wrId: String, lastPage: Int = 0): Long = withContext(Dispatchers.IO) {
+        val writable = WorkId.writable(workId.sourceId, workId.toonId, hitomiEnabled()) ?: return@withContext now()
         val readAt = now()
         readEpisodeDao.markRead(
             ReadEpisode(
-                toonId = toonId,
+                sourceId = writable.sourceId,
+                toonId = writable.toonId,
                 wrId = wrId,
                 readAt = readAt,
                 lastPage = lastPage,
@@ -294,48 +357,59 @@ class ToonRepository(
         readAt
     }
 
-    suspend fun saveEpisodePage(toonId: String, wrId: String, page: Int) = withContext(Dispatchers.IO) {
-        readEpisodeDao.updateLastPage(toonId, wrId, page)
+    suspend fun saveEpisodePage(workId: WorkId, wrId: String, page: Int) = withContext(Dispatchers.IO) {
+        readEpisodeDao.updateLastPage(workId, wrId, page)
     }
 
-    suspend fun getReadEpisode(toonId: String, wrId: String): ReadEpisode? = withContext(Dispatchers.IO) {
-        readEpisodeDao.getReadEpisode(toonId, wrId)
+    suspend fun getReadEpisode(workId: WorkId, wrId: String): ReadEpisode? = withContext(Dispatchers.IO) {
+        readEpisodeDao.getReadEpisode(workId, wrId)
     }
 
     suspend fun getHistory(): List<ReadHistory> = withContext(Dispatchers.IO) {
         readHistoryDao.all()
     }
 
+    suspend fun getHistory(workId: WorkId): ReadHistory? = withContext(Dispatchers.IO) {
+        readHistoryDao.get(workId)
+    }
+
     suspend fun saveHistory(history: ReadHistory) = withContext(Dispatchers.IO) {
-        readHistoryDao.upsert(history)
-        database?.tombstoneDao()?.delete("HISTORY", history.toonId)
+        val workId = WorkId.writable(history.sourceId, history.toonId, hitomiEnabled()) ?: return@withContext
+        val stored = if (history.sourceId == workId.sourceId) history else history.copy(sourceId = workId.sourceId)
+        readHistoryDao.upsert(stored)
+        database?.tombstoneDao()?.delete("HISTORY", workId.storageKey())
         val nowMs = now()
-        val existing = seenDao.byIds(listOf(history.toonId)).firstOrNull()
+        val existing = seenByWorkIds(listOf(workId))[workId.storageKey()]
         seenDao.upsertAll(
             listOf(
                 SeenToon(
-                    id = history.toonId,
-                    title = history.toonTitle,
+                    sourceId = workId.sourceId,
+                    id = workId.toonId,
+                    title = stored.toonTitle,
                     updatedAt = existing?.updatedAt,
                     firstSeenAt = existing?.firstSeenAt ?: nowMs,
                     lastSeenAt = nowMs,
-                    notifiedKey = "${history.toonId}|${history.lastWrId}",
+                    notifiedKey = "${workId.storageKey()}|${stored.lastWrId}",
                 )
             )
         )
         syncManager?.triggerDebouncedPush()
     }
 
-    suspend fun deleteHistory(toonId: String) = withContext(Dispatchers.IO) {
-        readHistoryDao.delete(toonId)
-        database?.tombstoneDao()?.insert(com.comics8.monitor.data.local.Tombstone("HISTORY", toonId, now()))
+    suspend fun deleteHistory(workId: WorkId) = withContext(Dispatchers.IO) {
+        readHistoryDao.delete(workId)
+        database?.tombstoneDao()?.insert(
+            com.comics8.monitor.data.local.Tombstone("HISTORY", workId.storageKey(), now()),
+        )
         syncManager?.triggerDebouncedPush()
     }
 
     suspend fun clearHistory() = withContext(Dispatchers.IO) {
         val all = readHistoryDao.all()
         all.forEach {
-            database?.tombstoneDao()?.insert(com.comics8.monitor.data.local.Tombstone("HISTORY", it.toonId, now()))
+            database?.tombstoneDao()?.insert(
+                com.comics8.monitor.data.local.Tombstone("HISTORY", it.workId().storageKey(), now()),
+            )
         }
         readHistoryDao.clearAll()
         syncManager?.triggerDebouncedPush()
@@ -356,18 +430,29 @@ class ToonRepository(
         BackupManager.getStats(db)
     }
 
-    private suspend fun touchFavoriteUpdatedAt(id: String, updatedAt: String?) {
+    private suspend fun touchFavoriteUpdatedAt(workId: WorkId, updatedAt: String?) {
         if (updatedAt.isNullOrBlank()) return
         try {
-            val current = favoriteDao.get(id) ?: return
+            val current = favoriteDao.get(workId) ?: return
             if (!UpdateDates.shouldReplace(current.updatedAt, updatedAt)) return
             val stored = UpdateDates.toListingDate(updatedAt) ?: updatedAt
-            favoriteDao.updateUpdatedAt(id, stored)
+            favoriteDao.updateUpdatedAt(workId, stored)
         } catch (_: Exception) {
         }
     }
 
-    private fun notifyKey(item: ToonItem): String = "${item.id}|${item.updatedAt.orEmpty()}"
+    private suspend fun seenByWorkIds(ids: List<WorkId>): Map<String, SeenToon> {
+        if (ids.isEmpty()) return emptyMap()
+        val wanted = ids.map { it.storageKey() }.toSet()
+        return seenDao.byToonIds(ids.map { it.toonId }.distinct())
+            .filter { it.workId().storageKey() in wanted }
+            .associateBy { it.workId().storageKey() }
+    }
+
+    private fun sourceFor(item: ToonItem) = sources.get(item.sourceId)
+
+    private fun writableWorkId(item: ToonItem): WorkId? =
+        WorkId.writable(item.sourceId, item.id, hitomiEnabled())
 
     private fun FavoriteToon.toItem(): ToonItem = ToonItem(
         id = id,
@@ -376,5 +461,6 @@ class ToonRepository(
         href = href,
         genre = genre,
         updatedAt = updatedAt,
+        sourceId = sourceId,
     )
 }

@@ -1,5 +1,7 @@
 package com.comics8.core.model
 
+import com.comics8.core.source.WorkId
+
 object FavoriteListing {
     /**
      * Favorites follow the first page of the latest-update listing.
@@ -7,26 +9,50 @@ object FavoriteListing {
      */
     suspend fun assemble(
         localFavorites: List<ToonItem>,
-        fetchLatestPage: suspend (Int) -> ListingPage,
+        fetchLatestPage: (suspend (Int) -> ListingPage)? = null,
     ): List<ToonItem> {
         if (localFavorites.isEmpty()) return emptyList()
-        val remaining = localFavorites.mapTo(mutableSetOf()) { it.id }
+        val remaining = localFavorites.mapTo(mutableSetOf()) { WorkId(it.sourceId, it.id) }
         val fromLatest = mutableListOf<ToonItem>()
-        try {
-            val listing = fetchLatestPage(1)
-            for (item in listing.items) {
-                if (remaining.remove(item.id)) {
-                    fromLatest.add(item.copy(isFavorite = true))
+        if (fetchLatestPage != null) {
+            try {
+                val listing = fetchLatestPage(1)
+                for (item in listing.items) {
+                    if (remaining.remove(WorkId(item.sourceId, item.id))) {
+                        fromLatest.add(item.copy(isFavorite = true))
+                    }
                 }
+            } catch (_: Exception) {
+                // Offline or listing failure: keep whatever we already took, rest go by date.
             }
-        } catch (_: Exception) {
-            // Offline or listing failure: keep whatever we already took, rest go by date.
         }
-        val seen = fromLatest.mapTo(HashSet()) { it.id }
+        val seen = fromLatest.mapTo(HashSet()) { WorkId(it.sourceId, it.id) }
         val leftover = localFavorites
-            .filter { it.id !in seen }
+            .filter { WorkId(it.sourceId, it.id) !in seen }
             .sortedByDescending { UpdateDates.parseScore(it.updatedAt) }
             .map { it.copy(isFavorite = true) }
         return fromLatest + leftover
+    }
+
+    suspend fun assembleBySource(
+        localFavorites: List<ToonItem>,
+        fetchLatestPage: suspend (sourceId: String, page: Int) -> ListingPage?,
+    ): List<ToonItem> {
+        if (localFavorites.isEmpty()) return emptyList()
+        val groups = localFavorites.groupBy { it.sourceId.ifBlank { WorkId.DEFAULT_SOURCE } }
+        val assembled = groups.flatMap { (sourceId, items) ->
+            val first = fetchLatestPage(sourceId, 1)
+            assemble(
+                items,
+                fetchLatestPage = if (first == null) {
+                    null
+                } else {
+                    { page ->
+                        if (page == 1) first else fetchLatestPage(sourceId, page) ?: ListingPage(emptyList(), page, 1)
+                    }
+                },
+            )
+        }
+        return assembled.sortedByDescending { UpdateDates.parseScore(it.updatedAt) }
     }
 }
