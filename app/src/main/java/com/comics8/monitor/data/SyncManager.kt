@@ -2,12 +2,14 @@ package com.comics8.monitor.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.comics8.core.source.WorkId
 import com.comics8.monitor.data.local.AppDatabase
 import com.comics8.monitor.data.local.FavoriteToon
 import com.comics8.monitor.data.local.ReadEpisode
 import com.comics8.monitor.data.local.ReadHistory
 import com.comics8.monitor.data.local.ReaderSetting
-import com.comics8.monitor.data.local.Tombstone
+import com.comics8.monitor.data.local.delete
+import com.comics8.monitor.data.local.deleteByToonId
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -295,9 +297,10 @@ class SyncManager(
                 val t = serverTombs.getJSONObject(i)
                 val type = t.optString("entityType", "")
                 val id = t.optString("entityId", "")
-                if (type == "FAVORITE") database.favoriteDao().delete(id)
-                else if (type == "HISTORY") database.readHistoryDao().delete(id)
-                else if (type == "EPISODE") database.readEpisodeDao().deleteByToonId(id)
+                val workId = WorkId.parse(id)
+                if (type == "FAVORITE") database.favoriteDao().delete(workId)
+                else if (type == "HISTORY") database.readHistoryDao().delete(workId)
+                else if (type == "EPISODE") database.readEpisodeDao().deleteByToonId(workId)
             }
 
             // Apply received favorites
@@ -305,9 +308,11 @@ class SyncManager(
             val favList = mutableListOf<FavoriteToon>()
             for (i in 0 until serverFavs.length()) {
                 val f = serverFavs.getJSONObject(i)
+                val workId = BackupJson.workId(f, preferId = true) ?: continue
                 favList.add(
                     FavoriteToon(
-                        id = f.getString("id"),
+                        sourceId = workId.sourceId,
+                        id = workId.toonId,
                         title = f.getString("title"),
                         thumbUrl = f.optString("thumbUrl", ""),
                         href = f.optString("href", ""),
@@ -324,9 +329,11 @@ class SyncManager(
             val histList = mutableListOf<ReadHistory>()
             for (i in 0 until serverHist.length()) {
                 val h = serverHist.getJSONObject(i)
+                val workId = BackupJson.workId(h, preferId = false) ?: continue
                 histList.add(
                     ReadHistory(
-                        toonId = h.getString("toonId"),
+                        sourceId = workId.sourceId,
+                        toonId = workId.toonId,
                         toonTitle = h.getString("toonTitle"),
                         toonThumbUrl = h.optString("toonThumbUrl", ""),
                         toonHref = h.optString("toonHref", ""),
@@ -350,9 +357,11 @@ class SyncManager(
             val epList = mutableListOf<ReadEpisode>()
             for (i in 0 until serverEps.length()) {
                 val ep = serverEps.getJSONObject(i)
+                val workId = BackupJson.workId(ep, preferId = false) ?: continue
                 epList.add(
                     ReadEpisode(
-                        toonId = ep.getString("toonId"),
+                        sourceId = workId.sourceId,
+                        toonId = workId.toonId,
                         wrId = ep.getString("wrId"),
                         readAt = ep.optLong("readAt", serverTime),
                         lastPage = ep.optInt("lastPage", 0),
@@ -366,9 +375,11 @@ class SyncManager(
             val settingList = mutableListOf<ReaderSetting>()
             for (i in 0 until serverSettings.length()) {
                 val s = serverSettings.getJSONObject(i)
+                val workId = BackupJson.workId(s, preferId = false) ?: continue
                 settingList.add(
                     ReaderSetting(
-                        toonId = s.getString("toonId"),
+                        sourceId = workId.sourceId,
+                        toonId = workId.toonId,
                         viewMode = s.optString("viewMode", "SCROLL"),
                         readDirection = s.optString("readDirection", "RIGHT_TO_LEFT"),
                         updatedAt = s.optLong("updatedAt", serverTime),

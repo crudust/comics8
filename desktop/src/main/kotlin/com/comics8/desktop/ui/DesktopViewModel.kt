@@ -1,5 +1,6 @@
 package com.comics8.desktop.ui
 
+import com.comics8.core.source.WorkId
 import com.comics8.core.sync.AppUpdateChecker
 import com.comics8.core.sync.SyncConstants
 import com.comics8.desktop.DesktopVersion
@@ -271,8 +272,8 @@ class DesktopViewModel(
                     val exactTotal = repository.fetchTotalEpisodes(target)
                     if (exactTotal <= 0) continue
 
-                    toonTotalCounts[target.id] = exactTotal
-                    val existing = repository.getHistory().firstOrNull { it.toonId == target.id }
+                    toonTotalCounts[target.workId().storageKey()] = exactTotal
+                    val existing = repository.getHistory(target.workId())
                     if (existing != null) {
                         val safeOrder = existing.lastReadOrder.coerceIn(1, exactTotal)
                         val hasNew = safeOrder < exactTotal
@@ -285,14 +286,14 @@ class DesktopViewModel(
                         val progressText = "${updated.lastReadOrder}/${updated.totalEpisodes}"
                         _state.update { curr ->
                             val updatedItems = curr.items.map { row ->
-                                if (row.id == target.id) row.copy(readProgress = progressText) else row
+                                if (row.workId() == target.workId()) row.copy(readProgress = progressText) else row
                             }
                             if (!curr.isSearch) {
                                 catalogCache[curr.catalog] = updatedItems
                             }
                             curr.copy(
                                 items = updatedItems,
-                                seriesHistory = if (curr.series?.id == target.id) updated else curr.seriesHistory,
+                                seriesHistory = if (curr.series?.workId() == target.workId()) updated else curr.seriesHistory,
                             )
                         }
                     }
@@ -430,10 +431,10 @@ class DesktopViewModel(
         }
         loadEpisodes(item, 1)
         scope.launch {
-            val favorited = repository.isFavorite(item.id)
-            val history = repository.getHistory().firstOrNull { it.toonId == item.id }
+            val favorited = repository.isFavorite(item.workId())
+            val history = repository.getHistory(item.workId())
             _state.update { current ->
-                if (current.series?.id == item.id) {
+                if (current.series?.workId() == item.workId()) {
                     current.copy(
                         seriesFavorited = favorited,
                         seriesHistory = history,
@@ -470,23 +471,24 @@ class DesktopViewModel(
                     val currP = result.currentPage.coerceIn(1, lastP)
                     val pageSize = 100
 
+                    val itemKey = item.workId().storageKey()
                     if (lastP <= 1) {
-                        toonTotalCounts[item.id] = result.items.size
-                        toonLastPageCounts[item.id] = result.items.size
+                        toonTotalCounts[itemKey] = result.items.size
+                        toonLastPageCounts[itemKey] = result.items.size
                     } else if (currP == lastP) {
-                        toonLastPageCounts[item.id] = result.items.size
+                        toonLastPageCounts[itemKey] = result.items.size
                         val total = (lastP - 1) * pageSize + result.items.size
-                        toonTotalCounts[item.id] = total
-                    } else if (!toonLastPageCounts.containsKey(item.id)) {
+                        toonTotalCounts[itemKey] = total
+                    } else if (!toonLastPageCounts.containsKey(itemKey)) {
                         scope.launch(Dispatchers.IO) {
                             try {
                                 val lastRes = repository.loadEpisodes(item, lastP)
                                 val lastCount = lastRes.items.size
-                                toonLastPageCounts[item.id] = lastCount
+                                toonLastPageCounts[itemKey] = lastCount
                                 val exactTotal = (lastP - 1) * pageSize + lastCount
-                                toonTotalCounts[item.id] = exactTotal
+                                toonTotalCounts[itemKey] = exactTotal
 
-                                val existing = repository.getHistory().firstOrNull { it.toonId == item.id }
+                                val existing = repository.getHistory(item.workId())
                                 if (existing != null) {
                                     val safeOrder = existing.lastReadOrder.coerceIn(1, exactTotal)
                                     val updated = existing.copy(
@@ -498,11 +500,11 @@ class DesktopViewModel(
                                     val progressText = "${updated.lastReadOrder}/${updated.totalEpisodes}"
                                     _state.update { curr ->
                                         val updatedItems = curr.items.map { row ->
-                                            if (row.id == item.id) row.copy(readProgress = progressText) else row
+                                            if (row.workId() == item.workId()) row.copy(readProgress = progressText) else row
                                         }
                                         curr.copy(
                                             items = updatedItems,
-                                            seriesHistory = if (curr.series?.id == item.id) updated else curr.seriesHistory,
+                                            seriesHistory = if (curr.series?.workId() == item.workId()) updated else curr.seriesHistory,
                                         )
                                     }
                                 }
@@ -510,7 +512,7 @@ class DesktopViewModel(
                         }
                     }
 
-                    val knownLast = toonLastPageCounts[item.id]
+                    val knownLast = toonLastPageCounts[itemKey]
                     val totalCalculated = when {
                         lastP <= 1 -> result.items.size
                         currP == lastP -> (lastP - 1) * pageSize + result.items.size
@@ -518,7 +520,7 @@ class DesktopViewModel(
                         else -> (lastP - 1) * pageSize + result.items.size
                     }
 
-                    val existing = repository.getHistory().firstOrNull { it.toonId == item.id }
+                    val existing = repository.getHistory(item.workId())
                     if (existing != null) {
                         val safeOrder = existing.lastReadOrder.coerceIn(1, totalCalculated)
                         val hasNew = safeOrder < totalCalculated
@@ -532,11 +534,11 @@ class DesktopViewModel(
                             val progressText = "${updated.lastReadOrder}/${updated.totalEpisodes}"
                             _state.update { curr ->
                                 val updatedItems = curr.items.map { row ->
-                                    if (row.id == item.id) row.copy(readProgress = progressText) else row
+                                    if (row.workId() == item.workId()) row.copy(readProgress = progressText) else row
                                 }
                                 curr.copy(
                                     items = updatedItems,
-                                    seriesHistory = if (curr.series?.id == item.id) updated else curr.seriesHistory,
+                                    seriesHistory = if (curr.series?.workId() == item.workId()) updated else curr.seriesHistory,
                                 )
                             }
                         }
@@ -579,7 +581,7 @@ class DesktopViewModel(
             val favorited = repository.toggleFavorite(item)
             _state.update { current ->
                 val updated = current.items.map { row ->
-                    if (row.id == item.id) row.copy(isFavorite = favorited) else row
+                    if (row.workId() == item.workId()) row.copy(isFavorite = favorited) else row
                 }
                 val visible = if (
                     !favorited &&
@@ -587,7 +589,7 @@ class DesktopViewModel(
                     current.screen == Screen.Browse &&
                     !current.isSearch
                 ) {
-                    updated.filter { it.id != item.id }
+                    updated.filter { it.workId() != item.workId() }
                 } else {
                     updated
                 }
@@ -598,7 +600,7 @@ class DesktopViewModel(
                     catalogCache[current.catalog] = visible
                 }
                 current.copy(
-                    seriesFavorited = if (current.series?.id == item.id) favorited else current.seriesFavorited,
+                    seriesFavorited = if (current.series?.workId() == item.workId()) favorited else current.seriesFavorited,
                     items = visible,
                 )
             }
@@ -613,7 +615,7 @@ class DesktopViewModel(
             return
         }
         scope.launch {
-            val readEp = repository.getReadEpisode(series.id, hist.lastWrId)
+            val readEp = repository.getReadEpisode(series.workId(), hist.lastWrId)
             val lastSavedPage = readEp?.lastPage ?: 0
             if (lastSavedPage > 0) {
                 reopenHistoryEpisode(hist, startPage = lastSavedPage)
@@ -754,24 +756,24 @@ class DesktopViewModel(
         }
     }
 
-    fun deleteToonDownloads(toonId: String) {
+    fun deleteToonDownloads(workId: WorkId) {
         scope.launch {
-            repository.downloadManager?.deleteToonDownloads(toonId)
+            repository.downloadManager?.deleteToonDownloads(workId)
             loadDownloads()
         }
     }
 
-    fun deleteHistory(toonId: String) {
+    fun deleteHistory(workId: WorkId) {
         scope.launch {
-            repository.deleteHistory(toonId)
+            repository.deleteHistory(workId)
             _state.update { current ->
                 val updatedItems = current.items.map {
-                    if (it.id == toonId) it.copy(readProgress = null) else it
+                    if (it.workId() == workId) it.copy(readProgress = null) else it
                 }
                 current.copy(
-                    historyItems = current.historyItems.filter { it.toonId != toonId },
+                    historyItems = current.historyItems.filter { it.workId() != workId },
                     items = updatedItems,
-                    seriesHistory = if (current.series?.id == toonId) null else current.seriesHistory,
+                    seriesHistory = if (current.series?.workId() == workId) null else current.seriesHistory,
                 )
             }
         }
@@ -831,26 +833,11 @@ class DesktopViewModel(
     }
 
     fun openSeriesFromHistory(item: ReadHistoryRecord) {
-        val toon = ToonItem(
-            id = item.toonId,
-            title = item.toonTitle,
-            thumbUrl = item.toonThumbUrl,
-            href = item.toonHref,
-            genre = "",
-            updatedAt = null,
-        )
-        openSeries(toon)
+        openSeries(item.toToonItem())
     }
 
     fun reopenHistoryEpisode(item: ReadHistoryRecord, startPage: Int = 0) {
-        val toon = ToonItem(
-            id = item.toonId,
-            title = item.toonTitle,
-            thumbUrl = item.toonThumbUrl,
-            href = item.toonHref,
-            genre = "",
-            updatedAt = null,
-        )
+        val toon = item.toToonItem()
         episodeJob?.cancel()
         readerJob?.cancel()
         _state.update {
@@ -866,7 +853,7 @@ class DesktopViewModel(
         scope.launch {
             try {
                 val pageToFetch = if (startPage == 0) {
-                    val readEp = repository.getReadEpisode(item.toonId, item.lastWrId)
+                    val readEp = repository.getReadEpisode(item.workId(), item.lastWrId)
                     readEp?.lastPage ?: 0
                 } else startPage
 
@@ -916,14 +903,7 @@ class DesktopViewModel(
     }
 
     fun continueHistoryEpisode(item: ReadHistoryRecord) {
-        val toon = ToonItem(
-            id = item.toonId,
-            title = item.toonTitle,
-            thumbUrl = item.toonThumbUrl,
-            href = item.toonHref,
-            genre = "",
-            updatedAt = null,
-        )
+        val toon = item.toToonItem()
         episodeJob?.cancel()
         readerJob?.cancel()
         _state.update {
@@ -1022,9 +1002,9 @@ class DesktopViewModel(
         val currentPage = current.episodePage.coerceIn(1, lastPage)
         val pageSize = 100
 
-        val seriesId = series?.id.orEmpty()
-        val knownLastPageCount = toonLastPageCounts[seriesId]
-        val knownTotalCount = toonTotalCounts[seriesId]
+        val seriesKey = series?.workId()?.storageKey().orEmpty()
+        val knownLastPageCount = toonLastPageCounts[seriesKey]
+        val knownTotalCount = toonTotalCounts[seriesKey]
 
         val totalEpCount = when {
             knownTotalCount != null && knownTotalCount > 0 -> knownTotalCount
@@ -1065,12 +1045,12 @@ class DesktopViewModel(
         loadReaderImages(episode)
         if (series != null) {
             scope.launch {
-                val savedSetting = repository.getReaderSetting(series.id)
+                val savedSetting = repository.getReaderSetting(series.workId())
                 if (savedSetting != null) {
                     _state.update { it.copy(viewMode = savedSetting.first, readDirection = savedSetting.second) }
                 }
-                repository.markEpisodeRead(series.id, episode.wrId, episode.lastReadPage)
-                val existingHistory = repository.getHistory().firstOrNull { it.toonId == series.id }
+                repository.markEpisodeRead(series.workId(), episode.wrId, episode.lastReadPage)
+                val existingHistory = repository.getHistory(series.workId())
 
                 val finalOrder = calculatedOrder
                     ?: existingHistory?.lastReadOrder
@@ -1081,6 +1061,7 @@ class DesktopViewModel(
 
                 val progressText = "$finalOrder/$finalTotal"
                 val savedHistory = ReadHistoryRecord(
+                    sourceId = series.sourceId,
                     toonId = series.id,
                     toonTitle = series.title,
                     toonThumbUrl = series.thumbUrl,
@@ -1099,11 +1080,11 @@ class DesktopViewModel(
                 repository.saveHistory(savedHistory)
                 _state.update { curr ->
                     val updatedItems = curr.items.map { item ->
-                        if (item.id == series.id) item.copy(readProgress = progressText) else item
+                        if (item.workId() == series.workId()) item.copy(readProgress = progressText) else item
                     }
                     curr.copy(
                         items = updatedItems,
-                        seriesHistory = if (curr.series?.id == series.id) savedHistory else curr.seriesHistory,
+                        seriesHistory = if (curr.series?.workId() == series.workId()) savedHistory else curr.seriesHistory,
                     )
                 }
             }
@@ -1114,8 +1095,8 @@ class DesktopViewModel(
         readerJob?.cancel()
         readerJob = scope.launch {
             try {
-                val seriesId = _state.value.series?.id
-                val images = repository.loadImages(episode, seriesId)
+                val seriesWorkId = _state.value.series?.workId()
+                val images = repository.loadImages(episode, seriesWorkId)
                 _state.update {
                     it.copy(
                         readerImages = images,
@@ -1204,7 +1185,7 @@ class DesktopViewModel(
             )
         }
         scope.launch {
-            repository.saveEpisodePage(series.id, episode.wrId, targetPage)
+            repository.saveEpisodePage(series.workId(), episode.wrId, targetPage)
         }
     }
 
@@ -1213,7 +1194,7 @@ class DesktopViewModel(
         val series = _state.value.series ?: return
         val direction = _state.value.readDirection
         scope.launch {
-            repository.saveReaderSetting(series.id, mode, direction)
+            repository.saveReaderSetting(series.workId(), mode, direction)
         }
     }
 
@@ -1222,7 +1203,7 @@ class DesktopViewModel(
         val series = _state.value.series ?: return
         val mode = _state.value.viewMode
         scope.launch {
-            repository.saveReaderSetting(series.id, mode, direction)
+            repository.saveReaderSetting(series.workId(), mode, direction)
         }
     }
 
@@ -1254,4 +1235,14 @@ class DesktopViewModel(
     fun toggleFullscreen() {
         _state.update { it.copy(isFullscreen = !it.isFullscreen) }
     }
+
+    private fun ReadHistoryRecord.toToonItem(): ToonItem = ToonItem(
+        id = toonId,
+        title = toonTitle,
+        thumbUrl = toonThumbUrl,
+        href = toonHref,
+        genre = "",
+        updatedAt = null,
+        sourceId = sourceId,
+    )
 }

@@ -1,6 +1,7 @@
 package com.comics8.desktop.data
 
 import com.comics8.core.network.ToonClient
+import com.comics8.core.source.WorkId
 import com.comics8.core.sync.SyncConstants
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -311,9 +312,10 @@ class DesktopSyncManager(
                 val t = serverTombs.getJSONObject(i)
                 val type = t.optString("entityType", "")
                 val id = t.optString("entityId", "")
-                if (type == "FAVORITE") database.deleteFavorite(id)
-                else if (type == "HISTORY") database.deleteHistory(id)
-                else if (type == "EPISODE") database.deleteReadEpisodesByToon(id)
+                val workId = WorkId.parse(id)
+                if (type == "FAVORITE") database.deleteFavorite(workId)
+                else if (type == "HISTORY") database.deleteHistory(workId)
+                else if (type == "EPISODE") database.deleteReadEpisodesByToon(workId)
             }
 
             // Apply received favorites
@@ -321,9 +323,11 @@ class DesktopSyncManager(
             val favList = mutableListOf<FavoriteRecord>()
             for (i in 0 until serverFavs.length()) {
                 val f = serverFavs.getJSONObject(i)
+                val workId = DesktopBackupJson.workId(f, preferId = true) ?: continue
                 favList.add(
                     FavoriteRecord(
-                        id = f.getString("id"),
+                        sourceId = workId.sourceId,
+                        id = workId.toonId,
                         title = f.getString("title"),
                         thumbUrl = f.optString("thumbUrl", ""),
                         href = f.optString("href", ""),
@@ -340,9 +344,11 @@ class DesktopSyncManager(
             val histList = mutableListOf<ReadHistoryRecord>()
             for (i in 0 until serverHist.length()) {
                 val h = serverHist.getJSONObject(i)
+                val workId = DesktopBackupJson.workId(h, preferId = false) ?: continue
                 histList.add(
                     ReadHistoryRecord(
-                        toonId = h.getString("toonId"),
+                        sourceId = workId.sourceId,
+                        toonId = workId.toonId,
                         toonTitle = h.getString("toonTitle"),
                         toonThumbUrl = h.optString("toonThumbUrl", ""),
                         toonHref = h.optString("toonHref", ""),
@@ -366,9 +372,11 @@ class DesktopSyncManager(
             val epList = mutableListOf<ReadEpisodeRecord>()
             for (i in 0 until serverEps.length()) {
                 val ep = serverEps.getJSONObject(i)
+                val workId = DesktopBackupJson.workId(ep, preferId = false) ?: continue
                 epList.add(
                     ReadEpisodeRecord(
-                        toonId = ep.getString("toonId"),
+                        sourceId = workId.sourceId,
+                        toonId = workId.toonId,
                         wrId = ep.getString("wrId"),
                         readAt = ep.optLong("readAt", serverTime),
                         lastPage = ep.optInt("lastPage", 0),
@@ -382,9 +390,11 @@ class DesktopSyncManager(
             val settingList = mutableListOf<ReaderSettingRecord>()
             for (i in 0 until serverSettings.length()) {
                 val s = serverSettings.getJSONObject(i)
+                val workId = DesktopBackupJson.workId(s, preferId = false) ?: continue
                 settingList.add(
                     ReaderSettingRecord(
-                        toonId = s.getString("toonId"),
+                        sourceId = workId.sourceId,
+                        toonId = workId.toonId,
                         viewMode = s.optString("viewMode", "SCROLL"),
                         readDirection = s.optString("readDirection", "RIGHT_TO_LEFT"),
                         updatedAt = s.optLong("updatedAt", serverTime),

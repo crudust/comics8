@@ -2,9 +2,11 @@ package com.comics8.desktop.data
 
 import com.comics8.core.model.SyncTombstone
 import com.comics8.core.model.UpdateDates
+import com.comics8.core.source.WorkId
 import java.io.File
 import java.sql.Connection
 import java.sql.DriverManager
+import java.sql.ResultSet
 
 class DesktopDatabase(dbFile: File? = null) {
     private val dbPath: String
@@ -23,59 +25,137 @@ class DesktopDatabase(dbFile: File? = null) {
     private fun getConnection(): Connection =
         DriverManager.getConnection("jdbc:sqlite:$dbPath")
 
+    fun userVersion(): Int {
+        getConnection().use { conn ->
+            return userVersion(conn)
+        }
+    }
+
+    private fun userVersion(conn: Connection): Int {
+        conn.createStatement().use { stmt ->
+            stmt.executeQuery("PRAGMA user_version").use { rs ->
+                return if (rs.next()) rs.getInt(1) else 0
+            }
+        }
+    }
+
     private fun initTables() {
         getConnection().use { conn ->
+            val version = userVersion(conn)
+            if (version < 1) {
+                rebuildIfLegacy(conn)
+                conn.createStatement().use { it.execute("PRAGMA user_version = 1") }
+            }
+            createCurrentTables(conn)
+        }
+    }
+
+    private fun tableExists(conn: Connection, name: String): Boolean {
+        conn.prepareStatement(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        ).use { stmt ->
+            stmt.setString(1, name)
+            stmt.executeQuery().use { rs -> return rs.next() }
+        }
+    }
+
+    private fun hasColumn(conn: Connection, table: String, column: String): Boolean {
+        conn.createStatement().use { stmt ->
+            stmt.executeQuery("PRAGMA table_info($table)").use { rs ->
+                while (rs.next()) {
+                    if (rs.getString("name") == column) return true
+                }
+            }
+        }
+        return false
+    }
+
+    private fun rebuildIfLegacy(conn: Connection) {
+        val eleven = WorkId.DEFAULT_SOURCE
+        if (tableExists(conn, "favorites") && !hasColumn(conn, "favorites", "sourceId")) {
             conn.createStatement().use { stmt ->
                 stmt.execute(
                     """
-                    CREATE TABLE IF NOT EXISTS seen_toons (
-                        id TEXT PRIMARY KEY,
-                        title TEXT,
-                        updatedAt TEXT,
-                        firstSeenAt INTEGER,
-                        lastSeenAt INTEGER,
-                        notifiedKey TEXT
-                    );
-                    """.trimIndent(),
-                )
-                stmt.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS favorites (
-                        id TEXT PRIMARY KEY,
+                    CREATE TABLE favorites_new (
+                        sourceId TEXT NOT NULL,
+                        toonId TEXT NOT NULL,
                         title TEXT,
                         thumbUrl TEXT,
                         href TEXT,
                         genre TEXT,
                         updatedAt TEXT,
-                        savedAt INTEGER
-                    );
+                        savedAt INTEGER,
+                        PRIMARY KEY (sourceId, toonId)
+                    )
                     """.trimIndent(),
                 )
                 stmt.execute(
                     """
-                    CREATE TABLE IF NOT EXISTS reader_settings (
-                        toonId TEXT PRIMARY KEY,
+                    INSERT INTO favorites_new (sourceId, toonId, title, thumbUrl, href, genre, updatedAt, savedAt)
+                    SELECT '$eleven', id, title, thumbUrl, href, genre, updatedAt, savedAt FROM favorites
+                    """.trimIndent(),
+                )
+                stmt.execute("DROP TABLE favorites")
+                stmt.execute("ALTER TABLE favorites_new RENAME TO favorites")
+            }
+        }
+        if (tableExists(conn, "seen_toons") && !hasColumn(conn, "seen_toons", "sourceId")) {
+            conn.createStatement().use { stmt ->
+                stmt.execute(
+                    """
+                    CREATE TABLE seen_toons_new (
+                        sourceId TEXT NOT NULL,
+                        toonId TEXT NOT NULL,
+                        title TEXT,
+                        updatedAt TEXT,
+                        firstSeenAt INTEGER,
+                        lastSeenAt INTEGER,
+                        notifiedKey TEXT,
+                        PRIMARY KEY (sourceId, toonId)
+                    )
+                    """.trimIndent(),
+                )
+                stmt.execute(
+                    """
+                    INSERT INTO seen_toons_new (sourceId, toonId, title, updatedAt, firstSeenAt, lastSeenAt, notifiedKey)
+                    SELECT '$eleven', id, title, updatedAt, firstSeenAt, lastSeenAt, notifiedKey FROM seen_toons
+                    """.trimIndent(),
+                )
+                stmt.execute("DROP TABLE seen_toons")
+                stmt.execute("ALTER TABLE seen_toons_new RENAME TO seen_toons")
+            }
+        }
+        if (tableExists(conn, "reader_settings") && !hasColumn(conn, "reader_settings", "sourceId")) {
+            conn.createStatement().use { stmt ->
+                stmt.execute(
+                    """
+                    CREATE TABLE reader_settings_new (
+                        sourceId TEXT NOT NULL,
+                        toonId TEXT NOT NULL,
                         viewMode TEXT,
                         readDirection TEXT,
-                        updatedAt INTEGER
-                    );
+                        updatedAt INTEGER,
+                        PRIMARY KEY (sourceId, toonId)
+                    )
                     """.trimIndent(),
                 )
                 stmt.execute(
                     """
-                    CREATE TABLE IF NOT EXISTS read_episodes (
-                        toonId TEXT,
-                        wrId TEXT,
-                        readAt INTEGER,
-                        lastPage INTEGER DEFAULT 0,
-                        PRIMARY KEY (toonId, wrId)
-                    );
+                    INSERT INTO reader_settings_new (sourceId, toonId, viewMode, readDirection, updatedAt)
+                    SELECT '$eleven', toonId, viewMode, readDirection, updatedAt FROM reader_settings
                     """.trimIndent(),
                 )
+                stmt.execute("DROP TABLE reader_settings")
+                stmt.execute("ALTER TABLE reader_settings_new RENAME TO reader_settings")
+            }
+        }
+        if (tableExists(conn, "read_history") && !hasColumn(conn, "read_history", "sourceId")) {
+            conn.createStatement().use { stmt ->
                 stmt.execute(
                     """
-                    CREATE TABLE IF NOT EXISTS read_history (
-                        toonId TEXT PRIMARY KEY,
+                    CREATE TABLE read_history_new (
+                        sourceId TEXT NOT NULL,
+                        toonId TEXT NOT NULL,
                         toonTitle TEXT,
                         toonThumbUrl TEXT,
                         toonHref TEXT,
@@ -88,25 +168,59 @@ class DesktopDatabase(dbFile: File? = null) {
                         nextWrId TEXT,
                         nextEpisodeTitle TEXT,
                         nextEpisodeHref TEXT,
-                        hasNew INTEGER DEFAULT 0
-                    );
+                        hasNew INTEGER DEFAULT 0,
+                        PRIMARY KEY (sourceId, toonId)
+                    )
                     """.trimIndent(),
                 )
                 stmt.execute(
                     """
-                    CREATE TABLE IF NOT EXISTS tombstones (
-                        entityType TEXT,
-                        entityId TEXT,
-                        deletedAt INTEGER,
-                        PRIMARY KEY (entityType, entityId)
-                    );
+                    INSERT INTO read_history_new (
+                        sourceId, toonId, toonTitle, toonThumbUrl, toonHref, lastWrId, lastEpisodeTitle,
+                        lastEpisodeHref, lastReadOrder, totalEpisodes, lastReadAt, nextWrId, nextEpisodeTitle,
+                        nextEpisodeHref, hasNew
+                    )
+                    SELECT '$eleven', toonId, toonTitle, toonThumbUrl, toonHref, lastWrId, lastEpisodeTitle,
+                        lastEpisodeHref, lastReadOrder, totalEpisodes, lastReadAt, nextWrId, nextEpisodeTitle,
+                        nextEpisodeHref, hasNew FROM read_history
+                    """.trimIndent(),
+                )
+                stmt.execute("DROP TABLE read_history")
+                stmt.execute("ALTER TABLE read_history_new RENAME TO read_history")
+            }
+        }
+        if (tableExists(conn, "read_episodes") && !hasColumn(conn, "read_episodes", "sourceId")) {
+            conn.createStatement().use { stmt ->
+                stmt.execute(
+                    """
+                    CREATE TABLE read_episodes_new (
+                        sourceId TEXT NOT NULL,
+                        toonId TEXT NOT NULL,
+                        wrId TEXT NOT NULL,
+                        readAt INTEGER,
+                        lastPage INTEGER DEFAULT 0,
+                        PRIMARY KEY (sourceId, toonId, wrId)
+                    )
                     """.trimIndent(),
                 )
                 stmt.execute(
                     """
-                    CREATE TABLE IF NOT EXISTS downloaded_episodes (
-                        toonId TEXT,
-                        wrId TEXT,
+                    INSERT INTO read_episodes_new (sourceId, toonId, wrId, readAt, lastPage)
+                    SELECT '$eleven', toonId, wrId, readAt, lastPage FROM read_episodes
+                    """.trimIndent(),
+                )
+                stmt.execute("DROP TABLE read_episodes")
+                stmt.execute("ALTER TABLE read_episodes_new RENAME TO read_episodes")
+            }
+        }
+        if (tableExists(conn, "downloaded_episodes") && !hasColumn(conn, "downloaded_episodes", "sourceId")) {
+            conn.createStatement().use { stmt ->
+                stmt.execute(
+                    """
+                    CREATE TABLE downloaded_episodes_new (
+                        sourceId TEXT NOT NULL,
+                        toonId TEXT NOT NULL,
+                        wrId TEXT NOT NULL,
                         toonTitle TEXT,
                         toonThumbUrl TEXT,
                         toonHref TEXT,
@@ -116,11 +230,139 @@ class DesktopDatabase(dbFile: File? = null) {
                         totalBytes INTEGER,
                         downloadedAt INTEGER,
                         localDirPath TEXT,
-                        PRIMARY KEY (toonId, wrId)
-                    );
+                        PRIMARY KEY (sourceId, toonId, wrId)
+                    )
                     """.trimIndent(),
                 )
+                stmt.execute(
+                    """
+                    INSERT INTO downloaded_episodes_new (
+                        sourceId, toonId, wrId, toonTitle, toonThumbUrl, toonHref, episodeTitle, episodeHref,
+                        imageCount, totalBytes, downloadedAt, localDirPath
+                    )
+                    SELECT '$eleven', toonId, wrId, toonTitle, toonThumbUrl, toonHref, episodeTitle, episodeHref,
+                        imageCount, totalBytes, downloadedAt, localDirPath FROM downloaded_episodes
+                    """.trimIndent(),
+                )
+                stmt.execute("DROP TABLE downloaded_episodes")
+                stmt.execute("ALTER TABLE downloaded_episodes_new RENAME TO downloaded_episodes")
             }
+        }
+        if (tableExists(conn, "tombstones")) {
+            conn.createStatement().use { stmt ->
+                stmt.execute(
+                    "UPDATE tombstones SET entityId = '$eleven:' || entityId WHERE entityId NOT LIKE '%:%'",
+                )
+            }
+        }
+    }
+
+    private fun createCurrentTables(conn: Connection) {
+        conn.createStatement().use { stmt ->
+            stmt.execute(
+                """
+                CREATE TABLE IF NOT EXISTS seen_toons (
+                    sourceId TEXT NOT NULL,
+                    toonId TEXT NOT NULL,
+                    title TEXT,
+                    updatedAt TEXT,
+                    firstSeenAt INTEGER,
+                    lastSeenAt INTEGER,
+                    notifiedKey TEXT,
+                    PRIMARY KEY (sourceId, toonId)
+                )
+                """.trimIndent(),
+            )
+            stmt.execute(
+                """
+                CREATE TABLE IF NOT EXISTS favorites (
+                    sourceId TEXT NOT NULL,
+                    toonId TEXT NOT NULL,
+                    title TEXT,
+                    thumbUrl TEXT,
+                    href TEXT,
+                    genre TEXT,
+                    updatedAt TEXT,
+                    savedAt INTEGER,
+                    PRIMARY KEY (sourceId, toonId)
+                )
+                """.trimIndent(),
+            )
+            stmt.execute(
+                """
+                CREATE TABLE IF NOT EXISTS reader_settings (
+                    sourceId TEXT NOT NULL,
+                    toonId TEXT NOT NULL,
+                    viewMode TEXT,
+                    readDirection TEXT,
+                    updatedAt INTEGER,
+                    PRIMARY KEY (sourceId, toonId)
+                )
+                """.trimIndent(),
+            )
+            stmt.execute(
+                """
+                CREATE TABLE IF NOT EXISTS read_episodes (
+                    sourceId TEXT NOT NULL,
+                    toonId TEXT NOT NULL,
+                    wrId TEXT NOT NULL,
+                    readAt INTEGER,
+                    lastPage INTEGER DEFAULT 0,
+                    PRIMARY KEY (sourceId, toonId, wrId)
+                )
+                """.trimIndent(),
+            )
+            stmt.execute(
+                """
+                CREATE TABLE IF NOT EXISTS read_history (
+                    sourceId TEXT NOT NULL,
+                    toonId TEXT NOT NULL,
+                    toonTitle TEXT,
+                    toonThumbUrl TEXT,
+                    toonHref TEXT,
+                    lastWrId TEXT,
+                    lastEpisodeTitle TEXT,
+                    lastEpisodeHref TEXT,
+                    lastReadOrder INTEGER,
+                    totalEpisodes INTEGER,
+                    lastReadAt INTEGER,
+                    nextWrId TEXT,
+                    nextEpisodeTitle TEXT,
+                    nextEpisodeHref TEXT,
+                    hasNew INTEGER DEFAULT 0,
+                    PRIMARY KEY (sourceId, toonId)
+                )
+                """.trimIndent(),
+            )
+            stmt.execute(
+                """
+                CREATE TABLE IF NOT EXISTS tombstones (
+                    entityType TEXT,
+                    entityId TEXT,
+                    deletedAt INTEGER,
+                    PRIMARY KEY (entityType, entityId)
+                )
+                """.trimIndent(),
+            )
+            stmt.execute(
+                """
+                CREATE TABLE IF NOT EXISTS downloaded_episodes (
+                    sourceId TEXT NOT NULL,
+                    toonId TEXT NOT NULL,
+                    wrId TEXT NOT NULL,
+                    toonTitle TEXT,
+                    toonThumbUrl TEXT,
+                    toonHref TEXT,
+                    episodeTitle TEXT,
+                    episodeHref TEXT,
+                    imageCount INTEGER,
+                    totalBytes INTEGER,
+                    downloadedAt INTEGER,
+                    localDirPath TEXT,
+                    PRIMARY KEY (sourceId, toonId, wrId)
+                )
+                """.trimIndent(),
+            )
         }
     }
 
@@ -187,17 +429,7 @@ class DesktopDatabase(dbFile: File? = null) {
             conn.prepareStatement("SELECT * FROM favorites ORDER BY COALESCE(updatedAt, '') DESC, savedAt DESC").use { stmt ->
                 val rs = stmt.executeQuery()
                 while (rs.next()) {
-                    list.add(
-                        FavoriteRecord(
-                            id = rs.getString("id"),
-                            title = rs.getString("title"),
-                            thumbUrl = rs.getString("thumbUrl"),
-                            href = rs.getString("href"),
-                            genre = rs.getString("genre"),
-                            updatedAt = rs.getString("updatedAt"),
-                            savedAt = rs.getLong("savedAt"),
-                        ),
-                    )
+                    list.add(favoriteFrom(rs))
                 }
             }
         }
@@ -211,75 +443,60 @@ class DesktopDatabase(dbFile: File? = null) {
                 stmt.setLong(1, since)
                 val rs = stmt.executeQuery()
                 while (rs.next()) {
-                    list.add(
-                        FavoriteRecord(
-                            id = rs.getString("id"),
-                            title = rs.getString("title"),
-                            thumbUrl = rs.getString("thumbUrl"),
-                            href = rs.getString("href"),
-                            genre = rs.getString("genre"),
-                            updatedAt = rs.getString("updatedAt"),
-                            savedAt = rs.getLong("savedAt"),
-                        ),
-                    )
+                    list.add(favoriteFrom(rs))
                 }
             }
         }
         return list
     }
 
-    fun isFavorite(id: String): Boolean {
+    fun isFavorite(workId: WorkId): Boolean {
         getConnection().use { conn ->
-            conn.prepareStatement("SELECT 1 FROM favorites WHERE id = ?").use { stmt ->
-                stmt.setString(1, id)
+            conn.prepareStatement("SELECT 1 FROM favorites WHERE sourceId = ? AND toonId = ?").use { stmt ->
+                stmt.setString(1, workId.sourceId)
+                stmt.setString(2, workId.toonId)
                 val rs = stmt.executeQuery()
                 return rs.next()
             }
         }
     }
 
-    fun getFavorite(id: String): FavoriteRecord? {
+    fun getFavorite(workId: WorkId): FavoriteRecord? {
         getConnection().use { conn ->
-            conn.prepareStatement("SELECT * FROM favorites WHERE id = ?").use { stmt ->
-                stmt.setString(1, id)
+            conn.prepareStatement("SELECT * FROM favorites WHERE sourceId = ? AND toonId = ?").use { stmt ->
+                stmt.setString(1, workId.sourceId)
+                stmt.setString(2, workId.toonId)
                 val rs = stmt.executeQuery()
                 if (!rs.next()) return null
-                return FavoriteRecord(
-                    id = rs.getString("id"),
-                    title = rs.getString("title"),
-                    thumbUrl = rs.getString("thumbUrl"),
-                    href = rs.getString("href"),
-                    genre = rs.getString("genre"),
-                    updatedAt = rs.getString("updatedAt"),
-                    savedAt = rs.getLong("savedAt"),
-                )
+                return favoriteFrom(rs)
             }
         }
     }
 
-    fun updateFavoriteUpdatedAt(id: String, updatedAt: String) {
+    fun updateFavoriteUpdatedAt(workId: WorkId, updatedAt: String) {
         if (updatedAt.isBlank()) return
-        val current = getFavorite(id) ?: return
+        val current = getFavorite(workId) ?: return
         if (!UpdateDates.shouldReplace(current.updatedAt, updatedAt)) return
         val stored = UpdateDates.toListingDate(updatedAt) ?: updatedAt
         getConnection().use { conn ->
             conn.prepareStatement(
-                "UPDATE favorites SET updatedAt = ? WHERE id = ?"
+                "UPDATE favorites SET updatedAt = ? WHERE sourceId = ? AND toonId = ?",
             ).use { stmt ->
                 stmt.setString(1, stored)
-                stmt.setString(2, id)
+                stmt.setString(2, workId.sourceId)
+                stmt.setString(3, workId.toonId)
                 stmt.executeUpdate()
             }
         }
     }
 
-    fun getFavoriteIds(): Set<String> {
-        val set = mutableSetOf<String>()
+    fun getFavoriteIds(): Set<WorkId> {
+        val set = mutableSetOf<WorkId>()
         getConnection().use { conn ->
-            conn.prepareStatement("SELECT id FROM favorites").use { stmt ->
+            conn.prepareStatement("SELECT sourceId, toonId FROM favorites").use { stmt ->
                 val rs = stmt.executeQuery()
                 while (rs.next()) {
-                    set.add(rs.getString("id"))
+                    set.add(WorkId(rs.getString("sourceId"), rs.getString("toonId")))
                 }
             }
         }
@@ -287,20 +504,22 @@ class DesktopDatabase(dbFile: File? = null) {
     }
 
     fun saveFavorite(item: FavoriteRecord) {
+        val workId = WorkId.writable(item.sourceId, item.id) ?: return
         getConnection().use { conn ->
             conn.prepareStatement(
                 """
-                INSERT OR REPLACE INTO favorites (id, title, thumbUrl, href, genre, updatedAt, savedAt)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO favorites (sourceId, toonId, title, thumbUrl, href, genre, updatedAt, savedAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """.trimIndent(),
             ).use { stmt ->
-                stmt.setString(1, item.id)
-                stmt.setString(2, item.title)
-                stmt.setString(3, item.thumbUrl)
-                stmt.setString(4, item.href)
-                stmt.setString(5, item.genre)
-                stmt.setString(6, item.updatedAt)
-                stmt.setLong(7, item.savedAt)
+                stmt.setString(1, workId.sourceId)
+                stmt.setString(2, workId.toonId)
+                stmt.setString(3, item.title)
+                stmt.setString(4, item.thumbUrl)
+                stmt.setString(5, item.href)
+                stmt.setString(6, item.genre)
+                stmt.setString(7, item.updatedAt)
+                stmt.setLong(8, item.savedAt)
                 stmt.executeUpdate()
             }
         }
@@ -311,18 +530,20 @@ class DesktopDatabase(dbFile: File? = null) {
             conn.autoCommit = false
             conn.prepareStatement(
                 """
-                INSERT OR REPLACE INTO favorites (id, title, thumbUrl, href, genre, updatedAt, savedAt)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO favorites (sourceId, toonId, title, thumbUrl, href, genre, updatedAt, savedAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """.trimIndent(),
             ).use { stmt ->
                 for (item in items) {
-                    stmt.setString(1, item.id)
-                    stmt.setString(2, item.title)
-                    stmt.setString(3, item.thumbUrl)
-                    stmt.setString(4, item.href)
-                    stmt.setString(5, item.genre)
-                    stmt.setString(6, item.updatedAt)
-                    stmt.setLong(7, item.savedAt)
+                    val workId = WorkId.writable(item.sourceId, item.id) ?: continue
+                    stmt.setString(1, workId.sourceId)
+                    stmt.setString(2, workId.toonId)
+                    stmt.setString(3, item.title)
+                    stmt.setString(4, item.thumbUrl)
+                    stmt.setString(5, item.href)
+                    stmt.setString(6, item.genre)
+                    stmt.setString(7, item.updatedAt)
+                    stmt.setLong(8, item.savedAt)
                     stmt.addBatch()
                 }
                 stmt.executeBatch()
@@ -331,14 +552,26 @@ class DesktopDatabase(dbFile: File? = null) {
         }
     }
 
-    fun deleteFavorite(id: String) {
+    fun deleteFavorite(workId: WorkId) {
         getConnection().use { conn ->
-            conn.prepareStatement("DELETE FROM favorites WHERE id = ?").use { stmt ->
-                stmt.setString(1, id)
+            conn.prepareStatement("DELETE FROM favorites WHERE sourceId = ? AND toonId = ?").use { stmt ->
+                stmt.setString(1, workId.sourceId)
+                stmt.setString(2, workId.toonId)
                 stmt.executeUpdate()
             }
         }
     }
+
+    private fun favoriteFrom(rs: ResultSet): FavoriteRecord = FavoriteRecord(
+        sourceId = rs.getString("sourceId"),
+        id = rs.getString("toonId"),
+        title = rs.getString("title"),
+        thumbUrl = rs.getString("thumbUrl"),
+        href = rs.getString("href"),
+        genre = rs.getString("genre"),
+        updatedAt = rs.getString("updatedAt"),
+        savedAt = rs.getLong("savedAt"),
+    )
 
     // --- Seen Toons ---
     fun getSeenCount(): Int {
@@ -350,24 +583,22 @@ class DesktopDatabase(dbFile: File? = null) {
         }
     }
 
-    fun getSeenByIds(ids: List<String>): Map<String, SeenRecord> {
+    fun getSeenByIds(ids: List<WorkId>): Map<String, SeenRecord> {
         if (ids.isEmpty()) return emptyMap()
+        val wanted = ids.map { it.storageKey() }.toSet()
+        val toonIds = ids.map { it.toonId }.distinct()
         val map = mutableMapOf<String, SeenRecord>()
         getConnection().use { conn ->
-            val placeholders = ids.joinToString(",") { "?" }
-            conn.prepareStatement("SELECT * FROM seen_toons WHERE id IN ($placeholders)").use { stmt ->
-                ids.forEachIndexed { index, id -> stmt.setString(index + 1, id) }
+            val placeholders = toonIds.joinToString(",") { "?" }
+            conn.prepareStatement("SELECT * FROM seen_toons WHERE toonId IN ($placeholders)").use { stmt ->
+                toonIds.forEachIndexed { index, id -> stmt.setString(index + 1, id) }
                 val rs = stmt.executeQuery()
                 while (rs.next()) {
-                    val record = SeenRecord(
-                        id = rs.getString("id"),
-                        title = rs.getString("title"),
-                        updatedAt = rs.getString("updatedAt"),
-                        firstSeenAt = rs.getLong("firstSeenAt"),
-                        lastSeenAt = rs.getLong("lastSeenAt"),
-                        notifiedKey = rs.getString("notifiedKey"),
-                    )
-                    map[record.id] = record
+                    val record = seenFrom(rs)
+                    val key = record.workId().storageKey()
+                    if (key in wanted) {
+                        map[key] = record
+                    }
                 }
             }
         }
@@ -380,17 +611,19 @@ class DesktopDatabase(dbFile: File? = null) {
             conn.autoCommit = false
             conn.prepareStatement(
                 """
-                INSERT OR REPLACE INTO seen_toons (id, title, updatedAt, firstSeenAt, lastSeenAt, notifiedKey)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO seen_toons (sourceId, toonId, title, updatedAt, firstSeenAt, lastSeenAt, notifiedKey)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """.trimIndent(),
             ).use { stmt ->
                 for (item in items) {
-                    stmt.setString(1, item.id)
-                    stmt.setString(2, item.title)
-                    stmt.setString(3, item.updatedAt)
-                    stmt.setLong(4, item.firstSeenAt)
-                    stmt.setLong(5, item.lastSeenAt)
-                    stmt.setString(6, item.notifiedKey)
+                    val workId = WorkId.writable(item.sourceId, item.id) ?: continue
+                    stmt.setString(1, workId.sourceId)
+                    stmt.setString(2, workId.toonId)
+                    stmt.setString(3, item.title)
+                    stmt.setString(4, item.updatedAt)
+                    stmt.setLong(5, item.firstSeenAt)
+                    stmt.setLong(6, item.lastSeenAt)
+                    stmt.setString(7, item.notifiedKey)
                     stmt.addBatch()
                 }
                 stmt.executeBatch()
@@ -399,6 +632,16 @@ class DesktopDatabase(dbFile: File? = null) {
         }
     }
 
+    private fun seenFrom(rs: ResultSet): SeenRecord = SeenRecord(
+        sourceId = rs.getString("sourceId"),
+        id = rs.getString("toonId"),
+        title = rs.getString("title"),
+        updatedAt = rs.getString("updatedAt"),
+        firstSeenAt = rs.getLong("firstSeenAt"),
+        lastSeenAt = rs.getLong("lastSeenAt"),
+        notifiedKey = rs.getString("notifiedKey"),
+    )
+
     // --- Read History ---
     fun getAllHistory(): List<ReadHistoryRecord> {
         val list = mutableListOf<ReadHistoryRecord>()
@@ -406,24 +649,7 @@ class DesktopDatabase(dbFile: File? = null) {
             conn.prepareStatement("SELECT * FROM read_history ORDER BY lastReadAt DESC").use { stmt ->
                 val rs = stmt.executeQuery()
                 while (rs.next()) {
-                    list.add(
-                        ReadHistoryRecord(
-                            toonId = rs.getString("toonId"),
-                            toonTitle = rs.getString("toonTitle"),
-                            toonThumbUrl = rs.getString("toonThumbUrl"),
-                            toonHref = rs.getString("toonHref"),
-                            lastWrId = rs.getString("lastWrId"),
-                            lastEpisodeTitle = rs.getString("lastEpisodeTitle"),
-                            lastEpisodeHref = rs.getString("lastEpisodeHref"),
-                            lastReadOrder = rs.getInt("lastReadOrder"),
-                            totalEpisodes = rs.getInt("totalEpisodes"),
-                            lastReadAt = rs.getLong("lastReadAt"),
-                            nextWrId = rs.getString("nextWrId"),
-                            nextEpisodeTitle = rs.getString("nextEpisodeTitle"),
-                            nextEpisodeHref = rs.getString("nextEpisodeHref"),
-                            hasNew = rs.getInt("hasNew") == 1,
-                        ),
-                    )
+                    list.add(historyFrom(rs))
                 }
             }
         }
@@ -437,52 +663,21 @@ class DesktopDatabase(dbFile: File? = null) {
                 stmt.setLong(1, since)
                 val rs = stmt.executeQuery()
                 while (rs.next()) {
-                    list.add(
-                        ReadHistoryRecord(
-                            toonId = rs.getString("toonId"),
-                            toonTitle = rs.getString("toonTitle"),
-                            toonThumbUrl = rs.getString("toonThumbUrl"),
-                            toonHref = rs.getString("toonHref"),
-                            lastWrId = rs.getString("lastWrId"),
-                            lastEpisodeTitle = rs.getString("lastEpisodeTitle"),
-                            lastEpisodeHref = rs.getString("lastEpisodeHref"),
-                            lastReadOrder = rs.getInt("lastReadOrder"),
-                            totalEpisodes = rs.getInt("totalEpisodes"),
-                            lastReadAt = rs.getLong("lastReadAt"),
-                            nextWrId = rs.getString("nextWrId"),
-                            nextEpisodeTitle = rs.getString("nextEpisodeTitle"),
-                            nextEpisodeHref = rs.getString("nextEpisodeHref"),
-                            hasNew = rs.getInt("hasNew") == 1,
-                        ),
-                    )
+                    list.add(historyFrom(rs))
                 }
             }
         }
         return list
     }
 
-    fun getHistory(toonId: String): ReadHistoryRecord? {
+    fun getHistory(workId: WorkId): ReadHistoryRecord? {
         getConnection().use { conn ->
-            conn.prepareStatement("SELECT * FROM read_history WHERE toonId = ?").use { stmt ->
-                stmt.setString(1, toonId)
+            conn.prepareStatement("SELECT * FROM read_history WHERE sourceId = ? AND toonId = ?").use { stmt ->
+                stmt.setString(1, workId.sourceId)
+                stmt.setString(2, workId.toonId)
                 val rs = stmt.executeQuery()
                 if (rs.next()) {
-                    return ReadHistoryRecord(
-                        toonId = rs.getString("toonId"),
-                        toonTitle = rs.getString("toonTitle"),
-                        toonThumbUrl = rs.getString("toonThumbUrl"),
-                        toonHref = rs.getString("toonHref"),
-                        lastWrId = rs.getString("lastWrId"),
-                        lastEpisodeTitle = rs.getString("lastEpisodeTitle"),
-                        lastEpisodeHref = rs.getString("lastEpisodeHref"),
-                        lastReadOrder = rs.getInt("lastReadOrder"),
-                        totalEpisodes = rs.getInt("totalEpisodes"),
-                        lastReadAt = rs.getLong("lastReadAt"),
-                        nextWrId = rs.getString("nextWrId"),
-                        nextEpisodeTitle = rs.getString("nextEpisodeTitle"),
-                        nextEpisodeHref = rs.getString("nextEpisodeHref"),
-                        hasNew = rs.getInt("hasNew") == 1,
-                    )
+                    return historyFrom(rs)
                 }
             }
         }
@@ -490,28 +685,16 @@ class DesktopDatabase(dbFile: File? = null) {
     }
 
     fun saveHistory(history: ReadHistoryRecord) {
+        val workId = WorkId.writable(history.sourceId, history.toonId) ?: return
         getConnection().use { conn ->
             conn.prepareStatement(
                 """
                 INSERT OR REPLACE INTO read_history 
-                (toonId, toonTitle, toonThumbUrl, toonHref, lastWrId, lastEpisodeTitle, lastEpisodeHref, lastReadOrder, totalEpisodes, lastReadAt, nextWrId, nextEpisodeTitle, nextEpisodeHref, hasNew)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (sourceId, toonId, toonTitle, toonThumbUrl, toonHref, lastWrId, lastEpisodeTitle, lastEpisodeHref, lastReadOrder, totalEpisodes, lastReadAt, nextWrId, nextEpisodeTitle, nextEpisodeHref, hasNew)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """.trimIndent(),
             ).use { stmt ->
-                stmt.setString(1, history.toonId)
-                stmt.setString(2, history.toonTitle)
-                stmt.setString(3, history.toonThumbUrl)
-                stmt.setString(4, history.toonHref)
-                stmt.setString(5, history.lastWrId)
-                stmt.setString(6, history.lastEpisodeTitle)
-                stmt.setString(7, history.lastEpisodeHref)
-                stmt.setInt(8, history.lastReadOrder)
-                stmt.setInt(9, history.totalEpisodes)
-                stmt.setLong(10, history.lastReadAt)
-                stmt.setString(11, history.nextWrId)
-                stmt.setString(12, history.nextEpisodeTitle)
-                stmt.setString(13, history.nextEpisodeHref)
-                stmt.setInt(14, if (history.hasNew) 1 else 0)
+                bindHistory(stmt, history, workId)
                 stmt.executeUpdate()
             }
         }
@@ -524,25 +707,13 @@ class DesktopDatabase(dbFile: File? = null) {
             conn.prepareStatement(
                 """
                 INSERT OR REPLACE INTO read_history 
-                (toonId, toonTitle, toonThumbUrl, toonHref, lastWrId, lastEpisodeTitle, lastEpisodeHref, lastReadOrder, totalEpisodes, lastReadAt, nextWrId, nextEpisodeTitle, nextEpisodeHref, hasNew)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (sourceId, toonId, toonTitle, toonThumbUrl, toonHref, lastWrId, lastEpisodeTitle, lastEpisodeHref, lastReadOrder, totalEpisodes, lastReadAt, nextWrId, nextEpisodeTitle, nextEpisodeHref, hasNew)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """.trimIndent(),
             ).use { stmt ->
                 for (history in items) {
-                    stmt.setString(1, history.toonId)
-                    stmt.setString(2, history.toonTitle)
-                    stmt.setString(3, history.toonThumbUrl)
-                    stmt.setString(4, history.toonHref)
-                    stmt.setString(5, history.lastWrId)
-                    stmt.setString(6, history.lastEpisodeTitle)
-                    stmt.setString(7, history.lastEpisodeHref)
-                    stmt.setInt(8, history.lastReadOrder)
-                    stmt.setInt(9, history.totalEpisodes)
-                    stmt.setLong(10, history.lastReadAt)
-                    stmt.setString(11, history.nextWrId)
-                    stmt.setString(12, history.nextEpisodeTitle)
-                    stmt.setString(13, history.nextEpisodeHref)
-                    stmt.setInt(14, if (history.hasNew) 1 else 0)
+                    val workId = WorkId.writable(history.sourceId, history.toonId) ?: continue
+                    bindHistory(stmt, history, workId)
                     stmt.addBatch()
                 }
                 stmt.executeBatch()
@@ -551,10 +722,11 @@ class DesktopDatabase(dbFile: File? = null) {
         }
     }
 
-    fun deleteHistory(toonId: String) {
+    fun deleteHistory(workId: WorkId) {
         getConnection().use { conn ->
-            conn.prepareStatement("DELETE FROM read_history WHERE toonId = ?").use { stmt ->
-                stmt.setString(1, toonId)
+            conn.prepareStatement("DELETE FROM read_history WHERE sourceId = ? AND toonId = ?").use { stmt ->
+                stmt.setString(1, workId.sourceId)
+                stmt.setString(2, workId.toonId)
                 stmt.executeUpdate()
             }
         }
@@ -575,14 +747,7 @@ class DesktopDatabase(dbFile: File? = null) {
             conn.prepareStatement("SELECT * FROM read_episodes").use { stmt ->
                 val rs = stmt.executeQuery()
                 while (rs.next()) {
-                    list.add(
-                        ReadEpisodeRecord(
-                            toonId = rs.getString("toonId"),
-                            wrId = rs.getString("wrId"),
-                            readAt = rs.getLong("readAt"),
-                            lastPage = rs.getInt("lastPage"),
-                        ),
-                    )
+                    list.add(episodeFrom(rs))
                 }
             }
         }
@@ -596,54 +761,37 @@ class DesktopDatabase(dbFile: File? = null) {
                 stmt.setLong(1, since)
                 val rs = stmt.executeQuery()
                 while (rs.next()) {
-                    list.add(
-                        ReadEpisodeRecord(
-                            toonId = rs.getString("toonId"),
-                            wrId = rs.getString("wrId"),
-                            readAt = rs.getLong("readAt"),
-                            lastPage = rs.getInt("lastPage"),
-                        ),
-                    )
+                    list.add(episodeFrom(rs))
                 }
             }
         }
         return list
     }
 
-    fun getReadEpisodesByToon(toonId: String): List<ReadEpisodeRecord> {
+    fun getReadEpisodesByToon(workId: WorkId): List<ReadEpisodeRecord> {
         val list = mutableListOf<ReadEpisodeRecord>()
         getConnection().use { conn ->
-            conn.prepareStatement("SELECT * FROM read_episodes WHERE toonId = ?").use { stmt ->
-                stmt.setString(1, toonId)
+            conn.prepareStatement("SELECT * FROM read_episodes WHERE sourceId = ? AND toonId = ?").use { stmt ->
+                stmt.setString(1, workId.sourceId)
+                stmt.setString(2, workId.toonId)
                 val rs = stmt.executeQuery()
                 while (rs.next()) {
-                    list.add(
-                        ReadEpisodeRecord(
-                            toonId = rs.getString("toonId"),
-                            wrId = rs.getString("wrId"),
-                            readAt = rs.getLong("readAt"),
-                            lastPage = rs.getInt("lastPage"),
-                        ),
-                    )
+                    list.add(episodeFrom(rs))
                 }
             }
         }
         return list
     }
 
-    fun getReadEpisode(toonId: String, wrId: String): ReadEpisodeRecord? {
+    fun getReadEpisode(workId: WorkId, wrId: String): ReadEpisodeRecord? {
         getConnection().use { conn ->
-            conn.prepareStatement("SELECT * FROM read_episodes WHERE toonId = ? AND wrId = ?").use { stmt ->
-                stmt.setString(1, toonId)
-                stmt.setString(2, wrId)
+            conn.prepareStatement("SELECT * FROM read_episodes WHERE sourceId = ? AND toonId = ? AND wrId = ?").use { stmt ->
+                stmt.setString(1, workId.sourceId)
+                stmt.setString(2, workId.toonId)
+                stmt.setString(3, wrId)
                 val rs = stmt.executeQuery()
                 if (rs.next()) {
-                    return ReadEpisodeRecord(
-                        toonId = rs.getString("toonId"),
-                        wrId = rs.getString("wrId"),
-                        readAt = rs.getLong("readAt"),
-                        lastPage = rs.getInt("lastPage"),
-                    )
+                    return episodeFrom(rs)
                 }
             }
         }
@@ -651,17 +799,19 @@ class DesktopDatabase(dbFile: File? = null) {
     }
 
     fun markEpisodeRead(record: ReadEpisodeRecord) {
+        val workId = WorkId.writable(record.sourceId, record.toonId) ?: return
         getConnection().use { conn ->
             conn.prepareStatement(
                 """
-                INSERT OR REPLACE INTO read_episodes (toonId, wrId, readAt, lastPage)
-                VALUES (?, ?, ?, ?)
+                INSERT OR REPLACE INTO read_episodes (sourceId, toonId, wrId, readAt, lastPage)
+                VALUES (?, ?, ?, ?, ?)
                 """.trimIndent(),
             ).use { stmt ->
-                stmt.setString(1, record.toonId)
-                stmt.setString(2, record.wrId)
-                stmt.setLong(3, record.readAt)
-                stmt.setInt(4, record.lastPage)
+                stmt.setString(1, workId.sourceId)
+                stmt.setString(2, workId.toonId)
+                stmt.setString(3, record.wrId)
+                stmt.setLong(4, record.readAt)
+                stmt.setInt(5, record.lastPage)
                 stmt.executeUpdate()
             }
         }
@@ -673,15 +823,17 @@ class DesktopDatabase(dbFile: File? = null) {
             conn.autoCommit = false
             conn.prepareStatement(
                 """
-                INSERT OR REPLACE INTO read_episodes (toonId, wrId, readAt, lastPage)
-                VALUES (?, ?, ?, ?)
+                INSERT OR REPLACE INTO read_episodes (sourceId, toonId, wrId, readAt, lastPage)
+                VALUES (?, ?, ?, ?, ?)
                 """.trimIndent(),
             ).use { stmt ->
                 for (item in items) {
-                    stmt.setString(1, item.toonId)
-                    stmt.setString(2, item.wrId)
-                    stmt.setLong(3, item.readAt)
-                    stmt.setInt(4, item.lastPage)
+                    val workId = WorkId.writable(item.sourceId, item.toonId) ?: continue
+                    stmt.setString(1, workId.sourceId)
+                    stmt.setString(2, workId.toonId)
+                    stmt.setString(3, item.wrId)
+                    stmt.setLong(4, item.readAt)
+                    stmt.setInt(5, item.lastPage)
                     stmt.addBatch()
                 }
                 stmt.executeBatch()
@@ -690,22 +842,26 @@ class DesktopDatabase(dbFile: File? = null) {
         }
     }
 
-    fun updateLastPage(toonId: String, wrId: String, page: Int, readAt: Long = System.currentTimeMillis()) {
+    fun updateLastPage(workId: WorkId, wrId: String, page: Int, readAt: Long = System.currentTimeMillis()) {
         getConnection().use { conn ->
-            conn.prepareStatement("UPDATE read_episodes SET lastPage = ?, readAt = ? WHERE toonId = ? AND wrId = ?").use { stmt ->
+            conn.prepareStatement(
+                "UPDATE read_episodes SET lastPage = ?, readAt = ? WHERE sourceId = ? AND toonId = ? AND wrId = ?",
+            ).use { stmt ->
                 stmt.setInt(1, page)
                 stmt.setLong(2, readAt)
-                stmt.setString(3, toonId)
-                stmt.setString(4, wrId)
+                stmt.setString(3, workId.sourceId)
+                stmt.setString(4, workId.toonId)
+                stmt.setString(5, wrId)
                 stmt.executeUpdate()
             }
         }
     }
 
-    fun deleteReadEpisodesByToon(toonId: String) {
+    fun deleteReadEpisodesByToon(workId: WorkId) {
         getConnection().use { conn ->
-            conn.prepareStatement("DELETE FROM read_episodes WHERE toonId = ?").use { stmt ->
-                stmt.setString(1, toonId)
+            conn.prepareStatement("DELETE FROM read_episodes WHERE sourceId = ? AND toonId = ?").use { stmt ->
+                stmt.setString(1, workId.sourceId)
+                stmt.setString(2, workId.toonId)
                 stmt.executeUpdate()
             }
         }
@@ -718,14 +874,7 @@ class DesktopDatabase(dbFile: File? = null) {
             conn.prepareStatement("SELECT * FROM reader_settings").use { stmt ->
                 val rs = stmt.executeQuery()
                 while (rs.next()) {
-                    list.add(
-                        ReaderSettingRecord(
-                            toonId = rs.getString("toonId"),
-                            viewMode = rs.getString("viewMode"),
-                            readDirection = rs.getString("readDirection"),
-                            updatedAt = rs.getLong("updatedAt"),
-                        ),
-                    )
+                    list.add(settingFrom(rs))
                 }
             }
         }
@@ -739,32 +888,21 @@ class DesktopDatabase(dbFile: File? = null) {
                 stmt.setLong(1, since)
                 val rs = stmt.executeQuery()
                 while (rs.next()) {
-                    list.add(
-                        ReaderSettingRecord(
-                            toonId = rs.getString("toonId"),
-                            viewMode = rs.getString("viewMode"),
-                            readDirection = rs.getString("readDirection"),
-                            updatedAt = rs.getLong("updatedAt"),
-                        ),
-                    )
+                    list.add(settingFrom(rs))
                 }
             }
         }
         return list
     }
 
-    fun getReaderSetting(toonId: String): ReaderSettingRecord? {
+    fun getReaderSetting(workId: WorkId): ReaderSettingRecord? {
         getConnection().use { conn ->
-            conn.prepareStatement("SELECT * FROM reader_settings WHERE toonId = ?").use { stmt ->
-                stmt.setString(1, toonId)
+            conn.prepareStatement("SELECT * FROM reader_settings WHERE sourceId = ? AND toonId = ?").use { stmt ->
+                stmt.setString(1, workId.sourceId)
+                stmt.setString(2, workId.toonId)
                 val rs = stmt.executeQuery()
                 if (rs.next()) {
-                    return ReaderSettingRecord(
-                        toonId = rs.getString("toonId"),
-                        viewMode = rs.getString("viewMode"),
-                        readDirection = rs.getString("readDirection"),
-                        updatedAt = rs.getLong("updatedAt"),
-                    )
+                    return settingFrom(rs)
                 }
             }
         }
@@ -772,17 +910,19 @@ class DesktopDatabase(dbFile: File? = null) {
     }
 
     fun saveReaderSetting(setting: ReaderSettingRecord) {
+        val workId = WorkId.writable(setting.sourceId, setting.toonId) ?: return
         getConnection().use { conn ->
             conn.prepareStatement(
                 """
-                INSERT OR REPLACE INTO reader_settings (toonId, viewMode, readDirection, updatedAt)
-                VALUES (?, ?, ?, ?)
+                INSERT OR REPLACE INTO reader_settings (sourceId, toonId, viewMode, readDirection, updatedAt)
+                VALUES (?, ?, ?, ?, ?)
                 """.trimIndent(),
             ).use { stmt ->
-                stmt.setString(1, setting.toonId)
-                stmt.setString(2, setting.viewMode)
-                stmt.setString(3, setting.readDirection)
-                stmt.setLong(4, setting.updatedAt)
+                stmt.setString(1, workId.sourceId)
+                stmt.setString(2, workId.toonId)
+                stmt.setString(3, setting.viewMode)
+                stmt.setString(4, setting.readDirection)
+                stmt.setLong(5, setting.updatedAt)
                 stmt.executeUpdate()
             }
         }
@@ -794,15 +934,17 @@ class DesktopDatabase(dbFile: File? = null) {
             conn.autoCommit = false
             conn.prepareStatement(
                 """
-                INSERT OR REPLACE INTO reader_settings (toonId, viewMode, readDirection, updatedAt)
-                VALUES (?, ?, ?, ?)
+                INSERT OR REPLACE INTO reader_settings (sourceId, toonId, viewMode, readDirection, updatedAt)
+                VALUES (?, ?, ?, ?, ?)
                 """.trimIndent(),
             ).use { stmt ->
                 for (item in items) {
-                    stmt.setString(1, item.toonId)
-                    stmt.setString(2, item.viewMode)
-                    stmt.setString(3, item.readDirection)
-                    stmt.setLong(4, item.updatedAt)
+                    val workId = WorkId.writable(item.sourceId, item.toonId) ?: continue
+                    stmt.setString(1, workId.sourceId)
+                    stmt.setString(2, workId.toonId)
+                    stmt.setString(3, item.viewMode)
+                    stmt.setString(4, item.readDirection)
+                    stmt.setLong(5, item.updatedAt)
                     stmt.addBatch()
                 }
                 stmt.executeBatch()
@@ -818,75 +960,41 @@ class DesktopDatabase(dbFile: File? = null) {
             conn.prepareStatement("SELECT * FROM downloaded_episodes ORDER BY downloadedAt DESC").use { stmt ->
                 val rs = stmt.executeQuery()
                 while (rs.next()) {
-                    list.add(
-                        DownloadedEpisodeRecord(
-                            toonId = rs.getString("toonId"),
-                            wrId = rs.getString("wrId"),
-                            toonTitle = rs.getString("toonTitle"),
-                            toonThumbUrl = rs.getString("toonThumbUrl"),
-                            toonHref = rs.getString("toonHref"),
-                            episodeTitle = rs.getString("episodeTitle"),
-                            episodeHref = rs.getString("episodeHref"),
-                            imageCount = rs.getInt("imageCount"),
-                            totalBytes = rs.getLong("totalBytes"),
-                            downloadedAt = rs.getLong("downloadedAt"),
-                            localDirPath = rs.getString("localDirPath"),
-                        )
-                    )
+                    list.add(downloadedFrom(rs))
                 }
             }
         }
         return list
     }
 
-    fun getDownloadedEpisodesByToon(toonId: String): List<DownloadedEpisodeRecord> {
+    fun getDownloadedEpisodesByToon(workId: WorkId): List<DownloadedEpisodeRecord> {
         val list = mutableListOf<DownloadedEpisodeRecord>()
         getConnection().use { conn ->
-            conn.prepareStatement("SELECT * FROM downloaded_episodes WHERE toonId = ? ORDER BY downloadedAt DESC").use { stmt ->
-                stmt.setString(1, toonId)
+            conn.prepareStatement(
+                "SELECT * FROM downloaded_episodes WHERE sourceId = ? AND toonId = ? ORDER BY downloadedAt DESC",
+            ).use { stmt ->
+                stmt.setString(1, workId.sourceId)
+                stmt.setString(2, workId.toonId)
                 val rs = stmt.executeQuery()
                 while (rs.next()) {
-                    list.add(
-                        DownloadedEpisodeRecord(
-                            toonId = rs.getString("toonId"),
-                            wrId = rs.getString("wrId"),
-                            toonTitle = rs.getString("toonTitle"),
-                            toonThumbUrl = rs.getString("toonThumbUrl"),
-                            toonHref = rs.getString("toonHref"),
-                            episodeTitle = rs.getString("episodeTitle"),
-                            episodeHref = rs.getString("episodeHref"),
-                            imageCount = rs.getInt("imageCount"),
-                            totalBytes = rs.getLong("totalBytes"),
-                            downloadedAt = rs.getLong("downloadedAt"),
-                            localDirPath = rs.getString("localDirPath"),
-                        )
-                    )
+                    list.add(downloadedFrom(rs))
                 }
             }
         }
         return list
     }
 
-    fun getDownloadedEpisode(toonId: String, wrId: String): DownloadedEpisodeRecord? {
+    fun getDownloadedEpisode(workId: WorkId, wrId: String): DownloadedEpisodeRecord? {
         getConnection().use { conn ->
-            conn.prepareStatement("SELECT * FROM downloaded_episodes WHERE toonId = ? AND wrId = ?").use { stmt ->
-                stmt.setString(1, toonId)
-                stmt.setString(2, wrId)
+            conn.prepareStatement(
+                "SELECT * FROM downloaded_episodes WHERE sourceId = ? AND toonId = ? AND wrId = ?",
+            ).use { stmt ->
+                stmt.setString(1, workId.sourceId)
+                stmt.setString(2, workId.toonId)
+                stmt.setString(3, wrId)
                 val rs = stmt.executeQuery()
                 if (rs.next()) {
-                    return DownloadedEpisodeRecord(
-                        toonId = rs.getString("toonId"),
-                        wrId = rs.getString("wrId"),
-                        toonTitle = rs.getString("toonTitle"),
-                        toonThumbUrl = rs.getString("toonThumbUrl"),
-                        toonHref = rs.getString("toonHref"),
-                        episodeTitle = rs.getString("episodeTitle"),
-                        episodeHref = rs.getString("episodeHref"),
-                        imageCount = rs.getInt("imageCount"),
-                        totalBytes = rs.getLong("totalBytes"),
-                        downloadedAt = rs.getLong("downloadedAt"),
-                        localDirPath = rs.getString("localDirPath"),
-                    )
+                    return downloadedFrom(rs)
                 }
             }
         }
@@ -894,46 +1002,119 @@ class DesktopDatabase(dbFile: File? = null) {
     }
 
     fun saveDownloadedEpisode(item: DownloadedEpisodeRecord) {
+        val workId = WorkId.writable(item.sourceId, item.toonId) ?: return
         getConnection().use { conn ->
             conn.prepareStatement(
                 """
                 INSERT OR REPLACE INTO downloaded_episodes
-                (toonId, wrId, toonTitle, toonThumbUrl, toonHref, episodeTitle, episodeHref, imageCount, totalBytes, downloadedAt, localDirPath)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (sourceId, toonId, wrId, toonTitle, toonThumbUrl, toonHref, episodeTitle, episodeHref, imageCount, totalBytes, downloadedAt, localDirPath)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """.trimIndent()
             ).use { stmt ->
-                stmt.setString(1, item.toonId)
-                stmt.setString(2, item.wrId)
-                stmt.setString(3, item.toonTitle)
-                stmt.setString(4, item.toonThumbUrl)
-                stmt.setString(5, item.toonHref)
-                stmt.setString(6, item.episodeTitle)
-                stmt.setString(7, item.episodeHref)
-                stmt.setInt(8, item.imageCount)
-                stmt.setLong(9, item.totalBytes)
-                stmt.setLong(10, item.downloadedAt)
-                stmt.setString(11, item.localDirPath)
+                stmt.setString(1, workId.sourceId)
+                stmt.setString(2, workId.toonId)
+                stmt.setString(3, item.wrId)
+                stmt.setString(4, item.toonTitle)
+                stmt.setString(5, item.toonThumbUrl)
+                stmt.setString(6, item.toonHref)
+                stmt.setString(7, item.episodeTitle)
+                stmt.setString(8, item.episodeHref)
+                stmt.setInt(9, item.imageCount)
+                stmt.setLong(10, item.totalBytes)
+                stmt.setLong(11, item.downloadedAt)
+                stmt.setString(12, item.localDirPath)
                 stmt.executeUpdate()
             }
         }
     }
 
-    fun deleteDownloadedEpisode(toonId: String, wrId: String) {
+    fun deleteDownloadedEpisode(workId: WorkId, wrId: String) {
         getConnection().use { conn ->
-            conn.prepareStatement("DELETE FROM downloaded_episodes WHERE toonId = ? AND wrId = ?").use { stmt ->
-                stmt.setString(1, toonId)
-                stmt.setString(2, wrId)
+            conn.prepareStatement(
+                "DELETE FROM downloaded_episodes WHERE sourceId = ? AND toonId = ? AND wrId = ?",
+            ).use { stmt ->
+                stmt.setString(1, workId.sourceId)
+                stmt.setString(2, workId.toonId)
+                stmt.setString(3, wrId)
                 stmt.executeUpdate()
             }
         }
     }
 
-    fun deleteDownloadedEpisodesByToon(toonId: String) {
+    fun deleteDownloadedEpisodesByToon(workId: WorkId) {
         getConnection().use { conn ->
-            conn.prepareStatement("DELETE FROM downloaded_episodes WHERE toonId = ?").use { stmt ->
-                stmt.setString(1, toonId)
+            conn.prepareStatement("DELETE FROM downloaded_episodes WHERE sourceId = ? AND toonId = ?").use { stmt ->
+                stmt.setString(1, workId.sourceId)
+                stmt.setString(2, workId.toonId)
                 stmt.executeUpdate()
             }
         }
     }
+
+    private fun historyFrom(rs: ResultSet): ReadHistoryRecord = ReadHistoryRecord(
+        sourceId = rs.getString("sourceId"),
+        toonId = rs.getString("toonId"),
+        toonTitle = rs.getString("toonTitle"),
+        toonThumbUrl = rs.getString("toonThumbUrl"),
+        toonHref = rs.getString("toonHref"),
+        lastWrId = rs.getString("lastWrId"),
+        lastEpisodeTitle = rs.getString("lastEpisodeTitle"),
+        lastEpisodeHref = rs.getString("lastEpisodeHref"),
+        lastReadOrder = rs.getInt("lastReadOrder"),
+        totalEpisodes = rs.getInt("totalEpisodes"),
+        lastReadAt = rs.getLong("lastReadAt"),
+        nextWrId = rs.getString("nextWrId"),
+        nextEpisodeTitle = rs.getString("nextEpisodeTitle"),
+        nextEpisodeHref = rs.getString("nextEpisodeHref"),
+        hasNew = rs.getInt("hasNew") == 1,
+    )
+
+    private fun bindHistory(stmt: java.sql.PreparedStatement, history: ReadHistoryRecord, workId: WorkId) {
+        stmt.setString(1, workId.sourceId)
+        stmt.setString(2, workId.toonId)
+        stmt.setString(3, history.toonTitle)
+        stmt.setString(4, history.toonThumbUrl)
+        stmt.setString(5, history.toonHref)
+        stmt.setString(6, history.lastWrId)
+        stmt.setString(7, history.lastEpisodeTitle)
+        stmt.setString(8, history.lastEpisodeHref)
+        stmt.setInt(9, history.lastReadOrder)
+        stmt.setInt(10, history.totalEpisodes)
+        stmt.setLong(11, history.lastReadAt)
+        stmt.setString(12, history.nextWrId)
+        stmt.setString(13, history.nextEpisodeTitle)
+        stmt.setString(14, history.nextEpisodeHref)
+        stmt.setInt(15, if (history.hasNew) 1 else 0)
+    }
+
+    private fun episodeFrom(rs: ResultSet): ReadEpisodeRecord = ReadEpisodeRecord(
+        sourceId = rs.getString("sourceId"),
+        toonId = rs.getString("toonId"),
+        wrId = rs.getString("wrId"),
+        readAt = rs.getLong("readAt"),
+        lastPage = rs.getInt("lastPage"),
+    )
+
+    private fun settingFrom(rs: ResultSet): ReaderSettingRecord = ReaderSettingRecord(
+        sourceId = rs.getString("sourceId"),
+        toonId = rs.getString("toonId"),
+        viewMode = rs.getString("viewMode"),
+        readDirection = rs.getString("readDirection"),
+        updatedAt = rs.getLong("updatedAt"),
+    )
+
+    private fun downloadedFrom(rs: ResultSet): DownloadedEpisodeRecord = DownloadedEpisodeRecord(
+        sourceId = rs.getString("sourceId"),
+        toonId = rs.getString("toonId"),
+        wrId = rs.getString("wrId"),
+        toonTitle = rs.getString("toonTitle"),
+        toonThumbUrl = rs.getString("toonThumbUrl"),
+        toonHref = rs.getString("toonHref"),
+        episodeTitle = rs.getString("episodeTitle"),
+        episodeHref = rs.getString("episodeHref"),
+        imageCount = rs.getInt("imageCount"),
+        totalBytes = rs.getLong("totalBytes"),
+        downloadedAt = rs.getLong("downloadedAt"),
+        localDirPath = rs.getString("localDirPath"),
+    )
 }

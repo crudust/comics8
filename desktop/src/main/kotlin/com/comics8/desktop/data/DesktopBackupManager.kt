@@ -1,5 +1,6 @@
 package com.comics8.desktop.data
 
+import com.comics8.core.source.WorkId
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -27,7 +28,7 @@ object DesktopBackupManager {
         val settings = database.getAllReaderSettings()
 
         val root = JSONObject()
-        root.put("version", 1)
+        root.put("version", 2)
         root.put("appName", "Comics8")
         root.put("exportedAt", System.currentTimeMillis())
 
@@ -35,6 +36,7 @@ object DesktopBackupManager {
         favorites.forEach { f ->
             val obj = JSONObject().apply {
                 put("id", f.id)
+                put("sourceId", f.sourceId)
                 put("title", f.title)
                 put("thumbUrl", f.thumbUrl)
                 put("href", f.href)
@@ -50,6 +52,7 @@ object DesktopBackupManager {
         history.forEach { h ->
             val obj = JSONObject().apply {
                 put("toonId", h.toonId)
+                put("sourceId", h.sourceId)
                 put("toonTitle", h.toonTitle)
                 put("toonThumbUrl", h.toonThumbUrl)
                 put("toonHref", h.toonHref)
@@ -72,6 +75,7 @@ object DesktopBackupManager {
         episodes.forEach { ep ->
             val obj = JSONObject().apply {
                 put("toonId", ep.toonId)
+                put("sourceId", ep.sourceId)
                 put("wrId", ep.wrId)
                 put("readAt", ep.readAt)
                 put("lastPage", ep.lastPage)
@@ -84,6 +88,7 @@ object DesktopBackupManager {
         settings.forEach { s ->
             val obj = JSONObject().apply {
                 put("toonId", s.toonId)
+                put("sourceId", s.sourceId)
                 put("viewMode", s.viewMode)
                 put("readDirection", s.readDirection)
                 put("updatedAt", s.updatedAt)
@@ -106,9 +111,11 @@ object DesktopBackupManager {
             val favorites = mutableListOf<FavoriteRecord>()
             for (i in 0 until favArray.length()) {
                 val obj = favArray.getJSONObject(i)
+                val workId = DesktopBackupJson.workId(obj, preferId = true) ?: continue
                 favorites.add(
                     FavoriteRecord(
-                        id = obj.getString("id"),
+                        sourceId = workId.sourceId,
+                        id = workId.toonId,
                         title = obj.getString("title"),
                         thumbUrl = obj.optString("thumbUrl", ""),
                         href = obj.optString("href", ""),
@@ -122,9 +129,11 @@ object DesktopBackupManager {
             val history = mutableListOf<ReadHistoryRecord>()
             for (i in 0 until histArray.length()) {
                 val obj = histArray.getJSONObject(i)
+                val workId = DesktopBackupJson.workId(obj, preferId = false) ?: continue
                 history.add(
                     ReadHistoryRecord(
-                        toonId = obj.getString("toonId"),
+                        sourceId = workId.sourceId,
+                        toonId = workId.toonId,
                         toonTitle = obj.getString("toonTitle"),
                         toonThumbUrl = obj.optString("toonThumbUrl", ""),
                         toonHref = obj.optString("toonHref", ""),
@@ -145,9 +154,11 @@ object DesktopBackupManager {
             val episodes = mutableListOf<ReadEpisodeRecord>()
             for (i in 0 until epArray.length()) {
                 val obj = epArray.getJSONObject(i)
+                val workId = DesktopBackupJson.workId(obj, preferId = false) ?: continue
                 episodes.add(
                     ReadEpisodeRecord(
-                        toonId = obj.getString("toonId"),
+                        sourceId = workId.sourceId,
+                        toonId = workId.toonId,
                         wrId = obj.getString("wrId"),
                         readAt = obj.optLong("readAt", System.currentTimeMillis()),
                         lastPage = obj.optInt("lastPage", 0),
@@ -158,9 +169,11 @@ object DesktopBackupManager {
             val settings = mutableListOf<ReaderSettingRecord>()
             for (i in 0 until settingArray.length()) {
                 val obj = settingArray.getJSONObject(i)
+                val workId = DesktopBackupJson.workId(obj, preferId = false) ?: continue
                 settings.add(
                     ReaderSettingRecord(
-                        toonId = obj.getString("toonId"),
+                        sourceId = workId.sourceId,
+                        toonId = workId.toonId,
                         viewMode = obj.optString("viewMode", "SCROLL"),
                         readDirection = obj.optString("readDirection", "RIGHT_TO_LEFT"),
                         updatedAt = obj.optLong("updatedAt", System.currentTimeMillis()),
@@ -196,5 +209,18 @@ object DesktopBackupManager {
             episodeCount = database.getAllReadEpisodes().size,
             settingCount = database.getAllReaderSettings().size,
         )
+    }
+}
+
+object DesktopBackupJson {
+    fun workId(obj: JSONObject, preferId: Boolean): WorkId? {
+        val sourceId = obj.optString("sourceId").ifBlank { WorkId.DEFAULT_SOURCE }
+        val local = if (preferId) {
+            obj.optString("id").ifBlank { obj.optString("toonId") }
+        } else {
+            obj.optString("toonId").ifBlank { obj.optString("id") }
+        }
+        if (local.isBlank()) return null
+        return WorkId.writable(sourceId, local)
     }
 }

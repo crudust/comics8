@@ -95,4 +95,5 @@ dependencies {
     testImplementation("org.jsoup:jsoup:1.18.3")
     testImplementation("com.google.truth:truth:1.4.4")
     testImplementation("org.json:json:20240303")
+    testImplementation("org.xerial:sqlite-jdbc:3.47.1.0")
 }

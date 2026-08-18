@@ -9,8 +9,14 @@ import com.comics8.core.model.DownloadedToonSummary
 import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.ToonItem
 import com.comics8.core.network.ToonClient
+import com.comics8.core.source.DownloadLayout
+import com.comics8.core.source.WorkId
 import com.comics8.monitor.data.local.AppDatabase
 import com.comics8.monitor.data.local.DownloadedEpisode
+import com.comics8.monitor.data.local.byToon
+import com.comics8.monitor.data.local.delete
+import com.comics8.monitor.data.local.deleteByToon
+import com.comics8.monitor.data.local.get
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -26,12 +32,15 @@ import java.io.File
 import java.util.concurrent.ConcurrentLinkedQueue
 
 data class DownloadTask(
+    val sourceId: String,
     val toonId: String,
     val toonTitle: String,
     val toonThumbUrl: String,
     val toonHref: String,
     val episode: EpisodeItem,
-)
+) {
+    fun workId(): WorkId = WorkId(sourceId, toonId)
+}
 
 data class DownloadProgressState(
     val isRunning: Boolean = false,
@@ -76,15 +85,17 @@ class DownloadManager(
 
     fun enqueueEpisodes(series: ToonItem, episodes: List<EpisodeItem>) {
         if (episodes.isEmpty()) return
+        val workId = WorkId.writable(series.sourceId, series.id) ?: return
         scope.launch {
-            val existing = database.downloadedEpisodeDao().byToon(series.id).map { it.wrId }.toSet()
+            val existing = database.downloadedEpisodeDao().byToon(workId).map { it.wrId }.toSet()
             val newEpisodes = episodes.filter { it.wrId !in existing }
             if (newEpisodes.isEmpty()) return@launch
 
             for (ep in newEpisodes) {
                 taskQueue.add(
                     DownloadTask(
-                        toonId = series.id,
+                        sourceId = workId.sourceId,
+                        toonId = workId.toonId,
                         toonTitle = series.title,
                         toonThumbUrl = series.thumbUrl,
                         toonHref = series.href,
@@ -129,7 +140,7 @@ class DownloadManager(
     }
 
     private suspend fun processTask(task: DownloadTask) {
-        val epDir = File(baseDir, "${task.toonId}/${task.episode.wrId}").apply { mkdirs() }
+        val epDir = DownloadLayout.episodeDir(baseDir, task.workId(), task.episode.wrId).apply { mkdirs() }
         try {
             updateNotification(
                 title = task.toonTitle,
@@ -169,6 +180,7 @@ class DownloadManager(
             }
 
             val entity = DownloadedEpisode(
+                sourceId = task.sourceId,
                 toonId = task.toonId,
                 wrId = task.episode.wrId,
                 toonTitle = task.toonTitle,
@@ -232,57 +244,70 @@ class DownloadManager(
         dismissNotification()
     }
 
-    suspend fun isEpisodeDownloaded(toonId: String, wrId: String): Boolean = withContext(Dispatchers.IO) {
-        database.downloadedEpisodeDao().get(toonId, wrId) != null
+    suspend fun isEpisodeDownloaded(workId: WorkId, wrId: String): Boolean = withContext(Dispatchers.IO) {
+        database.downloadedEpisodeDao().get(workId, wrId) != null
     }
 
-    suspend fun getLocalEpisodeImages(toonId: String, wrId: String): List<String>? = withContext(Dispatchers.IO) {
-        val entity = database.downloadedEpisodeDao().get(toonId, wrId) ?: return@withContext null
-        val dir = File(entity.localDirPath)
-        if (!dir.exists() || !dir.isDirectory) return@withContext null
+    suspend fun getDownloadedEpisode(workId: WorkId, wrId: String): DownloadedEpisode? = withContext(Dispatchers.IO) {
+        database.downloadedEpisodeDao().get(workId, wrId)
+    }
+
+    suspend fun getLocalEpisodeImages(workId: WorkId, wrId: String): List<String>? = withContext(Dispatchers.IO) {
+        val entity = database.downloadedEpisodeDao().get(workId, wrId)
+        val dir = DownloadLayout.resolveEpisodeDir(baseDir, workId, wrId, entity?.localDirPath)
+            ?: return@withContext null
         val files = dir.listFiles { f -> f.isFile && f.length() > 0 && f.name.endsWith(".jpg") }
             ?.sortedBy { it.name }
         if (files.isNullOrEmpty()) return@withContext null
         files.map { "file://${it.absolutePath}" }
     }
 
-    suspend fun deleteToonDownloads(toonId: String) = withContext(Dispatchers.IO) {
-        database.downloadedEpisodeDao().deleteByToon(toonId)
-        val toonDir = File(baseDir, toonId)
+    suspend fun deleteToonDownloads(workId: WorkId) = withContext(Dispatchers.IO) {
+        database.downloadedEpisodeDao().deleteByToon(workId)
+        val toonDir = DownloadLayout.toonDir(baseDir, workId)
         if (toonDir.exists()) {
             toonDir.deleteRecursively()
         }
+        val legacy = DownloadLayout.legacyToonDir(baseDir, workId.toonId)
+        if (legacy.exists()) {
+            legacy.deleteRecursively()
+        }
     }
 
-    suspend fun deleteEpisodeDownload(toonId: String, wrId: String) = withContext(Dispatchers.IO) {
-        database.downloadedEpisodeDao().delete(toonId, wrId)
-        val epDir = File(baseDir, "$toonId/$wrId")
+    suspend fun deleteEpisodeDownload(workId: WorkId, wrId: String) = withContext(Dispatchers.IO) {
+        database.downloadedEpisodeDao().delete(workId, wrId)
+        val epDir = DownloadLayout.episodeDir(baseDir, workId, wrId)
         if (epDir.exists()) {
             epDir.deleteRecursively()
+        }
+        val legacy = DownloadLayout.legacyEpisodeDir(baseDir, workId.toonId, wrId)
+        if (legacy.exists()) {
+            legacy.deleteRecursively()
         }
     }
 
     suspend fun getDownloadedToonSummaries(): List<DownloadedToonSummary> = withContext(Dispatchers.IO) {
         val all = database.downloadedEpisodeDao().all()
-        val grouped = all.groupBy { it.toonId }
-        grouped.map { (toonId, epList) ->
+        val grouped = all.groupBy { it.workId().storageKey() }
+        grouped.map { (_, epList) ->
             val first = epList.first()
             val totalBytes = epList.sumOf { it.totalBytes }
             val latestDownloadedAt = epList.maxOf { it.downloadedAt }
             DownloadedToonSummary(
-                toonId = toonId,
+                toonId = first.toonId,
                 toonTitle = first.toonTitle,
                 toonThumbUrl = first.toonThumbUrl,
                 toonHref = first.toonHref,
                 episodeCount = epList.size,
                 totalBytes = totalBytes,
                 latestDownloadedAt = latestDownloadedAt,
+                sourceId = first.sourceId,
             )
         }.sortedByDescending { it.latestDownloadedAt }
     }
 
-    suspend fun getDownloadedEpisodes(toonId: String): List<DownloadedEpisode> = withContext(Dispatchers.IO) {
-        database.downloadedEpisodeDao().byToon(toonId)
+    suspend fun getDownloadedEpisodes(workId: WorkId): List<DownloadedEpisode> = withContext(Dispatchers.IO) {
+        database.downloadedEpisodeDao().byToon(workId)
     }
 
     companion object {

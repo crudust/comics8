@@ -58,6 +58,20 @@ class FavoriteListingTest {
         assertThat(result.map { it.id }).containsExactly("newer", "older").inOrder()
     }
 
+    @Test
+    fun comparesWorkIdNotBareId() = runBlocking {
+        val local = listOf(toon("shared", "08.16").copy(sourceId = "eleven"))
+        val result = FavoriteListing.assemble(local) {
+            ListingPage(
+                items = listOf(toon("shared", "08.18").copy(sourceId = "hitomi")),
+                currentPage = 1,
+                lastPage = 1,
+            )
+        }
+        assertThat(result.map { it.id }).containsExactly("shared")
+        assertThat(result[0].updatedAt).isEqualTo("08.16")
+    }
+
     private fun toon(id: String, updatedAt: String) = ToonItem(
         id = id,
         title = id,

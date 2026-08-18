@@ -41,4 +41,11 @@ class WorkIdTest {
             WorkId("ele:ven", "1")
         }
     }
+
+    @Test
+    fun writableRejectsNonEleven() {
+        assertThat(WorkId.writable("eleven", "1")).isEqualTo(WorkId.eleven("1"))
+        assertThat(WorkId.writable("", "1")).isEqualTo(WorkId.eleven("1"))
+        assertThat(WorkId.writable("hitomi", "1")).isNull()
+    }
 }

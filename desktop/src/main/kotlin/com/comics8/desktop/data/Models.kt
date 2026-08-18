@@ -11,6 +11,7 @@ import com.comics8.core.model.ViewMode
 import com.comics8.core.model.buildDualSpreads
 
 import com.comics8.core.model.DownloadedToonSummary
+import com.comics8.core.source.WorkId
 
 typealias ViewMode = ViewMode
 typealias ReadDirection = ReadDirection
@@ -23,6 +24,7 @@ typealias DualSpread = DualSpread
 typealias DownloadedToonSummary = DownloadedToonSummary
 
 data class FavoriteRecord(
+    val sourceId: String = WorkId.DEFAULT_SOURCE,
     val id: String,
     val title: String,
     val thumbUrl: String,
@@ -30,25 +32,34 @@ data class FavoriteRecord(
     val genre: String,
     val updatedAt: String?,
     val savedAt: Long,
-)
+) {
+    fun workId(): WorkId = WorkId(sourceId, id)
+}
 
 data class SeenRecord(
+    val sourceId: String = WorkId.DEFAULT_SOURCE,
     val id: String,
     val title: String,
     val updatedAt: String?,
     val firstSeenAt: Long,
     val lastSeenAt: Long,
     val notifiedKey: String,
-)
+) {
+    fun workId(): WorkId = WorkId(sourceId, id)
+}
 
 data class ReadEpisodeRecord(
+    val sourceId: String = WorkId.DEFAULT_SOURCE,
     val toonId: String,
     val wrId: String,
     val readAt: Long,
     val lastPage: Int = 0,
-)
+) {
+    fun workId(): WorkId = WorkId(sourceId, toonId)
+}
 
 data class ReadHistoryRecord(
+    val sourceId: String = WorkId.DEFAULT_SOURCE,
     val toonId: String,
     val toonTitle: String,
     val toonThumbUrl: String,
@@ -63,16 +74,22 @@ data class ReadHistoryRecord(
     val nextEpisodeTitle: String? = null,
     val nextEpisodeHref: String? = null,
     val hasNew: Boolean = false,
-)
+) {
+    fun workId(): WorkId = WorkId(sourceId, toonId)
+}
 
 data class ReaderSettingRecord(
+    val sourceId: String = WorkId.DEFAULT_SOURCE,
     val toonId: String,
     val viewMode: String,
     val readDirection: String,
     val updatedAt: Long,
-)
+) {
+    fun workId(): WorkId = WorkId(sourceId, toonId)
+}
 
 data class DownloadedEpisodeRecord(
+    val sourceId: String = WorkId.DEFAULT_SOURCE,
     val toonId: String,
     val wrId: String,
     val toonTitle: String,
@@ -84,5 +101,7 @@ data class DownloadedEpisodeRecord(
     val totalBytes: Long,
     val downloadedAt: Long,
     val localDirPath: String,
-)
+) {
+    fun workId(): WorkId = WorkId(sourceId, toonId)
+}
 

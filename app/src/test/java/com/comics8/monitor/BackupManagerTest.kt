@@ -1,15 +1,8 @@
 package com.comics8.monitor
 
+import com.comics8.core.source.WorkId
+import com.comics8.monitor.data.BackupJson
 import com.comics8.monitor.data.BackupManager
-import com.comics8.monitor.data.local.AppDatabase
-import com.comics8.monitor.data.local.FavoriteDao
-import com.comics8.monitor.data.local.FavoriteToon
-import com.comics8.monitor.data.local.ReadEpisode
-import com.comics8.monitor.data.local.ReadEpisodeDao
-import com.comics8.monitor.data.local.ReadHistory
-import com.comics8.monitor.data.local.ReadHistoryDao
-import com.comics8.monitor.data.local.ReaderSetting
-import com.comics8.monitor.data.local.ReaderSettingDao
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
@@ -18,7 +11,7 @@ import org.junit.Test
 class BackupManagerTest {
 
     @Test
-    fun testJsonBackupAndRestore() = runBlocking {
+    fun v1BackupRestoreStillParsesWithDefaultEleven() {
         val json = """
             {
               "version": 1,
@@ -78,15 +71,41 @@ class BackupManagerTest {
 
         val fav = root.getJSONArray("favorites").getJSONObject(0)
         assertThat(fav.getString("title")).isEqualTo("원피스")
+        val favId = BackupJson.workId(fav, preferId = true)
+        assertThat(favId).isEqualTo(WorkId.eleven("12345"))
 
         val hist = root.getJSONArray("history").getJSONObject(0)
         assertThat(hist.getInt("lastReadOrder")).isEqualTo(100)
         assertThat(hist.getInt("totalEpisodes")).isEqualTo(1100)
+        assertThat(BackupJson.workId(hist, preferId = false)).isEqualTo(WorkId.eleven("12345"))
 
         val ep = root.getJSONArray("readEpisodes").getJSONObject(0)
         assertThat(ep.getInt("lastPage")).isEqualTo(5)
+        assertThat(BackupJson.workId(ep, preferId = false)).isEqualTo(WorkId.eleven("12345"))
 
         val set = root.getJSONArray("readerSettings").getJSONObject(0)
         assertThat(set.getString("viewMode")).isEqualTo("DUAL")
+        assertThat(BackupJson.workId(set, preferId = false)).isEqualTo(WorkId.eleven("12345"))
+    }
+
+    @Test
+    fun v2InboundAcceptsIdOrToonIdAndRejectsHitomi() {
+        val favByToonId = JSONObject()
+            .put("toonId", "7883")
+            .put("sourceId", "eleven")
+        assertThat(BackupJson.workId(favByToonId, preferId = true)).isEqualTo(WorkId.eleven("7883"))
+
+        val histById = JSONObject().put("id", "7883")
+        assertThat(BackupJson.workId(histById, preferId = false)).isEqualTo(WorkId.eleven("7883"))
+
+        val hitomi = JSONObject()
+            .put("id", "99")
+            .put("sourceId", "hitomi")
+        assertThat(BackupJson.workId(hitomi, preferId = true)).isNull()
+    }
+
+    @Test
+    fun backupVersionConstantIsV2() = runBlocking {
+        assertThat(BackupManager.BACKUP_VERSION).isEqualTo(2)
     }
 }

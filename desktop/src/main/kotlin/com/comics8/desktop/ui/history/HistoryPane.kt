@@ -70,13 +70,13 @@ fun HistoryPane(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = modifier.fillMaxSize(),
             ) {
-                items(state.historyItems, key = { it.toonId }) { item ->
+                items(state.historyItems, key = { it.workId().storageKey() }) { item ->
                     HistoryItemCard(
                         item = item,
                         onOpenSeries = { viewModel.openSeriesFromHistory(item) },
                         onReopen = { viewModel.reopenHistoryEpisode(item) },
                         onContinue = { viewModel.continueHistoryEpisode(item) },
-                        onDelete = { viewModel.deleteHistory(item.toonId) },
+                        onDelete = { viewModel.deleteHistory(item.workId()) },
                     )
                 }
             }

@@ -4,6 +4,7 @@ import com.comics8.core.model.FavoriteListing
 import com.comics8.core.network.ToonClient
 import com.comics8.core.source.SearchQuery
 import com.comics8.core.source.SourceRegistry
+import com.comics8.core.source.WorkId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -48,13 +49,14 @@ class DesktopToonRepository(
             error("회차 목록을 읽지 못했습니다.")
         }
         val firstDate = parsed.items.firstOrNull()?.date
+        val workId = item.workId()
         if (!firstDate.isNullOrBlank()) {
             try {
-                database.updateFavoriteUpdatedAt(item.id, firstDate)
+                database.updateFavoriteUpdatedAt(workId, firstDate)
             } catch (_: Exception) {
             }
         }
-        val readMap = database.getReadEpisodesByToon(item.id).associateBy { it.wrId }
+        val readMap = database.getReadEpisodesByToon(workId).associateBy { it.wrId }
         val enriched = parsed.items.map { ep ->
             val read = readMap[ep.wrId]
             if (read != null) {
@@ -82,18 +84,19 @@ class DesktopToonRepository(
         }
     }
 
-    suspend fun loadImages(episode: EpisodeItem, toonId: String? = null): List<String> = withContext(Dispatchers.IO) {
-        if (!toonId.isNullOrBlank() && downloadManager != null) {
-            val localImages = downloadManager.getLocalEpisodeImages(toonId, episode.wrId)
+    suspend fun loadImages(episode: EpisodeItem, workId: WorkId? = null): List<String> = withContext(Dispatchers.IO) {
+        if (workId != null && downloadManager != null) {
+            val localImages = downloadManager.getLocalEpisodeImages(workId, episode.wrId)
             if (!localImages.isNullOrEmpty()) {
                 return@withContext localImages
             }
         }
         val item = ToonItem(
-            id = toonId.orEmpty(),
+            id = workId?.toonId.orEmpty(),
             title = "",
             thumbUrl = "",
             href = episode.href,
+            sourceId = workId?.sourceId ?: WorkId.DEFAULT_SOURCE,
         )
         val parsed = sourceFor(item).resolveImages(episode, item, client)
         if (parsed.isEmpty()) {
@@ -112,11 +115,13 @@ class DesktopToonRepository(
     suspend fun markSeen(items: List<ToonItem>) = withContext(Dispatchers.IO) {
         if (items.isEmpty()) return@withContext
         val nowMs = now()
-        val existing = database.getSeenByIds(items.map { it.id })
-        val rows = items.map { item ->
-            val prev = existing[item.id]
+        val existing = database.getSeenByIds(items.map { it.workId() })
+        val rows = items.mapNotNull { item ->
+            val workId = WorkId.writable(item.sourceId, item.id) ?: return@mapNotNull null
+            val prev = existing[workId.storageKey()]
             SeenRecord(
-                id = item.id,
+                sourceId = workId.sourceId,
+                id = workId.toonId,
                 title = item.title,
                 updatedAt = item.updatedAt,
                 firstSeenAt = prev?.firstSeenAt ?: nowMs,
@@ -130,45 +135,49 @@ class DesktopToonRepository(
     private suspend fun applyFlags(items: List<ToonItem>): List<ToonItem> {
         if (items.isEmpty()) return items
         val favoriteIds = database.getFavoriteIds()
+        val favoriteKeys = favoriteIds.map { it.storageKey() }.toSet()
         val total = database.getSeenCount()
-        val existing = if (total == 0) emptyMap() else database.getSeenByIds(items.map { it.id })
-        val historyMap = database.getAllHistory().associateBy { it.toonId }
+        val existing = if (total == 0) emptyMap() else database.getSeenByIds(items.map { it.workId() })
+        val historyMap = database.getAllHistory().associateBy { it.workId().storageKey() }
 
         for (item in items) {
             val uDate = item.updatedAt
-            if (item.id in favoriteIds && !uDate.isNullOrBlank()) {
+            if (item.workId().storageKey() in favoriteKeys && !uDate.isNullOrBlank()) {
                 try {
-                    database.updateFavoriteUpdatedAt(item.id, uDate)
+                    database.updateFavoriteUpdatedAt(item.workId(), uDate)
                 } catch (_: Exception) {}
             }
         }
 
         return items.map { item ->
-            val prev = existing[item.id]
-            val history = historyMap[item.id]
+            val key = item.workId().storageKey()
+            val prev = existing[key]
+            val history = historyMap[key]
             val isUpdated = prev != null && !item.updatedAt.isNullOrBlank() && prev.updatedAt != item.updatedAt
             item.copy(
                 isNew = total > 0 && (prev == null || isUpdated),
-                isFavorite = item.id in favoriteIds,
+                isFavorite = key in favoriteKeys,
                 readProgress = history?.let { "${it.lastReadOrder}/${it.totalEpisodes}" },
             )
         }
     }
 
-    suspend fun isFavorite(id: String): Boolean = withContext(Dispatchers.IO) {
-        database.isFavorite(id)
+    suspend fun isFavorite(workId: WorkId): Boolean = withContext(Dispatchers.IO) {
+        database.isFavorite(workId)
     }
 
     suspend fun toggleFavorite(item: ToonItem): Boolean = withContext(Dispatchers.IO) {
-        val exists = database.isFavorite(item.id)
+        val workId = WorkId.writable(item.sourceId, item.id) ?: return@withContext false
+        val exists = database.isFavorite(workId)
         val result = if (exists) {
-            database.deleteFavorite(item.id)
-            database.recordTombstone("FAVORITE", item.id, now())
+            database.deleteFavorite(workId)
+            database.recordTombstone("FAVORITE", workId.storageKey(), now())
             false
         } else {
             database.saveFavorite(
                 FavoriteRecord(
-                    id = item.id,
+                    sourceId = workId.sourceId,
+                    id = workId.toonId,
                     title = item.title,
                     thumbUrl = item.thumbUrl,
                     href = item.href,
@@ -177,15 +186,15 @@ class DesktopToonRepository(
                     savedAt = now(),
                 ),
             )
-            database.deleteTombstone("FAVORITE", item.id)
+            database.deleteTombstone("FAVORITE", workId.storageKey())
             true
         }
         syncManager?.triggerDebouncedPush()
         result
     }
 
-    suspend fun getReaderSetting(toonId: String): Pair<ViewMode, ReadDirection>? = withContext(Dispatchers.IO) {
-        val setting = database.getReaderSetting(toonId) ?: return@withContext null
+    suspend fun getReaderSetting(workId: WorkId): Pair<ViewMode, ReadDirection>? = withContext(Dispatchers.IO) {
+        val setting = database.getReaderSetting(workId) ?: return@withContext null
         val viewMode = try {
             ViewMode.valueOf(setting.viewMode)
         } catch (_: Exception) {
@@ -200,13 +209,15 @@ class DesktopToonRepository(
     }
 
     suspend fun saveReaderSetting(
-        toonId: String,
+        workId: WorkId,
         viewMode: ViewMode,
         readDirection: ReadDirection,
     ) = withContext(Dispatchers.IO) {
+        val writable = WorkId.writable(workId.sourceId, workId.toonId) ?: return@withContext
         database.saveReaderSetting(
             ReaderSettingRecord(
-                toonId = toonId,
+                sourceId = writable.sourceId,
+                toonId = writable.toonId,
                 viewMode = viewMode.name,
                 readDirection = readDirection.name,
                 updatedAt = now(),
@@ -215,11 +226,13 @@ class DesktopToonRepository(
         syncManager?.triggerDebouncedPush()
     }
 
-    suspend fun markEpisodeRead(toonId: String, wrId: String, lastPage: Int = 0): Long = withContext(Dispatchers.IO) {
+    suspend fun markEpisodeRead(workId: WorkId, wrId: String, lastPage: Int = 0): Long = withContext(Dispatchers.IO) {
+        val writable = WorkId.writable(workId.sourceId, workId.toonId) ?: return@withContext now()
         val readAt = now()
         database.markEpisodeRead(
             ReadEpisodeRecord(
-                toonId = toonId,
+                sourceId = writable.sourceId,
+                toonId = writable.toonId,
                 wrId = wrId,
                 readAt = readAt,
                 lastPage = lastPage,
@@ -229,34 +242,39 @@ class DesktopToonRepository(
         readAt
     }
 
-    suspend fun saveEpisodePage(toonId: String, wrId: String, page: Int) = withContext(Dispatchers.IO) {
-        database.updateLastPage(toonId, wrId, page)
+    suspend fun saveEpisodePage(workId: WorkId, wrId: String, page: Int) = withContext(Dispatchers.IO) {
+        database.updateLastPage(workId, wrId, page)
     }
 
-    suspend fun getReadEpisode(toonId: String, wrId: String): ReadEpisodeRecord? = withContext(Dispatchers.IO) {
-        database.getReadEpisode(toonId, wrId)
+    suspend fun getReadEpisode(workId: WorkId, wrId: String): ReadEpisodeRecord? = withContext(Dispatchers.IO) {
+        database.getReadEpisode(workId, wrId)
     }
 
     suspend fun getHistory(): List<ReadHistoryRecord> = withContext(Dispatchers.IO) {
         database.getAllHistory()
     }
 
+    suspend fun getHistory(workId: WorkId): ReadHistoryRecord? = withContext(Dispatchers.IO) {
+        database.getHistory(workId)
+    }
+
     suspend fun saveHistory(history: ReadHistoryRecord) = withContext(Dispatchers.IO) {
+        val workId = WorkId.writable(history.sourceId, history.toonId) ?: return@withContext
         database.saveHistory(history)
-        database.deleteTombstone("HISTORY", history.toonId)
+        database.deleteTombstone("HISTORY", workId.storageKey())
         syncManager?.triggerDebouncedPush()
     }
 
-    suspend fun deleteHistory(toonId: String) = withContext(Dispatchers.IO) {
-        database.deleteHistory(toonId)
-        database.recordTombstone("HISTORY", toonId, now())
+    suspend fun deleteHistory(workId: WorkId) = withContext(Dispatchers.IO) {
+        database.deleteHistory(workId)
+        database.recordTombstone("HISTORY", workId.storageKey(), now())
         syncManager?.triggerDebouncedPush()
     }
 
     suspend fun clearHistory() = withContext(Dispatchers.IO) {
         val all = database.getAllHistory()
         all.forEach {
-            database.recordTombstone("HISTORY", it.toonId, now())
+            database.recordTombstone("HISTORY", it.workId().storageKey(), now())
         }
         database.clearAllHistory()
         syncManager?.triggerDebouncedPush()
@@ -276,7 +294,7 @@ class DesktopToonRepository(
 
     private fun sourceFor(item: ToonItem) = sources.get(item.sourceId)
 
-    private fun notifyKey(item: ToonItem): String = "${item.id}|${item.updatedAt.orEmpty()}"
+    private fun notifyKey(item: ToonItem): String = "${item.workId().storageKey()}|${item.updatedAt.orEmpty()}"
 
     private fun FavoriteRecord.toItem(): ToonItem = ToonItem(
         id = id,
@@ -285,5 +303,6 @@ class DesktopToonRepository(
         href = href,
         genre = genre,
         updatedAt = updatedAt,
+        sourceId = sourceId,
     )
 }
