@@ -7,11 +7,10 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 export JAVA_HOME="/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"
 export PATH="${JAVA_HOME}/bin:${PATH}"
 
-echo "🔨 Building macOS Desktop Application & DMG..."
+echo "🔨 Building macOS Desktop Application (.app)..."
 cd "${ROOT_DIR}"
-./gradlew :desktop:createDistributable :desktop:packageDmg
+./gradlew :desktop:createDistributable
 
 echo ""
 echo "✅ Build Completed Successfully!"
 echo "📁 macOS App: ${ROOT_DIR}/desktop/build/compose/binaries/main/app/Comics8.app"
-echo "💿 macOS DMG: ${ROOT_DIR}/desktop/build/compose/binaries/main/dmg/Comics8-1.0.0.dmg"

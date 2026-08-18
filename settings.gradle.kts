@@ -18,5 +18,10 @@ dependencyResolutionManagement {
 
 rootProject.name = "Comics8"
 include(":core")
-include(":app")
 include(":desktop")
+val desktopOnly =
+    settings.startParameter.projectProperties["comics8.desktopOnly"] == "true" ||
+        System.getenv("COMICS8_DESKTOP_ONLY") == "1"
+if (!desktopOnly) {
+    include(":app")
+}

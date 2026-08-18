@@ -70,11 +70,11 @@ adb shell am start -n "com.comics8.monitor/.MainActivity"
 ./gradlew :desktop:run
 ```
 
-### 3.6. macOS 데스크톱 배포본 빌드 (.app 및 .dmg)
+### 3.6. macOS 데스크톱 배포본 빌드 (.app)
 ```bash
 ./scripts/build-mac-desktop.sh
 # 또는
-./gradlew :desktop:createDistributable :desktop:packageDmg
+./gradlew :desktop:createDistributable
 ```
 - **출력 App 경로**: `desktop/build/compose/binaries/main/app/Comics8.app`
 ### 3.7. 릴리즈 자동 빌드 및 서버 배포 (Deploy Release)

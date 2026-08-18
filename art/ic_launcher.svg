@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="512" height="512">
+  <defs>
+    <!-- Background Canvas -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1E2028" />
+      <stop offset="100%" stop-color="#101116" />
+    </linearGradient>
+
+    <!-- 4:3 Screen Frame Stroke: Crisp visible metallic slate -->
+    <linearGradient id="frameGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#6B7286" />
+      <stop offset="100%" stop-color="#3F4452" />
+    </linearGradient>
+
+    <!-- 4:3 Screen Inner Display Fill -->
+    <linearGradient id="screenFill" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#282B36" />
+      <stop offset="100%" stop-color="#1A1C24" />
+    </linearGradient>
+
+    <!-- Behind Strand Gradient (Deep Coral to Rich Crimson) -->
+    <linearGradient id="gradBehind" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FF453A" />
+      <stop offset="50%" stop-color="#D32F2F" />
+      <stop offset="100%" stop-color="#880E1C" />
+    </linearGradient>
+
+    <!-- Front Continuous Strand Gradient (Coral Red -> Silk White -> Coral Red) -->
+    <linearGradient id="gradFront" x1="10%" y1="10%" x2="90%" y2="90%">
+      <stop offset="0%" stop-color="#FF453A" />
+      <stop offset="30%" stop-color="#FF8593" />
+      <stop offset="50%" stop-color="#FFFFFF" />
+      <stop offset="70%" stop-color="#FF8593" />
+      <stop offset="100%" stop-color="#FF453A" />
+    </linearGradient>
+
+    <!-- Drop Shadow for Fold Screen Plate -->
+    <filter id="plateShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="3" stdDeviation="2.5" flood-color="#000000" flood-opacity="0.5" />
+    </filter>
+
+    <!-- Soft Drop Shadow on Front Strand -->
+    <filter id="ribbonShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="1.2" dy="2.0" stdDeviation="1.8" flood-color="#000000" flood-opacity="0.65" />
+    </filter>
+  </defs>
+
+  <!-- Background Base Canvas -->
+  <rect width="108" height="108" fill="url(#bgGrad)" rx="24" />
+
+  <!-- 4:3 Ratio Scaled Foldable Device: (Total Width 84, Height 63 -> 4:3 exact) -->
+  <g filter="url(#plateShadow)">
+    <!-- Left Screen (40.5 x 63, rx=6.5) -->
+    <rect x="12" y="22.5" width="40.5" height="63" rx="6.5" fill="url(#screenFill)" stroke="url(#frameGrad)" stroke-width="2.2" />
+    <!-- Right Screen (40.5 x 63, rx=6.5) -->
+    <rect x="55.5" y="22.5" width="40.5" height="63" rx="6.5" fill="url(#screenFill)" stroke="url(#frameGrad)" stroke-width="2.2" />
+
+    <!-- Center Crease Spine -->
+    <line x1="54" y1="23" x2="54" y2="85" stroke="#0E0F14" stroke-width="2.2" />
+    <line x1="54" y1="24" x2="54" y2="84" stroke="#4A5060" stroke-width="0.8" opacity="0.6" />
+  </g>
+
+  <!-- Bold Möbius 3D Infinity Ribbon (Width 10.5) -->
+  <!-- 1. Behind Strand: Right Top loop from (86,54) ending under crossing at (54,54) -->
+  <path d="M 86,54 C 86,37 65.5,37 54,54"
+        fill="none"
+        stroke="url(#gradBehind)"
+        stroke-width="10.5"
+        stroke-linecap="round" />
+
+  <!-- 2. Behind Strand: Left Bottom loop from under crossing at (54,54) to (22,54) -->
+  <path d="M 54,54 C 42.5,71 22,71 22,54"
+        fill="none"
+        stroke="url(#gradBehind)"
+        stroke-width="10.5"
+        stroke-linecap="round" />
+
+  <!-- 3. Front Over Strand: Complete Seamless 3D Curve: (22,54) -> Top-Left -> Center (54,54) -> Bottom-Right -> (86,54) -->
+  <path d="M 22,54 C 22,37 42.5,37 54,54 C 65.5,71 86,71 86,54"
+        fill="none"
+        stroke="url(#gradFront)"
+        stroke-width="10.5"
+        stroke-linecap="round"
+        filter="url(#ribbonShadow)" />
+</svg>

@@ -19,6 +19,7 @@ import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.utf16CodePoint
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPlacement
@@ -96,6 +97,7 @@ fun main() {
         Window(
             onCloseRequest = ::exitApplication,
             title = "Comics8",
+            icon = painterResource("icon.png"),
             state = windowState,
             onKeyEvent = { event ->
                 if (event.type == KeyEventType.KeyDown) {

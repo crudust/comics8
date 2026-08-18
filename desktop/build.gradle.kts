@@ -27,15 +27,12 @@ compose.desktop {
         mainClass = "com.comics8.desktop.MainKt"
         nativeDistributions {
             modules("java.sql", "java.naming", "java.desktop")
-            targetFormats(
-                org.jetbrains.compose.desktop.application.dsl.TargetFormat.Dmg,
-                org.jetbrains.compose.desktop.application.dsl.TargetFormat.Pkg,
-            )
             packageName = "Comics8"
             packageVersion = "1.0.0"
             macOS {
                 bundleID = "com.comics8.desktop"
                 dockName = "Comics8"
+                iconFile.set(project.file("src/main/resources/icon.icns"))
             }
         }
     }

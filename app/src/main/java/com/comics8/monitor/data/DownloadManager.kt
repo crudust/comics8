@@ -15,6 +15,7 @@ import com.comics8.core.source.LocalImageUri
 import com.comics8.core.source.SourceAccess
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
+import com.comics8.monitor.R
 import com.comics8.monitor.data.local.AppDatabase
 import com.comics8.monitor.data.local.DownloadedEpisode
 import com.comics8.monitor.data.local.byToon
@@ -231,7 +232,7 @@ class DownloadManager(
         if (!manager.areNotificationsEnabled()) return
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
             .setContentText(text)
             .setOngoing(true)
