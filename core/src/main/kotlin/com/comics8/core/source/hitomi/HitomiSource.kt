@@ -63,17 +63,12 @@ class HitomiSource(
         if (!query.type.isNullOrBlank() && filters.none { it.ns == "type" }) {
             filters += SearchToken("type", query.type)
         }
-        val ordered = if (filters.isEmpty()) {
-            NozomiIndex.parseIds(fetchNozomiPage(HitomiUrls.indexNozomi(lang), 1, http).body)
+        val urls = if (filters.isEmpty()) {
+            listOf(HitomiUrls.indexNozomi(lang))
         } else {
-            val lists = filters.map { token ->
-                fetchRequiredNozomi(HitomiSearch.nozomiUrl(token, lang), http)
-            }
-            val sets = lists.map { it.toSet() }
-            val seed = lists.minBy { it.size }
-            seed.filter { id -> sets.all { id in it } }.take(NozomiIndex.PAGE)
+            filters.map { HitomiSearch.nozomiUrl(it, lang) }
         }
-        return loadGalleryCards(ordered, http)
+        return loadGalleryCards(collectSearchIds(urls, http), http)
     }
 
     override suspend fun loadEpisodes(item: ToonItem, page: Int, http: SourceHttp): EpisodePage {
@@ -149,13 +144,48 @@ class HitomiSource(
         return result
     }
 
-    private suspend fun fetchRequiredNozomi(url: String, http: SourceHttp): List<Long> {
-        val result = fetchWithBackoff(http, FetchSpec(url, defaultPolicy))
-            ?: error("HTTP ${url.substringAfterLast('/')} failed")
-        if (result.code !in 200..299) {
-            error("HTTP ${result.code}")
+    private suspend fun collectSearchIds(urls: List<String>, http: SourceHttp): List<Long> {
+        if (urls.isEmpty()) return emptyList()
+        val cursors = urls.map { NozomiCursor(it) }
+        val out = ArrayList<Long>(NozomiIndex.PAGE)
+        while (out.size < NozomiIndex.PAGE) {
+            val heads = cursors.map { it.peek(http) }
+            if (heads.any { it == null }) break
+            val present = heads.filterNotNull()
+            val target = present.minOrNull() ?: break
+            if (present.all { it == target }) {
+                out += target
+                cursors.forEach { it.pop() }
+            } else {
+                for (cursor in cursors) {
+                    val head = cursor.peek(http) ?: return out
+                    if (head > target) cursor.pop()
+                }
+            }
         }
-        return NozomiIndex.parseIds(result.body)
+        return out
+    }
+
+    private inner class NozomiCursor(private val url: String) {
+        private var page = 1
+        private var lastPage = Int.MAX_VALUE
+        private val buffer = ArrayDeque<Long>()
+
+        suspend fun peek(http: SourceHttp): Long? {
+            while (buffer.isEmpty() && page <= lastPage) {
+                val result = fetchNozomiPage(url, page, http)
+                val ids = NozomiIndex.parseIds(result.body)
+                lastPage = NozomiIndex.lastPage(page, ids, result.totalLength())
+                buffer.addAll(ids)
+                page += 1
+                if (ids.isEmpty()) break
+            }
+            return buffer.firstOrNull()
+        }
+
+        fun pop() {
+            if (buffer.isNotEmpty()) buffer.removeFirst()
+        }
     }
 
     private suspend fun loadGalleryInfos(ids: List<Long>, http: SourceHttp): List<GalleryInfo> {

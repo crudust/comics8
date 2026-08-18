@@ -15,8 +15,12 @@ data class GgJsRouter(
         private val caseRegex = Regex("""case\s+(\d+)\s*:""")
         private val arrayRegex = Regex("""(?:var\s+)?o\s*=\s*\[([0-9,\s]+)\]""")
         private val caseReturnRegex = Regex("""case\s+\d+\s*:[\s\S]*?return\s+(\d+)""")
+        private val caseAssignRegex = Regex("""case\s+\d+\s*:\s*[A-Za-z_]\w*\s*=\s*(\d+)""")
         private val defaultReturnRegex = Regex("""default\s*:\s*return\s+(\d+)""")
         private val trailingReturnRegex = Regex("""\}\s*return\s+(\d+)\s*;?\s*\}""")
+        private val defaultInitRegex = Regex(
+            """(?:(?:var|let|const)\s+)?[A-Za-z_]\w*\s*=\s*(\d+)\s*;\s*switch""",
+        )
 
         fun pathFromHash(hash: String): String {
             val last3 = hash.takeLast(3)
@@ -39,9 +43,12 @@ data class GgJsRouter(
                 ?.toSet()
                 .orEmpty()
             val members = cases + fromArray
-            val memberM = caseReturnRegex.find(js)?.groupValues?.get(1)?.toIntOrNull() ?: 1
+            val memberM = caseReturnRegex.find(js)?.groupValues?.get(1)?.toIntOrNull()
+                ?: caseAssignRegex.find(js)?.groupValues?.get(1)?.toIntOrNull()
+                ?: 1
             val defaultM = defaultReturnRegex.find(js)?.groupValues?.get(1)?.toIntOrNull()
                 ?: trailingReturnRegex.find(js)?.groupValues?.get(1)?.toIntOrNull()
+                ?: defaultInitRegex.find(js)?.groupValues?.get(1)?.toIntOrNull()
                 ?: 0
             return GgJsRouter(b = b, members = members, memberM = memberM, defaultM = defaultM)
         }

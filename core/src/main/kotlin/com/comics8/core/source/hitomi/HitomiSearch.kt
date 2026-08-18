@@ -37,9 +37,4 @@ object HitomiSearch {
             else -> HitomiUrls.nsNozomi(token.ns, slug, lang)
         }
     }
-
-    fun intersectInOrder(order: List<Long>, sets: List<Set<Long>>): List<Long> {
-        if (sets.isEmpty()) return order
-        return order.filter { id -> sets.all { id in it } }
-    }
 }

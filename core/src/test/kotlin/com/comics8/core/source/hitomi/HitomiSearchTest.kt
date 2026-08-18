@@ -30,12 +30,4 @@ class HitomiSearchTest {
         assertThat(HitomiSearch.parse("artist:foo -female:bar")).isNull()
         assertThat(HitomiSearch.parse("-tag:x")).isNull()
     }
-
-    @Test
-    fun intersectKeepsIndexOrder() {
-        val index = listOf(9L, 8L, 7L, 6L, 5L)
-        val a = setOf(8L, 6L, 4L)
-        val b = setOf(6L, 8L, 1L)
-        assertThat(HitomiSearch.intersectInOrder(index, listOf(a, b))).containsExactly(8L, 6L).inOrder()
-    }
 }

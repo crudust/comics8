@@ -43,6 +43,14 @@ class GgJsRouterTest {
     }
 
     @Test
+    fun assignmentStyleSwitchUsesInitAndCaseAssign() {
+        val gg = GgJsRouter.parse(readFixture("hitomi/gg_assign.js"))
+        assertThat(gg.m(273)).isEqualTo(0)
+        assertThat(gg.m(99)).isEqualTo(1)
+        assertThat(gg.b).isEqualTo("42/")
+    }
+
+    @Test
     fun parseIncludesArrayForm() {
         val js = """var o = [10, 20, 30]; function m(g) { return o.includes(g) ? 1 : 0 } b: "1/" """
         val gg = GgJsRouter.parse(js)

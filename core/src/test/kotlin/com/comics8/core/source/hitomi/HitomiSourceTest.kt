@@ -119,9 +119,23 @@ class HitomiSourceTest {
         assertThat(source.search(SearchQuery("big breasts"), http)).isEmpty()
         val items = source.search(SearchQuery("artist:demo_artist"), http)
         assertThat(items.map { it.entryEpisodeId }).contains("1001")
-        assertThat(http.recorded.any { it.url.endsWith("/artist/demo_artist-korean.nozomi") }).isTrue()
-        assertThat(http.recorded.none { it.url.endsWith("/index-korean.nozomi") && it.headers["Range"] == null }).isTrue()
+        val artistCalls = http.recorded.filter { it.url.endsWith("/artist/demo_artist-korean.nozomi") }
+        assertThat(artistCalls).isNotEmpty()
+        assertThat(artistCalls.all { !it.headers["Range"].isNullOrBlank() }).isTrue()
+        assertThat(artistCalls.any { it.headers["Range"] == "bytes=0-99" }).isTrue()
         assertThat(http.recorded.none { it.url.endsWith("/index-korean.nozomi") }).isTrue()
+    }
+
+    @Test
+    fun searchIntersectsFiltersWithRangePages() = runBlocking<Unit> {
+        val http = FakeHitomiHttp()
+        val items = source().search(SearchQuery("artist:demo_artist female:sole_female"), http)
+        assertThat(items.map { it.entryEpisodeId }).containsExactly("1001")
+        val ranged = http.recorded.filter { it.url.endsWith(".nozomi") }
+        assertThat(ranged).isNotEmpty()
+        assertThat(ranged.all { it.headers["Range"] != null }).isTrue()
+        assertThat(ranged.any { it.url.contains("/artist/demo_artist-") }).isTrue()
+        assertThat(ranged.any { it.url.contains("/female/sole_female-") }).isTrue()
     }
 
     @Test
@@ -193,7 +207,7 @@ class HitomiSourceTest {
             recorded += spec
             val url = spec.url
             return when {
-                url.endsWith(".nozomi") -> nozomi(url)
+                url.endsWith(".nozomi") -> nozomi(spec)
                 url.contains("/galleries/") && url.endsWith(".js") -> gallery(url.substringAfterLast('/').removeSuffix(".js"))
                 url.endsWith("/gg.js") -> ok(readFixture("hitomi/gg.js").toByteArray())
                 else -> HttpResult(404, emptyMap(), ByteArray(0))
@@ -217,7 +231,8 @@ class HitomiSourceTest {
             return ok(body.toByteArray())
         }
 
-        private fun nozomi(url: String): HttpResult {
+        private fun nozomi(spec: FetchSpec): HttpResult {
+            val url = spec.url
             if (missingNozomi.any { url.contains(it) }) {
                 return HttpResult(404, emptyMap(), ByteArray(0))
             }
@@ -226,17 +241,38 @@ class HitomiSourceTest {
             }
             val ids = when {
                 url.contains("/artist/demo_artist-") -> listOf(1001L, 2002L)
+                url.contains("/female/") -> listOf(1001L, 3003L)
                 url.contains("/index-") -> listingIds
                 else -> listingIds
             }
-            val body = encodeIds(ids)
+            val full = encodeIds(ids)
+            val range = spec.headers.entries.firstOrNull { it.key.equals("Range", ignoreCase = true) }?.value
+            val (body, start) = sliceRange(full, range)
             val headers = linkedMapOf<String, String>()
-            if (includeLength) {
-                val total = 200L
-                headers["Content-Range"] = "bytes 0-${body.size - 1}/$total"
+            val total = when {
+                !includeLength -> null
+                url.contains("/index-") || url.contains("/popular/") -> 200L
+                else -> full.size.toLong()
+            }
+            if (total != null) {
+                val end = (start + body.size - 1).coerceAtLeast(start)
+                headers["Content-Range"] = "bytes $start-$end/$total"
                 headers["Content-Length"] = body.size.toString()
             }
             return HttpResult(206, headers, body)
+        }
+
+        private fun sliceRange(full: ByteArray, range: String?): Pair<ByteArray, Int> {
+            if (range.isNullOrBlank() || !range.startsWith("bytes=")) return full to 0
+            val spec = range.removePrefix("bytes=")
+            val dash = spec.indexOf('-')
+            if (dash < 0) return full to 0
+            val start = spec.substring(0, dash).toIntOrNull()?.coerceAtLeast(0) ?: 0
+            val endRaw = spec.substring(dash + 1)
+            val end = if (endRaw.isEmpty()) full.lastIndex else endRaw.toIntOrNull() ?: full.lastIndex
+            if (start >= full.size) return ByteArray(0) to start
+            val until = (end + 1).coerceIn(start, full.size)
+            return full.copyOfRange(start, until) to start
         }
 
         private fun ok(body: ByteArray) = HttpResult(200, mapOf("Content-Length" to body.size.toString()), body)
