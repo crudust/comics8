@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-DEST_DIR="${HOME}/Applications"
+DEST_DIR="/Applications"
 APP_NAME="Comics8.app"
 
 echo "=================================================="

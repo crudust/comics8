@@ -119,11 +119,8 @@ object DesktopUpdateManager {
             val file = File(appPath)
             if (file.exists()) return file
         }
-        val homeApp = File(System.getProperty("user.home"), "Applications/Comics8.app")
-        if (homeApp.exists()) return homeApp
         val defaultApp = File("/Applications/Comics8.app")
-        if (defaultApp.exists()) return defaultApp
-        return null
+        return defaultApp.takeIf { it.exists() }
     }
 
     private fun unzip(zipFile: File, targetDir: File) {
