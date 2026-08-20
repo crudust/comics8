@@ -32,6 +32,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 data class SyncState(
     val syncKey: String = "",
@@ -64,6 +65,16 @@ class SyncManager(
     private val prefs: SharedPreferences = context.getSharedPreferences("comics8_sync", Context.MODE_PRIVATE)
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var debounceJob: Job? = null
+    private val inFlight = AtomicBoolean(false)
+
+    private suspend fun <T> exclusiveSync(busy: T, block: suspend () -> T): T {
+        if (!inFlight.compareAndSet(false, true)) return busy
+        return try {
+            block()
+        } finally {
+            inFlight.set(false)
+        }
+    }
 
     private val _syncState = MutableStateFlow(
         SyncState(
@@ -140,19 +151,39 @@ class SyncManager(
         debounceJob?.cancel()
         debounceJob = scope.launch {
             delay(2500)
-            syncDeltaInternal(isSilent = true)
+            exclusiveSync(Unit) {
+                syncDeltaInternal(isSilent = true)
+                Unit
+            }
         }
     }
 
     suspend fun syncPull(): SyncResult = withContext(Dispatchers.IO) {
-        syncDeltaInternal(isSilent = false)
+        exclusiveSync(SyncResult(false, "이미 동기화 중입니다.")) {
+            syncDeltaInternal(isSilent = false)
+        }
     }
 
     suspend fun syncPush(): SyncResult = withContext(Dispatchers.IO) {
-        syncPushInternal(isSilent = false)
+        exclusiveSync(SyncResult(false, "이미 동기화 중입니다.")) {
+            syncPushInternal(isSilent = false)
+        }
     }
 
     suspend fun syncFull(): SyncResult = withContext(Dispatchers.IO) {
+        exclusiveSync(SyncResult(false, "이미 동기화 중입니다.")) {
+            doFullSync()
+        }
+    }
+
+    /** Silent delta if no other sync is running; null when skipped. */
+    suspend fun syncIfIdle(): SyncResult? = withContext(Dispatchers.IO) {
+        exclusiveSync(null) {
+            syncDeltaInternal(isSilent = true)
+        }
+    }
+
+    private suspend fun doFullSync(): SyncResult {
         val pullRes = syncPullInternal(isSilent = true)
         if (!pullRes.success && !pullRes.message.contains("데이터가 없습니다")) {
             _syncState.value = _syncState.value.copy(
@@ -160,10 +191,9 @@ class SyncManager(
                 isSuccess = false,
                 syncMessage = pullRes.message,
             )
-            return@withContext pullRes
+            return pullRes
         }
-        val pushRes = syncPushInternal(isSilent = false)
-        pushRes
+        return syncPushInternal(isSilent = false)
     }
 
     /**
@@ -179,7 +209,7 @@ class SyncManager(
         val elevenSince = prefs.getLong(KEY_LAST_SYNCED_AT, 0L)
         if (elevenSince == 0L) {
             // First time sync: perform full pull, then push local
-            return@withContext syncFull()
+            return@withContext doFullSync()
         }
 
         if (!isSilent) {

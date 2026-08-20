@@ -590,12 +590,28 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             loadEpisodes(series, current.episodePage, asRefresh = true)
             return
         }
+        if (current.screen == Screen.Browse) {
+            syncOnBrowseRefresh()
+        }
         if (current.isSearch) {
             val query = current.searchQuery ?: return
             runSearch(query, asRefresh = current.items.isNotEmpty())
             return
         }
         loadPage(if (force) 1 else current.page, replace = true, asRefresh = !force && current.items.isNotEmpty())
+    }
+
+    private fun syncOnBrowseRefresh() {
+        val sm = repository.syncManager ?: return
+        viewModelScope.launch {
+            val res = sm.syncIfIdle() ?: return@launch
+            if (res.success && (res.favoritesCount > 0 || res.historyCount > 0)) {
+                val now = _state.value
+                if (now.screen == Screen.Browse && !now.isSearch) {
+                    loadPage(page = now.page, replace = true)
+                }
+            }
+        }
     }
 
     fun goToPage(page: Int) {

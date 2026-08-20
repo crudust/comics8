@@ -453,12 +453,28 @@ class DesktopViewModel(
 
     fun refresh() {
         checkForUpdate()
+        if (_state.value.screen == Screen.Browse) {
+            syncOnBrowseRefresh()
+        }
         if (_state.value.isSearch) {
             val query = _state.value.searchQuery.orEmpty()
             if (query.isNotEmpty()) search(query)
         } else {
             catalogCache.remove(_state.value.tab)
             loadPage(_state.value.page, replace = true)
+        }
+    }
+
+    private fun syncOnBrowseRefresh() {
+        val sm = repository.syncManager ?: return
+        scope.launch {
+            val res = sm.syncIfIdle() ?: return@launch
+            if (res.success && (res.favoritesCount > 0 || res.historyCount > 0)) {
+                val now = _state.value
+                if (now.screen == Screen.Browse && !now.isSearch) {
+                    loadPage(now.page, replace = true)
+                }
+            }
         }
     }
 

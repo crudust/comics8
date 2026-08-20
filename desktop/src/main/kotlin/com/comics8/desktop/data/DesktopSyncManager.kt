@@ -25,6 +25,7 @@ import org.json.JSONObject
 import java.io.File
 import java.util.Properties
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 data class DesktopSyncState(
     val syncKey: String = "",
@@ -56,6 +57,16 @@ class DesktopSyncManager(
     private val configFile = File(System.getProperty("user.home"), ".comics8/sync.properties")
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var debounceJob: Job? = null
+    private val inFlight = AtomicBoolean(false)
+
+    private suspend fun <T> exclusiveSync(busy: T, block: suspend () -> T): T {
+        if (!inFlight.compareAndSet(false, true)) return busy
+        return try {
+            block()
+        } finally {
+            inFlight.set(false)
+        }
+    }
 
     private val properties = Properties().apply {
         if (configFile.exists()) {
@@ -153,19 +164,39 @@ class DesktopSyncManager(
         debounceJob?.cancel()
         debounceJob = scope.launch {
             delay(2500)
-            syncDeltaInternal(isSilent = true)
+            exclusiveSync(Unit) {
+                syncDeltaInternal(isSilent = true)
+                Unit
+            }
         }
     }
 
     suspend fun syncPull(): DesktopSyncResult = withContext(Dispatchers.IO) {
-        syncDeltaInternal(isSilent = false)
+        exclusiveSync(DesktopSyncResult(false, "이미 동기화 중입니다.")) {
+            syncDeltaInternal(isSilent = false)
+        }
     }
 
     suspend fun syncPush(): DesktopSyncResult = withContext(Dispatchers.IO) {
-        syncPushInternal(isSilent = false)
+        exclusiveSync(DesktopSyncResult(false, "이미 동기화 중입니다.")) {
+            syncPushInternal(isSilent = false)
+        }
     }
 
     suspend fun syncFull(): DesktopSyncResult = withContext(Dispatchers.IO) {
+        exclusiveSync(DesktopSyncResult(false, "이미 동기화 중입니다.")) {
+            doFullSync()
+        }
+    }
+
+    /** Silent delta if no other sync is running; null when skipped. */
+    suspend fun syncIfIdle(): DesktopSyncResult? = withContext(Dispatchers.IO) {
+        exclusiveSync(null) {
+            syncDeltaInternal(isSilent = true)
+        }
+    }
+
+    private suspend fun doFullSync(): DesktopSyncResult {
         val pullRes = syncPullInternal(isSilent = true)
         if (!pullRes.success && !pullRes.message.contains("데이터가 없습니다")) {
             _syncState.value = _syncState.value.copy(
@@ -173,10 +204,9 @@ class DesktopSyncManager(
                 isSuccess = false,
                 syncMessage = pullRes.message,
             )
-            return@withContext pullRes
+            return pullRes
         }
-        val pushRes = syncPushInternal(isSilent = false)
-        pushRes
+        return syncPushInternal(isSilent = false)
     }
 
     /**
@@ -192,7 +222,7 @@ class DesktopSyncManager(
         val elevenSince = properties.getProperty(KEY_LAST_SYNCED_AT, "0").toLongOrNull() ?: 0L
         if (elevenSince == 0L) {
             // First time sync: perform full sync
-            return@withContext syncFull()
+            return@withContext doFullSync()
         }
 
         if (!isSilent) {
