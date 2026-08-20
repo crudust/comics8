@@ -921,6 +921,48 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
         return list
     }
 
+    fun countReadEpisodes(workId: WorkId): Int {
+        withConnection { conn ->
+            conn.prepareStatement(
+                "SELECT COUNT(*) FROM read_episodes WHERE sourceId = ? AND toonId = ?",
+            ).use { stmt ->
+                stmt.setString(1, workId.sourceId)
+                stmt.setString(2, workId.toonId)
+                val rs = stmt.executeQuery()
+                if (rs.next()) return rs.getInt(1)
+            }
+        }
+        return 0
+    }
+
+    fun countReadEpisodes(workIds: List<WorkId>): Map<String, Int> {
+        if (workIds.isEmpty()) return emptyMap()
+        val wanted = workIds.map { it.storageKey() }.toSet()
+        val toonIds = workIds.map { it.toonId }.distinct()
+        val counts = mutableMapOf<String, Int>()
+        withConnection { conn ->
+            val placeholders = toonIds.joinToString(",") { "?" }
+            conn.prepareStatement(
+                """
+                SELECT sourceId, toonId, COUNT(*)
+                FROM read_episodes
+                WHERE toonId IN ($placeholders)
+                GROUP BY sourceId, toonId
+                """.trimIndent(),
+            ).use { stmt ->
+                toonIds.forEachIndexed { index, id -> stmt.setString(index + 1, id) }
+                val rs = stmt.executeQuery()
+                while (rs.next()) {
+                    val key = "${rs.getString(1)}:${rs.getString(2)}"
+                    if (key in wanted) {
+                        counts[key] = rs.getInt(3)
+                    }
+                }
+            }
+        }
+        return counts
+    }
+
     fun getReadEpisode(workId: WorkId, wrId: String): ReadEpisodeRecord? {
         withConnection { conn ->
             conn.prepareStatement("SELECT * FROM read_episodes WHERE sourceId = ? AND toonId = ? AND wrId = ?").use { stmt ->

@@ -49,3 +49,14 @@ enum class NotificationMode {
     PER_FAVORITE,
     NONE,
 }
+
+enum class ProgressDisplay {
+    LAST_READ_ORDER,
+    READ_COUNT,
+    ;
+
+    fun format(lastReadOrder: Int, totalEpisodes: Int, readCount: Int): String = when (this) {
+        LAST_READ_ORDER -> "$lastReadOrder/$totalEpisodes"
+        READ_COUNT -> "$readCount/$totalEpisodes"
+    }
+}

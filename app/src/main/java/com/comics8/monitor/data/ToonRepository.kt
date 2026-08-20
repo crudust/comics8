@@ -14,6 +14,7 @@ import com.comics8.core.model.ViewMode
 import com.comics8.core.network.ToonClient
 import com.comics8.core.source.LatestUpdateSelection
 import com.comics8.core.source.NotificationMode
+import com.comics8.core.source.ProgressDisplay
 import com.comics8.core.source.SearchQuery
 import com.comics8.core.source.SourceAccess
 import com.comics8.core.source.SourceConfig
@@ -30,6 +31,7 @@ import com.comics8.monitor.data.local.ReaderSetting
 import com.comics8.monitor.data.local.ReaderSettingDao
 import com.comics8.monitor.data.local.SeenDao
 import com.comics8.monitor.data.local.SeenToon
+import com.comics8.monitor.data.local.countByToon
 import com.comics8.monitor.data.local.delete
 import com.comics8.monitor.data.local.exists
 import com.comics8.monitor.data.local.get
@@ -338,6 +340,9 @@ class ToonRepository(
         } catch (_: Exception) {
             emptyMap()
         }
+        val readCounts = countReadEpisodesNow(
+            items.map { it.workId() }.filter { historyMap.containsKey(it.storageKey()) },
+        )
         for (item in items) {
             if (item.workId().storageKey() in favoriteKeys) {
                 touchFavoriteUpdatedAt(item.workId(), item.updatedAt)
@@ -351,7 +356,9 @@ class ToonRepository(
             item.copy(
                 isNew = total > 0 && (prev == null || isUpdated),
                 isFavorite = key in favoriteKeys,
-                readProgress = history?.let { "${it.lastReadOrder}/${it.totalEpisodes}" },
+                readProgress = history?.let { h ->
+                    formatReadProgress(item.sourceId, h.lastReadOrder, h.totalEpisodes, readCounts[key] ?: 0)
+                },
             )
         }
     }
@@ -446,6 +453,17 @@ class ToonRepository(
         readEpisodeDao.getReadEpisode(workId, wrId)
     }
 
+    fun formatReadProgress(sourceId: String, lastReadOrder: Int, totalEpisodes: Int, readCount: Int): String =
+        sourceOrDefault(sourceId).formatReadProgress(lastReadOrder, totalEpisodes, readCount)
+
+    suspend fun countReadEpisodes(workId: WorkId): Int = withContext(Dispatchers.IO) {
+        readEpisodeDao.countByToon(workId)
+    }
+
+    suspend fun countReadEpisodes(workIds: List<WorkId>): Map<String, Int> = withContext(Dispatchers.IO) {
+        countReadEpisodesNow(workIds)
+    }
+
     suspend fun getHistory(sourceId: String): List<ReadHistory> = withContext(Dispatchers.IO) {
         val sid = sourceId.ifBlank { WorkId.DEFAULT_SOURCE }
         readHistoryDao.bySource(sid)
@@ -530,6 +548,20 @@ class ToonRepository(
         return seenDao.byToonIds(ids.map { it.toonId }.distinct())
             .filter { it.workId().storageKey() in wanted }
             .associateBy { it.workId().storageKey() }
+    }
+
+    private suspend fun countReadEpisodesNow(workIds: List<WorkId>): Map<String, Int> {
+        val needed = workIds.filter {
+            sourceOrDefault(it.sourceId).progressDisplay == ProgressDisplay.READ_COUNT
+        }
+        if (needed.isEmpty()) return emptyMap()
+        val wanted = needed.map { it.storageKey() }.toSet()
+        return readEpisodeDao.countsByToonIds(needed.map { it.toonId }.distinct())
+            .mapNotNull { row ->
+                val key = row.storageKey()
+                if (key in wanted) key to row.readCount else null
+            }
+            .toMap()
     }
 
     private fun sourceFor(item: ToonItem) = sources.get(item.sourceId)

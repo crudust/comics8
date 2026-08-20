@@ -5,6 +5,7 @@ import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.ReadDirection
 import com.comics8.core.model.ToonItem
 import com.comics8.core.model.ViewMode
+import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
 import com.comics8.desktop.data.DesktopBackupStats
 import com.comics8.desktop.data.DesktopSyncState
@@ -61,6 +62,7 @@ data class DesktopUiState(
     val readDirection: ReadDirection = ReadDirection.RIGHT_TO_LEFT,
     val seriesHistory: ReadHistoryRecord? = null,
     val historyItems: List<ReadHistoryRecord> = emptyList(),
+    val readCounts: Map<String, Int> = emptyMap(),
     val historyLoading: Boolean = false,
     val showSyncDialog: Boolean = false,
     val syncState: DesktopSyncState = DesktopSyncState(),
@@ -85,4 +87,12 @@ data class DesktopUiState(
 
     val hasPrevEpisode: Boolean
         get() = (currentEpisodeIndex in 0 until (episodes.size - 1)) || (currentEpisodeIndex == episodes.size - 1 && episodePage < episodeLastPage)
+
+    fun progressLabel(history: ReadHistoryRecord): String =
+        SourceRegistry.formatReadProgress(
+            history.sourceId,
+            history.lastReadOrder,
+            history.totalEpisodes,
+            readCounts[history.workId().storageKey()] ?: 0,
+        )
 }

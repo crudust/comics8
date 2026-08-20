@@ -11,6 +11,7 @@ import com.comics8.core.model.ReadDirection
 import com.comics8.core.model.ToonItem
 import com.comics8.core.model.ViewMode
 import com.comics8.core.network.ToonClient
+import com.comics8.core.source.ProgressDisplay
 import com.comics8.core.source.SearchQuery
 import com.comics8.core.source.SourceAccess
 import com.comics8.core.source.SourceConfig
@@ -211,6 +212,7 @@ class DesktopToonRepository(
         val total = database.getSeenCount()
         val existing = if (total == 0) emptyMap() else database.getSeenByIds(workIds)
         val historyMap = database.getHistoryByToonIds(workIds).associateBy { it.workId().storageKey() }
+        val readCounts = countReadEpisodesNow(workIds.filter { historyMap.containsKey(it.storageKey()) })
 
         for (item in items) {
             val uDate = item.updatedAt
@@ -229,7 +231,9 @@ class DesktopToonRepository(
             item.copy(
                 isNew = total > 0 && (prev == null || isUpdated),
                 isFavorite = key in favoriteKeys,
-                readProgress = history?.let { "${it.lastReadOrder}/${it.totalEpisodes}" },
+                readProgress = history?.let { h ->
+                    formatReadProgress(item.sourceId, h.lastReadOrder, h.totalEpisodes, readCounts[key] ?: 0)
+                },
             )
         }
     }
@@ -322,6 +326,17 @@ class DesktopToonRepository(
         database.getReadEpisode(workId, wrId)
     }
 
+    fun formatReadProgress(sourceId: String, lastReadOrder: Int, totalEpisodes: Int, readCount: Int): String =
+        sourceOrDefault(sourceId).formatReadProgress(lastReadOrder, totalEpisodes, readCount)
+
+    suspend fun countReadEpisodes(workId: WorkId): Int = withContext(Dispatchers.IO) {
+        database.countReadEpisodes(workId)
+    }
+
+    suspend fun countReadEpisodes(workIds: List<WorkId>): Map<String, Int> = withContext(Dispatchers.IO) {
+        countReadEpisodesNow(workIds)
+    }
+
     suspend fun getHistory(sourceId: String): List<ReadHistoryRecord> = withContext(Dispatchers.IO) {
         database.getHistoryBySource(sourceId)
     }
@@ -362,6 +377,14 @@ class DesktopToonRepository(
 
     suspend fun getBackupStats(): DesktopBackupStats = withContext(Dispatchers.IO) {
         DesktopBackupManager.getStats(database)
+    }
+
+    private fun countReadEpisodesNow(workIds: List<WorkId>): Map<String, Int> {
+        val needed = workIds.filter {
+            sourceOrDefault(it.sourceId).progressDisplay == ProgressDisplay.READ_COUNT
+        }
+        if (needed.isEmpty()) return emptyMap()
+        return database.countReadEpisodes(needed)
     }
 
     private fun sourceFor(item: ToonItem) = sources.get(item.sourceId)

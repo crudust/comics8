@@ -10,6 +10,7 @@ import com.comics8.core.source.ComicSource
 import com.comics8.core.source.FetchSpec
 import com.comics8.core.source.HttpResult
 import com.comics8.core.source.NotificationMode
+import com.comics8.core.source.ProgressDisplay
 import com.comics8.core.source.RequestPolicy
 import com.comics8.core.source.SearchQuery
 import com.comics8.core.source.SearchSuggestion
@@ -58,6 +59,7 @@ class HitomiSource(
     override val emptyListingOk: Boolean = true
     override val defaultLanguage: String? = DEFAULT_LANGUAGE
     override val favoriteUsesLatestListing: Boolean = false
+    override val progressDisplay: ProgressDisplay = ProgressDisplay.READ_COUNT
 
     override suspend fun loadListing(catalogId: String, page: Int, http: SourceHttp): ListingPage {
         val p = page.coerceAtLeast(1)

@@ -75,6 +75,18 @@ class SourceRegistry(private val sources: List<ComicSource>) {
             return searchPlaceholders[key] ?: cachedDefaults.default.searchPlaceholder
         }
 
+        fun progressDisplay(sourceId: String): ProgressDisplay {
+            val key = sourceId.ifBlank { WorkId.DEFAULT_SOURCE }
+            return cachedDefaults.getOrNull(key)?.progressDisplay ?: ProgressDisplay.LAST_READ_ORDER
+        }
+
+        fun formatReadProgress(
+            sourceId: String,
+            lastReadOrder: Int,
+            totalEpisodes: Int,
+            readCount: Int,
+        ): String = progressDisplay(sourceId).format(lastReadOrder, totalEpisodes, readCount)
+
         fun hostOf(url: String): String? =
             try {
                 URI(url).host?.lowercase()

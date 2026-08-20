@@ -21,6 +21,10 @@ interface ComicSource {
     val defaultLanguage: String? get() = null
     val favoriteUsesLatestListing: Boolean
         get() = notificationMode == NotificationMode.LATEST_INTERSECTION
+    val progressDisplay: ProgressDisplay get() = ProgressDisplay.LAST_READ_ORDER
+
+    fun formatReadProgress(lastReadOrder: Int, totalEpisodes: Int, readCount: Int): String =
+        progressDisplay.format(lastReadOrder, totalEpisodes, readCount)
 
     suspend fun loadListing(catalogId: String, page: Int, http: SourceHttp): ListingPage
     suspend fun search(query: SearchQuery, http: SourceHttp): List<ToonItem>

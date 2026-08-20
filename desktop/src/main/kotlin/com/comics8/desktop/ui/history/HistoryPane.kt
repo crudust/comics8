@@ -73,6 +73,7 @@ fun HistoryPane(
                 items(state.historyItems, key = { it.workId().storageKey() }) { item ->
                     HistoryItemCard(
                         item = item,
+                        progressText = state.progressLabel(item),
                         onOpenSeries = { viewModel.openSeriesFromHistory(item) },
                         onReopen = { viewModel.reopenHistoryEpisode(item) },
                         onContinue = { viewModel.continueHistoryEpisode(item) },
@@ -87,6 +88,7 @@ fun HistoryPane(
 @Composable
 fun HistoryItemCard(
     item: ReadHistoryRecord,
+    progressText: String,
     onOpenSeries: () -> Unit,
     onReopen: () -> Unit,
     onContinue: () -> Unit,
@@ -127,7 +129,7 @@ fun HistoryItemCard(
                         .padding(horizontal = 6.dp, vertical = 2.dp),
                 ) {
                     Text(
-                        text = "${item.lastReadOrder}/${item.totalEpisodes}",
+                        text = progressText,
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onPrimaryContainer,

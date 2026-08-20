@@ -192,7 +192,7 @@ fun TopBar(
                         )
                         Spacer(Modifier.width(4.dp))
                         Text(
-                            text = "이어보기 (${hist.lastReadOrder}/${hist.totalEpisodes})",
+                            text = "이어보기 (${state.progressLabel(hist)})",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,
                         )

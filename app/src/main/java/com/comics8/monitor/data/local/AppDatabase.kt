@@ -167,6 +167,19 @@ interface ReadEpisodeDao {
     @Query("SELECT wrId FROM read_episodes WHERE sourceId = :sourceId AND toonId = :toonId")
     suspend fun getReadWrIds(sourceId: String, toonId: String): List<String>
 
+    @Query("SELECT COUNT(*) FROM read_episodes WHERE sourceId = :sourceId AND toonId = :toonId")
+    suspend fun countByToon(sourceId: String, toonId: String): Int
+
+    @Query(
+        """
+        SELECT sourceId AS sourceId, toonId AS toonId, COUNT(*) AS readCount
+        FROM read_episodes
+        WHERE toonId IN (:toonIds)
+        GROUP BY sourceId, toonId
+        """,
+    )
+    suspend fun countsByToonIds(toonIds: List<String>): List<WorkReadCount>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun markRead(item: ReadEpisode)
 
@@ -186,8 +199,19 @@ interface ReadEpisodeDao {
     suspend fun deleteByToonId(sourceId: String, toonId: String)
 }
 
+data class WorkReadCount(
+    val sourceId: String,
+    val toonId: String,
+    val readCount: Int,
+) {
+    fun storageKey(): String = WorkId(sourceId, toonId).storageKey()
+}
+
 suspend fun ReadEpisodeDao.getReadEpisodes(workId: WorkId): List<ReadEpisode> =
     getReadEpisodes(workId.sourceId, workId.toonId)
+
+suspend fun ReadEpisodeDao.countByToon(workId: WorkId): Int =
+    countByToon(workId.sourceId, workId.toonId)
 
 suspend fun ReadEpisodeDao.getReadEpisode(workId: WorkId, wrId: String): ReadEpisode? =
     getReadEpisode(workId.sourceId, workId.toonId, wrId)

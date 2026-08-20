@@ -12,7 +12,9 @@ import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.ReadDirection
 import com.comics8.core.model.ToonItem
 import com.comics8.core.model.ViewMode
+import com.comics8.core.source.ProgressDisplay
 import com.comics8.core.source.SourcePrefs
+import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
 import com.comics8.core.sync.AppUpdateChecker
 import com.comics8.core.sync.SyncConstants
@@ -75,6 +77,7 @@ data class ListingUiState(
     val scrollToTopTrigger: Int = 0,
     val seriesHistory: ReadHistory? = null,
     val historyItems: List<ReadHistory> = emptyList(),
+    val readCounts: Map<String, Int> = emptyMap(),
     val historyLoading: Boolean = false,
     val showSyncDialog: Boolean = false,
     val syncState: SyncState = SyncState(),
@@ -98,6 +101,14 @@ data class ListingUiState(
 
     val hasPrevEpisode: Boolean
         get() = (currentEpisodeIndex in 0 until (episodes.size - 1)) || (currentEpisodeIndex == episodes.size - 1 && episodePage < episodeLastPage)
+
+    fun progressLabel(history: ReadHistory): String =
+        SourceRegistry.formatReadProgress(
+            history.sourceId,
+            history.lastReadOrder,
+            history.totalEpisodes,
+            readCounts[history.workId().storageKey()] ?: 0,
+        )
 }
 
 sealed interface Screen {
@@ -657,11 +668,13 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             val favorited = repository.isFavorite(item.workId())
             val history = repository.getHistory(item.workId())
+            val readCount = countIfNeeded(item.workId())
             _state.update { current ->
                 if (current.series?.workId() == item.workId()) {
                     current.copy(
                         seriesFavorited = favorited,
                         seriesHistory = history,
+                        readCounts = current.readCounts.withCount(item.workId(), readCount),
                     )
                 } else {
                     current
@@ -820,7 +833,14 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             _state.update { it.copy(historyLoading = it.historyItems.isEmpty()) }
             val items = repository.getHistory(_state.value.activeSourceId)
-            _state.update { it.copy(historyItems = items, historyLoading = false) }
+            val counts = countIfNeeded(items.map { item -> item.workId() }, _state.value.activeSourceId)
+            _state.update {
+                it.copy(
+                    historyItems = items,
+                    historyLoading = false,
+                    readCounts = it.readCounts + counts,
+                )
+            }
         }
     }
 
@@ -944,6 +964,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                     historyItems = current.historyItems.filter { it.workId() != workId },
                     items = updatedItems,
                     seriesHistory = if (current.series?.workId() == workId) null else current.seriesHistory,
+                    readCounts = current.readCounts - workId.storageKey(),
                 )
             }
         }
@@ -958,6 +979,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                     historyItems = emptyList(),
                     items = updatedItems,
                     seriesHistory = null,
+                    readCounts = emptyMap(),
                 )
             }
         }
@@ -977,7 +999,13 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             if (res?.success == true) {
                 loadPage(page = _state.value.page, replace = true)
                 val updatedHistory = repository.getHistory(_state.value.activeSourceId)
-                _state.update { it.copy(historyItems = updatedHistory) }
+                val counts = countIfNeeded(updatedHistory.map { item -> item.workId() }, _state.value.activeSourceId)
+                _state.update {
+                    it.copy(
+                        historyItems = updatedHistory,
+                        readCounts = it.readCounts + counts,
+                    )
+                }
             }
         }
     }
@@ -1252,7 +1280,12 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 val candidateTotal = if (totalEpCount > 1) totalEpCount else (existingHistory?.totalEpisodes ?: 1)
                 val finalTotal = maxOf(candidateTotal, finalOrder, existingHistory?.totalEpisodes ?: 1)
 
-                val progressText = "$finalOrder/$finalTotal"
+                val (progressText, readCount) = listingProgress(
+                    series.sourceId,
+                    finalOrder,
+                    finalTotal,
+                    series.workId(),
+                )
                 val savedHistory = ReadHistory(
                     sourceId = series.sourceId,
                     toonId = series.id,
@@ -1278,6 +1311,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                     curr.copy(
                         items = updatedItems,
                         seriesHistory = if (curr.series?.workId() == series.workId()) savedHistory else curr.seriesHistory,
+                        readCounts = curr.readCounts.withCount(series.workId(), readCount),
                     )
                 }
             }
@@ -1443,7 +1477,12 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                             hasNew = hasNew,
                         )
                         repository.saveHistory(updated)
-                        val progressText = "${updated.lastReadOrder}/${updated.totalEpisodes}"
+                        val (progressText, readCount) = listingProgress(
+                            target.sourceId,
+                            updated.lastReadOrder,
+                            updated.totalEpisodes,
+                            target.workId(),
+                        )
                         _state.update { curr ->
                             val updatedItems = curr.items.map { row ->
                                 if (row.workId() == target.workId()) row.copy(readProgress = progressText) else row
@@ -1454,6 +1493,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                             curr.copy(
                                 items = updatedItems,
                                 seriesHistory = if (curr.series?.workId() == target.workId()) updated else curr.seriesHistory,
+                                readCounts = curr.readCounts.withCount(target.workId(), readCount),
                             )
                         }
                     }
@@ -1611,7 +1651,12 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                                         hasNew = safeOrder < exactTotal,
                                     )
                                     repository.saveHistory(updated)
-                                    val progressText = "${updated.lastReadOrder}/${updated.totalEpisodes}"
+                                    val (progressText, readCount) = listingProgress(
+                                        item.sourceId,
+                                        updated.lastReadOrder,
+                                        updated.totalEpisodes,
+                                        item.workId(),
+                                    )
                                     _state.update { curr ->
                                         val updatedItems = curr.items.map { row ->
                                             if (row.workId() == item.workId()) row.copy(readProgress = progressText) else row
@@ -1619,6 +1664,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                                         curr.copy(
                                             items = updatedItems,
                                             seriesHistory = if (curr.series?.workId() == item.workId()) updated else curr.seriesHistory,
+                                            readCounts = curr.readCounts.withCount(item.workId(), readCount),
                                         )
                                     }
                                 }
@@ -1645,7 +1691,12 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                                 hasNew = hasNew,
                             )
                             repository.saveHistory(updated)
-                            val progressText = "${updated.lastReadOrder}/${updated.totalEpisodes}"
+                            val (progressText, readCount) = listingProgress(
+                                item.sourceId,
+                                updated.lastReadOrder,
+                                updated.totalEpisodes,
+                                item.workId(),
+                            )
                             _state.update { curr ->
                                 val updatedItems = curr.items.map { row ->
                                     if (row.workId() == item.workId()) row.copy(readProgress = progressText) else row
@@ -1653,6 +1704,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                                 curr.copy(
                                     items = updatedItems,
                                     seriesHistory = if (curr.series?.workId() == item.workId()) updated else curr.seriesHistory,
+                                    readCounts = curr.readCounts.withCount(item.workId(), readCount),
                                 )
                             }
                         }
@@ -1746,6 +1798,34 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         val detail = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
         return "$prefix\n$detail"
     }
+
+    private suspend fun listingProgress(
+        sourceId: String,
+        lastReadOrder: Int,
+        totalEpisodes: Int,
+        workId: WorkId,
+    ): Pair<String, Int> {
+        val readCount = countIfNeeded(workId)
+        return repository.formatReadProgress(sourceId, lastReadOrder, totalEpisodes, readCount) to readCount
+    }
+
+    private suspend fun countIfNeeded(workId: WorkId): Int {
+        if (repository.sourceOrDefault(workId.sourceId).progressDisplay != ProgressDisplay.READ_COUNT) {
+            return 0
+        }
+        return repository.countReadEpisodes(workId)
+    }
+
+    private suspend fun countIfNeeded(workIds: List<WorkId>, sourceId: String): Map<String, Int> {
+        if (workIds.isEmpty()) return emptyMap()
+        if (repository.sourceOrDefault(sourceId).progressDisplay != ProgressDisplay.READ_COUNT) {
+            return emptyMap()
+        }
+        return repository.countReadEpisodes(workIds)
+    }
+
+    private fun Map<String, Int>.withCount(workId: WorkId, count: Int): Map<String, Int> =
+        this + (workId.storageKey() to count)
 
     private fun ReadHistory.toToonItem(): ToonItem = ToonItem(
         id = toonId,
