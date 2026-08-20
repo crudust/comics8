@@ -76,24 +76,34 @@ object DesktopUpdateManager {
             scriptFile.writeText(
                 """
                 #!/bin/bash
+                trap '' HUP
                 PID=$currentPid
                 NEW_APP="${extractedApp.absolutePath}"
                 DEST_APP="${destApp.absolutePath}"
 
-                while kill -0 ${'$'}PID 2>/dev/null; do
+                for _ in {1..150}; do
+                    if ! kill -0 ${'$'}PID 2>/dev/null; then
+                        break
+                    fi
                     sleep 0.2
                 done
+                sleep 0.5
 
                 rm -rf "${'$'}DEST_APP"
                 cp -R "${'$'}NEW_APP" "${'$'}DEST_APP"
                 xattr -dr com.apple.quarantine "${'$'}DEST_APP" 2>/dev/null || true
+                chmod -R u+x "${'$'}DEST_APP/Contents/MacOS" 2>/dev/null || true
                 open "${'$'}DEST_APP"
                 """.trimIndent()
             )
             scriptFile.setExecutable(true)
 
-            // Launch updater script in background
-            ProcessBuilder("/bin/bash", scriptFile.absolutePath).start()
+            val logFile = File(updateDir, "relaunch.log")
+            ProcessBuilder("/usr/bin/nohup", "/bin/bash", scriptFile.absolutePath)
+                .redirectInput(ProcessBuilder.Redirect.from(File("/dev/null")))
+                .redirectOutput(logFile)
+                .redirectErrorStream(true)
+                .start()
 
             // Terminate current process to allow updater to replace app
             exitProcess(0)
@@ -128,7 +138,11 @@ object DesktopUpdateManager {
                     FileOutputStream(newFile).use { fos ->
                         zis.copyTo(fos)
                     }
-                    if (entry.name.contains("MacOS/") || entry.name.endsWith(".sh")) {
+                    if (
+                        entry.name.contains("MacOS/") ||
+                        entry.name.contains("/bin/") ||
+                        entry.name.endsWith(".sh")
+                    ) {
                         newFile.setExecutable(true)
                     }
                 }

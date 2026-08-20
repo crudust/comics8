@@ -77,12 +77,19 @@ if [[ ! -d "${APP_DIR}/Comics8.app" ]]; then
     echo "Comics8.app not found: ${APP_DIR}/Comics8.app"
     exit 1
 fi
-DEST_APP="${HOME}/Applications/Comics8.app"
-mkdir -p "${HOME}/Applications"
-rm -rf "${DEST_APP}"
-cp -R "${APP_DIR}/Comics8.app" "${DEST_APP}"
-xattr -dr com.apple.quarantine "${DEST_APP}" 2>/dev/null || true
-echo "Installed ${DEST_APP}"
+install_app() {
+    local dest="$1"
+    mkdir -p "$(dirname "${dest}")"
+    rm -rf "${dest}"
+    cp -R "${APP_DIR}/Comics8.app" "${dest}"
+    xattr -dr com.apple.quarantine "${dest}" 2>/dev/null || true
+    echo "Installed ${dest}"
+}
+install_app "${HOME}/Applications/Comics8.app"
+# Dock/Spotlight often launch this copy instead of ~/Applications.
+if [[ -e /Applications/Comics8.app || -L /Applications/Comics8.app ]]; then
+    install_app /Applications/Comics8.app
+fi
 
 ZIP_PATH="${DIR}/desktop/build/compose/binaries/main/Comics8-mac.zip"
 rm -f "${ZIP_PATH}"
