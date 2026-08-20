@@ -21,16 +21,16 @@ Comics8 Android 프로젝트 작업 시 필요한 환경 정보, 빌드/실행 �
 
 ## 2. 개발 환경 및 필수 경로 (Environment Setup)
 
-macOS 환경 기준으로 기본 설정된 환경 변수 및 SDK 경로입니다:
+릴리즈 배포는 Linux 개발서버에서 합니다. Android SDK와 JDK 17이 필요합니다.
 
 ```bash
-export JAVA_HOME="/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"
-export ANDROID_SDK_ROOT="/opt/homebrew/share/android-commandlinetools"
+export JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64"
+export ANDROID_SDK_ROOT="$HOME/android-sdk"
 export ANDROID_HOME="$ANDROID_SDK_ROOT"
-export PATH="$JAVA_HOME/bin:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
+export PATH="$JAVA_HOME/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
 ```
 
-Android는 에뮬레이터로 돌리지 않습니다. APK는 릴리즈 빌드 후 `deploy-release.sh`로 올리고, 기기는 인앱 업데이트로 받습니다.
+Android는 에뮬레이터로 돌리지 않습니다. 폰은 인앱 업데이트로 APK를 받습니다. Mac `.app`은 배포 시 SSH로 빌더 Mac의 `~/Applications/Comics8.app`을 덮어쓰고, zip은 서버에도 올립니다. 실행 중인 앱은 인앱 업데이트로 받을 수 있습니다.
 
 ---
 
@@ -43,32 +43,26 @@ Android는 에뮬레이터로 돌리지 않습니다. APK는 릴리즈 빌드 �
 ```
 - **출력 APK 경로**: `app/build/outputs/apk/release/app-release.apk`
 
-### 3.2. macOS 데스크톱 앱 실행 (Desktop Run)
+### 3.2. macOS 데스크톱 앱 실행 (개발용)
+Mac 코딩 클론에서:
 ```bash
 ./scripts/run-desktop.sh
 # 또는
 ./gradlew :desktop:run
 ```
 
-### 3.3. macOS 데스크톱 배포본 빌드 (.app)
-```bash
-./scripts/build-mac-desktop.sh
-# 또는
-./gradlew :desktop:createDistributable
-```
-- **출력 App 경로**: `desktop/build/compose/binaries/main/app/Comics8.app`
-
-### 3.4. macOS 로컬 설치 (`~/Applications`)
+### 3.3. macOS 첫 설치 (`~/Applications`)
+빌더 Mac에서 한 번:
 ```bash
 ./scripts/build-mac-local.sh
 ```
 
-### 3.5. 릴리즈 자동 빌드 및 서버 배포 (Deploy Release)
-Android APK + Mac Desktop 앱을 빌드하여 서버(VM 101)에 업로드하고 `version.json`을 갱신합니다:
+### 3.4. 릴리즈 배포
+Linux에서 APK를 빌드하고, SSH로 Mac `.app`을 만든 뒤 서버에 둘 다 올립니다. Mac SSH는 `~/.comics8-deploy.env` (예: `scripts/deploy.env.example`).
 ```bash
 ./scripts/deploy-release.sh [versionName] [versionCode] [releaseNotes]
 # 예시:
-./scripts/deploy-release.sh 1.0.1 2 "성능 개선 및 인앱 자동 업데이트 지원"
+./scripts/deploy-release.sh 1.4.2 21 "Hitomi 진행도 표시"
 ```
 
 ---
@@ -94,10 +88,11 @@ Comics8/
 │       ├── data/               # SQLite JDBC, 리포지토리, 동기화/업데이트 매니저
 │       └── ui/                 # Compose Desktop UI (Browse, Series, Reader, History)
 ├── scripts/
-│   ├── build-mac-desktop.sh    # macOS Desktop .app 빌드
-│   ├── build-mac-local.sh      # macOS Desktop을 ~/Applications 에 설치
-│   ├── run-desktop.sh          # macOS Desktop 앱 직접 실행
-│   └── deploy-release.sh       # Release 빌드 및 VM 101 서버 배포
+│   ├── build-mac-local.sh          # Mac에서 ~/Applications 첫 설치
+│   ├── update-mac-app-remote.sh    # Linux→Mac SSH 빌드/설치/zip
+│   ├── run-desktop.sh              # Mac에서 데스크톱 앱 직접 실행
+│   ├── deploy-release.sh           # APK + Mac zip 서버 배포
+│   └── deploy.env.example          # ~/.comics8-deploy.env 예시
 ├── build.gradle.kts
 ├── settings.gradle.kts
 ├── local.properties
@@ -110,10 +105,10 @@ Comics8/
 
 1. **빌드/테스트 전 환경변수 필수**:
    - `JAVA_HOME`과 `ANDROID_SDK_ROOT`가 셸 세션에 올바르게 잡혀 있어야 `./gradlew`가 정상 동작합니다. Android는 에뮬레이터/`adb`로 실행하지 않습니다.
-2. **Android 빌드와 macOS Desktop 빌드 구분**:
-   - Android APK: `./gradlew assembleRelease` 또는 `./scripts/deploy-release.sh`
-   - macOS Desktop: `./scripts/build-mac-desktop.sh` 또는 `./gradlew :desktop:createDistributable`
-   - macOS 직접 실행: `./scripts/run-desktop.sh` 또는 `./gradlew :desktop:run`
+2. **릴리즈는 Linux `deploy-release.sh`만 사용**:
+   - 푸시(`origin/main`) 후 배포. Mac 빌더는 GitHub `main`을 받아 `.app`을 만들고 `~/Applications`에 덮어쓴 뒤 zip을 서버에 올립니다.
+   - 앱을 실행하지는 않습니다. 이미 켜 둔 앱은 인앱 업데이트로 받습니다.
+   - Mac 코딩 클론(`Documents/Comics8`)은 건드리지 않습니다. 빌드는 `Documents/Mac/Comics8`입니다.
 3. **Room Entity 변경 시 주의**:
    - Room 엔티티나 스키마 수정 시 KSP 코드 생성이 필요하며, DB 버전 업그레이드 시 마이그레이션 전략(`fallbackToDestructiveMigration()` 여부 확인)을 확인해야 합니다.
 4. **테스트 추가 및 검증**:

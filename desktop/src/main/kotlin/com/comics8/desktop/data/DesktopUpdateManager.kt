@@ -70,7 +70,7 @@ object DesktopUpdateManager {
                 ?: return@withContext Result.failure(Exception("압축 파일 내에서 .app 번들을 찾을 수 없습니다."))
 
             val currentPid = ProcessHandle.current().pid()
-            val destApp = findCurrentAppPath() ?: File("/Applications/Comics8.app")
+            val destApp = findCurrentAppPath() ?: error("설치된 Comics8.app 경로를 찾지 못했습니다.")
 
             val scriptFile = File(updateDir, "relaunch.sh")
             scriptFile.writeText(
@@ -109,6 +109,8 @@ object DesktopUpdateManager {
             val file = File(appPath)
             if (file.exists()) return file
         }
+        val homeApp = File(System.getProperty("user.home"), "Applications/Comics8.app")
+        if (homeApp.exists()) return homeApp
         val defaultApp = File("/Applications/Comics8.app")
         if (defaultApp.exists()) return defaultApp
         return null

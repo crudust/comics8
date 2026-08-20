@@ -3,9 +3,13 @@ set -euo pipefail
 
 # ==========================================================
 # Comics8 Release Deploy Script
-# Builds Android APK (+ macOS Desktop App on Darwin),
-# uploads to Comics8 server (VM 101), and updates version.json.
+# Linux: APK here, .app via SSH to the Mac builder, upload both.
 # ==========================================================
+
+if [[ -f "${HOME}/.comics8-deploy.env" ]]; then
+    # shellcheck disable=SC1091
+    source "${HOME}/.comics8-deploy.env"
+fi
 
 if [[ -z "${JAVA_HOME:-}" ]]; then
     if [[ -x "/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home/bin/java" ]]; then
@@ -43,17 +47,12 @@ SSH=(ssh -o StrictHostKeyChecking=no "${SERVER_USER}@${SERVER_HOST}")
 VERSION_NAME="${1:-1.0.0}"
 VERSION_CODE="${2:-1}"
 RELEASE_NOTES="${3:-버그 수정 및 성능 개선}"
-BUILD_MAC=0
-if [[ "$(uname -s)" == "Darwin" ]]; then
-    BUILD_MAC=1
-fi
+export COMICS8_VERSION_NAME="${VERSION_NAME}"
+export COMICS8_VERSION_CODE="${VERSION_CODE}"
 
 echo "=================================================="
-echo "🚀 Comics8 Deploying Release v${VERSION_NAME} (code ${VERSION_CODE})"
+echo "Comics8 Deploying Release v${VERSION_NAME} (code ${VERSION_CODE})"
 echo "Notes: ${RELEASE_NOTES}"
-if [[ "$BUILD_MAC" -eq 0 ]]; then
-    echo "ℹ️  Non-macOS host: Android APK only (keeping existing Mac zip)"
-fi
 echo "=================================================="
 
 sed_inplace() {
@@ -68,6 +67,7 @@ sed_inplace() {
 echo "🔧 Syncing codebase version..."
 sed_inplace "s/versionCode = [0-9]+/versionCode = ${VERSION_CODE}/" app/build.gradle.kts
 sed_inplace "s/versionName = \"[^\"]+\"/versionName = \"${VERSION_NAME}\"/" app/build.gradle.kts
+sed_inplace "s/packageVersion = \"[^\"]+\"/packageVersion = \"${VERSION_NAME}\"/" desktop/build.gradle.kts
 
 cat <<EOF > desktop/src/main/kotlin/com/comics8/desktop/DesktopVersion.kt
 package com.comics8.desktop
@@ -79,7 +79,7 @@ object DesktopVersion {
 EOF
 
 # 1. Build Android Release APK
-echo "📦 1/4: Building Android Release APK..."
+echo "📦 1/5: Building Android Release APK..."
 ./gradlew assembleRelease
 
 APK_PATH="app/build/outputs/apk/release/app-release.apk"
@@ -88,29 +88,24 @@ if [ ! -f "$APK_PATH" ]; then
     exit 1
 fi
 
-# 2. Build macOS Desktop App & ZIP
+# 2. Build macOS Desktop App on the Mac builder
 MAC_ZIP_PATH="desktop/build/compose/binaries/main/Comics8-mac.zip"
-if [[ "$BUILD_MAC" -eq 1 ]]; then
-    echo "📦 2/4: Building macOS Desktop App..."
-    ./gradlew :desktop:createDistributable
-
-    MAC_APP_DIR="desktop/build/compose/binaries/main/app"
-    if [ ! -d "$MAC_APP_DIR/Comics8.app" ]; then
-        echo "❌ macOS App not found: $MAC_APP_DIR/Comics8.app"
-        exit 1
-    fi
-
-    echo "📦 Zipping Comics8.app..."
-    rm -f "$MAC_ZIP_PATH"
-    (cd "$MAC_APP_DIR" && zip -r -q "../Comics8-mac.zip" "Comics8.app")
+HAVE_MAC_ZIP=0
+if [[ -z "${COMICS8_MAC_SSH:-}" ]]; then
+    echo "COMICS8_MAC_SSH is not set. See scripts/deploy.env.example"
+    exit 1
+fi
+echo "📦 2/5: Building macOS Desktop App via ${COMICS8_MAC_SSH}..."
+if ./scripts/update-mac-app-remote.sh origin/main "${MAC_ZIP_PATH}"; then
+    HAVE_MAC_ZIP=1
 else
-    echo "📦 2/4: Skipping macOS Desktop App (not Darwin)"
+    echo "⚠️  Mac .app build failed. Continuing with Android APK only."
 fi
 
 # 3. Upload binaries and server code to Server
-echo "🚀 3/4: Uploading server code and binaries to server ($SERVER_HOST)..."
+echo "🚀 3/5: Uploading server code and binaries to server ($SERVER_HOST)..."
 "${SSH[@]}" "mkdir -p ${SERVER_DOWNLOAD_DIR}"
-if [[ "$BUILD_MAC" -eq 1 ]]; then
+if [[ "$HAVE_MAC_ZIP" -eq 1 ]]; then
     "${SSH[@]}" "rm -rf ${SERVER_DOWNLOAD_DIR}/*"
 else
     "${SSH[@]}" "rm -f ${SERVER_DOWNLOAD_DIR}/comics8-latest.apk"
@@ -123,17 +118,17 @@ if [ -f "server/server.py" ]; then
 fi
 
 scp "$APK_PATH" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/comics8-latest.apk"
-if [[ "$BUILD_MAC" -eq 1 ]]; then
+if [[ "$HAVE_MAC_ZIP" -eq 1 ]]; then
     scp "$MAC_ZIP_PATH" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/Comics8-mac.zip"
 fi
 
 # 4. Update version.json on Server
-echo "📝 4/4: Updating version.json on server..."
+echo "📝 4/5: Updating version.json on server..."
 "${SSH[@]}" "cat ${SERVER_VERSION_FILE}" > /tmp/comics8-version-current.json || echo '{}' > /tmp/comics8-version-current.json
 COMICS8_VERSION_NAME="$VERSION_NAME" \
 COMICS8_VERSION_CODE="$VERSION_CODE" \
 COMICS8_RELEASE_NOTES="$RELEASE_NOTES" \
-COMICS8_BUILD_MAC="$BUILD_MAC" \
+COMICS8_BUILD_MAC="$HAVE_MAC_ZIP" \
 python3 - <<'PY' >/tmp/comics8-version.json
 import json, os, sys
 
@@ -172,7 +167,7 @@ echo "🎉 배포가 성공적으로 완료되었습니다!"
 echo "• Version Info:  https://homeassistant.tail1946af.ts.net/api/comics8/version"
 echo "• Android APK:   https://homeassistant.tail1946af.ts.net/api/comics8/download/comics8-latest.apk"
 echo "• Mac Desktop:   https://homeassistant.tail1946af.ts.net/api/comics8/download/Comics8-mac.zip"
-if [[ "$BUILD_MAC" -eq 0 ]]; then
-    echo "• Desktop zip was left unchanged (built on macOS only)"
+if [[ "$HAVE_MAC_ZIP" -eq 0 ]]; then
+    echo "• Desktop zip was left unchanged (no Mac .app this run)"
 fi
 echo "=================================================="

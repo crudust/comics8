@@ -98,5 +98,4 @@ xattr -dr com.apple.quarantine "${DEST_DIR}/${APP_NAME}" 2>/dev/null || true
 
 echo ""
 echo "완료: ${DEST_DIR}/${APP_NAME}"
-open "${DEST_DIR}/${APP_NAME}"
 echo "=================================================="
