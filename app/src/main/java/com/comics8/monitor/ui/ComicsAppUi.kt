@@ -64,8 +64,8 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
 
     val catalogs = state.browseTabs
 
-    LaunchedEffect(config.screenWidthDp) {
-        viewModel.updateScreenWidthDp(config.screenWidthDp)
+    LaunchedEffect(config.screenWidthDp, config.screenHeightDp) {
+        viewModel.updateScreenDimensions(config.screenWidthDp, config.screenHeightDp)
     }
 
     DisposableEffect(isReader) {

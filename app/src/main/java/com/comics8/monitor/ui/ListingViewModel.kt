@@ -146,6 +146,15 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         }
 
     private var currentScreenWidthDp: Int = 0
+    private var currentScreenHeightDp: Int = 0
+
+    private fun isDualEligible(widthDp: Int = currentScreenWidthDp, heightDp: Int = currentScreenHeightDp): Boolean {
+        return widthDp >= 600 && widthDp > heightDp
+    }
+
+    private fun resolveTargetViewMode(widthDp: Int = currentScreenWidthDp, heightDp: Int = currentScreenHeightDp): ViewMode {
+        return if (isDualEligible(widthDp, heightDp)) ViewMode.DUAL else singleViewPreference
+    }
 
     private val _state = MutableStateFlow(
         ListingUiState(
@@ -646,8 +655,13 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun updateScreenWidthDp(widthDp: Int) {
+        updateScreenDimensions(widthDp, currentScreenHeightDp)
+    }
+
+    fun updateScreenDimensions(widthDp: Int, heightDp: Int) {
         currentScreenWidthDp = widthDp
-        val targetMode = if (widthDp >= 600) ViewMode.DUAL else singleViewPreference
+        currentScreenHeightDp = heightDp
+        val targetMode = resolveTargetViewMode(widthDp, heightDp)
         _state.update {
             it.copy(
                 viewMode = targetMode,
@@ -663,7 +677,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         }
         lastViewedSeries = item
         episodeJob?.cancel()
-        val targetMode = if (currentScreenWidthDp >= 600) ViewMode.DUAL else singleViewPreference
+        val targetMode = resolveTargetViewMode()
         _state.update {
             it.copy(
                 screen = Screen.Series,
@@ -1053,7 +1067,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         }
         episodeJob?.cancel()
         readerJob?.cancel()
-        val targetMode = if (currentScreenWidthDp >= 600) ViewMode.DUAL else singleViewPreference
+        val targetMode = resolveTargetViewMode()
         _state.update {
             it.copy(
                 screen = Screen.Series,
@@ -1133,7 +1147,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         }
         episodeJob?.cancel()
         readerJob?.cancel()
-        val targetMode = if (currentScreenWidthDp >= 600) ViewMode.DUAL else singleViewPreference
+        val targetMode = resolveTargetViewMode()
         _state.update {
             it.copy(
                 screen = Screen.Series,
