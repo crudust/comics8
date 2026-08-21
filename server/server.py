@@ -6,6 +6,8 @@ import time
 import sqlite3
 import hashlib
 import re
+import urllib.request
+import urllib.error
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urljoin, urlparse
 
@@ -231,34 +233,57 @@ def passthrough_proxy_headers(resp_headers, decoded: bool = False) -> list[tuple
     return headers
 
 
-def fetch_proxied(method: str, url: str, headers: dict, timeout: int, stream: bool = False):
-    import requests
+class ProxiedResponse:
+    def __init__(self, status_code: int, headers: dict[str, str], fp):
+        self.status_code = status_code
+        self.headers = headers
+        self.raw = fp
 
+    def close(self):
+        if self.raw:
+            try:
+                self.raw.close()
+            except Exception:
+                pass
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def fetch_proxied(method: str, url: str, headers: dict, timeout: int, stream: bool = False):
     current = url
+    opener = urllib.request.build_opener(_NoRedirectHandler)
     for _ in range(MAX_PROXY_REDIRECTS + 1):
         if not allowed_proxy_url(current):
             return "forbidden", None
-        resp = requests.request(
-            method,
-            current,
-            headers=headers,
-            timeout=timeout,
-            allow_redirects=False,
-            stream=stream,
-        )
-        if resp.status_code not in PROXY_REDIRECT_STATUSES:
-            return "ok", resp
-        location = resp.headers.get("Location")
-        nxt = next_proxy_url(current, location)
-        if nxt is None:
-            if not location:
-                return "ok", resp
-            resp.close()
-            return "forbidden", None
-        if resp.status_code == 303:
-            method = "GET"
-        resp.close()
-        current = nxt
+        req = urllib.request.Request(current, headers=headers, method=method)
+        try:
+            resp = opener.open(req, timeout=timeout)
+            resp_headers = {k: v for k, v in resp.headers.items()}
+            return "ok", ProxiedResponse(resp.status, resp_headers, resp)
+        except urllib.error.HTTPError as e:
+            if e.code in PROXY_REDIRECT_STATUSES:
+                location = e.headers.get("Location")
+                nxt = next_proxy_url(current, location)
+                if nxt is None:
+                    if not location:
+                        resp_headers = {k: v for k, v in e.headers.items()}
+                        return "ok", ProxiedResponse(e.code, resp_headers, e)
+                    e.close()
+                    return "forbidden", None
+                if e.code == 303:
+                    method = "GET"
+                e.close()
+                current = nxt
+                continue
+            resp_headers = {k: v for k, v in e.headers.items()} if e.headers else {}
+            return "ok", ProxiedResponse(e.code, resp_headers, e)
+        except (TimeoutError, urllib.error.URLError) as e:
+            if isinstance(e, TimeoutError) or isinstance(getattr(e, "reason", None), TimeoutError):
+                raise TimeoutError("Target server timed out")
+            raise
     return "redirects", None
 
 
@@ -1014,7 +1039,6 @@ class SyncHandler(BaseHTTPRequestHandler):
 
             req_headers = self._proxy_forward_headers(query, include_accept=True)
             try:
-                import requests
                 kind, resp = fetch_proxied("GET", target_url, req_headers, timeout=20, stream=True)
                 if kind == "forbidden":
                     self._send_json(403, {"error": "Forbidden", "message": "Host not allowed"})
@@ -1031,7 +1055,7 @@ class SyncHandler(BaseHTTPRequestHandler):
                     resp.close()
                 self.close_connection = True
                 return
-            except requests.exceptions.Timeout:
+            except TimeoutError:
                 self._send_json(504, {"error": "GatewayTimeout", "message": "Target server timed out"})
                 return
             except Exception as e:
