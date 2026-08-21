@@ -821,7 +821,7 @@ private fun ReaderDualView(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxHeight(),
-                        contentAlignment = Alignment.CenterEnd,
+                        contentAlignment = Alignment.Center,
                     ) {
                         val url = state.readerImages.getOrNull(leftIndex)
                         if (url != null) {
@@ -829,7 +829,7 @@ private fun ReaderDualView(
                                 url = url,
                                 contentDescription = "페이지 ${leftIndex + 1}",
                                 contentScale = ContentScale.Fit,
-                                alignment = Alignment.CenterEnd,
+                                alignment = Alignment.Center,
                                 modifier = Modifier.fillMaxSize(),
                                 onLoaded = { bmp ->
                                     viewModel.recordImageAspectRatio(leftIndex, bmp.width, bmp.height)
@@ -842,7 +842,7 @@ private fun ReaderDualView(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxHeight(),
-                        contentAlignment = Alignment.CenterStart,
+                        contentAlignment = Alignment.Center,
                     ) {
                         val url = state.readerImages.getOrNull(rightIndex)
                         if (url != null) {
@@ -850,7 +850,7 @@ private fun ReaderDualView(
                                 url = url,
                                 contentDescription = "페이지 ${rightIndex + 1}",
                                 contentScale = ContentScale.Fit,
-                                alignment = Alignment.CenterStart,
+                                alignment = Alignment.Center,
                                 modifier = Modifier.fillMaxSize(),
                                 onLoaded = { bmp ->
                                     viewModel.recordImageAspectRatio(rightIndex, bmp.width, bmp.height)

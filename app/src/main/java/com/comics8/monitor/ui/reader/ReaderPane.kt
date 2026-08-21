@@ -725,7 +725,6 @@ private fun ReaderDualPagePane(
                         }
                     }
                     is DualSpread.Dual -> {
-                        // Normal 2 portrait pages side-by-side: hug the center spine like a book
                         val leftIndex = if (isR2L) spread.secondIndex else spread.firstIndex
                         val rightIndex = if (isR2L) spread.firstIndex else spread.secondIndex
 
@@ -738,13 +737,13 @@ private fun ReaderDualPagePane(
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxHeight(),
-                                contentAlignment = Alignment.CenterEnd,
+                                contentAlignment = Alignment.Center,
                             ) {
                                 ReaderImage(
                                     model = state.readerImages.getOrNull(leftIndex),
                                     contentDescription = "페이지 ${leftIndex + 1}",
                                     contentScale = ContentScale.Fit,
-                                    alignment = Alignment.CenterEnd,
+                                    alignment = Alignment.Center,
                                     modifier = Modifier.fillMaxSize(),
                                     onSuccess = { result ->
                                         val w = result.result.drawable.intrinsicWidth
@@ -759,13 +758,13 @@ private fun ReaderDualPagePane(
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxHeight(),
-                                contentAlignment = Alignment.CenterStart,
+                                contentAlignment = Alignment.Center,
                             ) {
                                 ReaderImage(
                                     model = state.readerImages.getOrNull(rightIndex),
                                     contentDescription = "페이지 ${rightIndex + 1}",
                                     contentScale = ContentScale.Fit,
-                                    alignment = Alignment.CenterStart,
+                                    alignment = Alignment.Center,
                                     modifier = Modifier.fillMaxSize(),
                                     onSuccess = { result ->
                                         val w = result.result.drawable.intrinsicWidth
