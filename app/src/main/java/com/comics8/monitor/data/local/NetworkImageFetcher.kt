@@ -65,28 +65,33 @@ class NetworkImageFetcher(
                     dataSource = DataSource.DISK,
                 )
             } else {
-                val tempFile = java.io.File(cacheFile.parentFile, "${cacheFile.name}.tmp")
-                try {
+                val tempFile = java.io.File(cacheFile.parentFile, "${cacheFile.name}.tmp.${java.util.UUID.randomUUID()}")
+                val bytes = try {
                     NetworkSourceRuntime.open(url).use { input ->
+                        input.readBytes()
+                    }.also { data ->
                         tempFile.outputStream().use { out ->
-                            input.copyTo(out)
+                            out.write(data)
                         }
-                    }
-                    if (tempFile.exists() && tempFile.length() > 0L) {
-                        tempFile.renameTo(cacheFile)
+                        if (tempFile.exists() && tempFile.length() > 0L) {
+                            tempFile.renameTo(cacheFile)
+                        }
                     }
                 } catch (e: Exception) {
                     tempFile.delete()
                     throw e
+                } finally {
+                    tempFile.delete()
                 }
                 val buffer = Buffer()
-                cacheFile.source().use { buffer.writeAll(it) }
+                buffer.write(bytes)
                 SourceResult(
                     source = ImageSource(source = buffer, context = options.context),
                     mimeType = ZipImageFetcher.mimeType(ref!!.zipEntry ?: ref.path),
                     dataSource = DataSource.NETWORK,
                 )
             }
+
 
         }
     }

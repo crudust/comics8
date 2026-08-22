@@ -157,6 +157,16 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
 
         override fun size(): Long = length
 
+        private fun readFileFully(buf: ByteArray, fileOffset: Long, lengthToRead: Int): Int {
+            var total = 0
+            while (total < lengthToRead) {
+                val read = file.read(buf, fileOffset + total, total, lengthToRead - total)
+                if (read <= 0) break
+                total += read
+            }
+            return total
+        }
+
         override fun read(dst: ByteBuffer): Int {
             check(open) { "channel closed" }
             if (cursor >= length) return -1
@@ -166,7 +176,7 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
                 if (remaining >= DIRECT_READ_THRESHOLD) {
                     val toRead = minOf(remaining.toLong(), length - cursor, 1024L * 1024L).toInt()
                     val bytes = ByteArray(toRead)
-                    val read = file.read(bytes, cursor, 0, toRead)
+                    val read = readFileFully(bytes, cursor, toRead)
                     if (read <= 0) break
                     dst.put(bytes, 0, read)
                     cursor += read
@@ -203,7 +213,7 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
                 return
             }
             val buf = ByteArray(toFetch)
-            val read = file.read(buf, start, 0, toFetch)
+            val read = readFileFully(buf, start, toFetch)
             if (read > 0) {
                 block = if (read == toFetch) buf else buf.copyOf(read)
                 blockStart = start
@@ -212,6 +222,7 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
                 blockStart = -1L
             }
         }
+
 
         override fun close() {
             if (!open) return
