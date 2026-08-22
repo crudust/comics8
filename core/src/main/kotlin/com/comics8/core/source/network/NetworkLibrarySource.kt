@@ -32,7 +32,7 @@ class NetworkLibrarySource(
         NetworkProtocol.WEBDAV -> config.url
     }
     override val kind: SourceKind = SourceKind.LOCAL
-    override val catalogs: List<SourceCatalog> = listOf(SourceCatalog("LIBRARY", "보관함", false))
+    override val catalogs: List<SourceCatalog> = listOf(SourceCatalog("LIBRARY", "보관함", true))
     override val defaultPolicy: RequestPolicy = RequestPolicy(userAgent = "Comics8/Network")
     override val searchPlaceholder: String = "파일명 검색"
     override val notificationMode: NotificationMode = NotificationMode.NONE
@@ -41,6 +41,7 @@ class NetworkLibrarySource(
     override val requiresHttp: Boolean = false
     override val emptyListingOk: Boolean = true
     override val emptyEpisodesOk: Boolean = true
+    override val episodePageSize: Int = PAGE_SIZE
 
     init {
         NetworkSourceRuntime.register(id, backend)
@@ -48,8 +49,15 @@ class NetworkLibrarySource(
 
     override fun useProxy(url: String): Boolean = false
 
-    override suspend fun loadListing(catalogId: String, page: Int, http: SourceHttp): ListingPage =
-        ListingPage(scan().map(::toItem), 1, 1)
+    override suspend fun loadListing(catalogId: String, page: Int, http: SourceHttp): ListingPage {
+        val works = scan()
+        val current = page.coerceIn(1, pageCount(works.size))
+        return ListingPage(
+            works.drop((current - 1) * PAGE_SIZE).take(PAGE_SIZE).map(::toItem),
+            current,
+            pageCount(works.size),
+        )
+    }
 
     override suspend fun search(query: SearchQuery, http: SourceHttp): List<ToonItem> {
         val needle = query.text.trim()
@@ -59,18 +67,19 @@ class NetworkLibrarySource(
 
     override suspend fun loadEpisodes(item: ToonItem, page: Int, http: SourceHttp): EpisodePage {
         val work = scan().firstOrNull { it.id == item.id } ?: return EpisodePage(emptyList(), 1, 1)
+        val current = page.coerceIn(1, pageCount(work.episodes.size))
         return EpisodePage(
-            work.episodes.map { episode ->
+            work.episodes.drop((current - 1) * PAGE_SIZE).take(PAGE_SIZE).map { episode ->
                 EpisodeItem(
                     wrId = encodeEpisode(episode),
                     title = episode.title,
                     date = null,
-                    thumbUrl = firstImageUrl(episode),
+                    thumbUrl = firstImageUrl(episode, EPISODE_THUMB_PX),
                     href = NetworkImageUri.encode(id, episode.path),
                 )
             },
-            1,
-            1,
+            current,
+            pageCount(work.episodes.size),
         )
     }
 
@@ -93,11 +102,20 @@ class NetworkLibrarySource(
     }
 
     private fun scan(): List<NetworkWork> {
+        val stamp = runCatching { backend.stat("") }.getOrNull()
+        val statSignature = stamp?.takeIf { it.modifiedAt > 0L }?.let { node ->
+            LibraryScanIndex.signature(
+                listOf("${config.protocol}|${config.path}|${node.size}|${node.modifiedAt}"),
+            )
+        }
+        if (statSignature != null) {
+            index?.load(statSignature)?.let { cached -> return cached.map(::fromIndexed) }
+        }
         val root = backend.list("").sortedWith(compareBy(NaturalSort) { it.name })
-        val signature = LibraryScanIndex.signature(root.map { node ->
+        val signature = statSignature ?: LibraryScanIndex.signature(root.map { node ->
             "${node.path}|${node.name}|${node.directory}|${node.size}|${node.modifiedAt}"
         })
-        index?.load(signature)?.let { cached -> return cached.map(::fromIndexed) }
+        if (statSignature == null) index?.load(signature)?.let { cached -> return cached.map(::fromIndexed) }
         val works = ArrayList<NetworkWork>()
         for (child in root) {
             if (ZipImageNames.isJunkName(child.name)) continue
@@ -169,18 +187,19 @@ class NetworkLibrarySource(
     private fun toItem(work: NetworkWork): ToonItem = ToonItem(
         id = work.id,
         title = work.title,
-        thumbUrl = work.episodes.firstNotNullOfOrNull(::firstImageUrl).orEmpty(),
+        thumbUrl = work.episodes.firstOrNull()?.let { firstImageUrl(it, GRID_THUMB_PX) }.orEmpty(),
         href = NetworkImageUri.encode(id, work.path),
         sourceId = id,
     )
 
-    private fun firstImageUrl(episode: NetworkEpisode): String? = if (episode.zip) {
+    private fun firstImageUrl(episode: NetworkEpisode, thumbnailPx: Int): String = if (episode.zip) {
         NetworkImageUri.encode(
             sourceId = id,
             path = episode.path,
             size = episode.size,
             preview = NetworkImageUri.PreviewKind.ZIP_FIRST,
             modifiedAt = episode.modifiedAt,
+            thumbnailPx = thumbnailPx,
         )
     } else {
         NetworkImageUri.encode(
@@ -188,6 +207,7 @@ class NetworkLibrarySource(
             path = episode.path,
             preview = NetworkImageUri.PreviewKind.FOLDER_FIRST,
             modifiedAt = episode.modifiedAt,
+            thumbnailPx = thumbnailPx,
         )
     }
 
@@ -224,6 +244,8 @@ class NetworkLibrarySource(
 
     private fun stem(name: String): String = name.substringBeforeLast('.', name)
 
+    private fun pageCount(size: Int): Int = maxOf(1, (size + PAGE_SIZE - 1) / PAGE_SIZE)
+
     private data class NetworkWork(
         val id: String,
         val title: String,
@@ -240,6 +262,12 @@ class NetworkLibrarySource(
     )
 
     private data class NetworkEpisodeRef(val path: String, val zip: Boolean, val size: Long, val modifiedAt: Long)
+
+    companion object {
+        private const val PAGE_SIZE = 100
+        private const val GRID_THUMB_PX = 320
+        private const val EPISODE_THUMB_PX = 192
+    }
 }
 
 fun createNetworkFileSystem(config: NetworkSourceConfig): NetworkFileSystem = when (config.protocol) {

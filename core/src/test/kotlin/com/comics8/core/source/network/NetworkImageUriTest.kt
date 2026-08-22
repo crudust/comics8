@@ -12,6 +12,7 @@ class NetworkImageUriTest {
             size = 1_000_000_000L,
             preview = NetworkImageUri.PreviewKind.ZIP_FIRST,
             modifiedAt = 1234L,
+            thumbnailPx = 320,
         )
 
         assertThat(NetworkImageUri.parse(url)).isEqualTo(
@@ -21,6 +22,7 @@ class NetworkImageUriTest {
                 size = 1_000_000_000L,
                 preview = NetworkImageUri.PreviewKind.ZIP_FIRST,
                 modifiedAt = 1234L,
+                thumbnailPx = 320,
             ),
         )
     }

@@ -4,6 +4,7 @@ import com.comics8.core.source.FetchSpec
 import com.comics8.core.source.HttpResult
 import com.comics8.core.source.RequestPolicy
 import com.comics8.core.source.SourceHttp
+import com.comics8.core.source.local.LibraryScanIndex
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.runBlocking
 import org.apache.commons.compress.utils.SeekableInMemoryByteChannel
@@ -14,6 +15,7 @@ import java.io.InputStream
 import java.nio.channels.SeekableByteChannel
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import kotlin.io.path.createTempDirectory
 
 class NetworkLibrarySourceTest {
     @Test
@@ -51,11 +53,45 @@ class NetworkLibrarySourceTest {
         }
     }
 
-    private class FakeFs(private val zip: ByteArray) : NetworkFileSystem {
+    @Test
+    fun reusesIndexAfterSingleRootStatWithoutListingAgain() = runBlocking {
+        val backend = FakeFs(ByteArray(8), rootModifiedAt = 1234L)
+        val config = NetworkSourceConfig(
+            id = "network-cache-test",
+            protocol = NetworkProtocol.SMB,
+            name = "NAS",
+            host = "nas",
+            share = "comics",
+        )
+        val index = LibraryScanIndex(createTempDirectory("network-index").resolve("index.json").toFile())
+        val source = NetworkLibrarySource(config, backend, index)
+        try {
+            source.loadListing("LIBRARY", 1, ThrowingHttp)
+            source.loadListing("LIBRARY", 1, ThrowingHttp)
+
+            assertThat(backend.listCalls).isEqualTo(1)
+            assertThat(backend.statCalls).isEqualTo(2)
+        } finally {
+            NetworkSourceRuntime.remove(config.id)
+        }
+    }
+
+    private class FakeFs(private val zip: ByteArray, private val rootModifiedAt: Long = 0L) : NetworkFileSystem {
         var channelOpens = 0
-        override fun list(path: String): List<NetworkNode> = when (path) {
-            "" -> listOf(NetworkNode("Book.cbz", "Book.cbz", false, zip.size.toLong()))
-            else -> emptyList()
+        var listCalls = 0
+        var statCalls = 0
+        override fun list(path: String): List<NetworkNode> {
+            listCalls++
+            return when (path) {
+                "" -> listOf(NetworkNode("Book.cbz", "Book.cbz", false, zip.size.toLong()))
+                else -> emptyList()
+            }
+        }
+        override fun stat(path: String): NetworkNode? {
+            statCalls++
+            return rootModifiedAt.takeIf { it > 0L }?.let {
+                NetworkNode("", "comics", true, 0L, it)
+            }
         }
         override fun open(path: String): InputStream = ByteArrayInputStream(zip)
         override fun openChannel(path: String, knownSize: Long): SeekableByteChannel {

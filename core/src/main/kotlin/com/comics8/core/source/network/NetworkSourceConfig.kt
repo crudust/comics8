@@ -147,7 +147,7 @@ class NetworkSourceStore(
 
     private fun indexFor(id: String): LibraryScanIndex {
         val name = LibraryScanIndex.signature(listOf(id))
-        return LibraryScanIndex(File(indexDir, "$name.json"))
+        return LibraryScanIndex(File(indexDir, "$name.json"), maxAgeMs = 24L * 60L * 60L * 1000L)
     }
 
     private fun write(configs: List<NetworkSourceConfig>) {

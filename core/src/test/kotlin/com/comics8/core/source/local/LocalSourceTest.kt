@@ -47,7 +47,11 @@ class LocalSourceTest {
         val items = source.loadListing("LIBRARY", 1, ThrowingHttp).items
 
         val zipItem = items.first { it.title == "standalone" }
+        val zipPreview = checkNotNull(LocalPreviewUri.parse(zipItem.thumbUrl))
+        assertThat(zipPreview.thumbnailPx).isEqualTo(320)
+        assertThat(LocalPreviewUri.open(zipPreview).use { it.readBytes() }).isNotEmpty()
         val zipEpisode = source.loadEpisodes(zipItem, 1, ThrowingHttp).items.single()
+        assertThat(LocalPreviewUri.parse(checkNotNull(zipEpisode.thumbUrl))?.thumbnailPx).isEqualTo(192)
         val zipImages = source.resolveImages(zipEpisode, zipItem, ThrowingHttp)
         assertThat(zipImages).isNotEmpty()
         for (url in zipImages) {
@@ -56,6 +60,8 @@ class LocalSourceTest {
         }
 
         val dirItem = items.first { it.title == "imgdir" }
+        val dirPreview = checkNotNull(LocalPreviewUri.parse(dirItem.thumbUrl))
+        assertThat(LocalPreviewUri.open(dirPreview).use { it.readBytes() }).isNotEmpty()
         val dirEpisode = source.loadEpisodes(dirItem, 1, ThrowingHttp).items.single()
         val dirImages = source.resolveImages(dirEpisode, dirItem, ThrowingHttp)
         assertThat(dirImages.map { LocalImageUri.toFile(it)!!.name })

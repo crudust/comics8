@@ -16,6 +16,7 @@ object NetworkImageUri {
         val size: Long = -1L,
         val preview: PreviewKind? = null,
         val modifiedAt: Long = 0L,
+        val thumbnailPx: Int = 0,
     )
 
     fun encode(
@@ -25,12 +26,14 @@ object NetworkImageUri {
         size: Long = -1L,
         preview: PreviewKind? = null,
         modifiedAt: Long = 0L,
+        thumbnailPx: Int = 0,
     ): String {
         val json = JSONObject().put("source", sourceId).put("path", path)
         if (zipEntry != null) json.put("entry", zipEntry)
         if (size >= 0L) json.put("size", size)
         if (preview != null) json.put("preview", preview.name)
         if (modifiedAt > 0L) json.put("modifiedAt", modifiedAt)
+        if (thumbnailPx > 0) json.put("thumbnailPx", thumbnailPx)
         val payload = Base64.getUrlEncoder().withoutPadding()
             .encodeToString(json.toString().toByteArray(StandardCharsets.UTF_8))
         return "$SCHEME:$payload"
@@ -48,7 +51,10 @@ object NetworkImageUri {
             val preview = json.optString("preview").takeIf(String::isNotBlank)
                 ?.let { PreviewKind.valueOf(it) }
             val modifiedAt = json.optLong("modifiedAt")
-            if (!source.startsWith("network-") || path.isBlank()) null else Ref(source, path, entry, size, preview, modifiedAt)
+            val thumbnailPx = json.optInt("thumbnailPx")
+            if (!source.startsWith("network-") || path.isBlank()) null else {
+                Ref(source, path, entry, size, preview, modifiedAt, thumbnailPx)
+            }
         } catch (_: Exception) {
             null
         }

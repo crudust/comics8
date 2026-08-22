@@ -15,6 +15,7 @@ data class NetworkNode(
 
 interface NetworkFileSystem : Closeable {
     fun list(path: String = ""): List<NetworkNode>
+    fun stat(path: String = ""): NetworkNode? = null
     fun open(path: String): InputStream
     fun openChannel(path: String, knownSize: Long = -1L): SeekableByteChannel
     fun test() {

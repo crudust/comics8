@@ -43,14 +43,17 @@ object NetworkSourceRuntime {
         }
         val normalized = if (ref.preview == NetworkImageUri.PreviewKind.ZIP_FIRST) {
             val entries = zip.entries
-            val names = ArrayList<String>()
+            var firstImage: String? = null
             while (entries.hasMoreElements()) {
                 val candidate = entries.nextElement()
                 if (candidate.isDirectory) continue
                 val name = runCatching { ZipArchive.normalizeZipEntry(candidate.name) }.getOrNull() ?: continue
-                if (ZipImageNames.isImageEntry(name)) names += name
+                if (ZipImageNames.isImageEntry(name)) {
+                    firstImage = name
+                    break
+                }
             }
-            names.minWithOrNull(NaturalSort) ?: run {
+            firstImage ?: run {
                 zip.close()
                 throw IOException("ZIP에 이미지가 없습니다")
             }

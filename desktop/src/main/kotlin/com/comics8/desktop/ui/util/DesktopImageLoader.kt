@@ -34,12 +34,14 @@ import com.comics8.core.source.LocalImageUri
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.local.ThumbEncoder
 import com.comics8.core.source.local.CoverThumbCache
+import com.comics8.core.source.local.LocalPreviewUri
 import com.comics8.core.source.local.ThumbKey
 import com.comics8.core.source.local.ZipArchive
 import com.comics8.core.source.local.ZipImageUri
 import com.comics8.core.source.network.NetworkImageUri
 import com.comics8.core.source.network.NetworkSourceRuntime
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -51,6 +53,7 @@ import org.jetbrains.skia.Surface
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.Semaphore
 
 object AwtThumbEncoder : ThumbEncoder {
     override fun webp(bytes: ByteArray, longEdgePx: Int, quality: Int): ByteArray {
@@ -93,6 +96,7 @@ object DesktopImageCache {
     private const val DISPLAY_LONG_EDGE = 2048
     private const val DISK_HARD_LIMIT_BYTES = 200L * 1024 * 1024
     private const val DISK_TARGET_BYTES = 160L * 1024 * 1024
+    private val previewSlots = Semaphore(2, true)
 
     private val memoryLock = Any()
     private val memoryCache = object : LinkedHashMap<String, ImageBitmap>(64, 0.75f, true) {
@@ -150,6 +154,7 @@ object DesktopImageCache {
         val cachedFile = File(diskCacheDir, "$hash.img")
         val localFile = LocalImageUri.toFile(url)
         val zipRef = ZipImageUri.parse(url)
+        val localPreviewRef = LocalPreviewUri.parse(url)
         val networkRef = NetworkImageUri.parse(url)
         return if (localFile != null && localFile.isFile && localFile.length() > 0L) {
             try {
@@ -165,16 +170,29 @@ object DesktopImageCache {
             } catch (_: Exception) {
                 null
             }
-        } else if (networkRef != null && networkRef.preview != null) {
+        } else if (localPreviewRef != null || networkRef?.preview != null) {
             try {
-                val key = ThumbKey(
-                    "${networkRef.sourceId}|${networkRef.path}|${networkRef.preview}",
-                    networkRef.modifiedAt,
-                    networkRef.size,
-                )
-                coverThumbs.getOrCreate(key) {
-                    NetworkSourceRuntime.open(url).use { it.readBytes() }
-                }.readBytes()
+                val key = if (localPreviewRef != null) {
+                    ThumbKey("local|${localPreviewRef.path}|${localPreviewRef.kind}", localPreviewRef.modifiedAt, localPreviewRef.size)
+                } else {
+                    ThumbKey(
+                        "${networkRef!!.sourceId}|${networkRef.path}|${networkRef.preview}",
+                        networkRef.modifiedAt,
+                        networkRef.size,
+                    )
+                }
+                val thumbnailPx = localPreviewRef?.thumbnailPx
+                    ?: networkRef!!.thumbnailPx.takeIf { it > 0 }
+                    ?: 320
+                previewSlots.acquire()
+                try {
+                    coverThumbs.getOrCreate(key, thumbnailPx) {
+                        if (localPreviewRef != null) LocalPreviewUri.open(localPreviewRef).use { it.readBytes() }
+                        else NetworkSourceRuntime.open(url).use { it.readBytes() }
+                    }.readBytes()
+                } finally {
+                    previewSlots.release()
+                }
             } catch (_: Exception) {
                 null
             }
@@ -233,13 +251,13 @@ object DesktopImageCache {
         return null
     }
 
-    suspend fun loadImage(url: String): ImageBitmap? = withContext(Dispatchers.IO) {
-        if (url.isBlank()) return@withContext null
-        get(url)?.let { return@withContext it }
+    suspend fun loadImage(url: String): ImageBitmap? = runInterruptible(Dispatchers.IO) {
+        if (url.isBlank()) return@runInterruptible null
+        get(url)?.let { return@runInterruptible it }
         val bytes = readImageBytes(url)
         if (bytes != null && bytes.isNotEmpty()) {
             try {
-                val bitmap = decodeForDisplay(bytes) ?: return@withContext null
+                val bitmap = decodeForDisplay(bytes) ?: return@runInterruptible null
                 putMemory(url, bitmap)
                 bitmap
             } catch (_: Exception) {

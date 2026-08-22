@@ -17,7 +17,7 @@ import java.io.File
 
 class LocalSource(
     private val roots: () -> List<File>,
-    private val thumbs: CoverThumbCache,
+    @Suppress("UNUSED_PARAMETER") thumbs: CoverThumbCache,
     private val scan: LibraryScanner = LibraryScanner(),
     private val index: LibraryScanIndex? = null,
 ) : ComicSource {
@@ -26,7 +26,7 @@ class LocalSource(
     override val origin: String = "local://"
     override val kind: SourceKind = SourceKind.LOCAL
     override val catalogs: List<SourceCatalog> = listOf(
-        SourceCatalog("LIBRARY", "보관함", paginated = false),
+        SourceCatalog("LIBRARY", "보관함", paginated = true),
     )
     override val defaultPolicy: RequestPolicy = RequestPolicy(userAgent = "Comics8/Local")
     override val searchPlaceholder: String = "파일명 검색"
@@ -36,12 +36,18 @@ class LocalSource(
     override val writesDownloads: Boolean = false
     override val requiresHttp: Boolean = false
     override val emptyEpisodesOk: Boolean = true
+    override val episodePageSize: Int = PAGE_SIZE
 
     override fun useProxy(url: String): Boolean = false
 
     override suspend fun loadListing(catalogId: String, page: Int, http: SourceHttp): ListingPage {
-        val items = scanWorks().map { toItem(it) }
-        return ListingPage(items = items, currentPage = 1, lastPage = 1)
+        val works = scanWorks()
+        val current = page.coerceIn(1, pageCount(works.size))
+        return ListingPage(
+            items = works.drop((current - 1) * PAGE_SIZE).take(PAGE_SIZE).map(::toItem),
+            currentPage = current,
+            lastPage = pageCount(works.size),
+        )
     }
 
     override suspend fun search(query: SearchQuery, http: SourceHttp): List<ToonItem> {
@@ -54,7 +60,8 @@ class LocalSource(
 
     override suspend fun loadEpisodes(item: ToonItem, page: Int, http: SourceHttp): EpisodePage {
         val work = workFor(item.id) ?: return EpisodePage(emptyList(), 1, 1)
-        val episodes = work.episodes.map { episode ->
+        val current = page.coerceIn(1, pageCount(work.episodes.size))
+        val episodes = work.episodes.drop((current - 1) * PAGE_SIZE).take(PAGE_SIZE).map { episode ->
             EpisodeItem(
                 wrId = episode.wrId,
                 title = episode.title,
@@ -63,7 +70,7 @@ class LocalSource(
                 href = LocalImageUri.fromFile(episode.path),
             )
         }
-        return EpisodePage(items = episodes, currentPage = 1, lastPage = 1)
+        return EpisodePage(items = episodes, currentPage = current, lastPage = pageCount(work.episodes.size))
     }
 
     override suspend fun resolveImages(episode: EpisodeItem, item: ToonItem, http: SourceHttp): List<String> {
@@ -81,12 +88,9 @@ class LocalSource(
 
     private fun scanWorks(): List<ScannedWork> {
         val currentRoots = roots()
-        val signature = LibraryScanIndex.signature(currentRoots.flatMap { root ->
+        val signature = LibraryScanIndex.signature(currentRoots.map { root ->
             val rootPath = LocalWorkId.canonical(root)
-            listOf("root|$rootPath|${root.lastModified()}") +
-                (root.listFiles()?.map { child ->
-                    "$rootPath|${child.name}|${child.isDirectory}|${child.length()}|${child.lastModified()}"
-                } ?: emptyList())
+            "root|$rootPath|${root.lastModified()}|${root.length()}"
         })
         index?.load(signature)?.let { cached -> return cached.map(::fromIndexed) }
         return scan.scan(currentRoots).also { works ->
@@ -142,58 +146,17 @@ class LocalSource(
         )
 
     private fun coverUrl(work: ScannedWork): String {
-        val key = coverKey(work) ?: return ""
-        return try {
-            LocalImageUri.fromFile(thumbs.getOrCreate(key) { coverBytes(work) })
-        } catch (_: Exception) {
-            ""
-        }
+        val episode = work.episodes.firstOrNull() ?: return ""
+        return previewUrl(episode, GRID_THUMB_PX)
     }
 
-    private fun episodeThumb(episode: ScannedEpisode): String? {
-        val key = episodeCoverKey(episode) ?: return null
-        return try {
-            LocalImageUri.fromFile(thumbs.getOrCreate(key) { episodeCoverBytes(episode) })
-        } catch (_: Exception) {
-            null
-        }
-    }
+    private fun episodeThumb(episode: ScannedEpisode): String = previewUrl(episode, EPISODE_THUMB_PX)
 
-    private fun coverKey(work: ScannedWork): ThumbKey? =
-        work.episodes.firstOrNull()?.let(::episodeCoverKey)
-
-    private fun coverBytes(work: ScannedWork): ByteArray {
-        val episode = work.episodes.firstOrNull() ?: error("no episode")
-        return episodeCoverBytes(episode)
-    }
-
-    private fun episodeCoverKey(episode: ScannedEpisode): ThumbKey? =
-        when (episode.kind) {
-            LocalEpisodeKind.ZIP -> fileKey(episode.path)
-            LocalEpisodeKind.DIR -> scan.listFolderImages(episode.path).firstOrNull()?.let(::fileKey)
-        }
-
-    private fun episodeCoverBytes(episode: ScannedEpisode): ByteArray =
-        when (episode.kind) {
-            LocalEpisodeKind.ZIP -> ZipArchive(episode.path).use { zip ->
-                val entry = zip.firstImageEntry() ?: error("no image")
-                zip.open(entry).use { it.readBytes() }
-            }
-            LocalEpisodeKind.DIR -> {
-                val image = scan.listFolderImages(episode.path).firstOrNull() ?: error("no image")
-                image.readBytes()
-            }
-        }
-
-    private fun fileKey(file: File): ThumbKey? {
-        if (!file.exists()) return null
-        val path = try {
-            file.canonicalPath
-        } catch (_: Exception) {
-            file.absolutePath
-        }
-        return ThumbKey(path, file.lastModified(), file.length())
-    }
+    private fun previewUrl(episode: ScannedEpisode, thumbnailPx: Int): String = LocalPreviewUri.encode(
+        episode.path,
+        if (episode.kind == LocalEpisodeKind.ZIP) LocalPreviewUri.Kind.ZIP else LocalPreviewUri.Kind.FOLDER,
+        thumbnailPx,
+    )
 
     private fun pathFromToonId(toonId: String): File? {
         val prefix = PREFIXES.firstOrNull { toonId.startsWith(it) } ?: return null
@@ -204,5 +167,10 @@ class LocalSource(
 
     companion object {
         private val PREFIXES = listOf("zip:", "dir:", "series:")
+        private const val PAGE_SIZE = 100
+        private const val GRID_THUMB_PX = 320
+        private const val EPISODE_THUMB_PX = 192
     }
+
+    private fun pageCount(size: Int): Int = maxOf(1, (size + PAGE_SIZE - 1) / PAGE_SIZE)
 }

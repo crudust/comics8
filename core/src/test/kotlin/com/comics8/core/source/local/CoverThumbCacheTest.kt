@@ -50,6 +50,23 @@ class CoverThumbCacheTest {
     }
 
     @Test
+    fun keepsSeparateSizeVariants() {
+        val dir = createTempDirectory("thumbs-sizes").toFile()
+        val sizes = mutableListOf<Int>()
+        val cache = CoverThumbCache(dir, ThumbEncoder { _, size, _ ->
+            sizes += size
+            byteArrayOf(size.toByte())
+        })
+        val key = ThumbKey("/cover.jpg", 1L, 1L)
+
+        val grid = cache.getOrCreate(key, 320) { byteArrayOf(1) }
+        val episode = cache.getOrCreate(key, 192) { byteArrayOf(1) }
+
+        assertThat(grid).isNotEqualTo(episode)
+        assertThat(sizes).containsExactly(320, 192)
+    }
+
+    @Test
     fun evictsLeastRecentlyUsedThumbsWhenCapacityIsExceeded() {
         val dir = createTempDirectory("thumbs-lru").toFile()
         dir.deleteOnExit()

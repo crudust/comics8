@@ -57,6 +57,23 @@ class WebDavFileSystem(
         }
     }
 
+    override fun stat(path: String): NetworkNode? {
+        val request = requestBuilder(urlFor(path, directory = true)).head().build()
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) return null
+            val modifiedAt = response.header("Last-Modified")
+                ?.let { runCatching { ZonedDateTime.parse(it, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant().toEpochMilli() }.getOrNull() }
+                ?: return null
+            return NetworkNode(
+                path = NetworkSourceConfig.normalizePath(path),
+                name = path.substringAfterLast('/').ifBlank { config.name },
+                directory = true,
+                size = response.header("Content-Length")?.toLongOrNull() ?: 0L,
+                modifiedAt = modifiedAt,
+            )
+        }
+    }
+
     override fun openChannel(path: String, knownSize: Long): SeekableByteChannel {
         val url = urlFor(path)
         val size = if (knownSize >= 0L) knownSize else contentLength(url)

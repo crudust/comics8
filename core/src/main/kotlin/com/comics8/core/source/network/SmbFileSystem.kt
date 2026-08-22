@@ -42,6 +42,17 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
         }
     }
 
+    override fun stat(path: String): NetworkNode? = withShare { share ->
+        val info = share.getFileInformation(remotePath(path))
+        NetworkNode(
+            path = NetworkSourceConfig.normalizePath(path),
+            name = path.substringAfterLast('/').ifBlank { config.path.substringAfterLast('/').ifBlank { config.share } },
+            directory = info.standardInformation.isDirectory,
+            size = info.standardInformation.endOfFile,
+            modifiedAt = info.basicInformation.lastWriteTime.toEpochMillis(),
+        )
+    }
+
     override fun open(path: String): InputStream = ChannelInputStream(openChannel(path))
 
     override fun openChannel(path: String, knownSize: Long): SeekableByteChannel {
