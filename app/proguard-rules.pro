@@ -4,3 +4,7 @@
 -dontwarn okhttp3.**
 -dontwarn okio.**
 -dontwarn org.jsoup.**
+-dontwarn java.awt.**
+-dontwarn java.beans.**
+-dontwarn javax.swing.**
+-dontwarn org.mozilla.javascript.tools.**
