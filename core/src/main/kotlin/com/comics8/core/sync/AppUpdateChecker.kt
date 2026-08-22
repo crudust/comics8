@@ -3,6 +3,7 @@ package com.comics8.core.sync
 import com.comics8.core.model.AppUpdateState
 import com.comics8.core.model.PlatformUpdateInfo
 import com.comics8.core.model.VersionResponse
+import com.comics8.core.network.FallbackDns
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -10,9 +11,11 @@ import java.util.concurrent.TimeUnit
 
 object AppUpdateChecker {
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
+        .dns(FallbackDns)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
         .build()
+
 
     fun fetchVersionInfo(serverUrl: String = SyncConstants.DEFAULT_SERVER_URL): VersionResponse? {
         val url = SyncConstants.versionUrl(serverUrl)

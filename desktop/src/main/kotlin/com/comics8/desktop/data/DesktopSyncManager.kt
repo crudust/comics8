@@ -49,12 +49,13 @@ class DesktopSyncManager(
     private val database: DesktopDatabase,
     private val toonClient: ToonClient? = null,
     private val client: OkHttpClient = OkHttpClient.Builder()
+        .dns(com.comics8.core.network.FallbackDns)
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
         .build(),
-
 ) {
+
     private val configFile = File(System.getProperty("user.home"), ".comics8/sync.properties")
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var debounceJob: Job? = null

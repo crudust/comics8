@@ -176,6 +176,7 @@ class ToonClient(
 
         fun defaultClient(cacheDirectory: File? = null): OkHttpClient {
             val builder = OkHttpClient.Builder()
+                .dns(FallbackDns)
                 .connectTimeout(20, TimeUnit.SECONDS)
                 .readTimeout(40, TimeUnit.SECONDS)
                 .followRedirects(true)
@@ -186,6 +187,7 @@ class ToonClient(
             }
             return builder.build()
         }
+
 
         private fun parseBytesRange(header: String, total: Int): Pair<Int, Int>? {
             if (total <= 0) return null

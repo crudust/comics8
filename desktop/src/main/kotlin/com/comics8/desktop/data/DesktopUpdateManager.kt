@@ -1,5 +1,6 @@
 package com.comics8.desktop.data
 
+import com.comics8.core.network.FallbackDns
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -12,9 +13,11 @@ import kotlin.system.exitProcess
 
 object DesktopUpdateManager {
     private val httpClient = OkHttpClient.Builder()
+        .dns(FallbackDns)
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(180, TimeUnit.SECONDS)
         .build()
+
 
     private val updateDir = File(System.getProperty("user.home"), ".comics8/updates").apply { mkdirs() }
 
