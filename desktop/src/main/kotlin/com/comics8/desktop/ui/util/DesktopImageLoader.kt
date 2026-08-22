@@ -25,10 +25,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.toAwtImage
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
+import com.comics8.core.model.CropRect
 import com.comics8.core.model.ImageHalf
+import com.comics8.core.model.computeContentCropRect
 import com.comics8.core.network.ImageFallbacks
 import com.comics8.core.network.ImageReferer
 import com.comics8.core.source.LocalImageUri
@@ -376,12 +379,34 @@ fun DesktopAsyncImage(
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
+                val cropRect = remember(currentBitmap, half) {
+                    try {
+                        val awtImage = currentBitmap.toAwtImage()
+                        val w = awtImage.width
+                        val h = awtImage.height
+                        val regionLeft = if (half == ImageHalf.LEFT) 0 else w / 2
+                        val regionRight = if (half == ImageHalf.LEFT) w / 2 else w
+                        computeContentCropRect(
+                            regionLeft = regionLeft,
+                            regionTop = 0,
+                            regionRight = regionRight,
+                            regionBottom = h,
+                            getPixelRgb = { x, y -> awtImage.getRGB(x, y) },
+                        )
+                    } catch (_: Exception) {
+                        val w = currentBitmap.width
+                        val h = currentBitmap.height
+                        val regionLeft = if (half == ImageHalf.LEFT) 0 else w / 2
+                        val regionRight = if (half == ImageHalf.LEFT) w / 2 else w
+                        CropRect(regionLeft, 0, regionRight, h)
+                    }
+                }
+
                 androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
-                    val srcW = currentBitmap.width.toFloat()
-                    val srcH = currentBitmap.height.toFloat()
+                    val srcW = cropRect.width.toFloat()
+                    val srcH = cropRect.height.toFloat()
                     if (srcW > 0 && srcH > 0) {
-                        val halfWidth = srcW / 2f
-                        val pageAspectRatio = halfWidth / srcH
+                        val pageAspectRatio = srcW / srcH
                         val containerWidth = size.width
                         val containerHeight = size.height
                         val containerAspectRatio = containerWidth / containerHeight
@@ -399,13 +424,10 @@ fun DesktopAsyncImage(
                         val dstLeft = (containerWidth - dstWidth) / 2f
                         val dstTop = (containerHeight - dstHeight) / 2f
 
-                        val srcLeft = if (half == ImageHalf.LEFT) 0 else (srcW / 2).toInt()
-                        val srcRight = if (half == ImageHalf.LEFT) (srcW / 2).toInt() else srcW.toInt()
-
                         drawImage(
                             image = currentBitmap,
-                            srcOffset = androidx.compose.ui.unit.IntOffset(srcLeft, 0),
-                            srcSize = androidx.compose.ui.unit.IntSize(srcRight - srcLeft, srcH.toInt()),
+                            srcOffset = androidx.compose.ui.unit.IntOffset(cropRect.left, cropRect.top),
+                            srcSize = androidx.compose.ui.unit.IntSize(cropRect.width, cropRect.height),
                             dstOffset = androidx.compose.ui.unit.IntOffset(dstLeft.toInt(), dstTop.toInt()),
                             dstSize = androidx.compose.ui.unit.IntSize(dstWidth.toInt(), dstHeight.toInt()),
                         )

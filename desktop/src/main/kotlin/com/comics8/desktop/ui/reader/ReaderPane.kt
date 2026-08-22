@@ -319,7 +319,7 @@ private fun ReaderSingleView(
         buildSinglePageSlices(state.readerImages.size, state.imageAspectRatios, state.splitMode, state.readDirection)
     }
     val totalPages = slices.size.coerceAtLeast(1)
-    var currentPage by remember(state.currentEpisode?.wrId, slices) {
+    var currentPage by remember(state.currentEpisode?.wrId) {
         val target = state.currentEpisode?.lastReadPage ?: 0
         val idx = slices.indexOfFirst { it.imageIndex >= target }
         mutableStateOf(if (idx >= 0) idx.coerceIn(0, totalPages - 1) else 0)
@@ -330,12 +330,15 @@ private fun ReaderSingleView(
     var promptJob by remember { mutableStateOf<Job?>(null) }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(slices, state.currentEpisode?.lastReadPage) {
-        val target = state.currentEpisode?.lastReadPage ?: 0
-        if (slices.isNotEmpty() && target > 0) {
+    var restoredWrId by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.currentEpisode?.wrId, state.readerImages.isNotEmpty()) {
+        val wrId = state.currentEpisode?.wrId
+        if (wrId != null && wrId != restoredWrId && state.readerImages.isNotEmpty()) {
+            restoredWrId = wrId
+            val target = state.currentEpisode?.lastReadPage ?: 0
             val idx = slices.indexOfFirst { it.imageIndex >= target }
-            if (idx >= 0) {
-                currentPage = idx.coerceIn(0, totalPages - 1)
+            if (idx in 0 until totalPages && idx != currentPage) {
+                currentPage = idx
             }
         }
     }

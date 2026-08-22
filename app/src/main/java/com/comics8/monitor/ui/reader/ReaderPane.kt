@@ -52,11 +52,13 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.translate
 import coil.compose.AsyncImagePainter
 import coil.compose.SubcomposeAsyncImage
 import coil.compose.SubcomposeAsyncImageContent
+import com.comics8.core.model.CropRect
 import com.comics8.core.model.DualSpread
 import com.comics8.core.model.ImageHalf
 import com.comics8.core.model.ReadDirection
@@ -64,6 +66,7 @@ import com.comics8.core.model.SinglePageSlice
 import com.comics8.core.model.ViewMode
 import com.comics8.core.model.buildDualSpreads
 import com.comics8.core.model.buildSinglePageSlices
+import com.comics8.core.model.computeContentCropRect
 import com.comics8.monitor.ui.ListingUiState
 import com.comics8.monitor.ui.ListingViewModel
 import com.comics8.monitor.ui.components.EpisodeBoundaryPrompt
@@ -246,7 +249,7 @@ private fun ReaderSinglePagePane(
         buildSinglePageSlices(state.readerImages.size, state.imageAspectRatios, state.splitMode, state.readDirection)
     }
     val totalSlices = slices.size.coerceAtLeast(1)
-    val initialPage = remember(state.currentEpisode?.wrId, slices) {
+    val initialPage = remember(state.currentEpisode?.wrId) {
         val targetPage = state.currentEpisode?.lastReadPage ?: 0
         val idx = slices.indexOfFirst { it.imageIndex >= targetPage }
         if (idx >= 0) idx.coerceIn(0, totalSlices - 1) else 0
@@ -281,11 +284,14 @@ private fun ReaderSinglePagePane(
         }
     }
 
-    LaunchedEffect(slices, state.currentEpisode?.lastReadPage) {
-        val target = state.currentEpisode?.lastReadPage ?: 0
-        if (slices.isNotEmpty() && target > 0) {
+    var restoredWrId by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.currentEpisode?.wrId, state.readerImages.isNotEmpty()) {
+        val wrId = state.currentEpisode?.wrId
+        if (wrId != null && wrId != restoredWrId && state.readerImages.isNotEmpty()) {
+            restoredWrId = wrId
+            val target = state.currentEpisode?.lastReadPage ?: 0
             val idx = slices.indexOfFirst { it.imageIndex >= target }
-            if (idx in 0 until totalSlices) {
+            if (idx in 0 until totalSlices && idx != pagerState.currentPage) {
                 pagerState.scrollToPage(idx)
             }
         }
@@ -1092,49 +1098,66 @@ private fun ReaderImage(
             if (half == ImageHalf.FULL) {
                 SubcomposeAsyncImageContent()
             } else {
-                val painter = successState.painter
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
-                        val intrinsicWidth = painter.intrinsicSize.width
-                        val intrinsicHeight = painter.intrinsicSize.height
-                        if (intrinsicWidth > 0 && intrinsicHeight > 0) {
-                            val halfWidth = intrinsicWidth / 2f
-                            val pageAspectRatio = halfWidth / intrinsicHeight
-                            val containerWidth = size.width
-                            val containerHeight = size.height
-                            val containerAspectRatio = containerWidth / containerHeight
+                val drawable = successState.result.drawable
+                val bitmap = (drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
+                if (bitmap != null) {
+                    val cropRect = remember(bitmap, half) {
+                        val w = bitmap.width
+                        val h = bitmap.height
+                        val regionLeft = if (half == ImageHalf.LEFT) 0 else w / 2
+                        val regionRight = if (half == ImageHalf.LEFT) w / 2 else w
+                        try {
+                            computeContentCropRect(
+                                regionLeft = regionLeft,
+                                regionTop = 0,
+                                regionRight = regionRight,
+                                regionBottom = h,
+                                getPixelRgb = { x, y -> bitmap.getPixel(x, y) },
+                            )
+                        } catch (_: Exception) {
+                            CropRect(regionLeft, 0, regionRight, h)
+                        }
+                    }
+                    val imageBitmap = remember(bitmap) { bitmap.asImageBitmap() }
 
-                            val dstWidth: Float
-                            val dstHeight: Float
-                            if (containerAspectRatio > pageAspectRatio) {
-                                dstHeight = containerHeight
-                                dstWidth = dstHeight * pageAspectRatio
-                            } else {
-                                dstWidth = containerWidth
-                                dstHeight = dstWidth / pageAspectRatio
-                            }
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                            val srcW = cropRect.width.toFloat()
+                            val srcH = cropRect.height.toFloat()
+                            if (srcW > 0 && srcH > 0) {
+                                val pageAspectRatio = srcW / srcH
+                                val containerWidth = size.width
+                                val containerHeight = size.height
+                                val containerAspectRatio = containerWidth / containerHeight
 
-                            val dstLeft = (containerWidth - dstWidth) / 2f
-                            val dstTop = (containerHeight - dstHeight) / 2f
-
-                            clipRect(
-                                left = dstLeft,
-                                top = dstTop,
-                                right = dstLeft + dstWidth,
-                                bottom = dstTop + dstHeight,
-                            ) {
-                                val drawX = if (half == ImageHalf.LEFT) dstLeft else dstLeft - dstWidth
-                                translate(left = drawX, top = dstTop) {
-                                    with(painter) {
-                                        draw(androidx.compose.ui.geometry.Size(dstWidth * 2f, dstHeight))
-                                    }
+                                val dstWidth: Float
+                                val dstHeight: Float
+                                if (containerAspectRatio > pageAspectRatio) {
+                                    dstHeight = containerHeight
+                                    dstWidth = dstHeight * pageAspectRatio
+                                } else {
+                                    dstWidth = containerWidth
+                                    dstHeight = dstWidth / pageAspectRatio
                                 }
+
+                                val dstLeft = (containerWidth - dstWidth) / 2f
+                                val dstTop = (containerHeight - dstHeight) / 2f
+
+                                drawImage(
+                                    image = imageBitmap,
+                                    srcOffset = androidx.compose.ui.unit.IntOffset(cropRect.left, cropRect.top),
+                                    srcSize = androidx.compose.ui.unit.IntSize(cropRect.width, cropRect.height),
+                                    dstOffset = androidx.compose.ui.unit.IntOffset(dstLeft.toInt(), dstTop.toInt()),
+                                    dstSize = androidx.compose.ui.unit.IntSize(dstWidth.toInt(), dstHeight.toInt()),
+                                )
                             }
                         }
                     }
+                } else {
+                    SubcomposeAsyncImageContent()
                 }
             }
         },

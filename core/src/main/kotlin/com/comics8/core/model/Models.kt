@@ -100,6 +100,138 @@ data class SinglePageSlice(
     val half: ImageHalf = ImageHalf.FULL,
 )
 
+data class CropRect(
+    val left: Int,
+    val top: Int,
+    val right: Int,
+    val bottom: Int,
+) {
+    val width: Int get() = (right - left).coerceAtLeast(1)
+    val height: Int get() = (bottom - top).coerceAtLeast(1)
+}
+
+fun computeContentCropRect(
+    regionLeft: Int,
+    regionTop: Int,
+    regionRight: Int,
+    regionBottom: Int,
+    maxCropFractionX: Float = 0.15f,
+    maxCropFractionY: Float = 0.12f,
+    whiteThreshold: Int = 240,
+    getPixelRgb: (x: Int, y: Int) -> Int,
+): CropRect {
+    val regionW = regionRight - regionLeft
+    val regionH = regionBottom - regionTop
+    if (regionW <= 10 || regionH <= 10) {
+        return CropRect(regionLeft, regionTop, regionRight, regionBottom)
+    }
+
+    val maxCropX = (regionW * maxCropFractionX).toInt()
+    val maxCropY = (regionH * maxCropFractionY).toInt()
+
+    fun isPixelWhite(rgb: Int): Boolean {
+        val r = (rgb shr 16) and 0xff
+        val g = (rgb shr 8) and 0xff
+        val b = rgb and 0xff
+        return r >= whiteThreshold && g >= whiteThreshold && b >= whiteThreshold
+    }
+
+    val sampleStepX = (regionW / 120).coerceIn(2, 8)
+    val sampleStepY = (regionH / 120).coerceIn(2, 8)
+
+    // Top crop
+    var cropTop = regionTop
+    val topLimit = (regionTop + maxCropY).coerceAtMost(regionBottom - 10)
+    var y = regionTop
+    while (y < topLimit) {
+        var whiteCount = 0
+        var totalCount = 0
+        for (x in regionLeft until regionRight step sampleStepX) {
+            totalCount++
+            if (isPixelWhite(getPixelRgb(x, y))) {
+                whiteCount++
+            }
+        }
+        if (totalCount > 0 && whiteCount.toFloat() / totalCount >= 0.98f) {
+            cropTop = y
+            y += sampleStepY
+        } else {
+            break
+        }
+    }
+
+    // Bottom crop
+    var cropBottom = regionBottom
+    val bottomLimit = (regionBottom - maxCropY).coerceAtLeast(cropTop + 10)
+    y = regionBottom - 1
+    while (y >= bottomLimit) {
+        var whiteCount = 0
+        var totalCount = 0
+        for (x in regionLeft until regionRight step sampleStepX) {
+            totalCount++
+            if (isPixelWhite(getPixelRgb(x, y))) {
+                whiteCount++
+            }
+        }
+        if (totalCount > 0 && whiteCount.toFloat() / totalCount >= 0.98f) {
+            cropBottom = y + 1
+            y -= sampleStepY
+        } else {
+            break
+        }
+    }
+
+    // Left crop
+    var cropLeft = regionLeft
+    val leftLimit = (regionLeft + maxCropX).coerceAtMost(regionRight - 10)
+    var x = regionLeft
+    while (x < leftLimit) {
+        var whiteCount = 0
+        var totalCount = 0
+        for (sampleY in cropTop until cropBottom step sampleStepY) {
+            totalCount++
+            if (isPixelWhite(getPixelRgb(x, sampleY))) {
+                whiteCount++
+            }
+        }
+        if (totalCount > 0 && whiteCount.toFloat() / totalCount >= 0.98f) {
+            cropLeft = x
+            x += sampleStepX
+        } else {
+            break
+        }
+    }
+
+    // Right crop
+    var cropRight = regionRight
+    val rightLimit = (regionRight - maxCropX).coerceAtLeast(cropLeft + 10)
+    x = regionRight - 1
+    while (x >= rightLimit) {
+        var whiteCount = 0
+        var totalCount = 0
+        for (sampleY in cropTop until cropBottom step sampleStepY) {
+            totalCount++
+            if (isPixelWhite(getPixelRgb(x, sampleY))) {
+                whiteCount++
+            }
+        }
+        if (totalCount > 0 && whiteCount.toFloat() / totalCount >= 0.98f) {
+            cropRight = x + 1
+            x -= sampleStepX
+        } else {
+            break
+        }
+    }
+
+    // Apply safety padding of 2px
+    val finalLeft = (cropLeft - 2).coerceAtLeast(regionLeft)
+    val finalTop = (cropTop - 2).coerceAtLeast(regionTop)
+    val finalRight = (cropRight + 2).coerceAtMost(regionRight)
+    val finalBottom = (cropBottom + 2).coerceAtMost(regionBottom)
+
+    return CropRect(finalLeft, finalTop, finalRight, finalBottom)
+}
+
 fun buildSinglePageSlices(
     imageCount: Int,
     aspectRatios: Map<Int, Float>,
