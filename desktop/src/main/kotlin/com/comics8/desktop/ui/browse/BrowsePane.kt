@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.comics8.core.model.ToonItem
@@ -96,28 +97,32 @@ fun BrowsePane(
                 if (isLocal) {
                     LibraryRootsBar(state = state, viewModel = viewModel)
                 }
-                val gridState = rememberLazyGridState()
-                LaunchedEffect(state.scrollToTopTrigger) {
-                    if (state.scrollToTopTrigger > 0) {
-                        gridState.scrollToItem(0)
+                if (isLocal && state.items.isEmpty() && !state.isSearch) {
+                    EmptyLibraryScanHint(modifier = Modifier.weight(1f).fillMaxWidth())
+                } else {
+                    val gridState = rememberLazyGridState()
+                    LaunchedEffect(state.scrollToTopTrigger) {
+                        if (state.scrollToTopTrigger > 0) {
+                            gridState.scrollToItem(0)
+                        }
                     }
-                }
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 160.dp),
-                    state = gridState,
-                    contentPadding = PaddingValues(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                ) {
-                    items(state.items.distinctBy { it.listingKey() }, key = { it.listingKey() }) { item ->
-                        ToonCard(
-                            item = item,
-                            onClick = { viewModel.onListingOpen(item) },
-                            onToggleFavorite = { viewModel.toggleFavorite(item) },
-                            showSourceChip = false,
-                            sourceRegistry = state.sourceRegistry,
-                        )
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 160.dp),
+                        state = gridState,
+                        contentPadding = PaddingValues(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                    ) {
+                        items(state.items.distinctBy { it.listingKey() }, key = { it.listingKey() }) { item ->
+                            ToonCard(
+                                item = item,
+                                onClick = { viewModel.onListingOpen(item) },
+                                onToggleFavorite = { viewModel.toggleFavorite(item) },
+                                showSourceChip = false,
+                                sourceRegistry = state.sourceRegistry,
+                            )
+                        }
                     }
                 }
 
@@ -148,8 +153,34 @@ private fun EmptyLibraryPane(
         Button(onClick = onAddFolder) {
             Text("폴더 추가")
         }
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = LOOSE_IMAGE_HINT,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
     }
 }
+
+@Composable
+private fun EmptyLibraryScanHint(modifier: Modifier = Modifier) {
+    Column(
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier.padding(24.dp),
+    ) {
+        Text(
+            text = LOOSE_IMAGE_HINT,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+private const val LOOSE_IMAGE_HINT =
+    "ZIP/CBZ 파일이나 이미지가 들어 있는 하위 폴더를 넣어 주세요. 루트의 낱개 이미지 파일은 스캔하지 않습니다."
 
 @Composable
 private fun LibraryRootsBar(

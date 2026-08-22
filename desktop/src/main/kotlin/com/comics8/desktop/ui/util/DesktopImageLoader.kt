@@ -39,49 +39,48 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.jetbrains.skia.EncodedImageFormat
 import org.jetbrains.skia.Image
-import java.awt.Color
-import java.awt.RenderingHints
-import java.awt.image.BufferedImage
-import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
+import org.jetbrains.skia.Rect
+import org.jetbrains.skia.SamplingMode
+import org.jetbrains.skia.Surface
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
-import javax.imageio.IIOImage
-import javax.imageio.ImageIO
-import javax.imageio.ImageWriteParam
 
 object AwtThumbEncoder : ThumbEncoder {
     override fun jpeg(bytes: ByteArray, longEdgePx: Int, quality: Int): ByteArray {
-        val src = ImageIO.read(ByteArrayInputStream(bytes)) ?: error("unreadable image")
-        val w = src.width.coerceAtLeast(1)
-        val h = src.height.coerceAtLeast(1)
-        val longEdge = maxOf(w, h)
-        val scale = if (longEdge <= longEdgePx) 1.0 else longEdgePx.toDouble() / longEdge
-        val tw = (w * scale).toInt().coerceAtLeast(1)
-        val th = (h * scale).toInt().coerceAtLeast(1)
-        val dest = BufferedImage(tw, th, BufferedImage.TYPE_INT_RGB)
-        val g = dest.createGraphics()
-        try {
-            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
-            g.drawImage(src, 0, 0, tw, th, Color.WHITE, null)
-        } finally {
-            g.dispose()
-        }
-        val out = ByteArrayOutputStream()
-        val writer = ImageIO.getImageWritersByFormatName("jpeg").next()
-        ImageIO.createImageOutputStream(out).use { ios ->
-            writer.output = ios
-            val param = writer.defaultWriteParam
-            if (param.canWriteCompressed()) {
-                param.compressionMode = ImageWriteParam.MODE_EXPLICIT
-                param.compressionQuality = (quality / 100f).coerceIn(0.1f, 1f)
+        val q = quality.coerceIn(1, 100)
+        Image.makeFromEncoded(bytes).use { src ->
+            val w = src.width.coerceAtLeast(1)
+            val h = src.height.coerceAtLeast(1)
+            val longEdge = maxOf(w, h)
+            val scale = if (longEdge <= longEdgePx) 1.0 else longEdgePx.toDouble() / longEdge
+            val tw = (w * scale).toInt().coerceAtLeast(1)
+            val th = (h * scale).toInt().coerceAtLeast(1)
+            val jpeg = if (tw == w && th == h) {
+                src.encodeJpeg(q)
+            } else {
+                Surface.makeRasterN32Premul(tw, th).use { surface ->
+                    surface.canvas.clear(0xFFFFFFFF.toInt())
+                    surface.canvas.drawImageRect(
+                        src,
+                        Rect.makeWH(w.toFloat(), h.toFloat()),
+                        Rect.makeWH(tw.toFloat(), th.toFloat()),
+                        SamplingMode.LINEAR,
+                        null,
+                        true,
+                    )
+                    surface.makeImageSnapshot().use { it.encodeJpeg(q) }
+                }
             }
-            writer.write(null, IIOImage(dest, null, null), param)
-            writer.dispose()
+            return jpeg
         }
-        return out.toByteArray()
+    }
+
+    private fun Image.encodeJpeg(quality: Int): ByteArray {
+        val data = encodeToData(EncodedImageFormat.JPEG, quality) ?: error("jpeg encode failed")
+        return data.use { it.bytes }
     }
 }
 

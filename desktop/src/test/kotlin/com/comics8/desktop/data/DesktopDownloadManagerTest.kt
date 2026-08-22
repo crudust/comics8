@@ -8,6 +8,9 @@ import com.comics8.core.source.SourceLocator
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
 import com.comics8.core.source.hitomi.HitomiUrls
+import com.comics8.core.source.local.CoverThumbCache
+import com.comics8.core.source.local.LocalSource
+import com.comics8.core.source.local.ThumbEncoder
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.runBlocking
 import okhttp3.Interceptor
@@ -168,6 +171,76 @@ class DesktopDownloadManagerTest {
         assertThat(img.readText()).isEqualTo("avif-bytes")
         val stored = db.getDownloadedEpisode(workId, "1001")
         assertThat(stored?.sourceId).isEqualTo(HitomiUrls.SOURCE_ID)
+    }
+
+    @Test
+    fun enqueueLocalDoesNotCreateDownloadFiles() {
+        val root = createTempDirectory("desk-local-dl").toFile()
+        root.deleteOnExit()
+        val downloads = File(root, "downloads").apply { mkdirs() }
+        val series = ToonItem(
+            id = "zip:/tmp/a.zip",
+            title = "Local",
+            thumbUrl = "",
+            href = "",
+            sourceId = WorkId.LOCAL_SOURCE,
+        )
+        val episode = EpisodeItem(
+            wrId = "/tmp/a.zip",
+            title = "a",
+            date = null,
+            thumbUrl = null,
+            href = "",
+        )
+        val unloaded = SourceRegistry()
+        enqueueLocal(downloads, File(root, "unloaded.db"), unloaded)
+        assertThat(File(downloads, WorkId.LOCAL_SOURCE).exists()).isFalse()
+        assertThat(
+            DownloadLayout.episodeDir(downloads, WorkId.local(series.id), episode.wrId).exists(),
+        ).isFalse()
+
+        val thumbs = CoverThumbCache(File(root, "thumbs"), ThumbEncoder { bytes, _, _ -> bytes })
+        val loaded = SourceRegistry(
+            listOf(LocalSource(roots = { emptyList() }, thumbs = thumbs)),
+        )
+        enqueueLocal(downloads, File(root, "loaded.db"), loaded)
+        assertThat(File(downloads, WorkId.LOCAL_SOURCE).exists()).isFalse()
+        assertThat(
+            DownloadLayout.episodeDir(downloads, WorkId.local(series.id), episode.wrId).exists(),
+        ).isFalse()
+    }
+
+    private fun enqueueLocal(downloads: File, dbFile: File, registry: SourceRegistry) {
+        val db = DesktopDatabase(dbFile).apply {
+            isSourceEnabled = { true }
+            installedIds = { setOf(WorkId.LOCAL_SOURCE) }
+        }
+        val manager = DesktopDownloadManager(
+            db,
+            ToonClient(isProxyEnabled = false, sources = SourceLocator { registry }),
+            isSourceEnabled = { true },
+            baseDir = downloads,
+            sources = registry,
+            installedIds = { setOf(WorkId.LOCAL_SOURCE) },
+        )
+        manager.enqueueEpisodes(
+            ToonItem(
+                id = "zip:/tmp/a.zip",
+                title = "Local",
+                thumbUrl = "",
+                href = "",
+                sourceId = WorkId.LOCAL_SOURCE,
+            ),
+            listOf(
+                EpisodeItem(
+                    wrId = "/tmp/a.zip",
+                    title = "a",
+                    date = null,
+                    thumbUrl = null,
+                    href = "",
+                ),
+            ),
+        )
     }
 
     private fun testLocator(): SourceLocator = SourceLocator { SourceRegistry.forTests() }
