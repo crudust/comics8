@@ -67,6 +67,30 @@ class CoverThumbCacheTest {
     }
 
     @Test
+    fun cancellationDoesNotPoisonFailureCache() {
+        val dir = createTempDirectory("thumbs-cancel").toFile()
+        var attempts = 0
+        val cache = CoverThumbCache(dir, ThumbEncoder { bytes, _, _ -> bytes })
+        val key = ThumbKey("/cancelled.jpg", 1L, 1L)
+
+        val cancelled = runCatching {
+            cache.getOrCreate(key) {
+                attempts++
+                throw InterruptedException("cancelled")
+            }
+        }.exceptionOrNull()
+        val created = cache.getOrCreate(key) {
+            attempts++
+            byteArrayOf(1)
+        }
+
+        assertThat(cancelled).isInstanceOf(InterruptedException::class.java)
+        assertThat(created.isFile).isTrue()
+        assertThat(attempts).isEqualTo(2)
+        assertThat(dir.listFiles().orEmpty().none { it.extension == "fail" }).isTrue()
+    }
+
+    @Test
     fun evictsLeastRecentlyUsedThumbsWhenCapacityIsExceeded() {
         val dir = createTempDirectory("thumbs-lru").toFile()
         dir.deleteOnExit()

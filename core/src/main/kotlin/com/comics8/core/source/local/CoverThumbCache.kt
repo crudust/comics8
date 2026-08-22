@@ -2,6 +2,7 @@ package com.comics8.core.source.local
 
 import java.io.File
 import java.security.MessageDigest
+import java.util.concurrent.CancellationException
 import java.util.concurrent.locks.ReentrantLock
 
 data class ThumbKey(val path: String, val mtimeEpochMs: Long, val sizeBytes: Long)
@@ -42,18 +43,22 @@ class CoverThumbCache(
 
     private fun getOrCreateLocked(dest: File, size: Int, decodeFull: () -> ByteArray): File {
         val failed = File(dir, "${dest.name}.fail")
+        val part = File(dir, "${dest.name}.part")
         if (dest.isFile && dest.length() > 0L) {
             dest.setLastModified(System.currentTimeMillis())
             return dest
         }
-        if (failed.isFile && System.currentTimeMillis() - failed.lastModified() < FAILURE_TTL_MS) {
-            error("thumbnail generation recently failed")
+        if (failed.isFile) {
+            val currentMarker = runCatching { failed.readText(Charsets.UTF_8) == FAILURE_MARKER }.getOrDefault(false)
+            if (currentMarker && System.currentTimeMillis() - failed.lastModified() < FAILURE_TTL_MS) {
+                error("thumbnail generation recently failed")
+            }
+            failed.delete()
         }
         dir.mkdirs()
         try {
             val encoded = encoder.webp(decodeFull(), size, quality)
             require(encoded.isNotEmpty()) { "webp encode failed" }
-            val part = File(dir, "${dest.name}.part")
             part.writeBytes(encoded)
             if (!part.renameTo(dest)) {
                 part.copyTo(dest, overwrite = true)
@@ -63,7 +68,10 @@ class CoverThumbCache(
             synchronized(evictionLock) { evictIfNeeded(dest) }
             return dest
         } catch (e: Exception) {
-            runCatching { failed.writeText("failed", Charsets.UTF_8) }
+            part.delete()
+            if (!e.isCancellation()) {
+                runCatching { failed.writeText(FAILURE_MARKER, Charsets.UTF_8) }
+            }
             throw e
         }
     }
@@ -95,5 +103,19 @@ class CoverThumbCache(
 
     companion object {
         private const val FAILURE_TTL_MS = 10L * 60L * 1000L
+        private const val FAILURE_MARKER = "v2"
     }
+}
+
+private fun Throwable.isCancellation(): Boolean {
+    if (this is InterruptedException || this is CancellationException || Thread.currentThread().isInterrupted) {
+        return true
+    }
+    var current = cause
+    var depth = 0
+    while (current != null && current !== this && depth++ < 16) {
+        if (current is InterruptedException || current is CancellationException) return true
+        current = current.cause
+    }
+    return false
 }
