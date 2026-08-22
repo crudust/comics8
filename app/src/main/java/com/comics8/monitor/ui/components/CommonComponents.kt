@@ -46,6 +46,24 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.comics8.core.source.SourceRegistry
 
+const val EMPTY_SOURCE_MESSAGE = "소스를 추가하세요"
+
+@Composable
+fun EmptySourcePane(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = EMPTY_SOURCE_MESSAGE,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
 @Composable
 fun LoadingPane(modifier: Modifier = Modifier) {
     Box(

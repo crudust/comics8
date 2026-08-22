@@ -41,6 +41,7 @@ import com.comics8.core.model.DownloadedToonSummary
 import com.comics8.core.model.ToonItem
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
+import com.comics8.desktop.ui.components.EmptySourcePane
 import com.comics8.desktop.ui.components.ErrorPane
 import com.comics8.desktop.ui.components.LoadingPane
 import java.text.SimpleDateFormat
@@ -62,6 +63,9 @@ fun DesktopDownloadsPane(
         }
 
         when {
+            state.activeSourceId == null -> {
+                EmptySourcePane(modifier = Modifier.weight(1f))
+            }
             state.downloadLoading && state.downloadSummaries.isEmpty() -> {
                 LoadingPane(modifier = Modifier.weight(1f))
             }

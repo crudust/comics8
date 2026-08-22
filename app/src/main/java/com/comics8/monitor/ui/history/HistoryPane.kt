@@ -41,6 +41,7 @@ import com.comics8.monitor.data.local.ReadHistory
 import com.comics8.monitor.ui.ListingUiState
 import com.comics8.monitor.ui.ListingViewModel
 import com.comics8.monitor.ui.components.Badge
+import com.comics8.monitor.ui.components.EmptySourcePane
 import com.comics8.monitor.ui.components.ErrorPane
 import com.comics8.monitor.ui.components.LoadingPane
 import java.text.SimpleDateFormat
@@ -54,6 +55,9 @@ fun HistoryPane(
     modifier: Modifier = Modifier,
 ) {
     when {
+        state.activeSourceId == null -> {
+            EmptySourcePane(modifier = modifier)
+        }
         state.historyLoading && state.historyItems.isEmpty() -> {
             LoadingPane(modifier = modifier)
         }

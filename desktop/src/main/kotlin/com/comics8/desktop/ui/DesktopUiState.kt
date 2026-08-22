@@ -5,8 +5,8 @@ import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.ReadDirection
 import com.comics8.core.model.ToonItem
 import com.comics8.core.model.ViewMode
+import com.comics8.core.source.ComicSource
 import com.comics8.core.source.SourceRegistry
-import com.comics8.core.source.WorkId
 import com.comics8.desktop.data.DesktopBackupStats
 import com.comics8.desktop.data.DesktopSyncState
 import com.comics8.desktop.data.ReadHistoryRecord
@@ -25,18 +25,16 @@ data class ArtistPickRequest(
 )
 
 data class DesktopUiState(
-    val tab: BrowseTab = BrowseTab.Remote(
-        WorkId.DEFAULT_SOURCE,
-        com.comics8.core.source.SourceCatalog("LATEST", "최신", paginated = true),
-    ),
+    val tab: BrowseTab? = null,
     val browseTabs: List<BrowseTab> = emptyList(),
-    val activeSourceId: String = WorkId.DEFAULT_SOURCE,
+    val activeSourceId: String? = null,
+    val installedSources: List<ComicSource> = emptyList(),
     val artistPick: ArtistPickRequest? = null,
     val highlightedEpisodeId: String? = null,
     val page: Int = 1,
     val lastPage: Int = 1,
     val items: List<ToonItem> = emptyList(),
-    val loading: Boolean = true,
+    val loading: Boolean = false,
     val refreshing: Boolean = false,
     val scrollToTopTrigger: Int = 0,
     val error: String? = null,

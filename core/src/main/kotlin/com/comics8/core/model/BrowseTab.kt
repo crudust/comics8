@@ -34,28 +34,29 @@ sealed interface BrowseTab {
             }
         }
 
-        fun resolveLaunchTarget(targetId: String?, tabs: List<BrowseTab>): BrowseTab {
+        fun resolveLaunchTarget(targetId: String?, tabs: List<BrowseTab>): BrowseTab? {
+            if (tabs.isEmpty()) return null
             val key = targetId?.trim().orEmpty()
             val favorite = tabs.firstOrNull { it is Favorite }
-                ?: Favorite(com.comics8.core.source.WorkId.DEFAULT_SOURCE)
             if (key.isEmpty() || key.equals(FAVORITE_ID, ignoreCase = true)) {
-                return favorite
+                return favorite ?: tabs.first()
             }
             return tabs.firstOrNull { tab ->
                 tab is Remote && tab.catalog.id.equals(key, ignoreCase = true)
-            } ?: favorite
+            } ?: favorite ?: tabs.first()
         }
 
-        fun afterSourceChange(current: BrowseTab, nextTabs: List<BrowseTab>): BrowseTab {
+        fun afterSourceChange(current: BrowseTab?, nextTabs: List<BrowseTab>): BrowseTab? {
+            if (nextTabs.isEmpty()) return null
             if (current is Favorite) {
-                return nextTabs.firstOrNull { it is Favorite } ?: nextTabs.firstOrNull() ?: current
+                return nextTabs.firstOrNull { it is Favorite } ?: nextTabs.first()
             }
             if (current is Remote) {
                 return nextTabs.firstOrNull { tab ->
                     tab is Remote && tab.catalog.id == current.catalog.id
-                } ?: nextTabs.firstOrNull() ?: Favorite(current.sourceId)
+                } ?: nextTabs.first()
             }
-            return nextTabs.firstOrNull() ?: Favorite(com.comics8.core.source.WorkId.DEFAULT_SOURCE)
+            return nextTabs.first()
         }
     }
 }

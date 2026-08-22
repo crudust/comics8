@@ -2,8 +2,8 @@ package com.comics8.core.source
 
 object SourceAccess {
     fun isEnabled(sourceId: String, storedEnabled: (String) -> Boolean): Boolean {
-        val sid = sourceId.ifBlank { WorkId.DEFAULT_SOURCE }
-        return sid == WorkId.DEFAULT_SOURCE || storedEnabled(sid)
+        if (sourceId.isBlank()) return false
+        return storedEnabled(sourceId)
     }
 
     fun writable(

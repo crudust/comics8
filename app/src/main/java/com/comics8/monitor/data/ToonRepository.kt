@@ -62,6 +62,7 @@ class ToonRepository(
     private val now: () -> Long = { System.currentTimeMillis() },
     private val sources: SourceRegistry,
     private val isSourceEnabled: (String) -> Boolean = { false },
+    private val installedIds: () -> Set<String> = { sources.knownIds() },
 ) {
     fun sourceRegistry(): SourceRegistry = sources
 
@@ -69,12 +70,14 @@ class ToonRepository(
 
     fun sourceOrNull(id: String): ComicSource? = sources.getOrNull(id)
 
-    fun sourceOrDefault(id: String): ComicSource =
-        sources.getOrNull(id)
-            ?: sources.getOrNull(WorkId.DEFAULT_SOURCE)
-            ?: error("no comic source loaded")
-
     fun allSources() = sources.all()
+
+    fun installedSources(): List<ComicSource> {
+        val ids = installedIds()
+        return sources.all().filter { it.id in ids }
+    }
+
+    fun activeSource(stored: String?): ComicSource? = sources.resolveActive(stored, installedIds())
 
     fun applySourceConfig(config: SourceConfig) {
         sources.applyConfig(config)
@@ -187,12 +190,14 @@ class ToonRepository(
                 return@withContext localImages
             }
         }
+        val resolved = workId ?: error("sourceId required")
+        val sourceId = resolved.sourceId.takeIf { it.isNotBlank() } ?: error("sourceId required")
         val item = ToonItem(
-            id = workId?.toonId.orEmpty(),
+            id = resolved.toonId,
             title = "",
             thumbUrl = "",
             href = episode.href,
-            sourceId = workId?.sourceId ?: WorkId.DEFAULT_SOURCE,
+            sourceId = sourceId,
         )
         val parsed = sourceFor(item).resolveImages(episode, item, client)
         if (parsed.isEmpty()) {
@@ -201,14 +206,14 @@ class ToonRepository(
         parsed
     }
 
-    suspend fun suggest(query: String, sourceId: String = WorkId.DEFAULT_SOURCE): List<com.comics8.core.source.SearchSuggestion> =
+    suspend fun suggest(query: String, sourceId: String): List<com.comics8.core.source.SearchSuggestion> =
         withContext(Dispatchers.IO) {
             val q = query.trim()
             if (q.isEmpty()) return@withContext emptyList()
             sources.get(sourceId).suggest(SearchQuery(q, language = sources.get(sourceId).searchLanguage()), client)
         }
 
-    suspend fun search(query: String, sourceId: String = WorkId.DEFAULT_SOURCE): List<ToonItem> =
+    suspend fun search(query: String, sourceId: String): List<ToonItem> =
         withContext(Dispatchers.IO) {
             val q = query.trim()
             if (q.isEmpty()) return@withContext emptyList()
@@ -259,7 +264,7 @@ class ToonRepository(
                     source = source,
                     favorites = rows.map { it.toItem() },
                     latestItems = latest,
-                    sourceEnabled = sourceId == WorkId.DEFAULT_SOURCE || isSourceEnabled(sourceId),
+                    sourceEnabled = isSourceEnabled(sourceId),
                 )
             } catch (_: Exception) {
                 emptyList()
@@ -503,7 +508,7 @@ class ToonRepository(
     }
 
     fun formatReadProgress(sourceId: String, lastReadOrder: Int, totalEpisodes: Int, readCount: Int): String =
-        sourceOrDefault(sourceId).formatReadProgress(lastReadOrder, totalEpisodes, readCount)
+        sources.formatReadProgress(sourceId, lastReadOrder, totalEpisodes, readCount)
 
     suspend fun countReadEpisodes(workId: WorkId): Int = withContext(Dispatchers.IO) {
         readEpisodeDao.countByToon(workId)
@@ -601,7 +606,7 @@ class ToonRepository(
 
     private suspend fun countReadEpisodesNow(workIds: List<WorkId>): Map<String, Int> {
         val needed = workIds.filter {
-            sourceOrDefault(it.sourceId).progressDisplay == ProgressDisplay.READ_COUNT
+            sources.progressDisplay(it.sourceId) == ProgressDisplay.READ_COUNT
         }
         if (needed.isEmpty()) return emptyMap()
         val wanted = needed.map { it.storageKey() }.toSet()
@@ -619,10 +624,10 @@ class ToonRepository(
         writableId(item.sourceId, item.id)
 
     private fun writableId(workId: WorkId): WorkId? =
-        SourceAccess.writable(workId, isSourceEnabled, sources.knownIds())
+        SourceAccess.writable(workId, isSourceEnabled, installedIds())
 
     private fun writableId(sourceId: String, toonId: String): WorkId? =
-        SourceAccess.writable(sourceId, toonId, isSourceEnabled, sources.knownIds())
+        SourceAccess.writable(sourceId, toonId, isSourceEnabled, installedIds())
 
     private fun FavoriteToon.toItem(): ToonItem = ToonItem(
         id = id,

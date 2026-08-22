@@ -113,6 +113,7 @@ fun TopBar(
             if (state.screen == Screen.Browse) {
                 SourceTitleDropdown(
                     activeSourceId = state.activeSourceId,
+                    sources = state.installedSources,
                     registry = state.sourceRegistry,
                     onSelect = viewModel::setActiveSource,
                     titleStyle = MaterialTheme.typography.titleMedium,
@@ -123,9 +124,13 @@ fun TopBar(
                     text = when (state.screen) {
                         Screen.Reader -> state.currentEpisode?.title.orEmpty().ifBlank { "만화 보기" }
                         Screen.Series -> state.series?.title.orEmpty()
-                        Screen.Browse -> state.sourceRegistry.chipLabel(state.activeSourceId)
+                        Screen.Browse -> state.sourceRegistry.chipLabel(state.activeSourceId.orEmpty())
+                            .ifBlank { EMPTY_SOURCE_MESSAGE }
                         Screen.History -> "히스토리"
-                        Screen.Downloads -> "${state.sourceRegistry.chipLabel(state.activeSourceId)} 저장소"
+                        Screen.Downloads -> {
+                            val label = state.sourceRegistry.chipLabel(state.activeSourceId.orEmpty())
+                            if (label.isBlank()) "저장소" else "$label 저장소"
+                        }
                     },
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
@@ -162,7 +167,10 @@ fun TopBar(
                         contentDescription = "히스토리",
                     )
                 }
-                IconButton(onClick = viewModel::toggleSearchBar) {
+                IconButton(
+                    onClick = viewModel::toggleSearchBar,
+                    enabled = state.activeSourceId != null,
+                ) {
                     Icon(
                         imageVector = if (state.searchExpanded) Icons.Default.Close else Icons.Default.Search,
                         contentDescription = if (state.searchExpanded) "검색 닫기" else "검색",
@@ -370,7 +378,10 @@ fun TopBar(
                     }
                 }
             }
-            IconButton(onClick = { viewModel.refresh() }) {
+            IconButton(
+                onClick = { viewModel.refresh() },
+                enabled = state.activeSourceId != null,
+            ) {
                 Icon(Icons.Default.Refresh, contentDescription = "새로고침")
             }
         }
@@ -448,7 +459,7 @@ fun SearchBar(
                 .focusRequester(requester),
             singleLine = true,
             placeholder = {
-                Text(state.sourceRegistry.searchPlaceholder(state.activeSourceId))
+                Text(state.sourceRegistry.searchPlaceholder(state.activeSourceId.orEmpty()))
             },
             trailingIcon = {
                 if (state.searchInput.isNotEmpty()) {
@@ -490,16 +501,16 @@ fun SearchBar(
 
 @Composable
 private fun SourceTitleDropdown(
-    activeSourceId: String,
+    activeSourceId: String?,
+    sources: List<com.comics8.core.source.ComicSource>,
     registry: SourceRegistry,
     onSelect: (String) -> Unit,
     titleStyle: TextStyle,
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val sources = registry.all()
     val label = sources.firstOrNull { it.id == activeSourceId }?.displayName
-        ?: registry.chipLabel(activeSourceId)
+        ?: registry.chipLabel(activeSourceId.orEmpty()).ifBlank { "소스 추가" }
     Box(modifier = modifier) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -522,14 +533,22 @@ private fun SourceTitleDropdown(
             )
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            sources.forEach { source ->
+            if (sources.isEmpty()) {
                 DropdownMenuItem(
-                    text = { Text(source.displayName) },
-                    onClick = {
-                        onSelect(source.id)
-                        expanded = false
-                    },
+                    text = { Text(EMPTY_SOURCE_MESSAGE) },
+                    onClick = { expanded = false },
+                    enabled = false,
                 )
+            } else {
+                sources.forEach { source ->
+                    DropdownMenuItem(
+                        text = { Text(source.displayName) },
+                        onClick = {
+                            onSelect(source.id)
+                            expanded = false
+                        },
+                    )
+                }
             }
         }
     }

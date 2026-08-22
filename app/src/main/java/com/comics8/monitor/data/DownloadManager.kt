@@ -65,6 +65,7 @@ class DownloadManager(
     private val isSourceEnabled: (String) -> Boolean = { false },
     baseDir: File = File(context.filesDir, "downloads"),
     private val sources: SourceRegistry,
+    private val installedIds: () -> Set<String> = { sources.knownIds() },
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val baseDir = baseDir.apply { mkdirs() }
@@ -98,7 +99,7 @@ class DownloadManager(
 
     fun enqueueEpisodes(series: ToonItem, episodes: List<EpisodeItem>) {
         if (episodes.isEmpty()) return
-        val workId = SourceAccess.writable(series.sourceId, series.id, isSourceEnabled, sources.knownIds()) ?: return
+        val workId = SourceAccess.writable(series.sourceId, series.id, isSourceEnabled, installedIds()) ?: return
         scope.launch {
             migrateLegacyDownloads()
             val existing = database.downloadedEpisodeDao().byToon(workId).map { it.wrId }.toSet()

@@ -38,6 +38,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.comics8.core.model.BrowseTab
 import com.comics8.monitor.ui.browse.ListingGrid
 import com.comics8.monitor.ui.components.ArtistPickDialog
+import com.comics8.monitor.ui.components.EmptySourcePane
 import com.comics8.monitor.ui.components.ErrorPane
 import com.comics8.monitor.ui.components.LoadingPane
 import com.comics8.monitor.ui.components.PageBar
@@ -121,6 +122,7 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                         state.screen == Screen.Series -> SeriesPane(state = state, viewModel = viewModel)
                         state.screen == Screen.History -> HistoryPane(state = state, viewModel = viewModel)
                         state.screen == Screen.Downloads -> com.comics8.monitor.ui.downloads.DownloadsPane(state = state, viewModel = viewModel)
+                        state.activeSourceId == null -> EmptySourcePane()
                         state.isSearch -> {
                             when {
                                 state.loading && state.items.isEmpty() -> LoadingPane()
@@ -131,7 +133,7 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                                 state.items.isEmpty() -> ErrorPane(
                                     message = "\"${state.searchQuery}\" 검색 결과가 없습니다.",
                                     actionLabel = "목록으로",
-                                    onRetry = { viewModel.selectTab(state.tab) },
+                                    onRetry = { state.tab?.let(viewModel::selectTab) },
                                 )
                                 else -> ListingGrid(
                                     items = state.items,
@@ -145,16 +147,12 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                             }
                         }
                         else -> {
-                            if (catalogs.isEmpty()) {
-                                LoadingPane()
-                            } else {
-                                key(state.activeSourceId) {
-                                    BrowseTabsPager(
-                                        catalogs = catalogs,
-                                        state = state,
-                                        viewModel = viewModel,
-                                    )
-                                }
+                            key(state.activeSourceId) {
+                                BrowseTabsPager(
+                                    catalogs = catalogs,
+                                    state = state,
+                                    viewModel = viewModel,
+                                )
                             }
                         }
                     }
@@ -270,9 +268,8 @@ private fun BrowseTabsPager(
                 message = "즐겨찾기한 작품이 없습니다.",
                 actionLabel = "최신으로",
                 onRetry = {
-                    viewModel.selectTab(
-                        state.browseTabs.firstOrNull { it is BrowseTab.Remote } ?: state.tab,
-                    )
+                    val dest = state.browseTabs.firstOrNull { it is BrowseTab.Remote } ?: state.tab
+                    dest?.let(viewModel::selectTab)
                 },
             )
             isCurrent -> {

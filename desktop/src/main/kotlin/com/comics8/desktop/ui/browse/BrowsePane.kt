@@ -43,6 +43,7 @@ import com.comics8.core.source.SourceRegistry
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
 import com.comics8.desktop.ui.components.Badge
+import com.comics8.desktop.ui.components.EmptySourcePane
 import com.comics8.desktop.ui.components.ErrorPane
 import com.comics8.desktop.ui.components.LoadingPane
 import com.comics8.desktop.ui.components.sourceChipLabel
@@ -55,6 +56,9 @@ fun BrowsePane(
     modifier: Modifier = Modifier,
 ) {
     when {
+        state.activeSourceId == null -> {
+            EmptySourcePane(modifier = modifier)
+        }
         state.loading && state.items.isEmpty() -> {
             Column(modifier = modifier.fillMaxSize()) {
                 LoadingPane(Modifier.weight(1f).fillMaxWidth())
@@ -106,7 +110,7 @@ private fun BrowsePageBar(
     state: DesktopUiState,
     viewModel: DesktopViewModel,
 ) {
-    if (!state.tab.paginated || state.isSearch || state.lastPage <= 1) return
+    if (state.tab?.paginated != true || state.isSearch || state.lastPage <= 1) return
     Row(
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,

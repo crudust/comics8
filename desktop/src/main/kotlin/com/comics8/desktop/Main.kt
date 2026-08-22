@@ -26,7 +26,6 @@ import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.comics8.core.network.ToonClient
-import com.comics8.core.source.BuiltInSources
 import com.comics8.core.source.SourceLocator
 import com.comics8.core.source.SourceRegistry
 import com.comics8.desktop.data.DesktopDatabase
@@ -70,11 +69,13 @@ fun main() {
     System.setProperty("apple.laf.useScreenMenuBar", "true")
 
     application {
-        val registry = remember { SourceRegistry(BuiltInSources.all()) }
+        val registry = remember { SourceRegistry() }
         val locator = remember { SourceLocator { registry } }
+        DesktopSourcePrefs.registry = registry
+        DesktopSourcePrefs.migrateIfNeeded()
         val database = remember {
             DesktopDatabase().apply {
-                installedIds = { registry.knownIds() }
+                installedIds = { DesktopSourcePrefs.installedIds() }
             }
         }
         val cacheDir = File(System.getProperty("user.home"), ".comics8/http-cache")
@@ -84,8 +85,8 @@ fun main() {
                 com.comics8.desktop.ui.util.DesktopImageCache.registry = registry
             }
         }
-        DesktopSourcePrefs.registry = registry
         val sourceEnabled = { id: String -> DesktopSourcePrefs.isEnabled(id) }
+        val installedIds = { DesktopSourcePrefs.installedIds() }
         val syncManager = remember { DesktopSyncManager(database, toonClient) }
         val downloadManager = remember {
             com.comics8.desktop.data.DesktopDownloadManager(
@@ -93,6 +94,7 @@ fun main() {
                 toonClient,
                 isSourceEnabled = sourceEnabled,
                 sources = registry,
+                installedIds = installedIds,
             )
         }
         val repository = remember {
@@ -103,6 +105,7 @@ fun main() {
                 downloadManager,
                 sources = registry,
                 isSourceEnabled = sourceEnabled,
+                installedIds = installedIds,
             )
         }
         val viewModel = remember { DesktopViewModel(repository) }

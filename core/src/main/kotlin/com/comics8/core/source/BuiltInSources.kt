@@ -4,8 +4,8 @@ import com.comics8.core.source.eleven.ElevenToonSource
 import com.comics8.core.source.hitomi.HitomiSource
 
 /**
- * Only place in the shared tree that names concrete sites.
- * Add or remove a ComicSource here; [SourceRegistry] and the apps stay unchanged.
+ * Test-only site parsers. Production apps start with an empty [SourceRegistry].
+ * Tests may construct these via [SourceRegistry.forTests].
  */
 object BuiltInSources {
     fun all(): List<ComicSource> = listOf(

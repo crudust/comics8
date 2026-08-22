@@ -110,7 +110,7 @@ class DesktopViewModel(
             }
             Screen.Browse -> {
                 if (current.isSearch) {
-                    selectTab(current.tab)
+                    current.tab?.let { selectTab(it) }
                     true
                 } else {
                     false
@@ -155,22 +155,14 @@ class DesktopViewModel(
     }
 
     init {
-        val storedSource = DesktopSourcePrefs.activeSourceId
-        val activeSource = repository.sourceOrDefault(storedSource).id
         repository.applyPreferences { id ->
-            DesktopSourcePrefs.language(id).ifBlank { null }
+            DesktopSourcePrefs.language(id)?.ifBlank { null }
         }
         repository.setSourceWriteAccess(DesktopSourcePrefs::isEnabled)
-        val tabs = BrowseTab.forSource(repository.source(activeSource))
-        _state.update {
-            it.copy(
-                activeSourceId = activeSource,
-                browseTabs = tabs,
-                tab = tabs.first(),
-                sourceRegistry = repository.sourceRegistry(),
-            )
+        applyActiveSource(DesktopSourcePrefs.activeSourceId(), loadListing = false)
+        if (_state.value.activeSourceId != null) {
+            loadPage(1)
         }
-        loadPage(1)
         checkForUpdate()
         repository.syncManager?.let { sm ->
             scope.launch {
@@ -181,7 +173,9 @@ class DesktopViewModel(
             scope.launch {
                 val res = sm.syncPull()
                 if (res.success && (res.favoritesCount > 0 || res.historyCount > 0)) {
-                    loadPage(_state.value.page, replace = true)
+                    if (_state.value.activeSourceId != null) {
+                        loadPage(_state.value.page, replace = true)
+                    }
                 }
             }
         }
@@ -200,6 +194,29 @@ class DesktopViewModel(
                     }
                 }
             }
+        }
+    }
+
+    private fun applyActiveSource(sourceId: String?, loadListing: Boolean) {
+        val source = sourceId?.let { repository.activeSource(it) }
+        val tabs = source?.let { BrowseTab.forSource(it) }.orEmpty()
+        val nextTab = BrowseTab.afterSourceChange(_state.value.tab, tabs)
+        _state.update {
+            it.copy(
+                activeSourceId = source?.id,
+                installedSources = repository.installedSources(),
+                browseTabs = tabs,
+                tab = nextTab,
+                items = if (source == null) emptyList() else it.items,
+                loading = source != null && loadListing,
+                error = if (source == null) null else it.error,
+                searchSuggestions = emptyList(),
+                sourceRegistry = repository.sourceRegistry(),
+            )
+        }
+        if (source == null || nextTab == null) return
+        if (loadListing) {
+            selectTab(nextTab)
         }
     }
 
@@ -297,22 +314,10 @@ class DesktopViewModel(
     }
 
     fun setActiveSource(sourceId: String) {
-        val resolved = repository.sourceOrDefault(sourceId).id
-        if (resolved != WorkId.DEFAULT_SOURCE) {
-            DesktopSourcePrefs.setEnabled(resolved, true)
-        }
+        if (sourceId !in DesktopSourcePrefs.installedIds()) return
+        DesktopSourcePrefs.setActiveSourceId(sourceId)
         repository.setSourceWriteAccess(DesktopSourcePrefs::isEnabled)
-        DesktopSourcePrefs.activeSourceId = resolved
-        val tabs = BrowseTab.forSource(repository.source(resolved))
-        val nextTab = BrowseTab.afterSourceChange(_state.value.tab, tabs)
-        _state.update {
-            it.copy(
-                activeSourceId = resolved,
-                browseTabs = tabs,
-                searchSuggestions = emptyList(),
-            )
-        }
-        selectTab(nextTab)
+        applyActiveSource(sourceId, loadListing = true)
         if (_state.value.screen == Screen.History) {
             loadHistory()
         }
@@ -322,15 +327,14 @@ class DesktopViewModel(
     }
 
     fun setSourceEnabled(sourceId: String, enabled: Boolean) {
-        val resolved = repository.sourceOrDefault(sourceId).id
-        if (resolved == WorkId.DEFAULT_SOURCE) return
-        DesktopSourcePrefs.setEnabled(resolved, enabled)
+        val id = sourceId.trim()
+        if (id.isEmpty()) return
+        DesktopSourcePrefs.setEnabled(id, enabled)
         repository.setSourceWriteAccess(DesktopSourcePrefs::isEnabled)
-        if (!enabled && _state.value.activeSourceId == resolved) {
-            setActiveSource(WorkId.DEFAULT_SOURCE)
+        if (!enabled && _state.value.activeSourceId == id) {
+            applyActiveSource(null, loadListing = false)
         } else {
-            val tabs = BrowseTab.forSource(repository.source(_state.value.activeSourceId))
-            _state.update { it.copy(browseTabs = tabs) }
+            _state.update { it.copy(installedSources = repository.installedSources()) }
         }
     }
 
@@ -354,8 +358,8 @@ class DesktopViewModel(
     fun pickArtist(artist: ArtistRef) {
         val request = _state.value.artistPick ?: return
         dismissArtistPick()
-        val parent = repository.sourceOrDefault(request.item.sourceId)
-            .resolveParent(request.item, artist, request.entryEpisodeId)
+        val parent = repository.sourceOrNull(request.item.sourceId)
+            ?.resolveParent(request.item, artist, request.entryEpisodeId)
         if (parent != null) {
             openSeries(parent)
         }
@@ -394,7 +398,7 @@ class DesktopViewModel(
                                 if (row.workId() == target.workId()) row.copy(readProgress = progressText) else row
                             }
                             if (!curr.isSearch) {
-                                catalogCache[curr.tab] = updatedItems
+                                curr.tab?.let { catalogCache[it] = updatedItems }
                             }
                             curr.copy(
                                 items = updatedItems,
@@ -409,8 +413,8 @@ class DesktopViewModel(
     }
 
     fun loadPage(page: Int, replace: Boolean = false) {
+        val tab = _state.value.tab ?: return
         loadJob?.cancel()
-        val tab = _state.value.tab
         val targetPage = page.coerceAtLeast(1)
 
         loadJob = scope.launch {
@@ -454,6 +458,7 @@ class DesktopViewModel(
 
     fun refresh() {
         checkForUpdate()
+        if (_state.value.activeSourceId == null) return
         if (_state.value.screen == Screen.Browse) {
             syncOnBrowseRefresh()
         }
@@ -480,6 +485,7 @@ class DesktopViewModel(
     }
 
     fun search(query: String) {
+        val sourceId = _state.value.activeSourceId ?: return
         val q = query.trim()
         if (q.isEmpty()) return
         loadJob?.cancel()
@@ -498,7 +504,7 @@ class DesktopViewModel(
         }
         loadJob = scope.launch {
             try {
-                val results = repository.search(q, _state.value.activeSourceId)
+                val results = repository.search(q, sourceId)
                 _state.update {
                     it.copy(
                         items = results,
@@ -530,14 +536,15 @@ class DesktopViewModel(
 
     private fun requestSuggestions(value: String) {
         suggestJob?.cancel()
-        if (value.isBlank()) {
+        val sourceId = _state.value.activeSourceId
+        if (value.isBlank() || sourceId == null) {
             _state.update { it.copy(searchSuggestions = emptyList()) }
             return
         }
         suggestJob = scope.launch {
             kotlinx.coroutines.delay(200)
             try {
-                val items = repository.suggest(value, _state.value.activeSourceId)
+                val items = repository.suggest(value, sourceId)
                 _state.update { current ->
                     if (current.searchInput == value) current.copy(searchSuggestions = items) else current
                 }
@@ -636,7 +643,7 @@ class DesktopViewModel(
                 if (result.items.isNotEmpty()) {
                     val lastP = result.lastPage.coerceAtLeast(1)
                     val currP = result.currentPage.coerceIn(1, lastP)
-                    val pageSize = repository.sourceOrDefault(item.sourceId).episodePageSize
+                    val pageSize = repository.sourceOrNull(item.sourceId)?.episodePageSize ?: 100
 
                     val itemKey = item.workId().storageKey()
                     if (lastP <= 1) {
@@ -747,7 +754,7 @@ class DesktopViewModel(
     }
 
     fun goToPage(page: Int) {
-        if (!_state.value.tab.paginated) return
+        if (_state.value.tab?.paginated != true) return
         val clamped = page.coerceIn(1, _state.value.lastPage.coerceAtLeast(1))
         _state.update {
             it.copy(
@@ -792,7 +799,7 @@ class DesktopViewModel(
                     catalogCache.remove(BrowseTab.Favorite(item.sourceId.ifBlank { WorkId.DEFAULT_SOURCE }))
                 }
                 if (!current.isSearch) {
-                    catalogCache[current.tab] = visible
+                    current.tab?.let { catalogCache[it] = visible }
                 }
                 current.copy(
                     seriesFavorited = if (current.series?.workId() == item.workId()) favorited else current.seriesFavorited,
@@ -903,10 +910,15 @@ class DesktopViewModel(
     }
 
     fun loadHistory() {
+        val sourceId = _state.value.activeSourceId
+        if (sourceId == null) {
+            _state.update { it.copy(historyLoading = false, historyItems = emptyList()) }
+            return
+        }
         scope.launch {
             _state.update { it.copy(historyLoading = it.historyItems.isEmpty()) }
-            val items = repository.getHistory(_state.value.activeSourceId)
-            val counts = countIfNeeded(items.map { item -> item.workId() }, _state.value.activeSourceId)
+            val items = repository.getHistory(sourceId)
+            val counts = countIfNeeded(items.map { item -> item.workId() }, sourceId)
             _state.update {
                 it.copy(
                     historyItems = items,
@@ -1010,10 +1022,15 @@ class DesktopViewModel(
     }
 
     fun loadDownloads() {
+        val sourceId = _state.value.activeSourceId
+        if (sourceId == null) {
+            _state.update { it.copy(downloadLoading = false, downloadSummaries = emptyList()) }
+            return
+        }
         scope.launch {
             _state.update { it.copy(downloadLoading = it.downloadSummaries.isEmpty()) }
             val items = repository.downloadManager
-                ?.getDownloadedToonSummaries(_state.value.activeSourceId)
+                ?.getDownloadedToonSummaries(sourceId)
                 .orEmpty()
             _state.update { it.copy(downloadSummaries = items, downloadLoading = false) }
         }
@@ -1044,8 +1061,9 @@ class DesktopViewModel(
     }
 
     fun clearAllHistory() {
+        val sourceId = _state.value.activeSourceId ?: return
         scope.launch {
-            repository.clearHistory(_state.value.activeSourceId)
+            repository.clearHistory(sourceId)
             _state.update { current ->
                 val updatedItems = current.items.map { it.copy(readProgress = null) }
                 current.copy(
@@ -1070,9 +1088,12 @@ class DesktopViewModel(
         scope.launch {
             val res = repository.syncManager?.syncFull()
             if (res?.success == true) {
-                loadPage(_state.value.page, replace = true)
-                val updatedHistory = repository.getHistory(_state.value.activeSourceId)
-                val counts = countIfNeeded(updatedHistory.map { item -> item.workId() }, _state.value.activeSourceId)
+                if (_state.value.activeSourceId != null) {
+                    loadPage(_state.value.page, replace = true)
+                }
+                val sourceId = _state.value.activeSourceId ?: return@launch
+                val updatedHistory = repository.getHistory(sourceId)
+                val counts = countIfNeeded(updatedHistory.map { item -> item.workId() }, sourceId)
                 _state.update {
                     it.copy(
                         historyItems = updatedHistory,
@@ -1558,7 +1579,7 @@ class DesktopViewModel(
     }
 
     private suspend fun countIfNeeded(workId: WorkId): Int {
-        if (repository.sourceOrDefault(workId.sourceId).progressDisplay != ProgressDisplay.READ_COUNT) {
+        if (repository.sourceOrNull(workId.sourceId)?.progressDisplay != ProgressDisplay.READ_COUNT) {
             return 0
         }
         return repository.countReadEpisodes(workId)
@@ -1566,7 +1587,7 @@ class DesktopViewModel(
 
     private suspend fun countIfNeeded(workIds: List<WorkId>, sourceId: String): Map<String, Int> {
         if (workIds.isEmpty()) return emptyMap()
-        if (repository.sourceOrDefault(sourceId).progressDisplay != ProgressDisplay.READ_COUNT) {
+        if (repository.sourceOrNull(sourceId)?.progressDisplay != ProgressDisplay.READ_COUNT) {
             return emptyMap()
         }
         return repository.countReadEpisodes(workIds)

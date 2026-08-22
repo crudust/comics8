@@ -42,4 +42,13 @@ class BrowseTabTest {
         assertThat((next as BrowseTab.Remote).catalog.id).isEqualTo("LATEST")
         assertThat(eleven.any { it is BrowseTab.Remote && it.catalog.id == "COMPLETE" }).isTrue()
     }
+
+    @Test
+    fun emptyTabsHaveNoElevenFallback() {
+        assertThat(BrowseTab.resolveLaunchTarget(null, emptyList())).isNull()
+        assertThat(BrowseTab.resolveLaunchTarget(BrowseTab.FAVORITE_ID, emptyList())).isNull()
+        assertThat(BrowseTab.afterSourceChange(BrowseTab.Favorite(WorkId.DEFAULT_SOURCE), emptyList()))
+            .isNull()
+        assertThat(BrowseTab.afterSourceChange(null, emptyList())).isNull()
+    }
 }

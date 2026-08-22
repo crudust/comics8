@@ -9,12 +9,11 @@ import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.comics8.core.network.ImageFallbacks
 import com.comics8.core.network.ImageReferer
-import com.comics8.core.source.BuiltInSources
 import com.comics8.core.source.SourceLocator
 import com.comics8.core.source.SourcePrefs
 import com.comics8.core.source.SourceRegistry
-import com.comics8.core.source.WorkId
 import com.comics8.core.network.ToonClient
+import com.comics8.monitor.data.AndroidSourcePrefs
 import com.comics8.monitor.data.DownloadManager
 import com.comics8.monitor.data.SyncManager
 import com.comics8.monitor.data.ToonRepository
@@ -26,6 +25,9 @@ class ComicsApp : Application(), ImageLoaderFactory {
     lateinit var repository: ToonRepository
         private set
 
+    lateinit var sourceSettings: AndroidSourcePrefs
+        private set
+
     private lateinit var toonClient: ToonClient
     private lateinit var sourceRegistry: SourceRegistry
 
@@ -35,20 +37,16 @@ class ComicsApp : Application(), ImageLoaderFactory {
             .addMigrations(AppDatabase.MIGRATION_9_10)
             .fallbackToDestructiveMigrationFrom(1, 2, 3, 4, 5, 6, 7, 8)
             .build()
-        val registry = SourceRegistry(BuiltInSources.all())
+        val registry = SourceRegistry()
         sourceRegistry = registry
         val locator = SourceLocator { registry }
         toonClient = ToonClient(ToonClient.defaultClient(File(cacheDir, "http")), sources = locator)
         val client = toonClient
         val prefs = getSharedPreferences("comics_reader_prefs", Context.MODE_PRIVATE)
-        val isSourceEnabled: (String) -> Boolean = { id ->
-            if (id == WorkId.DEFAULT_SOURCE || id.isBlank()) {
-                true
-            } else {
-                val defaultOn = registry.getOrNull(id)?.enabledByDefault ?: false
-                prefs.getBoolean(SourcePrefs.enabledKey(id), defaultOn)
-            }
-        }
+        val sourcePrefs = AndroidSourcePrefs(prefs).also { it.migrateIfNeeded() }
+        sourceSettings = sourcePrefs
+        val isSourceEnabled: (String) -> Boolean = { id -> sourcePrefs.isEnabled(id) }
+        val installedIds: () -> Set<String> = { sourcePrefs.installedIds() }
         val syncManager = SyncManager(this, db, client)
         val downloadManager = DownloadManager(
             this,
@@ -56,6 +54,7 @@ class ComicsApp : Application(), ImageLoaderFactory {
             client,
             isSourceEnabled = isSourceEnabled,
             sources = registry,
+            installedIds = installedIds,
         )
         repository = ToonRepository(
             client = client,
@@ -69,6 +68,7 @@ class ComicsApp : Application(), ImageLoaderFactory {
             downloadManager = downloadManager,
             sources = registry,
             isSourceEnabled = isSourceEnabled,
+            installedIds = installedIds,
         )
         repository.applyPreferences { id ->
             prefs.getString(SourcePrefs.languageKey(id), null)

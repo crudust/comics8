@@ -12,8 +12,8 @@ import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.ReadDirection
 import com.comics8.core.model.ToonItem
 import com.comics8.core.model.ViewMode
+import com.comics8.core.source.ComicSource
 import com.comics8.core.source.ProgressDisplay
-import com.comics8.core.source.SourcePrefs
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
 import com.comics8.core.sync.AppUpdateChecker
@@ -40,18 +40,16 @@ data class ArtistPickRequest(
 )
 
 data class ListingUiState(
-    val tab: BrowseTab = BrowseTab.Remote(
-        WorkId.DEFAULT_SOURCE,
-        com.comics8.core.source.SourceCatalog("LATEST", "최신", paginated = true),
-    ),
+    val tab: BrowseTab? = null,
     val browseTabs: List<BrowseTab> = emptyList(),
-    val activeSourceId: String = WorkId.DEFAULT_SOURCE,
+    val activeSourceId: String? = null,
+    val installedSources: List<ComicSource> = emptyList(),
     val artistPick: ArtistPickRequest? = null,
     val highlightedEpisodeId: String? = null,
     val page: Int = 1,
     val lastPage: Int = 1,
     val items: List<ToonItem> = emptyList(),
-    val loading: Boolean = true,
+    val loading: Boolean = false,
     val refreshing: Boolean = false,
     val error: String? = null,
     val screen: Screen = Screen.Browse,
@@ -122,6 +120,7 @@ sealed interface Screen {
 
 class ListingViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = (application as ComicsApp).repository
+    private val sourceSettings = (application as ComicsApp).sourceSettings
     private val prefs = application.getSharedPreferences("comics_reader_prefs", Context.MODE_PRIVATE)
 
     var singleViewPreference: ViewMode
@@ -239,7 +238,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             }
             Screen.Browse -> {
                 if (current.isSearch) {
-                    selectTab(current.tab)
+                    current.tab?.let { selectTab(it) }
                     true
                 } else {
                     false
@@ -284,22 +283,14 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     init {
-        val storedSource = prefs.getString(SourcePrefs.ACTIVE_SOURCE_KEY, WorkId.DEFAULT_SOURCE)
-        val activeSource = repository.sourceOrDefault(storedSource.orEmpty()).id
-        repository.applyPreferences { id ->
-            prefs.getString(SourcePrefs.languageKey(id), null)
-        }
-        val tabs = BrowseTab.forSource(repository.source(activeSource))
+        repository.applyPreferences { id -> sourceSettings.language(id) }
         _state.update {
             it.copy(
                 viewMode = singleViewPreference,
                 readDirection = globalReadDirection,
-                activeSourceId = activeSource,
-                browseTabs = tabs,
-                tab = tabs.first(),
-                sourceRegistry = repository.sourceRegistry(),
             )
         }
+        applyActiveSource(sourceSettings.activeSourceId(), loadListing = false)
         repository.syncManager?.let { sm ->
             viewModelScope.launch {
                 sm.syncState.collect { s ->
@@ -309,7 +300,9 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             viewModelScope.launch {
                 val res = sm.syncPull()
                 if (res.success && (res.favoritesCount > 0 || res.historyCount > 0)) {
-                    loadPage(page = _state.value.page, replace = true)
+                    if (_state.value.activeSourceId != null) {
+                        loadPage(page = _state.value.page, replace = true)
+                    }
                 }
             }
         }
@@ -329,8 +322,33 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 }
             }
         }
-        refresh(force = true)
+        if (_state.value.activeSourceId != null) {
+            refresh(force = true)
+        }
         checkForUpdate()
+    }
+
+    private fun applyActiveSource(sourceId: String?, loadListing: Boolean) {
+        val source = sourceId?.let { repository.activeSource(it) }
+        val tabs = source?.let { BrowseTab.forSource(it) }.orEmpty()
+        val nextTab = BrowseTab.afterSourceChange(_state.value.tab, tabs)
+        _state.update {
+            it.copy(
+                activeSourceId = source?.id,
+                installedSources = repository.installedSources(),
+                browseTabs = tabs,
+                tab = nextTab,
+                items = if (source == null) emptyList() else it.items,
+                loading = source != null && loadListing,
+                error = if (source == null) null else it.error,
+                searchSuggestions = emptyList(),
+                sourceRegistry = repository.sourceRegistry(),
+            )
+        }
+        if (source == null || nextTab == null) return
+        if (loadListing) {
+            selectTab(nextTab)
+        }
     }
 
     fun checkForUpdate() {
@@ -396,7 +414,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     fun handleNotificationLaunch(targetTab: String? = null) {
         readerJob?.cancel()
         episodeJob?.cancel()
-        val dest = BrowseTab.resolveLaunchTarget(targetTab, _state.value.browseTabs)
+        val dest = BrowseTab.resolveLaunchTarget(targetTab, _state.value.browseTabs) ?: return
         _state.update {
             it.copy(
                 screen = Screen.Browse,
@@ -454,22 +472,10 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setActiveSource(sourceId: String) {
-        val resolved = repository.sourceOrDefault(sourceId).id
-        val editor = prefs.edit().putString(SourcePrefs.ACTIVE_SOURCE_KEY, resolved)
-        if (resolved != WorkId.DEFAULT_SOURCE) {
-            editor.putBoolean(SourcePrefs.enabledKey(resolved), true)
-        }
-        editor.apply()
-        val tabs = BrowseTab.forSource(repository.source(resolved))
-        val nextTab = BrowseTab.afterSourceChange(_state.value.tab, tabs)
-        _state.update {
-            it.copy(
-                activeSourceId = resolved,
-                browseTabs = tabs,
-                searchSuggestions = emptyList(),
-            )
-        }
-        selectTab(nextTab)
+        val installed = sourceSettings.installedIds()
+        if (sourceId !in installed) return
+        sourceSettings.setActiveSourceId(sourceId)
+        applyActiveSource(sourceId, loadListing = true)
         if (_state.value.screen == Screen.History) {
             loadHistory()
         }
@@ -479,14 +485,13 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setSourceEnabled(sourceId: String, enabled: Boolean) {
-        val resolved = repository.sourceOrDefault(sourceId).id
-        if (resolved == WorkId.DEFAULT_SOURCE) return
-        prefs.edit().putBoolean(SourcePrefs.enabledKey(resolved), enabled).apply()
-        if (!enabled && _state.value.activeSourceId == resolved) {
-            setActiveSource(WorkId.DEFAULT_SOURCE)
+        val id = sourceId.trim()
+        if (id.isEmpty()) return
+        sourceSettings.setEnabled(id, enabled)
+        if (!enabled && _state.value.activeSourceId == id) {
+            applyActiveSource(null, loadListing = false)
         } else {
-            val tabs = BrowseTab.forSource(repository.source(_state.value.activeSourceId))
-            _state.update { it.copy(browseTabs = tabs) }
+            _state.update { it.copy(installedSources = repository.installedSources()) }
         }
     }
 
@@ -510,8 +515,8 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     fun pickArtist(artist: ArtistRef) {
         val request = _state.value.artistPick ?: return
         dismissArtistPick()
-        val parent = repository.sourceOrDefault(request.item.sourceId)
-            .resolveParent(request.item, artist, request.entryEpisodeId)
+        val parent = repository.sourceOrNull(request.item.sourceId)
+            ?.resolveParent(request.item, artist, request.entryEpisodeId)
         if (parent != null) {
             openSeries(parent)
         }
@@ -521,7 +526,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         val current = _state.value
         if (current.searchExpanded) {
             if (current.isSearch) {
-                selectTab(current.tab)
+                current.tab?.let { selectTab(it) }
             } else {
                 _state.update { it.copy(searchExpanded = false, searchInput = "", searchSuggestions = emptyList()) }
             }
@@ -541,14 +546,15 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
     private fun requestSuggestions(value: String) {
         suggestJob?.cancel()
-        if (value.isBlank()) {
+        val sourceId = _state.value.activeSourceId
+        if (value.isBlank() || sourceId == null) {
             _state.update { it.copy(searchSuggestions = emptyList()) }
             return
         }
         suggestJob = viewModelScope.launch {
             kotlinx.coroutines.delay(200)
             try {
-                val items = repository.suggest(value, _state.value.activeSourceId)
+                val items = repository.suggest(value, sourceId)
                 _state.update { current ->
                     if (current.searchInput == value) current.copy(searchSuggestions = items) else current
                 }
@@ -561,6 +567,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun submitSearch() {
+        if (_state.value.activeSourceId == null) return
         val query = _state.value.searchInput.trim()
         if (query.isEmpty()) return
         readerJob?.cancel()
@@ -587,6 +594,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
     fun refresh(force: Boolean = false) {
         checkForUpdate()
+        if (_state.value.activeSourceId == null) return
         if (force) {
             catalogCache.clear()
             catalogPages.clear()
@@ -629,7 +637,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     fun goToPage(page: Int) {
         val current = _state.value
         val target = page.coerceIn(1, current.lastPage.coerceAtLeast(1))
-        if (!current.tab.paginated) return
+        if (current.tab?.paginated != true) return
         _state.update {
             it.copy(
                 items = emptyList(),
@@ -742,7 +750,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                     catalogCache.remove(BrowseTab.Favorite(item.sourceId.ifBlank { WorkId.DEFAULT_SOURCE }))
                 }
                 if (!current.isSearch) {
-                    catalogCache[current.tab] = visible
+                    current.tab?.let { catalogCache[it] = visible }
                 }
                 current.copy(
                     seriesFavorited = if (current.series?.workId() == item.workId()) favorited else current.seriesFavorited,
@@ -863,10 +871,15 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun loadHistory() {
+        val sourceId = _state.value.activeSourceId
+        if (sourceId == null) {
+            _state.update { it.copy(historyLoading = false, historyItems = emptyList()) }
+            return
+        }
         viewModelScope.launch {
             _state.update { it.copy(historyLoading = it.historyItems.isEmpty()) }
-            val items = repository.getHistory(_state.value.activeSourceId)
-            val counts = countIfNeeded(items.map { item -> item.workId() }, _state.value.activeSourceId)
+            val items = repository.getHistory(sourceId)
+            val counts = countIfNeeded(items.map { item -> item.workId() }, sourceId)
             _state.update {
                 it.copy(
                     historyItems = items,
@@ -970,10 +983,15 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun loadDownloads() {
+        val sourceId = _state.value.activeSourceId
+        if (sourceId == null) {
+            _state.update { it.copy(downloadLoading = false, downloadSummaries = emptyList()) }
+            return
+        }
         viewModelScope.launch {
             _state.update { it.copy(downloadLoading = it.downloadSummaries.isEmpty()) }
             val items = repository.downloadManager
-                ?.getDownloadedToonSummaries(_state.value.activeSourceId)
+                ?.getDownloadedToonSummaries(sourceId)
                 .orEmpty()
             _state.update { it.copy(downloadSummaries = items, downloadLoading = false) }
         }
@@ -1004,8 +1022,9 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun clearAllHistory() {
+        val sourceId = _state.value.activeSourceId ?: return
         viewModelScope.launch {
-            repository.clearHistory(_state.value.activeSourceId)
+            repository.clearHistory(sourceId)
             _state.update { current ->
                 val updatedItems = current.items.map { it.copy(readProgress = null) }
                 current.copy(
@@ -1030,9 +1049,12 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             val res = repository.syncManager?.syncFull()
             if (res?.success == true) {
-                loadPage(page = _state.value.page, replace = true)
-                val updatedHistory = repository.getHistory(_state.value.activeSourceId)
-                val counts = countIfNeeded(updatedHistory.map { item -> item.workId() }, _state.value.activeSourceId)
+                if (_state.value.activeSourceId != null) {
+                    loadPage(page = _state.value.page, replace = true)
+                }
+                val sourceId = _state.value.activeSourceId ?: return@launch
+                val updatedHistory = repository.getHistory(sourceId)
+                val counts = countIfNeeded(updatedHistory.map { item -> item.workId() }, sourceId)
                 _state.update {
                     it.copy(
                         historyItems = updatedHistory,
@@ -1521,7 +1543,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                                 if (row.workId() == target.workId()) row.copy(readProgress = progressText) else row
                             }
                             if (!curr.isSearch) {
-                                catalogCache[curr.tab] = updatedItems
+                                curr.tab?.let { catalogCache[it] = updatedItems }
                             }
                             curr.copy(
                                 items = updatedItems,
@@ -1547,7 +1569,8 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 )
             }
             try {
-                val items = repository.search(query, _state.value.activeSourceId)
+                val sourceId = _state.value.activeSourceId ?: return@launch
+                val items = repository.search(query, sourceId)
                 repository.markSeen(items)
                 _state.update {
                     it.copy(
@@ -1587,7 +1610,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 )
             }
             try {
-                val currentTab = _state.value.tab
+                val currentTab = _state.value.tab ?: return@launch
                 val result = repository.loadListing(currentTab, page)
                 repository.markSeen(result.items)
                 catalogCache[currentTab] = result.items
@@ -1656,7 +1679,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 if (result.items.isNotEmpty()) {
                     val lastP = result.lastPage.coerceAtLeast(1)
                     val currP = result.currentPage.coerceIn(1, lastP)
-                    val pageSize = repository.sourceOrDefault(item.sourceId).episodePageSize
+                    val pageSize = repository.sourceOrNull(item.sourceId)?.episodePageSize ?: 100
 
                     val itemKey = item.workId().storageKey()
                     if (lastP <= 1) {
@@ -1843,7 +1866,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private suspend fun countIfNeeded(workId: WorkId): Int {
-        if (repository.sourceOrDefault(workId.sourceId).progressDisplay != ProgressDisplay.READ_COUNT) {
+        if (repository.sourceOrNull(workId.sourceId)?.progressDisplay != ProgressDisplay.READ_COUNT) {
             return 0
         }
         return repository.countReadEpisodes(workId)
@@ -1851,7 +1874,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
     private suspend fun countIfNeeded(workIds: List<WorkId>, sourceId: String): Map<String, Int> {
         if (workIds.isEmpty()) return emptyMap()
-        if (repository.sourceOrDefault(sourceId).progressDisplay != ProgressDisplay.READ_COUNT) {
+        if (repository.sourceOrNull(sourceId)?.progressDisplay != ProgressDisplay.READ_COUNT) {
             return emptyMap()
         }
         return repository.countReadEpisodes(workIds)
