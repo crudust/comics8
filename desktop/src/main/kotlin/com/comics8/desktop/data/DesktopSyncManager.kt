@@ -301,6 +301,7 @@ class DesktopSyncManager(
                         put("sourceId", s.sourceId)
                         put("viewMode", s.viewMode)
                         put("readDirection", s.readDirection)
+                        put("splitMode", s.splitMode)
                         put("updatedAt", s.updatedAt)
                     })
                 }
@@ -440,8 +441,9 @@ class DesktopSyncManager(
                     ReaderSettingRecord(
                         sourceId = workId.sourceId,
                         toonId = workId.toonId,
-                        viewMode = s.optString("viewMode", "SCROLL"),
+                        viewMode = s.optString("viewMode", "SINGLE"),
                         readDirection = s.optString("readDirection", "RIGHT_TO_LEFT"),
+                        splitMode = s.optString("splitMode", "FIT"),
                         updatedAt = s.optLong("updatedAt", serverTime),
                     )
                 )

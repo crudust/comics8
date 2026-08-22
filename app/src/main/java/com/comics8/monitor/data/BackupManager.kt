@@ -99,6 +99,7 @@ object BackupManager {
                 put("sourceId", s.sourceId)
                 put("viewMode", s.viewMode)
                 put("readDirection", s.readDirection)
+                put("splitMode", s.splitMode)
                 put("updatedAt", s.updatedAt)
             }
             settingArray.put(obj)
@@ -182,8 +183,9 @@ object BackupManager {
                     ReaderSetting(
                         sourceId = workId.sourceId,
                         toonId = workId.toonId,
-                        viewMode = obj.optString("viewMode", "SCROLL"),
+                        viewMode = obj.optString("viewMode", "SINGLE"),
                         readDirection = obj.optString("readDirection", "RIGHT_TO_LEFT"),
+                        splitMode = obj.optString("splitMode", "FIT"),
                         updatedAt = obj.optLong("updatedAt", System.currentTimeMillis()),
                     ),
                 )

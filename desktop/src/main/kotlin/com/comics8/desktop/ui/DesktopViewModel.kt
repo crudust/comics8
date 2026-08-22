@@ -1647,7 +1647,13 @@ class DesktopViewModel(
             scope.launch {
                 val savedSetting = repository.getReaderSetting(series.workId())
                 if (savedSetting != null) {
-                    _state.update { it.copy(viewMode = savedSetting.first, readDirection = savedSetting.second) }
+                    _state.update {
+                        it.copy(
+                            viewMode = savedSetting.viewMode,
+                            readDirection = savedSetting.readDirection,
+                            splitMode = savedSetting.splitMode,
+                        )
+                    }
                 }
                 repository.markEpisodeRead(series.workId(), episode.wrId, episode.lastReadPage)
                 val existingHistory = repository.getHistory(series.workId())
@@ -1818,8 +1824,9 @@ class DesktopViewModel(
         _state.update { it.copy(viewMode = mode) }
         val series = _state.value.series ?: return
         val direction = _state.value.readDirection
+        val split = _state.value.splitMode
         scope.launch {
-            repository.saveReaderSetting(series.workId(), mode, direction)
+            repository.saveReaderSetting(series.workId(), mode, direction, split)
         }
     }
 
@@ -1827,13 +1834,20 @@ class DesktopViewModel(
         _state.update { it.copy(readDirection = direction) }
         val series = _state.value.series ?: return
         val mode = _state.value.viewMode
+        val split = _state.value.splitMode
         scope.launch {
-            repository.saveReaderSetting(series.workId(), mode, direction)
+            repository.saveReaderSetting(series.workId(), mode, direction, split)
         }
     }
 
     fun setSplitMode(mode: SplitMode) {
         _state.update { it.copy(splitMode = mode) }
+        val series = _state.value.series ?: return
+        val modeVal = _state.value.viewMode
+        val direction = _state.value.readDirection
+        scope.launch {
+            repository.saveReaderSetting(series.workId(), modeVal, direction, mode)
+        }
     }
 
     fun recordImageAspectRatio(index: Int, width: Int, height: Int) {

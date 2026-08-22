@@ -8,6 +8,7 @@ import com.comics8.core.model.FavoriteListing
 import com.comics8.core.model.ListingPage
 import com.comics8.core.model.OfflineEpisodeRef
 import com.comics8.core.model.ReadDirection
+import com.comics8.core.model.SplitMode
 import com.comics8.core.model.ToonItem
 import com.comics8.core.model.UpdateDates
 import com.comics8.core.model.ViewMode
@@ -451,25 +452,37 @@ class ToonRepository(
         result
     }
 
-    suspend fun getReaderSetting(workId: WorkId): Pair<ViewMode, ReadDirection>? = withContext(Dispatchers.IO) {
+    data class AppReaderSetting(
+        val viewMode: ViewMode,
+        val readDirection: ReadDirection,
+        val splitMode: SplitMode,
+    )
+
+    suspend fun getReaderSetting(workId: WorkId): AppReaderSetting? = withContext(Dispatchers.IO) {
         val setting = readerSettingDao.getSetting(workId) ?: return@withContext null
         val viewMode = try {
             ViewMode.valueOf(setting.viewMode)
         } catch (_: Exception) {
-            ViewMode.SCROLL
+            ViewMode.SINGLE
         }
         val direction = try {
             ReadDirection.valueOf(setting.readDirection)
         } catch (_: Exception) {
             ReadDirection.RIGHT_TO_LEFT
         }
-        Pair(viewMode, direction)
+        val splitMode = try {
+            SplitMode.valueOf(setting.splitMode)
+        } catch (_: Exception) {
+            SplitMode.FIT
+        }
+        AppReaderSetting(viewMode, direction, splitMode)
     }
 
     suspend fun saveReaderSetting(
         workId: WorkId,
         viewMode: ViewMode,
         readDirection: ReadDirection,
+        splitMode: SplitMode,
     ) = withContext(Dispatchers.IO) {
         val writable = writableId(workId) ?: return@withContext
         readerSettingDao.saveSetting(
@@ -478,10 +491,10 @@ class ToonRepository(
                 toonId = writable.toonId,
                 viewMode = viewMode.name,
                 readDirection = readDirection.name,
+                splitMode = splitMode.name,
                 updatedAt = now(),
             ),
         )
-        syncManager?.triggerDebouncedPush()
     }
 
     suspend fun markEpisodeRead(workId: WorkId, wrId: String, lastPage: Int = 0): Long = withContext(Dispatchers.IO) {

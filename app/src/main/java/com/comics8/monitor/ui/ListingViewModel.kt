@@ -1623,6 +1623,16 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         loadReaderImages(episode)
         if (series != null) {
             viewModelScope.launch {
+                val savedSetting = repository.getReaderSetting(series.workId())
+                if (savedSetting != null) {
+                    _state.update {
+                        it.copy(
+                            viewMode = savedSetting.viewMode,
+                            readDirection = savedSetting.readDirection,
+                            splitMode = savedSetting.splitMode,
+                        )
+                    }
+                }
                 repository.markEpisodeRead(series.workId(), episode.wrId, episode.lastReadPage)
                 val existingHistory = repository.getHistory(series.workId())
 
@@ -1794,15 +1804,33 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             singleViewPreference = mode
         }
         _state.update { it.copy(viewMode = mode) }
+        val series = _state.value.series ?: return
+        val direction = _state.value.readDirection
+        val split = _state.value.splitMode
+        viewModelScope.launch {
+            repository.saveReaderSetting(series.workId(), mode, direction, split)
+        }
     }
 
     fun setReadDirection(direction: ReadDirection) {
         globalReadDirection = direction
         _state.update { it.copy(readDirection = direction) }
+        val series = _state.value.series ?: return
+        val mode = _state.value.viewMode
+        val split = _state.value.splitMode
+        viewModelScope.launch {
+            repository.saveReaderSetting(series.workId(), mode, direction, split)
+        }
     }
 
     fun setSplitMode(mode: SplitMode) {
         _state.update { it.copy(splitMode = mode) }
+        val series = _state.value.series ?: return
+        val modeVal = _state.value.viewMode
+        val direction = _state.value.readDirection
+        viewModelScope.launch {
+            repository.saveReaderSetting(series.workId(), modeVal, direction, mode)
+        }
     }
 
     fun goToEpisodePage(page: Int) {

@@ -297,6 +297,8 @@ def _ensure_user_indexes(conn: sqlite3.Connection):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ep_sync ON read_episodes(syncUpdatedAt);")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_set_sync ON reader_settings(syncUpdatedAt);")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_tomb_deleted ON tombstones(deletedAt);")
+    if "splitMode" not in _table_columns(conn, "reader_settings"):
+        conn.execute("ALTER TABLE reader_settings ADD COLUMN splitMode TEXT DEFAULT 'FIT';")
 
 
 def _rebuild_user_tables_v2(conn: sqlite3.Connection):
@@ -493,6 +495,7 @@ def init_user_db(conn: sqlite3.Connection, user_id: str):
             toonId TEXT NOT NULL,
             viewMode TEXT,
             readDirection TEXT,
+            splitMode TEXT DEFAULT 'FIT',
             updatedAt INTEGER,
             syncUpdatedAt INTEGER,
             PRIMARY KEY (sourceId, toonId)
@@ -616,14 +619,15 @@ def import_full_snapshot(conn: sqlite3.Connection, data: dict, now_ms: int, sche
                 continue
             up_at = s.get("updatedAt") or now_ms
             conn.execute("""
-            INSERT INTO reader_settings (sourceId, toonId, viewMode, readDirection, updatedAt, syncUpdatedAt)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO reader_settings (sourceId, toonId, viewMode, readDirection, splitMode, updatedAt, syncUpdatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(sourceId, toonId) DO UPDATE SET
                 viewMode = excluded.viewMode,
                 readDirection = excluded.readDirection,
+                splitMode = excluded.splitMode,
                 updatedAt = excluded.updatedAt,
                 syncUpdatedAt = excluded.syncUpdatedAt
-            """, (source_id, toon_id, s.get("viewMode", "SCROLL"), s.get("readDirection", "RIGHT_TO_LEFT"), up_at, now_ms))
+            """, (source_id, toon_id, s.get("viewMode", "SINGLE"), s.get("readDirection", "RIGHT_TO_LEFT"), s.get("splitMode", "FIT"), up_at, now_ms))
 
 
 def export_full_snapshot(conn: sqlite3.Connection, schema: int = 2) -> dict:
@@ -655,7 +659,7 @@ def export_full_snapshot(conn: sqlite3.Connection, schema: int = 2) -> dict:
             eps.append(emitted)
 
     settings = []
-    for row in cursor.execute("SELECT sourceId, toonId, viewMode, readDirection, updatedAt FROM reader_settings"):
+    for row in cursor.execute("SELECT sourceId, toonId, viewMode, readDirection, splitMode, updatedAt FROM reader_settings"):
         emitted = emit_work_row(dict(row), schema)
         if emitted:
             settings.append(emitted)
@@ -788,15 +792,16 @@ def apply_delta_changes(conn: sqlite3.Connection, changes: dict, now_ms: int, sc
                 continue
             up_at = int(s.get("updatedAt", now_ms))
             conn.execute("""
-            INSERT INTO reader_settings (sourceId, toonId, viewMode, readDirection, updatedAt, syncUpdatedAt)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO reader_settings (sourceId, toonId, viewMode, readDirection, splitMode, updatedAt, syncUpdatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(sourceId, toonId) DO UPDATE SET
                 viewMode = excluded.viewMode,
                 readDirection = excluded.readDirection,
+                splitMode = excluded.splitMode,
                 updatedAt = excluded.updatedAt,
                 syncUpdatedAt = ?
             WHERE excluded.updatedAt >= reader_settings.updatedAt
-            """, (source_id, toon_id, s.get("viewMode", "SCROLL"), s.get("readDirection", "RIGHT_TO_LEFT"), up_at, now_ms, now_ms))
+            """, (source_id, toon_id, s.get("viewMode", "SINGLE"), s.get("readDirection", "RIGHT_TO_LEFT"), s.get("splitMode", "FIT"), up_at, now_ms, now_ms))
 
 
 def collect_delta_changes(conn: sqlite3.Connection, since: int, schema: int) -> dict:
@@ -834,7 +839,7 @@ def collect_delta_changes(conn: sqlite3.Connection, since: int, schema: int) -> 
 
     server_settings = []
     for r in cur.execute(
-        "SELECT sourceId, toonId, viewMode, readDirection, updatedAt FROM reader_settings WHERE syncUpdatedAt > ?",
+        "SELECT sourceId, toonId, viewMode, readDirection, splitMode, updatedAt FROM reader_settings WHERE syncUpdatedAt > ?",
         (since,),
     ):
         emitted = emit_work_row(dict(r), schema)

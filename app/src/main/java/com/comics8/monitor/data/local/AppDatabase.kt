@@ -110,6 +110,7 @@ data class ReaderSetting(
     val toonId: String,
     val viewMode: String,
     val readDirection: String,
+    val splitMode: String = "FIT",
     val updatedAt: Long,
 ) {
     fun workId(): WorkId = WorkId(sourceId, toonId)
@@ -380,7 +381,7 @@ suspend fun DownloadedEpisodeDao.deleteByToon(workId: WorkId) =
         Tombstone::class,
         DownloadedEpisode::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -396,6 +397,11 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_9_10: Migration = object : Migration(9, 10) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 SchemaV10.statements().forEach { db.execSQL(it) }
+            }
+        }
+        val MIGRATION_10_11: Migration = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE reader_settings ADD COLUMN splitMode TEXT NOT NULL DEFAULT 'FIT'")
             }
         }
     }

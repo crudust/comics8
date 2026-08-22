@@ -62,6 +62,7 @@ data class ReaderSettingRecord(
     val toonId: String,
     val viewMode: String,
     val readDirection: String,
+    val splitMode: String = "FIT",
     val updatedAt: Long,
 ) {
     fun workId(): WorkId = WorkId(sourceId, toonId)

@@ -373,11 +373,15 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
                     toonId TEXT NOT NULL,
                     viewMode TEXT,
                     readDirection TEXT,
+                    splitMode TEXT DEFAULT 'FIT',
                     updatedAt INTEGER,
                     PRIMARY KEY (sourceId, toonId)
                 )
                 """.trimIndent(),
             )
+            if (!hasColumn(conn, "reader_settings", "splitMode")) {
+                stmt.execute("ALTER TABLE reader_settings ADD COLUMN splitMode TEXT DEFAULT 'FIT'")
+            }
             stmt.execute(
                 """
                 CREATE TABLE IF NOT EXISTS read_episodes (
@@ -1095,15 +1099,16 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
         withConnection { conn ->
             conn.prepareStatement(
                 """
-                INSERT OR REPLACE INTO reader_settings (sourceId, toonId, viewMode, readDirection, updatedAt)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO reader_settings (sourceId, toonId, viewMode, readDirection, splitMode, updatedAt)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """.trimIndent(),
             ).use { stmt ->
                 stmt.setString(1, workId.sourceId)
                 stmt.setString(2, workId.toonId)
                 stmt.setString(3, setting.viewMode)
                 stmt.setString(4, setting.readDirection)
-                stmt.setLong(5, setting.updatedAt)
+                stmt.setString(5, setting.splitMode)
+                stmt.setLong(6, setting.updatedAt)
                 stmt.executeUpdate()
             }
         }
@@ -1114,8 +1119,8 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
         withTransaction { conn ->
             conn.prepareStatement(
                 """
-                INSERT OR REPLACE INTO reader_settings (sourceId, toonId, viewMode, readDirection, updatedAt)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO reader_settings (sourceId, toonId, viewMode, readDirection, splitMode, updatedAt)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """.trimIndent(),
             ).use { stmt ->
                 for (item in items) {
@@ -1124,7 +1129,8 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
                     stmt.setString(2, workId.toonId)
                     stmt.setString(3, item.viewMode)
                     stmt.setString(4, item.readDirection)
-                    stmt.setLong(5, item.updatedAt)
+                    stmt.setString(5, item.splitMode)
+                    stmt.setLong(6, item.updatedAt)
                     stmt.addBatch()
                 }
                 stmt.executeBatch()
@@ -1296,6 +1302,7 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
         toonId = rs.getString("toonId"),
         viewMode = rs.getString("viewMode"),
         readDirection = rs.getString("readDirection"),
+        splitMode = try { rs.getString("splitMode") ?: "FIT" } catch (_: Exception) { "FIT" },
         updatedAt = rs.getLong("updatedAt"),
     )
 

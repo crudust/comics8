@@ -39,7 +39,7 @@ class AppDatabaseRoomMigrationTest {
         helper.close()
 
         val room = Room.databaseBuilder(context, AppDatabase::class.java, name)
-            .addMigrations(AppDatabase.MIGRATION_9_10)
+            .addMigrations(AppDatabase.MIGRATION_9_10, AppDatabase.MIGRATION_10_11)
             .allowMainThreadQueries()
             .build()
         try {
@@ -60,6 +60,7 @@ class AppDatabaseRoomMigrationTest {
             assertThat(episodes).hasSize(1)
             val settings = room.readerSettingDao().all()
             assertThat(settings).hasSize(1)
+            assertThat(settings[0].splitMode).isEqualTo("FIT")
             val downloads = room.downloadedEpisodeDao().all()
             assertThat(downloads).hasSize(1)
             val tombs = room.tombstoneDao().getSince(0)
