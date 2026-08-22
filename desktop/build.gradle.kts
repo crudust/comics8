@@ -25,7 +25,15 @@ compose.desktop {
     application {
         mainClass = "com.comics8.desktop.MainKt"
         nativeDistributions {
-            modules("java.sql", "java.naming", "java.desktop")
+            modules(
+                "java.sql",
+                "java.naming",
+                "java.desktop",
+                "java.security.jgss",
+                "java.security.sasl",
+                "java.management",
+                "jdk.unsupported",
+            )
             packageName = "Comics8"
             packageVersion = "1.5.12"
             macOS {
