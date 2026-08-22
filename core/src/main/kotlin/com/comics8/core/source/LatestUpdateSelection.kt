@@ -10,7 +10,7 @@ object LatestUpdateSelection {
         sourceEnabled: Boolean,
     ): List<ToonItem> {
         if (favorites.isEmpty()) return emptyList()
-        if (source.id != WorkId.DEFAULT_SOURCE && !sourceEnabled) return emptyList()
+        if (!sourceEnabled) return emptyList()
         return when (source.notificationMode) {
             NotificationMode.NONE -> emptyList()
             NotificationMode.LATEST_INTERSECTION -> {

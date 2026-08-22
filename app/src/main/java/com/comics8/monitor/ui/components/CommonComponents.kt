@@ -84,7 +84,7 @@ fun ErrorPane(
     }
 }
 
-fun sourceChipLabel(sourceId: String): String = SourceRegistry.chipLabel(sourceId)
+fun sourceChipLabel(sourceId: String, registry: SourceRegistry): String = registry.chipLabel(sourceId)
 
 @Composable
 fun Badge(text: String, modifier: Modifier = Modifier) {

@@ -50,6 +50,12 @@ enum class NotificationMode {
     NONE,
 }
 
+enum class SourceKind { LOCAL, REMOTE }
+
+object HostApi {
+    const val LEVEL: Int = 1
+}
+
 enum class ProgressDisplay {
     LAST_READ_ORDER,
     READ_COUNT,

@@ -34,6 +34,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.comics8.core.model.ToonItem
+import com.comics8.core.source.SourceRegistry
 import com.comics8.monitor.ui.components.Badge
 import com.comics8.monitor.ui.components.sourceChipLabel
 
@@ -45,6 +46,7 @@ fun ListingGrid(
     modifier: Modifier = Modifier,
     scrollToTopTrigger: Int = 0,
     showSourceChip: Boolean = false,
+    sourceRegistry: SourceRegistry = SourceRegistry(),
 ) {
     val gridState = rememberLazyGridState()
 
@@ -68,6 +70,7 @@ fun ListingGrid(
                 onClick = { onOpen(item) },
                 onToggleFavorite = { onToggleFavorite(item) },
                 showSourceChip = showSourceChip,
+                sourceRegistry = sourceRegistry,
             )
         }
     }
@@ -80,6 +83,7 @@ fun ToonCard(
     onToggleFavorite: () -> Unit,
     modifier: Modifier = Modifier,
     showSourceChip: Boolean = false,
+    sourceRegistry: SourceRegistry = SourceRegistry(),
 ) {
     Column(
         modifier = modifier
@@ -107,7 +111,7 @@ fun ToonCard(
                         .padding(6.dp),
                 ) {
                     if (showSourceChip) {
-                        Badge(sourceChipLabel(item.sourceId))
+                        Badge(sourceChipLabel(item.sourceId, sourceRegistry))
                     }
                     if (item.isNew) {
                         Badge("NEW")

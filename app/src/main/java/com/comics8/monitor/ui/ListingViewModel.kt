@@ -90,6 +90,7 @@ data class ListingUiState(
     val downloadCatalogLoading: Boolean = false,
     val downloadedWrIds: Set<String> = emptySet(),
     val downloadProgress: com.comics8.monitor.data.DownloadProgressState = com.comics8.monitor.data.DownloadProgressState(),
+    val sourceRegistry: SourceRegistry = SourceRegistry(),
 ) {
     val isSearch: Boolean get() = searchQuery != null
 
@@ -103,7 +104,7 @@ data class ListingUiState(
         get() = (currentEpisodeIndex in 0 until (episodes.size - 1)) || (currentEpisodeIndex == episodes.size - 1 && episodePage < episodeLastPage)
 
     fun progressLabel(history: ReadHistory): String =
-        SourceRegistry.formatReadProgress(
+        sourceRegistry.formatReadProgress(
             history.sourceId,
             history.lastReadOrder,
             history.totalEpisodes,
@@ -296,6 +297,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 activeSourceId = activeSource,
                 browseTabs = tabs,
                 tab = tabs.first(),
+                sourceRegistry = repository.sourceRegistry(),
             )
         }
         repository.syncManager?.let { sm ->

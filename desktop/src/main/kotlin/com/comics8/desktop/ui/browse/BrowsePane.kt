@@ -39,6 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.comics8.core.model.ToonItem
+import com.comics8.core.source.SourceRegistry
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
 import com.comics8.desktop.ui.components.Badge
@@ -89,6 +90,7 @@ fun BrowsePane(
                             onClick = { viewModel.onListingOpen(item) },
                             onToggleFavorite = { viewModel.toggleFavorite(item) },
                             showSourceChip = false,
+                            sourceRegistry = state.sourceRegistry,
                         )
                     }
                 }
@@ -149,6 +151,7 @@ fun ToonCard(
     onToggleFavorite: () -> Unit,
     modifier: Modifier = Modifier,
     showSourceChip: Boolean = false,
+    sourceRegistry: SourceRegistry = SourceRegistry(),
 ) {
     Column(
         modifier = modifier
@@ -178,7 +181,7 @@ fun ToonCard(
                         .padding(6.dp),
                 ) {
                     if (showSourceChip) {
-                        Badge(sourceChipLabel(item.sourceId))
+                        Badge(sourceChipLabel(item.sourceId, sourceRegistry))
                     }
                     if (item.isNew) {
                         Badge("NEW")

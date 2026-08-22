@@ -73,6 +73,18 @@ class DownloadLayoutTest {
     }
 
     @Test
+    fun migrateDoesNotTouchLocalTree() {
+        val base = createTempDirectory("dl-local").toFile()
+        base.deleteOnExit()
+        val local = DownloadLayout.episodeDir(base, WorkId.local("folder"), "1")
+        local.mkdirs()
+        File(local, "0001.jpg").writeText("l")
+
+        DownloadLayout.migrateLegacyElevenDirs(base)
+        assertThat(File(local, "0001.jpg").readText()).isEqualTo("l")
+    }
+
+    @Test
     fun migrateDoesNotTouchHitomiTree() {
         val base = createTempDirectory("dl-hitomi").toFile()
         base.deleteOnExit()

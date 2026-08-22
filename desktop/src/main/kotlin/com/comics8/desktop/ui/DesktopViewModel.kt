@@ -167,6 +167,7 @@ class DesktopViewModel(
                 activeSourceId = activeSource,
                 browseTabs = tabs,
                 tab = tabs.first(),
+                sourceRegistry = repository.sourceRegistry(),
             )
         }
         loadPage(1)

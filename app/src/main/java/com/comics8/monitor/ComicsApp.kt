@@ -9,6 +9,8 @@ import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.comics8.core.network.ImageFallbacks
 import com.comics8.core.network.ImageReferer
+import com.comics8.core.source.BuiltInSources
+import com.comics8.core.source.SourceLocator
 import com.comics8.core.source.SourcePrefs
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
@@ -25,6 +27,7 @@ class ComicsApp : Application(), ImageLoaderFactory {
         private set
 
     private lateinit var toonClient: ToonClient
+    private lateinit var sourceRegistry: SourceRegistry
 
     override fun onCreate() {
         super.onCreate()
@@ -32,19 +35,28 @@ class ComicsApp : Application(), ImageLoaderFactory {
             .addMigrations(AppDatabase.MIGRATION_9_10)
             .fallbackToDestructiveMigrationFrom(1, 2, 3, 4, 5, 6, 7, 8)
             .build()
-        toonClient = ToonClient(ToonClient.defaultClient(File(cacheDir, "http")))
+        val registry = SourceRegistry(BuiltInSources.all())
+        sourceRegistry = registry
+        val locator = SourceLocator { registry }
+        toonClient = ToonClient(ToonClient.defaultClient(File(cacheDir, "http")), sources = locator)
         val client = toonClient
         val prefs = getSharedPreferences("comics_reader_prefs", Context.MODE_PRIVATE)
         val isSourceEnabled: (String) -> Boolean = { id ->
             if (id == WorkId.DEFAULT_SOURCE || id.isBlank()) {
                 true
             } else {
-                val defaultOn = SourceRegistry.defaults().getOrNull(id)?.enabledByDefault ?: false
+                val defaultOn = registry.getOrNull(id)?.enabledByDefault ?: false
                 prefs.getBoolean(SourcePrefs.enabledKey(id), defaultOn)
             }
         }
         val syncManager = SyncManager(this, db, client)
-        val downloadManager = DownloadManager(this, db, client, isSourceEnabled = isSourceEnabled)
+        val downloadManager = DownloadManager(
+            this,
+            db,
+            client,
+            isSourceEnabled = isSourceEnabled,
+            sources = registry,
+        )
         repository = ToonRepository(
             client = client,
             seenDao = db.seenDao(),
@@ -55,6 +67,7 @@ class ComicsApp : Application(), ImageLoaderFactory {
             database = db,
             syncManager = syncManager,
             downloadManager = downloadManager,
+            sources = registry,
             isSourceEnabled = isSourceEnabled,
         )
         repository.applyPreferences { id ->
@@ -64,22 +77,23 @@ class ComicsApp : Application(), ImageLoaderFactory {
     }
 
     override fun newImageLoader(): ImageLoader {
+        val registry = sourceRegistry
         val http = toonClient.httpClient.newBuilder()
             .addInterceptor { chain ->
                 val originalUrl = chain.request().url.toString()
                 val request = chain.request().newBuilder()
                     .header("User-Agent", ToonClient.USER_AGENT)
-                    .header("Referer", ImageReferer.forUrl(originalUrl))
+                    .header("Referer", ImageReferer.forUrl(originalUrl, registry))
                     .build()
                 var response = chain.proceed(request)
                 if (!response.isSuccessful && (response.code == 404 || response.code >= 500)) {
                     val urlStr = request.url.toString()
-                    val fallbacks = ImageFallbacks.forUrl(urlStr)
+                    val fallbacks = ImageFallbacks.forUrl(urlStr, registry)
                     for (fallback in fallbacks) {
                         response.close()
                         val retryReq = request.newBuilder()
                             .url(fallback)
-                            .header("Referer", ImageReferer.forUrl(fallback))
+                            .header("Referer", ImageReferer.forUrl(fallback, registry))
                             .build()
                         val retryResp = try {
                             chain.proceed(retryReq)

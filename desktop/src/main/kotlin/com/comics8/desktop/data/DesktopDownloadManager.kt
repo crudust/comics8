@@ -51,7 +51,7 @@ class DesktopDownloadManager(
     private val client: ToonClient,
     private val isSourceEnabled: (String) -> Boolean = { false },
     baseDir: File = File(System.getProperty("user.home"), ".comics8/downloads"),
-    private val sources: SourceRegistry = SourceRegistry.defaults(),
+    private val sources: SourceRegistry,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val baseDir = baseDir.apply { mkdirs() }
@@ -69,7 +69,7 @@ class DesktopDownloadManager(
 
     fun enqueueEpisodes(series: ToonItem, episodes: List<EpisodeItem>) {
         if (episodes.isEmpty()) return
-        val workId = SourceAccess.writable(series.sourceId, series.id, isSourceEnabled) ?: return
+        val workId = SourceAccess.writable(series.sourceId, series.id, isSourceEnabled, sources.knownIds()) ?: return
         scope.launch {
             migrateLegacyDownloads()
             val existing = database.getDownloadedEpisodesByToon(workId).map { it.wrId }.toSet()
@@ -142,7 +142,7 @@ class DesktopDownloadManager(
             val batch = ImageBatchDownload.toNumberedFiles(
                 urls = imageUrls,
                 destDir = epDir,
-                fetchBytes = { url -> ImageFallbacks.fetchBytes(url) { client.fetchBytes(it) } },
+                fetchBytes = { url -> ImageFallbacks.fetchBytes(url, sources) { client.fetchBytes(it) } },
                 onProgress = { completed, total ->
                     _progress.update { it.copy(currentImage = completed, totalImages = total) }
                 },

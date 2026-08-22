@@ -30,6 +30,7 @@ class ElevenToonSource : ComicSource {
         ),
     )
     override val searchPlaceholder: String = "제목 검색"
+    override val enabledByDefault: Boolean = true
     override val notificationMode: NotificationMode = NotificationMode.LATEST_INTERSECTION
     override val episodePageSize: Int = 100
     override val emptyListingOk: Boolean = false

@@ -2,6 +2,8 @@ package com.comics8.core.network
 
 import com.comics8.core.source.FetchSpec
 import com.comics8.core.source.RequestPolicy
+import com.comics8.core.source.SourceLocator
+import com.comics8.core.source.SourceRegistry
 import com.google.common.truth.Truth.assertThat
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
@@ -27,7 +29,7 @@ class ToonClientFetchTest {
                     .build()
             }
             .build()
-        val client = ToonClient(http, isProxyEnabled = false)
+        val client = ToonClient(http, isProxyEnabled = false, sources = testLocator())
         val result = client.fetch(
             FetchSpec(
                 url = "https://example.test/gallery.nozomi",
@@ -66,6 +68,7 @@ class ToonClientFetchTest {
             client = http,
             proxyBaseUrl = "https://example.test/proxy",
             isProxyEnabled = true,
+            sources = testLocator(),
         )
         val text = client.fetch("http://103.204.13.68:8904/bbs/board.php")
         assertThat(text).isEqualTo("direct-ok")
@@ -122,6 +125,7 @@ class ToonClientFetchTest {
             client = http,
             proxyBaseUrl = "https://example.test/proxy",
             isProxyEnabled = true,
+            sources = testLocator(),
         )
         repeat(2) { client.fetch(PROXY_TARGET) }
         proxyCode = 200
@@ -156,10 +160,13 @@ class ToonClientFetchTest {
             client = http,
             proxyBaseUrl = "https://example.test/proxy",
             isProxyEnabled = true,
+            sources = testLocator(),
         )
     }
 
     companion object {
         private const val PROXY_TARGET = "http://103.204.13.68:8904/bbs/board.php"
+
+        private fun testLocator(): SourceLocator = SourceLocator { SourceRegistry.forTests() }
     }
 }

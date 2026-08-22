@@ -76,6 +76,7 @@ data class DesktopUiState(
     val downloadCatalogLoading: Boolean = false,
     val downloadedWrIds: Set<String> = emptySet(),
     val downloadProgress: com.comics8.desktop.data.DesktopDownloadProgressState = com.comics8.desktop.data.DesktopDownloadProgressState(),
+    val sourceRegistry: SourceRegistry = SourceRegistry(),
 ) {
     val isSearch: Boolean get() = searchQuery != null
 
@@ -89,7 +90,7 @@ data class DesktopUiState(
         get() = (currentEpisodeIndex in 0 until (episodes.size - 1)) || (currentEpisodeIndex == episodes.size - 1 && episodePage < episodeLastPage)
 
     fun progressLabel(history: ReadHistoryRecord): String =
-        SourceRegistry.formatReadProgress(
+        sourceRegistry.formatReadProgress(
             history.sourceId,
             history.lastReadOrder,
             history.totalEpisodes,

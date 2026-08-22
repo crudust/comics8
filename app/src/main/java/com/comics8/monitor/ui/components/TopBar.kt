@@ -113,6 +113,7 @@ fun TopBar(
             if (state.screen == Screen.Browse) {
                 SourceTitleDropdown(
                     activeSourceId = state.activeSourceId,
+                    registry = state.sourceRegistry,
                     onSelect = viewModel::setActiveSource,
                     titleStyle = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f),
@@ -122,9 +123,9 @@ fun TopBar(
                     text = when (state.screen) {
                         Screen.Reader -> state.currentEpisode?.title.orEmpty().ifBlank { "만화 보기" }
                         Screen.Series -> state.series?.title.orEmpty()
-                        Screen.Browse -> SourceRegistry.chipLabel(state.activeSourceId)
+                        Screen.Browse -> state.sourceRegistry.chipLabel(state.activeSourceId)
                         Screen.History -> "히스토리"
-                        Screen.Downloads -> "${SourceRegistry.chipLabel(state.activeSourceId)} 저장소"
+                        Screen.Downloads -> "${state.sourceRegistry.chipLabel(state.activeSourceId)} 저장소"
                     },
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
@@ -447,7 +448,7 @@ fun SearchBar(
                 .focusRequester(requester),
             singleLine = true,
             placeholder = {
-                Text(SourceRegistry.searchPlaceholder(state.activeSourceId))
+                Text(state.sourceRegistry.searchPlaceholder(state.activeSourceId))
             },
             trailingIcon = {
                 if (state.searchInput.isNotEmpty()) {
@@ -490,14 +491,15 @@ fun SearchBar(
 @Composable
 private fun SourceTitleDropdown(
     activeSourceId: String,
+    registry: SourceRegistry,
     onSelect: (String) -> Unit,
     titleStyle: TextStyle,
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val sources = remember { SourceRegistry.defaults().all() }
+    val sources = registry.all()
     val label = sources.firstOrNull { it.id == activeSourceId }?.displayName
-        ?: SourceRegistry.chipLabel(activeSourceId)
+        ?: registry.chipLabel(activeSourceId)
     Box(modifier = modifier) {
         Row(
             verticalAlignment = Alignment.CenterVertically,

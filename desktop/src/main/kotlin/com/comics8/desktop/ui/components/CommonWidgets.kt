@@ -21,7 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.comics8.core.source.SourceRegistry
 
-fun sourceChipLabel(sourceId: String): String = SourceRegistry.chipLabel(sourceId)
+fun sourceChipLabel(sourceId: String, registry: SourceRegistry): String = registry.chipLabel(sourceId)
 
 @Composable
 fun Badge(

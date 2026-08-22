@@ -14,10 +14,19 @@ interface ComicSource {
     val defaultPolicy: RequestPolicy
     val searchPlaceholder: String get() = "제목 검색"
 
-    val enabledByDefault: Boolean get() = id == WorkId.DEFAULT_SOURCE
+    /** Included when a catalog is installed. ElevenToonSource overrides true. */
+    val enabledByDefault: Boolean get() = false
+
+    val kind: SourceKind get() = SourceKind.REMOTE
+    val hostApiLevel: Int get() = HostApi.LEVEL
+    val syncParticipates: Boolean get() = kind == SourceKind.REMOTE
+    val writesDownloads: Boolean get() = kind == SourceKind.REMOTE
+    val requiresHttp: Boolean get() = kind == SourceKind.REMOTE
+
     val notificationMode: NotificationMode get() = NotificationMode.NONE
     val episodePageSize: Int get() = 100
-    val emptyListingOk: Boolean get() = false
+    val emptyListingOk: Boolean get() = kind == SourceKind.LOCAL
+    val emptyEpisodesOk: Boolean get() = false
     val defaultLanguage: String? get() = null
     val favoriteUsesLatestListing: Boolean
         get() = notificationMode == NotificationMode.LATEST_INTERSECTION
@@ -39,7 +48,7 @@ interface ComicSource {
         notificationMode != NotificationMode.NONE
 
     fun ownsHost(host: String): Boolean = false
-    fun useProxy(url: String): Boolean = true
+    fun useProxy(url: String): Boolean = kind == SourceKind.REMOTE
 
     fun resolveParent(
         item: ToonItem,

@@ -216,6 +216,28 @@ class SyncWireTest {
     }
 
     @Test
+    fun localFavoriteIsOmittedOnSchema1And2WithoutForeignFlag() {
+        val localFav = JSONObject()
+            .put("favorites", JSONArray().put(
+                JSONObject().put("id", "/a.zip").put("sourceId", "local").put("title", "Local"),
+            ))
+        val v1 = SyncWire.filterOutbound(localFav, ServerSchema.Known(1))
+        assertThat(v1.json.getJSONArray("favorites").length()).isEqualTo(0)
+        assertThat(v1.omittedForeignSource).isFalse()
+        val v2 = SyncWire.filterOutbound(JSONObject(localFav.toString()), ServerSchema.Known(2))
+        assertThat(v2.json.getJSONArray("favorites").length()).isEqualTo(0)
+        assertThat(v2.omittedForeignSource).isFalse()
+    }
+
+    @Test
+    fun inboundLocalWorkIdIsRejectedBeforeElevenFallback() {
+        val local = JSONObject().put("id", "/a.zip").put("sourceId", "local")
+        assertThat(SyncWire.workId(local, preferId = true)).isNull()
+        val blank = JSONObject().put("id", "12345")
+        assertThat(SyncWire.workId(blank, preferId = true)).isEqualTo(WorkId.eleven("12345"))
+    }
+
+    @Test
     fun blankSourceIdOnSettingsDefaultsToEleven() {
         val row = JSONObject().put("toonId", "11").put("viewMode", "SCROLL")
         val filtered = SyncWire.filterOutbound(

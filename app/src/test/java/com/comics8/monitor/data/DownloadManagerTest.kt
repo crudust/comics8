@@ -8,6 +8,8 @@ import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.ToonItem
 import com.comics8.core.network.ToonClient
 import com.comics8.core.source.DownloadLayout
+import com.comics8.core.source.SourceLocator
+import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
 import com.comics8.core.source.hitomi.HitomiUrls
 import com.comics8.monitor.data.local.AppDatabase
@@ -61,8 +63,9 @@ class DownloadManagerTest {
             val manager = DownloadManager(
                 context,
                 db,
-                ToonClient(isProxyEnabled = false),
+                ToonClient(isProxyEnabled = false, sources = testLocator()),
                 baseDir = downloads,
+                sources = SourceRegistry.forTests(),
             )
             manager.migrateLegacyDownloads()
 
@@ -115,8 +118,9 @@ class DownloadManagerTest {
             val manager = DownloadManager(
                 context,
                 db,
-                ToonClient(isProxyEnabled = false),
+                ToonClient(isProxyEnabled = false, sources = testLocator()),
                 baseDir = downloads,
+                sources = SourceRegistry.forTests(),
             )
             manager.migrateLegacyDownloads()
 
@@ -138,13 +142,14 @@ class DownloadManagerTest {
             .build()
         try {
             val downloads = File(context.filesDir, "dl-hitomi-${System.nanoTime()}").apply { mkdirs() }
-            val client = ToonClient(hitomiClient(), isProxyEnabled = false)
+            val client = ToonClient(hitomiClient(), isProxyEnabled = false, sources = testLocator())
             val manager = DownloadManager(
                 context,
                 db,
                 client,
                 isSourceEnabled = { true },
                 baseDir = downloads,
+                sources = SourceRegistry.forTests(),
             )
             val toonId = "gallery:1001"
             manager.enqueueEpisodes(
@@ -209,6 +214,8 @@ class DownloadManagerTest {
             .build()
 
     companion object {
+        private fun testLocator(): SourceLocator = SourceLocator { SourceRegistry.forTests() }
+
         private const val HASH =
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcabc"
         private const val WEBP =

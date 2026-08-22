@@ -26,8 +26,12 @@ import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.comics8.core.network.ToonClient
+import com.comics8.core.source.BuiltInSources
+import com.comics8.core.source.SourceLocator
+import com.comics8.core.source.SourceRegistry
 import com.comics8.desktop.data.DesktopDatabase
 import java.io.File
+import com.comics8.desktop.data.DesktopSourcePrefs
 import com.comics8.desktop.data.DesktopSyncManager
 import com.comics8.desktop.data.DesktopToonRepository
 import com.comics8.desktop.ui.DesktopUiState
@@ -66,20 +70,29 @@ fun main() {
     System.setProperty("apple.laf.useScreenMenuBar", "true")
 
     application {
-        val database = remember { DesktopDatabase() }
-        val cacheDir = File(System.getProperty("user.home"), ".comics8/http-cache")
-        val toonClient = remember {
-            ToonClient(ToonClient.defaultClient(cacheDir)).also { client ->
-                com.comics8.desktop.ui.util.DesktopImageCache.shareHttpClient(client.httpClient)
+        val registry = remember { SourceRegistry(BuiltInSources.all()) }
+        val locator = remember { SourceLocator { registry } }
+        val database = remember {
+            DesktopDatabase().apply {
+                installedIds = { registry.knownIds() }
             }
         }
-        val sourceEnabled = { id: String -> com.comics8.desktop.data.DesktopSourcePrefs.isEnabled(id) }
+        val cacheDir = File(System.getProperty("user.home"), ".comics8/http-cache")
+        val toonClient = remember {
+            ToonClient(ToonClient.defaultClient(cacheDir), sources = locator).also { client ->
+                com.comics8.desktop.ui.util.DesktopImageCache.shareHttpClient(client.httpClient)
+                com.comics8.desktop.ui.util.DesktopImageCache.registry = registry
+            }
+        }
+        DesktopSourcePrefs.registry = registry
+        val sourceEnabled = { id: String -> DesktopSourcePrefs.isEnabled(id) }
         val syncManager = remember { DesktopSyncManager(database, toonClient) }
         val downloadManager = remember {
             com.comics8.desktop.data.DesktopDownloadManager(
                 database,
                 toonClient,
                 isSourceEnabled = sourceEnabled,
+                sources = registry,
             )
         }
         val repository = remember {
@@ -88,6 +101,7 @@ fun main() {
                 database,
                 syncManager,
                 downloadManager,
+                sources = registry,
                 isSourceEnabled = sourceEnabled,
             )
         }

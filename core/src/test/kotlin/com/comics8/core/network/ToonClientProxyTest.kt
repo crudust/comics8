@@ -1,5 +1,7 @@
 package com.comics8.core.network
 
+import com.comics8.core.source.SourceLocator
+import com.comics8.core.source.SourceRegistry
 import com.comics8.core.sync.SyncConstants
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
@@ -33,12 +35,16 @@ class ToonClientProxyTest {
 
     @Test
     fun hitomiHostsGoDirect() {
-        assertThat(ToonClient.shouldUseProxy("https://hitomi.la/galleries/1.html")).isFalse()
-        assertThat(ToonClient.shouldUseProxy("https://tn.hitomi.la/webpsmalltn/1.webp")).isFalse()
-        assertThat(ToonClient.shouldUseProxy("https://aa.gold-usergeneratedcontent.net/1.webp")).isFalse()
-        assertThat(ToonClient.shouldUseProxy("https://gold-usergeneratedcontent.net/1.webp")).isFalse()
-        assertThat(ToonClient.shouldUseProxy("https://evilgold-usergeneratedcontent.net/1.webp")).isTrue()
-        assertThat(ToonClient.shouldUseProxy("http://103.204.13.68:8904/bbs/board.php")).isTrue()
-        assertThat(ToonClient.shouldUseProxy("https://www.pl3040.com/kr/1.png")).isTrue()
+        val client = ToonClient(
+            isProxyEnabled = false,
+            sources = SourceLocator { SourceRegistry.forTests() },
+        )
+        assertThat(client.shouldUseProxy("https://hitomi.la/galleries/1.html")).isFalse()
+        assertThat(client.shouldUseProxy("https://tn.hitomi.la/webpsmalltn/1.webp")).isFalse()
+        assertThat(client.shouldUseProxy("https://aa.gold-usergeneratedcontent.net/1.webp")).isFalse()
+        assertThat(client.shouldUseProxy("https://gold-usergeneratedcontent.net/1.webp")).isFalse()
+        assertThat(client.shouldUseProxy("https://evilgold-usergeneratedcontent.net/1.webp")).isFalse()
+        assertThat(client.shouldUseProxy("http://103.204.13.68:8904/bbs/board.php")).isTrue()
+        assertThat(client.shouldUseProxy("https://www.pl3040.com/kr/1.png")).isTrue()
     }
 }

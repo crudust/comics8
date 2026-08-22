@@ -12,13 +12,13 @@ object FavoriteListing {
         fetchLatestPage: (suspend (Int) -> ListingPage)? = null,
     ): List<ToonItem> {
         if (localFavorites.isEmpty()) return emptyList()
-        val remaining = localFavorites.mapTo(mutableSetOf()) { WorkId(it.sourceId, it.id) }
+        val remaining = localFavorites.mapTo(mutableSetOf()) { it.workId() }
         val fromLatest = mutableListOf<ToonItem>()
         if (fetchLatestPage != null) {
             try {
                 val listing = fetchLatestPage(1)
                 for (item in listing.items) {
-                    if (remaining.remove(WorkId(item.sourceId, item.id))) {
+                    if (remaining.remove(item.workId())) {
                         fromLatest.add(item.copy(isFavorite = true))
                     }
                 }
@@ -26,9 +26,9 @@ object FavoriteListing {
                 // Offline or listing failure: keep whatever we already took, rest go by date.
             }
         }
-        val seen = fromLatest.mapTo(HashSet()) { WorkId(it.sourceId, it.id) }
+        val seen = fromLatest.mapTo(HashSet()) { it.workId() }
         val leftover = localFavorites
-            .filter { WorkId(it.sourceId, it.id) !in seen }
+            .filter { it.workId() !in seen }
             .sortedByDescending { UpdateDates.parseScore(it.updatedAt) }
             .map { it.copy(isFavorite = true) }
         return fromLatest + leftover

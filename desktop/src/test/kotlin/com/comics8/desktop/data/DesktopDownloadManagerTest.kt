@@ -4,6 +4,8 @@ import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.ToonItem
 import com.comics8.core.network.ToonClient
 import com.comics8.core.source.DownloadLayout
+import com.comics8.core.source.SourceLocator
+import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
 import com.comics8.core.source.hitomi.HitomiUrls
 import com.google.common.truth.Truth.assertThat
@@ -24,7 +26,9 @@ class DesktopDownloadManagerTest {
         val root = createTempDirectory("desk-dl").toFile()
         root.deleteOnExit()
         val downloads = File(root, "downloads").apply { mkdirs() }
-        val db = DesktopDatabase(File(root, "comics8.db"))
+        val db = DesktopDatabase(File(root, "comics8.db")).apply {
+            installedIds = { SourceRegistry.forTests().knownIds() }
+        }
         val legacy = DownloadLayout.legacyEpisodeDir(downloads, "123", "999")
         legacy.mkdirs()
         File(legacy, "0001.jpg").writeText("img")
@@ -47,8 +51,9 @@ class DesktopDownloadManagerTest {
 
         val manager = DesktopDownloadManager(
             db,
-            ToonClient(isProxyEnabled = false),
+            ToonClient(isProxyEnabled = false, sources = testLocator()),
             baseDir = downloads,
+            sources = SourceRegistry.forTests(),
         )
         manager.migrateLegacyDownloads()
 
@@ -67,7 +72,9 @@ class DesktopDownloadManagerTest {
         val root = createTempDirectory("desk-partial").toFile()
         root.deleteOnExit()
         val downloads = File(root, "downloads").apply { mkdirs() }
-        val db = DesktopDatabase(File(root, "comics8.db"))
+        val db = DesktopDatabase(File(root, "comics8.db")).apply {
+            installedIds = { SourceRegistry.forTests().knownIds() }
+        }
         val workId = WorkId.eleven("123")
         val dest = DownloadLayout.episodeDir(downloads, workId, "999")
         dest.mkdirs()
@@ -95,8 +102,9 @@ class DesktopDownloadManagerTest {
 
         val manager = DesktopDownloadManager(
             db,
-            ToonClient(isProxyEnabled = false),
+            ToonClient(isProxyEnabled = false, sources = testLocator()),
             baseDir = downloads,
+            sources = SourceRegistry.forTests(),
         )
         manager.migrateLegacyDownloads()
 
@@ -112,13 +120,17 @@ class DesktopDownloadManagerTest {
         val root = createTempDirectory("desk-hitomi").toFile()
         root.deleteOnExit()
         val downloads = File(root, "downloads").apply { mkdirs() }
-        val db = DesktopDatabase(File(root, "comics8.db")).apply { isSourceEnabled = { true } }
-        val client = ToonClient(hitomiClient(), isProxyEnabled = false)
+        val db = DesktopDatabase(File(root, "comics8.db")).apply {
+            isSourceEnabled = { true }
+            installedIds = { SourceRegistry.forTests().knownIds() }
+        }
+        val client = ToonClient(hitomiClient(), isProxyEnabled = false, sources = testLocator())
         val manager = DesktopDownloadManager(
             db,
             client,
             isSourceEnabled = { true },
             baseDir = downloads,
+            sources = SourceRegistry.forTests(),
         )
         val toonId = "gallery:1001"
         manager.enqueueEpisodes(
@@ -155,6 +167,8 @@ class DesktopDownloadManagerTest {
         val stored = db.getDownloadedEpisode(workId, "1001")
         assertThat(stored?.sourceId).isEqualTo(HitomiUrls.SOURCE_ID)
     }
+
+    private fun testLocator(): SourceLocator = SourceLocator { SourceRegistry.forTests() }
 
     private fun hitomiClient(): OkHttpClient =
         OkHttpClient.Builder()

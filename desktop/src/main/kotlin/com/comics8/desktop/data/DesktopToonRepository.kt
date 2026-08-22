@@ -26,12 +26,19 @@ class DesktopToonRepository(
     val syncManager: DesktopSyncManager? = null,
     val downloadManager: DesktopDownloadManager? = null,
     private val now: () -> Long = { System.currentTimeMillis() },
-    private val sources: SourceRegistry = SourceRegistry.defaults(),
+    private val sources: SourceRegistry,
     private val isSourceEnabled: (String) -> Boolean = { false },
 ) {
+    fun sourceRegistry(): SourceRegistry = sources
+
     fun source(id: String) = sources.get(id)
 
-    fun sourceOrDefault(id: String) = sources.getOrNull(id) ?: sources.default
+    fun sourceOrNull(id: String) = sources.getOrNull(id)
+
+    fun sourceOrDefault(id: String) =
+        sources.getOrNull(id)
+            ?: sources.getOrNull(WorkId.DEFAULT_SOURCE)
+            ?: error("no comic source loaded")
 
     fun allSources() = sources.all()
 
@@ -390,10 +397,10 @@ class DesktopToonRepository(
     private fun sourceFor(item: ToonItem) = sources.get(item.sourceId)
 
     private fun writableId(workId: WorkId): WorkId? =
-        SourceAccess.writable(workId, isSourceEnabled)
+        SourceAccess.writable(workId, isSourceEnabled, sources.knownIds())
 
     private fun writableId(sourceId: String, toonId: String): WorkId? =
-        SourceAccess.writable(sourceId, toonId, isSourceEnabled)
+        SourceAccess.writable(sourceId, toonId, isSourceEnabled, sources.knownIds())
 
     private fun notifyKey(item: ToonItem): String = "${item.workId().storageKey()}|${item.updatedAt.orEmpty()}"
 

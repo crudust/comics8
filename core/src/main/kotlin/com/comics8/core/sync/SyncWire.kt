@@ -109,7 +109,13 @@ object SyncWire {
         }
     }
 
+    fun isSyncableSource(sourceId: String): Boolean {
+        if (sourceId == WorkId.LOCAL_SOURCE) return false
+        return true
+    }
+
     fun allowOutbound(sourceId: String, schema: ServerSchema): Boolean {
+        if (!isSyncableSource(sourceId)) return false
         if (!schema.omitForeign) return true
         return sourceId.ifBlank { WorkId.DEFAULT_SOURCE } == WorkId.DEFAULT_SOURCE
     }
@@ -129,6 +135,7 @@ object SyncWire {
         foreignSince: Long,
         schema: ServerSchema,
     ): Boolean {
+        if (!isSyncableSource(sourceId)) return false
         val source = sourceId.ifBlank { WorkId.DEFAULT_SOURCE }
         return if (source == WorkId.DEFAULT_SOURCE) {
             rowTime > elevenSince
@@ -155,7 +162,9 @@ object SyncWire {
     }
 
     fun workId(obj: JSONObject, preferId: Boolean): WorkId? {
-        val sourceId = obj.optString("sourceId").ifBlank { WorkId.DEFAULT_SOURCE }
+        val rawSource = obj.optString("sourceId")
+        if (rawSource == WorkId.LOCAL_SOURCE) return null
+        val sourceId = rawSource.ifBlank { WorkId.DEFAULT_SOURCE }
         val local = if (preferId) {
             obj.optString("id").ifBlank { obj.optString("toonId") }
         } else {
@@ -210,6 +219,9 @@ object SyncWire {
                 WorkId.parse(item.optString("entityId")).sourceId
             } else {
                 item.optString("sourceId").ifBlank { WorkId.DEFAULT_SOURCE }
+            }
+            if (!isSyncableSource(source)) {
+                continue
             }
             if (!allowOutbound(source, schema)) {
                 omitted = true

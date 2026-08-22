@@ -13,6 +13,9 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
     @Volatile
     var isSourceEnabled: (String) -> Boolean = { false }
 
+    @Volatile
+    var installedIds: () -> Set<String> = { emptySet() }
+
     private val dbPath: String = run {
         try {
             Class.forName("org.sqlite.JDBC")
@@ -37,7 +40,7 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
     }
 
     private fun writableId(sourceId: String, toonId: String): WorkId? =
-        SourceAccess.writable(sourceId, toonId, isSourceEnabled)
+        SourceAccess.writable(sourceId, toonId, isSourceEnabled, installedIds())
 
     private inline fun <T> withConnection(block: (Connection) -> T): T {
         synchronized(connectionLock) {

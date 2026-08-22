@@ -17,10 +17,10 @@ class ProgressDisplayTest {
 
     @Test
     fun hitomiUsesReadCountAndElevenKeepsOrder() {
-        val registry = SourceRegistry.defaults()
-        assertThat(registry.default.progressDisplay).isEqualTo(ProgressDisplay.LAST_READ_ORDER)
+        val registry = SourceRegistry.forTests()
+        assertThat(registry.get(WorkId.DEFAULT_SOURCE).progressDisplay).isEqualTo(ProgressDisplay.LAST_READ_ORDER)
         assertThat(registry.get(HitomiSource.ID).progressDisplay).isEqualTo(ProgressDisplay.READ_COUNT)
-        assertThat(SourceRegistry.formatReadProgress(WorkId.DEFAULT_SOURCE, 52, 64, 3)).isEqualTo("52/64")
-        assertThat(SourceRegistry.formatReadProgress(HitomiSource.ID, 52, 64, 3)).isEqualTo("3/64")
+        assertThat(registry.formatReadProgress(WorkId.DEFAULT_SOURCE, 52, 64, 3)).isEqualTo("52/64")
+        assertThat(registry.formatReadProgress(HitomiSource.ID, 52, 64, 3)).isEqualTo("3/64")
     }
 }

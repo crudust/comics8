@@ -8,10 +8,13 @@ import java.util.prefs.Preferences
 object DesktopSourcePrefs {
     private val prefs: Preferences = Preferences.userRoot().node("com.comics8.desktop")
 
+    @Volatile
+    var registry: SourceRegistry = SourceRegistry()
+
     fun isEnabled(sourceId: String): Boolean {
         val id = sourceId.ifBlank { WorkId.DEFAULT_SOURCE }
         if (id == WorkId.DEFAULT_SOURCE) return true
-        val default = SourceRegistry.defaults().getOrNull(id)?.enabledByDefault ?: false
+        val default = registry.getOrNull(id)?.enabledByDefault ?: false
         return prefs.getBoolean(SourcePrefs.enabledKey(id), default)
     }
 
@@ -22,20 +25,20 @@ object DesktopSourcePrefs {
     }
 
     fun language(sourceId: String): String {
-        val fallback = SourceRegistry.defaults().getOrNull(sourceId)?.defaultLanguage.orEmpty()
+        val fallback = registry.getOrNull(sourceId)?.defaultLanguage.orEmpty()
         return prefs.get(SourcePrefs.languageKey(sourceId), fallback).ifBlank { fallback }
     }
 
     fun setLanguage(sourceId: String, value: String) {
-        val fallback = SourceRegistry.defaults().getOrNull(sourceId)?.defaultLanguage.orEmpty()
+        val fallback = registry.getOrNull(sourceId)?.defaultLanguage.orEmpty()
         prefs.put(SourcePrefs.languageKey(sourceId), value.ifBlank { fallback })
     }
 
     var activeSourceId: String
         get() = SourcePrefs.resolveActiveId(
             prefs.get(SourcePrefs.ACTIVE_SOURCE_KEY, WorkId.DEFAULT_SOURCE),
-            SourceRegistry.knownIds(),
-        )
+            registry.knownIds(),
+        ) ?: WorkId.DEFAULT_SOURCE
         set(value) {
             prefs.put(SourcePrefs.ACTIVE_SOURCE_KEY, value.ifBlank { WorkId.DEFAULT_SOURCE })
         }

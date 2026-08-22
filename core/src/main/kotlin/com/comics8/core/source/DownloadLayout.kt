@@ -3,8 +3,7 @@ package com.comics8.core.source
 import java.io.File
 
 object DownloadLayout {
-    private val sourceDirNames: Set<String>
-        get() = SourceRegistry.knownIds()
+    private val SOURCE_DIR_NAMES = setOf("eleven", "hitomi", "local")
 
     fun episodeDir(base: File, workId: WorkId, wrId: String): File =
         File(base, "${workId.sourceId}/${workId.toonId}/$wrId")
@@ -41,7 +40,7 @@ object DownloadLayout {
         val results = mutableListOf<MigratedDownloadDir>()
         val top = base.listFiles { file -> file.isDirectory } ?: return emptyList()
         for (toonDir in top) {
-            if (toonDir.name in sourceDirNames) continue
+            if (toonDir.name in SOURCE_DIR_NAMES) continue
             val workId = WorkId.eleven(toonDir.name)
             val destToon = toonDir(base, workId)
             val wrDirs = toonDir.listFiles { file -> file.isDirectory } ?: emptyArray()

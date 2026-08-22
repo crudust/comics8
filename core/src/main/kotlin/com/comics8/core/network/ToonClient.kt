@@ -4,7 +4,7 @@ import com.comics8.core.source.FetchSpec
 import com.comics8.core.source.HttpResult
 import com.comics8.core.source.RequestPolicy
 import com.comics8.core.source.SourceHttp
-import com.comics8.core.source.SourceRegistry
+import com.comics8.core.source.SourceLocator
 import com.comics8.core.sync.SyncConstants
 import okhttp3.Cache
 import okhttp3.OkHttpClient
@@ -17,6 +17,7 @@ class ToonClient(
     private val client: OkHttpClient = defaultClient(),
     @Volatile var proxyBaseUrl: String? = SyncConstants.proxyBaseUrl(),
     @Volatile var isProxyEnabled: Boolean = true,
+    private val sources: SourceLocator,
 ) : SourceHttp {
     val httpClient: OkHttpClient get() = client
 
@@ -90,11 +91,12 @@ class ToonClient(
      * Downloads raw bytes for an image URL.
      */
     fun fetchBytes(url: String): ByteArray {
+        val registry = sources.registry()
         val request = Request.Builder()
             .url(url)
             .header("User-Agent", USER_AGENT)
             .header("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
-            .header("Referer", ImageReferer.forUrl(url))
+            .header("Referer", ImageReferer.forUrl(url, registry))
             .get()
             .build()
         client.newCall(request).execute().use { response ->
@@ -159,6 +161,12 @@ class ToonClient(
         return HttpResult(result.code, headers, sliced)
     }
 
+    internal fun shouldUseProxy(url: String): Boolean {
+        if (!url.startsWith("http://") && !url.startsWith("https://")) return false
+        val source = sources.registry().sourceForUrl(url) ?: return false
+        return source.useProxy(url)
+    }
+
     companion object {
         const val USER_AGENT =
             "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
@@ -178,9 +186,6 @@ class ToonClient(
             }
             return builder.build()
         }
-
-        internal fun shouldUseProxy(url: String): Boolean =
-            SourceRegistry.defaults().sourceForUrl(url).useProxy(url)
 
         private fun parseBytesRange(header: String, total: Int): Pair<Int, Int>? {
             if (total <= 0) return null

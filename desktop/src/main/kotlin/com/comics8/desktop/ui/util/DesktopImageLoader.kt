@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import com.comics8.core.network.ImageFallbacks
 import com.comics8.core.network.ImageReferer
 import com.comics8.core.source.LocalImageUri
+import com.comics8.core.source.SourceRegistry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -61,6 +62,9 @@ object DesktopImageCache {
     fun shareHttpClient(client: OkHttpClient) {
         httpClient = client
     }
+
+    @Volatile
+    var registry: SourceRegistry = SourceRegistry()
 
     fun get(url: String): ImageBitmap? {
         if (url.isBlank()) return null
@@ -109,7 +113,7 @@ object DesktopImageCache {
         } else {
             null
         } ?: run {
-            val urlsToTry = listOf(url) + ImageFallbacks.forUrl(url)
+            val urlsToTry = listOf(url) + ImageFallbacks.forUrl(url, registry)
             var fetchedBytes: ByteArray? = null
             for (targetUrl in urlsToTry) {
                 if (LocalImageUri.toFile(targetUrl) != null) continue
@@ -117,7 +121,7 @@ object DesktopImageCache {
                     val request = Request.Builder()
                         .url(targetUrl)
                         .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
-                        .header("Referer", ImageReferer.forUrl(targetUrl))
+                        .header("Referer", ImageReferer.forUrl(targetUrl, registry))
                         .get()
                         .build()
                     val result = httpClient.newCall(request).execute().use { resp ->

@@ -105,6 +105,21 @@ class FavoriteListingTest {
         return@runBlocking
     }
 
+    @Test
+    fun blankSourceIdAssemblesAsElevenWithoutThrowing() = runBlocking {
+        val local = listOf(toon("7883", "08.16").copy(sourceId = ""))
+        val result = FavoriteListing.assemble(local) {
+            ListingPage(
+                items = listOf(toon("7883", "08.18").copy(sourceId = "eleven")),
+                currentPage = 1,
+                lastPage = 1,
+            )
+        }
+        assertThat(result.map { it.id }).containsExactly("7883")
+        assertThat(result[0].updatedAt).isEqualTo("08.18")
+        return@runBlocking
+    }
+
     private fun toon(id: String, updatedAt: String) = ToonItem(
         id = id,
         title = id,

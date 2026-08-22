@@ -7,8 +7,12 @@ object SourcePrefs {
 
     fun languageKey(sourceId: String): String = "$sourceId.language"
 
-    fun resolveActiveId(stored: String?, knownIds: Collection<String>): String {
-        val key = stored?.trim().orEmpty().ifBlank { WorkId.DEFAULT_SOURCE }
-        return if (key in knownIds) key else WorkId.DEFAULT_SOURCE
+    /**
+     * Active source. Blank or not installed → null. No eleven fallback.
+     */
+    fun resolveActiveId(stored: String?, installed: Set<String>): String? {
+        val key = stored?.trim().orEmpty()
+        if (key.isEmpty() || key !in installed) return null
+        return key
     }
 }

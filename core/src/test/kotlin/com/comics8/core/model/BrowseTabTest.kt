@@ -9,7 +9,7 @@ import org.junit.Test
 class BrowseTabTest {
     @Test
     fun notificationTargetDefaultsToFavorite() {
-        val tabs = BrowseTab.forSource(SourceRegistry.defaults().default)
+        val tabs = BrowseTab.forSource(SourceRegistry.forTests().get("eleven"))
         val favorite = BrowseTab.Favorite(WorkId.DEFAULT_SOURCE)
         assertThat(BrowseTab.resolveLaunchTarget(null, tabs)).isEqualTo(favorite)
         assertThat(BrowseTab.resolveLaunchTarget(BrowseTab.FAVORITE_ID, tabs)).isEqualTo(favorite)
@@ -19,18 +19,18 @@ class BrowseTabTest {
 
     @Test
     fun favoriteTabSitsAfterLatest() {
-        val hitomi = BrowseTab.forSource(SourceRegistry.defaults().get("hitomi"))
+        val hitomi = BrowseTab.forSource(SourceRegistry.forTests().get("hitomi"))
         val labels = hitomi.map { it.label }
         assertThat(labels.take(2)).containsExactly("최신", "즐겨찾기").inOrder()
         assertThat((hitomi[1] as BrowseTab.Favorite).sourceId).isEqualTo("hitomi")
-        val eleven = BrowseTab.forSource(SourceRegistry.defaults().default)
+        val eleven = BrowseTab.forSource(SourceRegistry.forTests().get("eleven"))
         assertThat(eleven.map { it.label }.take(2)).containsExactly("최신", "즐겨찾기").inOrder()
     }
 
     @Test
     fun afterSourceChangeKeepsFavoriteOrMatchingCatalog() {
-        val eleven = BrowseTab.forSource(SourceRegistry.defaults().default)
-        val hitomi = BrowseTab.forSource(SourceRegistry.defaults().get("hitomi"))
+        val eleven = BrowseTab.forSource(SourceRegistry.forTests().get("eleven"))
+        val hitomi = BrowseTab.forSource(SourceRegistry.forTests().get("hitomi"))
         assertThat(BrowseTab.afterSourceChange(BrowseTab.Favorite(WorkId.DEFAULT_SOURCE), hitomi))
             .isEqualTo(BrowseTab.Favorite("hitomi"))
         val elevenLatest = BrowseTab.Remote(
