@@ -189,6 +189,55 @@ class HostApiV1Test {
     }
 
     @Test
+    fun evalSiteJsStrictGgAndGalleryInfo() {
+        val strictGg = """
+            'use strict';
+            gg = {
+              m: function(g) { return g === 10 ? 1 : 0; },
+              b: '9999/',
+              s: function(h) { return '123'; }
+            };
+        """.trimIndent()
+        val strictGallery = """
+            'use strict';
+            galleryinfo = {
+              id: 9999,
+              title: 'Strict Mode Gallery',
+              artists: [{ artist: 'Strict Artist' }]
+            };
+        """.trimIndent()
+        val engine = JsEngine()
+        val handle = engine.load(JsTestResources.read("js/hello.js"), "hello.js")
+        val ggJson = evalJsonOn(
+            engine,
+            handle,
+            """
+            (function() {
+              var gg = host.evalSiteJs("gg", ${jsString(strictGg)});
+              return { b: gg.b, m: gg.m(10), s: gg.s("abc") };
+            })()
+            """.trimIndent(),
+        )
+        assertThat(ggJson.getString("b")).isEqualTo("9999/")
+        assertThat(ggJson.getInt("m")).isEqualTo(1)
+        assertThat(ggJson.getString("s")).isEqualTo("123")
+
+        val galleryJson = evalJsonOn(
+            engine,
+            handle,
+            """
+            (function() {
+              var info = host.evalSiteJs("galleryinfo", ${jsString(strictGallery)});
+              return { id: String(info.id), title: info.title, artist: info.artists[0].artist };
+            })()
+            """.trimIndent(),
+        )
+        assertThat(galleryJson.getString("id")).isEqualTo("9999")
+        assertThat(galleryJson.getString("title")).isEqualTo("Strict Mode Gallery")
+        assertThat(galleryJson.getString("artist")).isEqualTo("Strict Artist")
+    }
+
+    @Test
     fun fetchAllDoesNotDeadlockWhenJsSourceIsRegistered() {
         val engine = JsEngine(callTimeoutMs = 3_000)
         val handle = engine.load(JsTestResources.read("js/hello.js"), "hello.js")

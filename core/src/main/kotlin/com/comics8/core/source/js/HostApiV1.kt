@@ -286,6 +286,7 @@ internal class HostApiV1Impl(
                 // not JSON — evaluate as site JS
             }
         }
+        cx.evaluateString(evalScope, "var galleryinfo;", "<init>", 1, null)
         cx.evaluateString(evalScope, text, "galleryinfo", 1, null)
         val value = ScriptableObject.getProperty(evalScope, "galleryinfo")
         if (JsValues.isNullish(value)) error("galleryinfo")
@@ -293,6 +294,7 @@ internal class HostApiV1Impl(
     }
 
     private fun evalGg(cx: Context, evalScope: Scriptable, text: String): Any {
+        cx.evaluateString(evalScope, "var gg;", "<init>", 1, null)
         cx.evaluateString(evalScope, text, "gg", 1, null)
         val gg = ScriptableObject.getProperty(evalScope, "gg") as? Scriptable
             ?: error("gg")
