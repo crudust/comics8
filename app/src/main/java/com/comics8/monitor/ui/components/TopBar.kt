@@ -567,7 +567,7 @@ private fun SourceTitleDropdown(
                     expanded = false
                     onRemoveSource()
                 },
-                enabled = sources.isNotEmpty(),
+                enabled = sources.any { it.id != com.comics8.core.source.WorkId.LOCAL_SOURCE },
             )
         }
     }

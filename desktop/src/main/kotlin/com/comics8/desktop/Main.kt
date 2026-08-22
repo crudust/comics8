@@ -251,8 +251,6 @@ fun ComicsDesktopApp(
 
         if (state.showAddSourceSheet) {
             com.comics8.desktop.ui.components.AddSourceDialog(
-                offers = state.addSourceOffers,
-                onPick = viewModel::addCatalogOffer,
                 onImportJs = {
                     viewModel.closeAddSourceSheet()
                     com.comics8.desktop.ui.components.pickJsFile()?.let(viewModel::importJsFile)

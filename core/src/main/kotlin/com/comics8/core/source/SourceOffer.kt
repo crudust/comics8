@@ -8,10 +8,10 @@ data class SourceOffer(
 
 enum class SourceImplementation { BUILTIN_LOCAL, JS_PACK }
 
-/** Catalog offers the app can add. Site names are never listed here. */
+/** Catalog offers the app can add. Local is builtin, not an offer. Site names are never listed here. */
 object BuiltinOffers {
     val LOCAL = SourceOffer("local", "로컬", SourceImplementation.BUILTIN_LOCAL)
 
-    /** Add-source sheets use [LOCAL] explicitly. JS packs are not catalog offers. */
+    /** JS packs are imported as files; they are not catalog offers. */
     fun bundled(): List<SourceOffer> = emptyList()
 }

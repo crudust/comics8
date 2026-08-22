@@ -52,6 +52,15 @@ object SourcePrefs {
         return key
     }
 
+    fun withLocal(ids: Collection<String>): Set<String> {
+        val next = linkedSetOf(WorkId.LOCAL_SOURCE)
+        for (id in ids) {
+            val key = id.trim()
+            if (key.isNotEmpty()) next += key
+        }
+        return next
+    }
+
     data class Migration(
         val installed: Set<String>,
         val activeId: String?,
@@ -59,7 +68,7 @@ object SourcePrefs {
     )
 
     /**
-     * Existing-install migration. Does **not** put eleven (or hitomi) into
+     * Local is always installed. Does **not** put eleven (or hitomi) into
      * installed from legacy data, enabled prefs, or an active-source default.
      */
     @Suppress("UNUSED_PARAMETER")
@@ -69,11 +78,11 @@ object SourcePrefs {
         hitomiEnabledPref: Boolean?,
         hasLegacyUserData: Boolean,
     ): Migration {
-        if (storedInstalled != null) {
-            val installed = parseIdList(storedInstalled).toSet()
-            return Migration(installed, resolveActiveId(storedActive, installed), wrote = false)
-        }
-        return Migration(emptySet(), activeId = null, wrote = true)
+        val parsed = parseIdList(storedInstalled)
+        val installed = withLocal(parsed)
+        val wrote = storedInstalled == null || WorkId.LOCAL_SOURCE !in parsed.toSet()
+        val active = resolveActiveId(storedActive, installed) ?: WorkId.LOCAL_SOURCE
+        return Migration(installed, active, wrote)
     }
 }
 
@@ -89,10 +98,11 @@ interface SourceSettings {
     fun setEnabled(sourceId: String, enabled: Boolean) {
         val id = sourceId.trim()
         if (id.isEmpty()) return
+        if (!enabled && id == WorkId.LOCAL_SOURCE) return
         val next = installedIds().toMutableSet()
         if (enabled) next += id else next -= id
         setInstalledIds(next)
-        if (!enabled && activeSourceId() == id) setActiveSourceId(null)
+        if (!enabled && activeSourceId() == id) setActiveSourceId(WorkId.LOCAL_SOURCE)
     }
     fun libraryRoots(): List<String> = emptyList()
     fun setLibraryRoots(paths: List<String>) {}

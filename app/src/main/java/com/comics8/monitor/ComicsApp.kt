@@ -12,7 +12,6 @@ import com.comics8.core.network.ImageReferer
 import com.comics8.core.source.SourceLocator
 import com.comics8.core.source.SourcePrefs
 import com.comics8.core.source.SourceRegistry
-import com.comics8.core.source.WorkId
 import com.comics8.core.source.js.JsPackStore
 import com.comics8.core.source.local.CoverThumbCache
 import com.comics8.core.source.local.LocalSource
@@ -69,14 +68,12 @@ class ComicsApp : Application(), ImageLoaderFactory {
         }
         libraryMirror = SafLibraryMirror(this)
         coverThumbs = CoverThumbCache(File(cacheDir, "thumbs"), BitmapThumbEncoder)
-        if (WorkId.LOCAL_SOURCE in sourcePrefs.installedIds()) {
-            registry.add(
-                LocalSource(
-                    roots = { libraryMirror.materialize(sourcePrefs.libraryRoots()) },
-                    thumbs = coverThumbs,
-                ),
-            )
-        }
+        registry.add(
+            LocalSource(
+                roots = { libraryMirror.materialize(sourcePrefs.libraryRoots()) },
+                thumbs = coverThumbs,
+            ),
+        )
         val isSourceEnabled: (String) -> Boolean = { id -> sourcePrefs.isEnabled(id) }
         val installedIds: () -> Set<String> = { sourcePrefs.installedIds() }
         val syncManager = SyncManager(this, db, client)

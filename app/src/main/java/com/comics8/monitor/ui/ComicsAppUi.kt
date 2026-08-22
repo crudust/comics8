@@ -253,8 +253,6 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
         }
         if (state.showAddSourceSheet) {
             AddSourceDialog(
-                offers = state.addSourceOffers,
-                onPick = viewModel::addCatalogOffer,
                 onImportJs = onImportJs,
                 onDismiss = viewModel::dismissAddSourceSheet,
             )

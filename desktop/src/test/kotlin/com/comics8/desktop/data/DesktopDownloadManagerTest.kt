@@ -24,7 +24,7 @@ class DesktopDownloadManagerTest {
         val downloads = File(root, "downloads").apply { mkdirs() }
         val db = DesktopDatabase(File(root, "comics8.db")).apply {
             isSourceEnabled = { true }
-            installedIds = { SourceRegistry.forTests().knownIds() }
+            installedIds = { setOf(WorkId.DEFAULT_SOURCE) }
         }
         val legacy = DownloadLayout.legacyEpisodeDir(downloads, "123", "999")
         legacy.mkdirs()
@@ -71,7 +71,7 @@ class DesktopDownloadManagerTest {
         val downloads = File(root, "downloads").apply { mkdirs() }
         val db = DesktopDatabase(File(root, "comics8.db")).apply {
             isSourceEnabled = { true }
-            installedIds = { SourceRegistry.forTests().knownIds() }
+            installedIds = { setOf(WorkId.DEFAULT_SOURCE) }
         }
         val workId = WorkId.eleven("123")
         val dest = DownloadLayout.episodeDir(downloads, workId, "999")

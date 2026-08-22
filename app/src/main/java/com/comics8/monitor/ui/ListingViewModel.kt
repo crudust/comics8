@@ -13,11 +13,8 @@ import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.ReadDirection
 import com.comics8.core.model.ToonItem
 import com.comics8.core.model.ViewMode
-import com.comics8.core.source.BuiltinOffers
 import com.comics8.core.source.ComicSource
 import com.comics8.core.source.ProgressDisplay
-import com.comics8.core.source.SourceImplementation
-import com.comics8.core.source.SourceOffer
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
 import com.comics8.core.source.js.JsPackStore
@@ -99,7 +96,6 @@ data class ListingUiState(
     val showAddSourceSheet: Boolean = false,
     val showRemoveSourceSheet: Boolean = false,
     val sourceError: String? = null,
-    val addSourceOffers: List<SourceOffer> = emptyList(),
     val libraryRoots: List<String> = emptyList(),
     val pendingLibraryTreePick: Boolean = false,
 ) {
@@ -325,10 +321,8 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 readDirection = globalReadDirection,
             )
         }
-        if (WorkId.LOCAL_SOURCE in sourceSettings.installedIds()) {
-            ensureLocalSourceLoaded()
-        }
-        applyActiveSource(sourceSettings.activeSourceId(), loadListing = false)
+        ensureLocalSourceLoaded()
+        applyActiveSource(sourceSettings.activeSourceId() ?: WorkId.LOCAL_SOURCE, loadListing = false)
         repository.syncManager?.let { sm ->
             viewModelScope.launch {
                 sm.syncState.collect { s ->
@@ -382,7 +376,6 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 searchSuggestions = emptyList(),
                 sourceRegistry = repository.sourceRegistry(),
                 libraryRoots = sourceSettings.libraryRoots(),
-                addSourceOffers = catalogAddOffers(),
                 screen = if (source == null) Screen.Browse else it.screen,
                 series = if (source == null) null else it.series,
             )
@@ -541,7 +534,6 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         _state.update {
             it.copy(
                 installedSources = repository.installedSources(),
-                addSourceOffers = catalogAddOffers(),
                 libraryRoots = sourceSettings.libraryRoots(),
             )
         }
@@ -552,7 +544,6 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             it.copy(
                 showAddSourceSheet = true,
                 showRemoveSourceSheet = false,
-                addSourceOffers = catalogAddOffers(),
             )
         }
     }
@@ -564,7 +555,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     fun closeAddSourceSheet() = dismissAddSourceSheet()
 
     fun openRemoveSourceSheet() {
-        if (_state.value.installedSources.isEmpty()) return
+        if (_state.value.installedSources.none { it.id != WorkId.LOCAL_SOURCE }) return
         _state.update { it.copy(showRemoveSourceSheet = true, showAddSourceSheet = false) }
     }
 
@@ -620,40 +611,28 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
     fun uninstallSource(sourceId: String) {
         val id = sourceId.trim()
-        if (id.isEmpty()) return
+        if (id.isEmpty() || id == WorkId.LOCAL_SOURCE) return
         jsPackStore.delete(id)
         repository.sourceRegistry().remove(id)
         sourceSettings.setEnabled(id, false)
         clearCatalogCache(id)
         closeRemoveSourceSheet()
         if (_state.value.activeSourceId == id) {
-            applyActiveSource(null, loadListing = false)
+            applyActiveSource(WorkId.LOCAL_SOURCE, loadListing = true)
         } else {
             _state.update {
                 it.copy(
                     installedSources = repository.installedSources(),
                     sourceRegistry = repository.sourceRegistry(),
-                    addSourceOffers = catalogAddOffers(),
                     libraryRoots = sourceSettings.libraryRoots(),
                 )
             }
         }
     }
 
-    fun addCatalogOffer(offer: SourceOffer) {
-        if (offer.implementation != SourceImplementation.BUILTIN_LOCAL) return
-        dismissAddSourceSheet()
-        ensureLocalSourceLoaded()
-        sourceSettings.setEnabled(WorkId.LOCAL_SOURCE, true)
-        sourceSettings.setActiveSourceId(WorkId.LOCAL_SOURCE)
-        applyActiveSource(WorkId.LOCAL_SOURCE, loadListing = true)
-        if (sourceSettings.libraryRoots().isEmpty()) {
-            _state.update { it.copy(pendingLibraryTreePick = true) }
-        }
-    }
-
     fun removeActiveSource() {
         val id = _state.value.activeSourceId ?: return
+        if (id == WorkId.LOCAL_SOURCE) return
         uninstallSource(id)
     }
 
@@ -701,11 +680,6 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 thumbs = coverThumbs,
             ),
         )
-    }
-
-    private fun catalogAddOffers(): List<SourceOffer> {
-        val installed = sourceSettings.installedIds()
-        return listOf(BuiltinOffers.LOCAL).filter { it.id !in installed }
     }
 
     fun onListingOpen(item: ToonItem) {

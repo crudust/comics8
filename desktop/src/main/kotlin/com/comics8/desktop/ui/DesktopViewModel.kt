@@ -6,10 +6,7 @@ import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.ReadDirection
 import com.comics8.core.model.ToonItem
 import com.comics8.core.model.ViewMode
-import com.comics8.core.source.BuiltinOffers
 import com.comics8.core.source.ProgressDisplay
-import com.comics8.core.source.SourceImplementation
-import com.comics8.core.source.SourceOffer
 import com.comics8.core.source.WorkId
 import com.comics8.core.source.js.JsPackStore
 import com.comics8.core.source.local.CoverThumbCache
@@ -186,10 +183,8 @@ class DesktopViewModel(
             DesktopSourcePrefs.language(id)?.ifBlank { null }
         }
         repository.setSourceWriteAccess(DesktopSourcePrefs::isEnabled)
-        if (WorkId.LOCAL_SOURCE in DesktopSourcePrefs.installedIds()) {
-            ensureLocalSourceLoaded()
-        }
-        applyActiveSource(DesktopSourcePrefs.activeSourceId(), loadListing = false)
+        ensureLocalSourceLoaded()
+        applyActiveSource(DesktopSourcePrefs.activeSourceId() ?: WorkId.LOCAL_SOURCE, loadListing = false)
         if (_state.value.activeSourceId != null) {
             loadPage(1)
         }
@@ -240,7 +235,6 @@ class DesktopViewModel(
 
     private fun applyActiveSource(sourceId: String?, loadListing: Boolean) {
         val source = sourceId?.let { repository.activeSource(it) }
-        if (source == null && !_state.value.packsReady) return
         if (source == null) {
             readerJob?.cancel()
             episodeJob?.cancel()
@@ -261,7 +255,6 @@ class DesktopViewModel(
                 searchSuggestions = emptyList(),
                 sourceRegistry = repository.sourceRegistry(),
                 libraryRoots = DesktopSourcePrefs.libraryRoots(),
-                addSourceOffers = catalogAddOffers(),
                 screen = if (source == null) Screen.Browse else it.screen,
                 series = if (source == null) null else it.series,
             )
@@ -394,7 +387,6 @@ class DesktopViewModel(
         _state.update {
             it.copy(
                 installedSources = repository.installedSources(),
-                addSourceOffers = catalogAddOffers(),
                 libraryRoots = DesktopSourcePrefs.libraryRoots(),
             )
         }
@@ -405,7 +397,6 @@ class DesktopViewModel(
             it.copy(
                 showAddSourceSheet = true,
                 showRemoveSourceSheet = false,
-                addSourceOffers = catalogAddOffers(),
             )
         }
     }
@@ -417,7 +408,7 @@ class DesktopViewModel(
     fun closeAddSourceSheet() = dismissAddSourceSheet()
 
     fun openRemoveSourceSheet() {
-        if (_state.value.installedSources.isEmpty()) return
+        if (_state.value.installedSources.none { it.id != WorkId.LOCAL_SOURCE }) return
         _state.update { it.copy(showRemoveSourceSheet = true, showAddSourceSheet = false) }
     }
 
@@ -475,7 +466,7 @@ class DesktopViewModel(
 
     fun uninstallSource(sourceId: String) {
         val id = sourceId.trim()
-        if (id.isEmpty()) return
+        if (id.isEmpty() || id == WorkId.LOCAL_SOURCE) return
         jsPackStore.delete(id)
         repository.sourceRegistry().remove(id)
         DesktopSourcePrefs.setEnabled(id, false)
@@ -483,34 +474,21 @@ class DesktopViewModel(
         clearCatalogCache(id)
         closeRemoveSourceSheet()
         if (_state.value.activeSourceId == id) {
-            applyActiveSource(null, loadListing = false)
+            applyActiveSource(WorkId.LOCAL_SOURCE, loadListing = true)
         } else {
             _state.update {
                 it.copy(
                     installedSources = repository.installedSources(),
                     sourceRegistry = repository.sourceRegistry(),
-                    addSourceOffers = catalogAddOffers(),
                     libraryRoots = DesktopSourcePrefs.libraryRoots(),
                 )
             }
         }
     }
 
-    fun addCatalogOffer(offer: SourceOffer) {
-        if (offer.implementation != SourceImplementation.BUILTIN_LOCAL) return
-        dismissAddSourceSheet()
-        ensureLocalSourceLoaded()
-        DesktopSourcePrefs.setEnabled(WorkId.LOCAL_SOURCE, true)
-        DesktopSourcePrefs.setActiveSourceId(WorkId.LOCAL_SOURCE)
-        repository.setSourceWriteAccess(DesktopSourcePrefs::isEnabled)
-        applyActiveSource(WorkId.LOCAL_SOURCE, loadListing = true)
-        if (DesktopSourcePrefs.libraryRoots().isEmpty()) {
-            addLibraryRoot()
-        }
-    }
-
     fun removeActiveSource() {
         val id = _state.value.activeSourceId ?: return
+        if (id == WorkId.LOCAL_SOURCE) return
         uninstallSource(id)
     }
 
@@ -551,11 +529,6 @@ class DesktopViewModel(
                 thumbs = thumbCache,
             ),
         )
-    }
-
-    private fun catalogAddOffers(): List<SourceOffer> {
-        val installed = DesktopSourcePrefs.installedIds()
-        return listOf(BuiltinOffers.LOCAL).filter { it.id !in installed }
     }
 
     fun onListingOpen(item: ToonItem) {

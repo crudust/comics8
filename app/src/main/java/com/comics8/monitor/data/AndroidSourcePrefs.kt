@@ -3,6 +3,7 @@ package com.comics8.monitor.data
 import android.content.SharedPreferences
 import com.comics8.core.source.SourcePrefs
 import com.comics8.core.source.SourceSettings
+import com.comics8.core.source.WorkId
 
 class AndroidSourcePrefs(
     private val prefs: SharedPreferences,
@@ -29,16 +30,19 @@ class AndroidSourcePrefs(
     }
 
     override fun installedIds(): Set<String> =
-        SourcePrefs.parseIdList(rawPref(SourcePrefs.INSTALLED_KEY)).toSet()
+        SourcePrefs.withLocal(SourcePrefs.parseIdList(rawPref(SourcePrefs.INSTALLED_KEY)))
 
     override fun setInstalledIds(ids: Set<String>) {
-        prefs.edit().putString(SourcePrefs.INSTALLED_KEY, SourcePrefs.formatIdList(ids)).apply()
+        prefs.edit().putString(
+            SourcePrefs.INSTALLED_KEY,
+            SourcePrefs.formatIdList(SourcePrefs.withLocal(ids)),
+        ).apply()
     }
 
     override fun storedActiveRaw(): String? = rawPref(SourcePrefs.ACTIVE_SOURCE_KEY)
 
     override fun activeSourceId(): String? =
-        SourcePrefs.resolveActiveId(storedActiveRaw(), installedIds())
+        SourcePrefs.resolveActiveId(storedActiveRaw(), installedIds()) ?: WorkId.LOCAL_SOURCE
 
     override fun setActiveSourceId(id: String?) {
         val key = id?.trim().orEmpty()

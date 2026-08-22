@@ -6,7 +6,6 @@ import com.comics8.core.model.ReadDirection
 import com.comics8.core.model.ToonItem
 import com.comics8.core.model.ViewMode
 import com.comics8.core.source.ComicSource
-import com.comics8.core.source.SourceOffer
 import com.comics8.core.source.SourceRegistry
 import com.comics8.desktop.data.DesktopBackupStats
 import com.comics8.desktop.data.DesktopSyncState
@@ -77,7 +76,6 @@ data class DesktopUiState(
     val downloadProgress: com.comics8.desktop.data.DesktopDownloadProgressState = com.comics8.desktop.data.DesktopDownloadProgressState(),
     val sourceRegistry: SourceRegistry = SourceRegistry(),
     val showAddSourceSheet: Boolean = false,
-    val addSourceOffers: List<SourceOffer> = emptyList(),
     val libraryRoots: List<String> = emptyList(),
     val showRemoveSourceSheet: Boolean = false,
     val sourceError: String? = null,

@@ -110,7 +110,7 @@ fun TopBar(
                     registry = state.sourceRegistry,
                     onSelect = viewModel::setActiveSource,
                     onAddSource = viewModel::openAddSourceSheet,
-                    onRemoveActive = viewModel::removeActiveSource,
+                    onRemoveActive = viewModel::openRemoveSourceSheet,
                     titleStyle = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.weight(1f),
                 )
