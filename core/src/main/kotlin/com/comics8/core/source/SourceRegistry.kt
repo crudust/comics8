@@ -38,14 +38,13 @@ class SourceRegistry(initial: List<ComicSource> = emptyList()) {
     fun get(id: String): ComicSource =
         getOrNull(id) ?: error("Unknown comic source: $id")
 
-    /** Blank id is not rewritten to eleven. */
     fun getOrNull(id: String): ComicSource? {
         if (id.isBlank()) return null
         return snapshot.get().byId[id]
     }
 
-    fun all(): List<ComicSource> = snapshot.get().sources
-    fun knownIds(): Set<String> = snapshot.get().byId.keys
+    fun all(): List<ComicSource> = snapshot.get().sources.toList()
+    fun knownIds(): Set<String> = snapshot.get().byId.keys.toSet()
     fun contains(id: String): Boolean = getOrNull(id) != null
 
     fun chipLabel(sourceId: String): String =
@@ -75,18 +74,17 @@ class SourceRegistry(initial: List<ComicSource> = emptyList()) {
         return getOrNull(key)
     }
 
-    /** No match does not fall back to eleven. */
     fun sourceForUrl(url: String): ComicSource? {
         val host = hostOf(url) ?: return null
-        return all().firstOrNull { it.ownsHost(host) }
+        return snapshot.get().sources.firstOrNull { it.ownsHost(host) }
     }
 
     fun applyConfig(config: SourceConfig) {
-        all().forEach { it.applyConfig(config) }
+        snapshot.get().sources.forEach { it.applyConfig(config) }
     }
 
     fun applyPreferences(languageFor: (String) -> String?) {
-        all().forEach { source ->
+        snapshot.get().sources.forEach { source ->
             val language = languageFor(source.id) ?: source.defaultLanguage
             if (language != null) source.applyConfig(SourceConfig(language = language))
         }
@@ -95,7 +93,7 @@ class SourceRegistry(initial: List<ComicSource> = emptyList()) {
     fun ownsHost(host: String): Boolean {
         val key = host.lowercase().trim().trim('.')
         if (key.isEmpty()) return false
-        return all().any { it.ownsHost(key) }
+        return snapshot.get().sources.any { it.ownsHost(key) }
     }
 
     fun syncParticipates(sourceId: String): Boolean =

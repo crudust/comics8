@@ -151,7 +151,7 @@ fun ToonCard(
     onToggleFavorite: () -> Unit,
     modifier: Modifier = Modifier,
     showSourceChip: Boolean = false,
-    sourceRegistry: SourceRegistry = SourceRegistry(),
+    sourceRegistry: SourceRegistry,
 ) {
     Column(
         modifier = modifier

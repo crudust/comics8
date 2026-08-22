@@ -33,7 +33,7 @@ object DownloadLayout {
 
     /**
      * Moves `{toonId}/{wrId}` under `{base}/eleven/` when the destination is empty.
-     * Existing `eleven/` and `hitomi/` trees are left untouched.
+     * Existing `eleven/`, `hitomi/`, and `local/` trees are left untouched.
      */
     fun migrateLegacyElevenDirs(base: File): List<MigratedDownloadDir> {
         if (!base.isDirectory) return emptyList()

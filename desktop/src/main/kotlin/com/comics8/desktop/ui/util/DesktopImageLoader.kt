@@ -64,7 +64,7 @@ object DesktopImageCache {
     }
 
     @Volatile
-    var registry: SourceRegistry = SourceRegistry()
+    lateinit var registry: SourceRegistry
 
     fun get(url: String): ImageBitmap? {
         if (url.isBlank()) return null

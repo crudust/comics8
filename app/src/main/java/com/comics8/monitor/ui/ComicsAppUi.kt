@@ -139,6 +139,7 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                                     onOpen = viewModel::onListingOpen,
                                     onToggleFavorite = viewModel::toggleFavorite,
                                     showSourceChip = false,
+                                    sourceRegistry = state.sourceRegistry,
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             }
@@ -282,6 +283,7 @@ private fun BrowseTabsPager(
                         onOpen = viewModel::onListingOpen,
                         onToggleFavorite = viewModel::toggleFavorite,
                         showSourceChip = false,
+                        sourceRegistry = state.sourceRegistry,
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                     )
                     if (pageCatalog.paginated && state.lastPage > 1) {

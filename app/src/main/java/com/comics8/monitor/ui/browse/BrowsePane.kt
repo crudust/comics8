@@ -46,7 +46,7 @@ fun ListingGrid(
     modifier: Modifier = Modifier,
     scrollToTopTrigger: Int = 0,
     showSourceChip: Boolean = false,
-    sourceRegistry: SourceRegistry = SourceRegistry(),
+    sourceRegistry: SourceRegistry,
 ) {
     val gridState = rememberLazyGridState()
 
@@ -83,7 +83,7 @@ fun ToonCard(
     onToggleFavorite: () -> Unit,
     modifier: Modifier = Modifier,
     showSourceChip: Boolean = false,
-    sourceRegistry: SourceRegistry = SourceRegistry(),
+    sourceRegistry: SourceRegistry,
 ) {
     Column(
         modifier = modifier

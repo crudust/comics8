@@ -9,7 +9,7 @@ object DesktopSourcePrefs {
     private val prefs: Preferences = Preferences.userRoot().node("com.comics8.desktop")
 
     @Volatile
-    var registry: SourceRegistry = SourceRegistry()
+    lateinit var registry: SourceRegistry
 
     fun isEnabled(sourceId: String): Boolean {
         val id = sourceId.ifBlank { WorkId.DEFAULT_SOURCE }

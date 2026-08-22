@@ -14,7 +14,6 @@ interface ComicSource {
     val defaultPolicy: RequestPolicy
     val searchPlaceholder: String get() = "제목 검색"
 
-    /** Included when a catalog is installed. ElevenToonSource overrides true. */
     val enabledByDefault: Boolean get() = false
 
     val kind: SourceKind get() = SourceKind.REMOTE

@@ -9,7 +9,6 @@ data class WorkId(val sourceId: String, val toonId: String) {
     fun storageKey(): String = "$sourceId:$toonId"
 
     companion object {
-        /** Storage/sync legacy ID. Not a runtime default source. */
         const val DEFAULT_SOURCE = "eleven"
         const val LOCAL_SOURCE = "local"
 
@@ -17,7 +16,7 @@ data class WorkId(val sourceId: String, val toonId: String) {
         fun local(toonId: String): WorkId = WorkId(LOCAL_SOURCE, toonId)
 
         /**
-         * Legacy storage only. Unprefixed raw / blank sourceId → eleven.
+         * Unprefixed raw / blank sourceId → DEFAULT_SOURCE (legacy entityId).
          * Do not use for UI active source, new favorites, or download enqueue.
          */
         fun parse(raw: String): WorkId {
@@ -29,7 +28,7 @@ data class WorkId(val sourceId: String, val toonId: String) {
         }
 
         /**
-         * inbound sync / DB row. Blank sourceId is eleven (old servers).
+         * inbound sync / DB row. Blank sourceId is DEFAULT_SOURCE (old servers).
          * local id is accepted here; SyncWire filters it.
          */
         fun stored(sourceId: String, toonId: String): WorkId? {
@@ -43,8 +42,8 @@ data class WorkId(val sourceId: String, val toonId: String) {
         }
 
         /**
-         * New writes. No eleven privilege.
-         * [installedIds]: currently installed sources. Blank sourceId is rejected.
+         * New writes. Blank sourceId is rejected.
+         * [installedIds]: currently installed sources.
          */
         fun writable(
             sourceId: String,
