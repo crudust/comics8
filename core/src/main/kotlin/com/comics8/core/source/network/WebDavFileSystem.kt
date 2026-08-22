@@ -16,6 +16,8 @@ import java.net.URLEncoder
 import java.nio.ByteBuffer
 import java.nio.channels.SeekableByteChannel
 import java.nio.charset.StandardCharsets
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 import javax.xml.XMLConstants
 import javax.xml.parsers.DocumentBuilderFactory
 
@@ -119,7 +121,10 @@ class WebDavFileSystem(
                 if (decoded.isBlank()) continue
                 val directory = element.getElementsByTagNameNS("DAV:", "collection").length > 0
                 val size = element.firstText("getcontentlength")?.toLongOrNull() ?: 0L
-                add(NetworkNode(joinNetworkPath(parent, decoded), decoded, directory, size))
+                val modifiedAt = element.firstText("getlastmodified")
+                    ?.let { runCatching { ZonedDateTime.parse(it, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant().toEpochMilli() }.getOrNull() }
+                    ?: 0L
+                add(NetworkNode(joinNetworkPath(parent, decoded), decoded, directory, size, modifiedAt))
             }
         }.distinctBy { it.path }
     }

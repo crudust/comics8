@@ -33,6 +33,8 @@ import com.comics8.core.network.ImageReferer
 import com.comics8.core.source.LocalImageUri
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.local.ThumbEncoder
+import com.comics8.core.source.local.CoverThumbCache
+import com.comics8.core.source.local.ThumbKey
 import com.comics8.core.source.local.ZipArchive
 import com.comics8.core.source.local.ZipImageUri
 import com.comics8.core.source.network.NetworkImageUri
@@ -51,7 +53,7 @@ import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
 object AwtThumbEncoder : ThumbEncoder {
-    override fun jpeg(bytes: ByteArray, longEdgePx: Int, quality: Int): ByteArray {
+    override fun webp(bytes: ByteArray, longEdgePx: Int, quality: Int): ByteArray {
         val q = quality.coerceIn(1, 100)
         Image.makeFromEncoded(bytes).use { src ->
             val w = src.width.coerceAtLeast(1)
@@ -60,8 +62,8 @@ object AwtThumbEncoder : ThumbEncoder {
             val scale = if (longEdge <= longEdgePx) 1.0 else longEdgePx.toDouble() / longEdge
             val tw = (w * scale).toInt().coerceAtLeast(1)
             val th = (h * scale).toInt().coerceAtLeast(1)
-            val jpeg = if (tw == w && th == h) {
-                src.encodeJpeg(q)
+            val webp = if (tw == w && th == h) {
+                src.encodeWebp(q)
             } else {
                 Surface.makeRasterN32Premul(tw, th).use { surface ->
                     surface.canvas.clear(0xFFFFFFFF.toInt())
@@ -73,15 +75,15 @@ object AwtThumbEncoder : ThumbEncoder {
                         null,
                         true,
                     )
-                    surface.makeImageSnapshot().use { it.encodeJpeg(q) }
+                    surface.makeImageSnapshot().use { it.encodeWebp(q) }
                 }
             }
-            return jpeg
+            return webp
         }
     }
 
-    private fun Image.encodeJpeg(quality: Int): ByteArray {
-        val data = encodeToData(EncodedImageFormat.JPEG, quality) ?: error("jpeg encode failed")
+    private fun Image.encodeWebp(quality: Int): ByteArray {
+        val data = encodeToData(EncodedImageFormat.WEBP, quality) ?: error("webp encode failed")
         return data.use { it.bytes }
     }
 }
@@ -98,6 +100,12 @@ object DesktopImageCache {
             size > MEMORY_MAX_ENTRIES
     }
     private val diskCacheDir = File(System.getProperty("user.home"), ".comics8/cache").apply { mkdirs() }
+    val coverThumbs = CoverThumbCache(
+        File(System.getProperty("user.home"), ".comics8/thumbs"),
+        AwtThumbEncoder,
+        maxSizeBytes = 300L * 1024L * 1024L,
+        targetSizeBytes = 240L * 1024L * 1024L,
+    )
 
     @Volatile
     var httpClient: OkHttpClient = OkHttpClient.Builder()
@@ -157,11 +165,32 @@ object DesktopImageCache {
             } catch (_: Exception) {
                 null
             }
-        } else if (networkRef != null) {
+        } else if (networkRef != null && networkRef.preview != null) {
             try {
-                NetworkSourceRuntime.open(url).use { it.readBytes() }
+                val key = ThumbKey(
+                    "${networkRef.sourceId}|${networkRef.path}|${networkRef.preview}",
+                    networkRef.modifiedAt,
+                    networkRef.size,
+                )
+                coverThumbs.getOrCreate(key) {
+                    NetworkSourceRuntime.open(url).use { it.readBytes() }
+                }.readBytes()
             } catch (_: Exception) {
                 null
+            }
+        } else if (networkRef != null) {
+            if (cachedFile.isFile && cachedFile.length() > 0L) {
+                cachedFile.setLastModified(System.currentTimeMillis())
+                runCatching { cachedFile.readBytes() }.getOrNull()
+            } else {
+                try {
+                    NetworkSourceRuntime.open(url).use { it.readBytes() }.also { bytes ->
+                        cachedFile.writeBytes(bytes)
+                        evictDiskIfNeeded(cachedFile)
+                    }
+                } catch (_: Exception) {
+                    null
+                }
             }
         } else if (cachedFile.exists() && cachedFile.length() > 0) {
             try {

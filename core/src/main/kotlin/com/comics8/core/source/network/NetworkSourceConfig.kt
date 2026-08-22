@@ -2,6 +2,7 @@ package com.comics8.core.source.network
 
 import org.json.JSONArray
 import org.json.JSONObject
+import com.comics8.core.source.local.LibraryScanIndex
 import java.io.File
 import java.util.UUID
 
@@ -98,7 +99,10 @@ data class NetworkSourceConfig(
     }
 }
 
-class NetworkSourceStore(private val file: File) {
+class NetworkSourceStore(
+    private val file: File,
+    private val indexDir: File = File(file.parentFile, "network-index"),
+) {
     @Synchronized
     fun all(): List<NetworkSourceConfig> {
         if (!file.isFile) return emptyList()
@@ -128,6 +132,15 @@ class NetworkSourceStore(private val file: File) {
         val next = all().filterNot { it.id == id }
         write(next)
         NetworkSourceRuntime.remove(id)
+        indexFor(id).clear()
+    }
+
+    fun createSource(config: NetworkSourceConfig): NetworkLibrarySource =
+        NetworkLibrarySource(config.validated(), index = indexFor(config.id))
+
+    private fun indexFor(id: String): LibraryScanIndex {
+        val name = LibraryScanIndex.signature(listOf(id))
+        return LibraryScanIndex(File(indexDir, "$name.json"))
     }
 
     private fun write(configs: List<NetworkSourceConfig>) {

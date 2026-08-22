@@ -14,6 +14,7 @@ import com.comics8.core.source.SourcePrefs
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.js.JsPackStore
 import com.comics8.core.source.local.CoverThumbCache
+import com.comics8.core.source.local.LibraryScanIndex
 import com.comics8.core.source.local.LocalSource
 import com.comics8.core.source.network.NetworkSourceStore
 import com.comics8.core.source.network.loadSources
@@ -69,7 +70,10 @@ class ComicsApp : Application(), ImageLoaderFactory {
         val store = JsPackStore.androidFiles(filesDir)
         jsPackStore = store
         val loaded = store.loadInto(registry)
-        val networkStore = NetworkSourceStore(File(filesDir, "sources/network-connections.json"))
+        val networkStore = NetworkSourceStore(
+            File(filesDir, "sources/network-connections.json"),
+            File(cacheDir, "library-index/network"),
+        )
         networkSourceStore = networkStore
         val networkSources = networkStore.loadSources()
         networkSources.forEach(registry::add)
@@ -83,6 +87,7 @@ class ComicsApp : Application(), ImageLoaderFactory {
             LocalSource(
                 roots = { libraryMirror.materialize(sourcePrefs.libraryRoots()) },
                 thumbs = coverThumbs,
+                index = LibraryScanIndex(File(cacheDir, "library-index/local.json")),
             ),
         )
         val isSourceEnabled: (String) -> Boolean = { id -> sourcePrefs.isEnabled(id) }
@@ -155,7 +160,7 @@ class ComicsApp : Application(), ImageLoaderFactory {
             .okHttpClient(http)
             .components {
                 add(ZipImageFetcher.Factory())
-                add(NetworkImageFetcher.Factory())
+                add(NetworkImageFetcher.Factory(coverThumbs))
             }
             .crossfade(true)
             .memoryCache {

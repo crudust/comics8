@@ -38,11 +38,14 @@ class NetworkLibrarySourceTest {
         try {
             val listing = source.loadListing("LIBRARY", 1, ThrowingHttp)
             assertThat(listing.items.map { it.title }).containsExactly("Book")
+            assertThat(backend.channelOpens).isEqualTo(0)
             val episodes = source.loadEpisodes(listing.items.single(), 1, ThrowingHttp)
+            assertThat(backend.channelOpens).isEqualTo(0)
             val urls = source.resolveImages(episodes.items.single(), listing.items.single(), ThrowingHttp)
             assertThat(urls).hasSize(1)
+            assertThat(backend.channelOpens).isEqualTo(1)
             assertThat(NetworkSourceRuntime.open(urls.single()).readBytes()).isEqualTo(image)
-            assertThat(backend.channelOpens).isAtLeast(3)
+            assertThat(backend.channelOpens).isEqualTo(2)
         } finally {
             NetworkSourceRuntime.remove(config.id)
         }

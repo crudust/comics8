@@ -13,14 +13,14 @@ class CoverThumbCacheTest {
         val received = mutableListOf<Triple<ByteArray, Int, Int>>()
         val encoder = ThumbEncoder { bytes, longEdgePx, quality ->
             received += Triple(bytes, longEdgePx, quality)
-            "jpeg-out".toByteArray()
+            "webp-out".toByteArray()
         }
         val cache = CoverThumbCache(dir, encoder, longEdgePx = 320, quality = 80)
         val key = ThumbKey("/comics/cover.jpg", mtimeEpochMs = 100L, sizeBytes = 12L)
         val created = cache.getOrCreate(key) { "full-image".toByteArray() }
 
-        assertThat(created.name).matches("[0-9a-f]{64}\\.jpg")
-        assertThat(created.readBytes().toString(Charsets.UTF_8)).isEqualTo("jpeg-out")
+        assertThat(created.name).matches("[0-9a-f]{64}\\.webp")
+        assertThat(created.readBytes().toString(Charsets.UTF_8)).isEqualTo("webp-out")
         assertThat(received).hasSize(1)
         assertThat(received[0].first.toString(Charsets.UTF_8)).isEqualTo("full-image")
         assertThat(received[0].second).isEqualTo(320)
@@ -46,7 +46,28 @@ class CoverThumbCacheTest {
         cache.getOrCreate(ThumbKey("/a.jpg", 2L, 1L)) { byteArrayOf(2) }
         cache.getOrCreate(ThumbKey("/a.jpg", 2L, 9L)) { byteArrayOf(3) }
         assertThat(encodes).isEqualTo(3)
-        assertThat(dir.listFiles { f -> f.extension == "jpg" }!!.size).isEqualTo(3)
+        assertThat(dir.listFiles { f -> f.extension == "webp" }!!.size).isEqualTo(3)
+    }
+
+    @Test
+    fun evictsLeastRecentlyUsedThumbsWhenCapacityIsExceeded() {
+        val dir = createTempDirectory("thumbs-lru").toFile()
+        dir.deleteOnExit()
+        val cache = CoverThumbCache(
+            dir = dir,
+            encoder = ThumbEncoder { bytes, _, _ -> bytes },
+            maxSizeBytes = 10L,
+            targetSizeBytes = 6L,
+        )
+        val first = cache.getOrCreate(ThumbKey("/first", 1L, 1L)) { ByteArray(4) { 1 } }
+        first.setLastModified(1L)
+        val second = cache.getOrCreate(ThumbKey("/second", 1L, 1L)) { ByteArray(4) { 2 } }
+        second.setLastModified(2L)
+        val third = cache.getOrCreate(ThumbKey("/third", 1L, 1L)) { ByteArray(4) { 3 } }
+
+        assertThat(first.exists()).isFalse()
+        assertThat(second.exists()).isFalse()
+        assertThat(third.exists()).isTrue()
     }
 
     @Test

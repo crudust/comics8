@@ -19,7 +19,7 @@ import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
 import com.comics8.core.source.js.JsPackStore
 import com.comics8.core.source.local.LocalSource
-import com.comics8.core.source.network.NetworkLibrarySource
+import com.comics8.core.source.local.LibraryScanIndex
 import com.comics8.core.source.network.NetworkProtocol
 import com.comics8.core.source.network.NetworkSourceConfig
 import com.comics8.core.source.network.createNetworkFileSystem
@@ -638,7 +638,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 val source = withContext(Dispatchers.IO) {
                     val valid = draft.validated()
                     networkSourceStore.save(valid)
-                    NetworkLibrarySource(valid)
+                    networkSourceStore.createSource(valid)
                 }
                 val registry = repository.sourceRegistry()
                 registry.remove(source.id)
@@ -782,6 +782,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             LocalSource(
                 roots = { libraryMirror.materialize(sourceSettings.libraryRoots()) },
                 thumbs = coverThumbs,
+                index = LibraryScanIndex(java.io.File(app.cacheDir, "library-index/local.json")),
             ),
         )
     }

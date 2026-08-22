@@ -19,6 +19,7 @@ class LocalSource(
     private val roots: () -> List<File>,
     private val thumbs: CoverThumbCache,
     private val scan: LibraryScanner = LibraryScanner(),
+    private val index: LibraryScanIndex? = null,
 ) : ComicSource {
     override val id: String = WorkId.LOCAL_SOURCE
     override val displayName: String = "저장소"
@@ -78,7 +79,51 @@ class LocalSource(
         return emptyList()
     }
 
-    private fun scanWorks(): List<ScannedWork> = scan.scan(roots())
+    private fun scanWorks(): List<ScannedWork> {
+        val currentRoots = roots()
+        val signature = LibraryScanIndex.signature(currentRoots.flatMap { root ->
+            val rootPath = LocalWorkId.canonical(root)
+            listOf("root|$rootPath|${root.lastModified()}") +
+                (root.listFiles()?.map { child ->
+                    "$rootPath|${child.name}|${child.isDirectory}|${child.length()}|${child.lastModified()}"
+                } ?: emptyList())
+        })
+        index?.load(signature)?.let { cached -> return cached.map(::fromIndexed) }
+        return scan.scan(currentRoots).also { works ->
+            index?.save(signature, works.map(::toIndexed))
+        }
+    }
+
+    private fun toIndexed(work: ScannedWork): IndexedLibraryWork = IndexedLibraryWork(
+        id = work.toonId,
+        title = work.title,
+        path = LocalWorkId.canonical(work.path),
+        kind = work.kind.name,
+        episodes = work.episodes.map { episode ->
+            IndexedLibraryEpisode(
+                path = LocalWorkId.canonical(episode.path),
+                title = episode.title,
+                zip = episode.kind == LocalEpisodeKind.ZIP,
+                size = episode.path.length(),
+                modifiedAt = episode.path.lastModified(),
+            )
+        },
+    )
+
+    private fun fromIndexed(work: IndexedLibraryWork): ScannedWork = ScannedWork(
+        kind = LocalWorkKind.valueOf(work.kind),
+        toonId = work.id,
+        title = work.title,
+        path = File(work.path),
+        episodes = work.episodes.map { episode ->
+            ScannedEpisode(
+                kind = if (episode.zip) LocalEpisodeKind.ZIP else LocalEpisodeKind.DIR,
+                wrId = episode.path,
+                title = episode.title,
+                path = File(episode.path),
+            )
+        },
+    )
 
     private fun workFor(toonId: String): ScannedWork? {
         scanWorks().firstOrNull { it.toonId == toonId }?.let { return it }

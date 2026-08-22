@@ -1,6 +1,8 @@
 package com.comics8.core.source.network
 
 import com.comics8.core.source.local.ZipArchive
+import com.comics8.core.source.local.NaturalSort
+import com.comics8.core.source.local.ZipImageNames
 import org.apache.commons.compress.archivers.zip.ZipFile
 import java.io.FilterInputStream
 import java.io.IOException
@@ -21,7 +23,17 @@ object NetworkSourceRuntime {
     fun open(url: String): InputStream {
         val ref = NetworkImageUri.parse(url) ?: throw IOException("잘못된 네트워크 이미지 주소입니다")
         val backend = backends[ref.sourceId] ?: throw IOException("등록되지 않은 네트워크 저장소입니다")
-        val entryName = ref.zipEntry ?: return backend.open(ref.path)
+        if (ref.preview == NetworkImageUri.PreviewKind.FOLDER_FIRST) {
+            val image = backend.list(ref.path)
+                .filter { !it.directory && ZipImageNames.isImageEntry(it.name) }
+                .minWithOrNull(compareBy(NaturalSort) { it.name })
+                ?: throw IOException("폴더에 이미지가 없습니다")
+            return backend.open(image.path)
+        }
+        if (ref.preview != NetworkImageUri.PreviewKind.ZIP_FIRST && ref.zipEntry == null) {
+            return backend.open(ref.path)
+        }
+        val entryName = ref.zipEntry.orEmpty()
         val channel = backend.openChannel(ref.path, ref.size)
         val zip = try {
             ZipFile.builder().setSeekableByteChannel(channel).get()
@@ -29,7 +41,22 @@ object NetworkSourceRuntime {
             channel.close()
             throw e
         }
-        val normalized = ZipArchive.normalizeZipEntry(entryName)
+        val normalized = if (ref.preview == NetworkImageUri.PreviewKind.ZIP_FIRST) {
+            val entries = zip.entries
+            val names = ArrayList<String>()
+            while (entries.hasMoreElements()) {
+                val candidate = entries.nextElement()
+                if (candidate.isDirectory) continue
+                val name = runCatching { ZipArchive.normalizeZipEntry(candidate.name) }.getOrNull() ?: continue
+                if (ZipImageNames.isImageEntry(name)) names += name
+            }
+            names.minWithOrNull(NaturalSort) ?: run {
+                zip.close()
+                throw IOException("ZIP에 이미지가 없습니다")
+            }
+        } else {
+            ZipArchive.normalizeZipEntry(entryName)
+        }
         val entry = zip.getEntry(normalized) ?: run {
             zip.close()
             throw IOException("ZIP 항목을 찾을 수 없습니다: $normalized")

@@ -75,7 +75,10 @@ fun main() {
     application {
         val jsPackStore = remember { JsPackStore.desktopDefault() }
         val networkSourceStore = remember {
-            NetworkSourceStore(File(System.getProperty("user.home"), ".comics8/network-connections.json"))
+            NetworkSourceStore(
+                File(System.getProperty("user.home"), ".comics8/network-connections.json"),
+                File(System.getProperty("user.home"), ".comics8/cache/library-index/network"),
+            )
         }
         val registry = remember {
             SourceRegistry().also {

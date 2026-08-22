@@ -15,7 +15,7 @@ import java.io.ByteArrayOutputStream
 @Config(application = Application::class, sdk = [34])
 class BitmapThumbEncoderTest {
     @Test
-    fun resizesLongEdgeAndWritesJpeg() {
+    fun resizesLongEdgeAndWritesWebp() {
         val src = Bitmap.createBitmap(800, 400, Bitmap.Config.ARGB_8888)
         src.eraseColor(Color.BLUE)
         val png = ByteArrayOutputStream().also {
@@ -23,9 +23,9 @@ class BitmapThumbEncoderTest {
         }.toByteArray()
         src.recycle()
 
-        val jpeg = BitmapThumbEncoder.jpeg(png, longEdgePx = 200, quality = 80)
-        assertThat(jpeg.size).isGreaterThan(0)
-        val decoded = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)
+        val webp = BitmapThumbEncoder.webp(png, longEdgePx = 200, quality = 80)
+        assertThat(webp.size).isGreaterThan(0)
+        val decoded = BitmapFactory.decodeByteArray(webp, 0, webp.size)
         assertThat(decoded).isNotNull()
         assertThat(maxOf(decoded.width, decoded.height)).isEqualTo(200)
         assertThat(minOf(decoded.width, decoded.height)).isEqualTo(100)
@@ -40,8 +40,8 @@ class BitmapThumbEncoderTest {
         }.toByteArray()
         src.recycle()
 
-        val jpeg = BitmapThumbEncoder.jpeg(png, longEdgePx = 320, quality = 70)
-        val decoded = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)
+        val webp = BitmapThumbEncoder.webp(png, longEdgePx = 320, quality = 70)
+        val decoded = BitmapFactory.decodeByteArray(webp, 0, webp.size)
         assertThat(decoded.width).isEqualTo(40)
         assertThat(decoded.height).isEqualTo(30)
     }

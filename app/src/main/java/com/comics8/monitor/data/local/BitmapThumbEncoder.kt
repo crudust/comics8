@@ -2,11 +2,12 @@ package com.comics8.monitor.data.local
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.os.Build
 import com.comics8.core.source.local.ThumbEncoder
 import java.io.ByteArrayOutputStream
 
 object BitmapThumbEncoder : ThumbEncoder {
-    override fun jpeg(bytes: ByteArray, longEdgePx: Int, quality: Int): ByteArray {
+    override fun webp(bytes: ByteArray, longEdgePx: Int, quality: Int): ByteArray {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         val srcW = bounds.outWidth
@@ -39,8 +40,14 @@ object BitmapThumbEncoder : ThumbEncoder {
                 }
             }
             val out = ByteArrayOutputStream()
-            val ok = bmp.compress(Bitmap.CompressFormat.JPEG, quality.coerceIn(1, 100), out)
-            if (!ok) error("jpeg encode failed")
+            @Suppress("DEPRECATION")
+            val format = if (Build.VERSION.SDK_INT >= 30) {
+                Bitmap.CompressFormat.WEBP_LOSSY
+            } else {
+                Bitmap.CompressFormat.WEBP
+            }
+            val ok = bmp.compress(format, quality.coerceIn(1, 100), out)
+            if (!ok) error("webp encode failed")
             return out.toByteArray()
         } finally {
             scaled?.recycle()

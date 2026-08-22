@@ -7,6 +7,7 @@ import com.hierynomus.mssmb2.SMB2CreateOptions
 import com.hierynomus.mssmb2.SMB2ShareAccess
 import com.hierynomus.protocol.commons.EnumWithValue.EnumUtils
 import com.hierynomus.smbj.SMBClient
+import com.hierynomus.smbj.SmbConfig
 import com.hierynomus.smbj.auth.AuthenticationContext
 import com.hierynomus.smbj.connection.Connection
 import com.hierynomus.smbj.session.Session
@@ -15,9 +16,13 @@ import java.io.InputStream
 import java.nio.ByteBuffer
 import java.nio.channels.SeekableByteChannel
 import java.util.EnumSet
+import java.util.concurrent.TimeUnit
 
 class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem {
     private val root = NetworkSourceConfig.normalizePath(config.path).replace('/', '\\')
+    private val handleLock = Any()
+    @Volatile private var activeHandles: Handles? = null
+    @Volatile private var closed = false
 
     override fun list(path: String): List<NetworkNode> = withShare { share ->
         val remoteDir = remotePath(path)
@@ -40,7 +45,7 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
     override fun open(path: String): InputStream = ChannelInputStream(openChannel(path))
 
     override fun openChannel(path: String, knownSize: Long): SeekableByteChannel {
-        val handles = connect()
+        val handles = handles()
         return try {
             val file = handles.share.openFile(
                 remotePath(path),
@@ -51,9 +56,9 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
                 EnumSet.of(SMB2CreateOptions.FILE_NON_DIRECTORY_FILE, SMB2CreateOptions.FILE_RANDOM_ACCESS),
             )
             val size = if (knownSize >= 0L) knownSize else file.fileInformation.standardInformation.endOfFile
-            SmbChannel(handles, file, size)
+            SmbChannel(file, size)
         } catch (e: Exception) {
-            handles.close()
+            invalidate(handles)
             throw e
         }
     }
@@ -63,10 +68,32 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
         return listOf(root, rel).filter { it.isNotEmpty() }.joinToString("\\")
     }
 
-    private fun <T> withShare(block: (DiskShare) -> T): T = connect().use { block(it.share) }
+    private fun <T> withShare(block: (DiskShare) -> T): T {
+        val handles = handles()
+        return try {
+            block(handles.share)
+        } catch (e: Exception) {
+            invalidate(handles)
+            throw e
+        }
+    }
+
+    private fun handles(): Handles = synchronized(handleLock) {
+        check(!closed) { "SMB 저장소가 닫혔습니다" }
+        activeHandles?.takeIf { it.connection.isConnected }?.let { return@synchronized it }
+        activeHandles?.close()
+        connect().also { activeHandles = it }
+    }
+
+    private fun invalidate(handles: Handles) = synchronized(handleLock) {
+        if (activeHandles === handles) {
+            activeHandles = null
+            handles.close()
+        }
+    }
 
     private fun connect(): Handles {
-        val client = SMBClient()
+        val client = SMBClient(SMB_CONFIG)
         val connection = try {
             client.connect(config.host, config.port)
         } catch (e: Exception) {
@@ -111,7 +138,6 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
     }
 
     private class SmbChannel(
-        private val handles: Handles,
         private val file: com.hierynomus.smbj.share.File,
         private val length: Long,
     ) : ReadOnlySeekableChannel() {
@@ -134,7 +160,20 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
             if (!open) return
             open = false
             runCatching { file.close() }
-            handles.close()
         }
+    }
+
+    override fun close() = synchronized(handleLock) {
+        if (closed) return@synchronized
+        closed = true
+        activeHandles?.close()
+        activeHandles = null
+    }
+
+    companion object {
+        private val SMB_CONFIG: SmbConfig = SmbConfig.builder()
+            .withTimeout(10L, TimeUnit.SECONDS)
+            .withSoTimeout(10L, TimeUnit.SECONDS)
+            .build()
     }
 }

@@ -9,9 +9,8 @@ import com.comics8.core.model.ViewMode
 import com.comics8.core.source.ProgressDisplay
 import com.comics8.core.source.WorkId
 import com.comics8.core.source.js.JsPackStore
-import com.comics8.core.source.local.CoverThumbCache
+import com.comics8.core.source.local.LibraryScanIndex
 import com.comics8.core.source.local.LocalSource
-import com.comics8.core.source.network.NetworkLibrarySource
 import com.comics8.core.source.network.NetworkProtocol
 import com.comics8.core.source.network.NetworkSourceConfig
 import com.comics8.core.source.network.NetworkSourceStore
@@ -23,7 +22,6 @@ import com.comics8.desktop.data.DesktopSourcePrefs
 import com.comics8.desktop.data.DesktopToonRepository
 import com.comics8.desktop.data.DesktopUpdateManager
 import com.comics8.desktop.data.ReadHistoryRecord
-import com.comics8.desktop.ui.util.AwtThumbEncoder
 import com.comics8.desktop.ui.util.DesktopFolderPicker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -60,10 +58,7 @@ class DesktopViewModel(
 
     private val catalogCache = mutableMapOf<BrowseTab, List<ToonItem>>()
     private val catalogPages = mutableMapOf<BrowseTab, Pair<Int, Int>>()
-    private val thumbCache = CoverThumbCache(
-        File(System.getProperty("user.home"), ".comics8/thumbs"),
-        AwtThumbEncoder,
-    )
+    private val thumbCache = com.comics8.desktop.ui.util.DesktopImageCache.coverThumbs
 
     private val toonTotalCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
     private val toonLastPageCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
@@ -484,7 +479,7 @@ class DesktopViewModel(
                 val source = withContext(Dispatchers.IO) {
                     val valid = draft.validated()
                     networkSourceStore.save(valid)
-                    NetworkLibrarySource(valid)
+                    networkSourceStore.createSource(valid)
                 }
                 val registry = repository.sourceRegistry()
                 registry.remove(source.id)
@@ -625,6 +620,9 @@ class DesktopViewModel(
             LocalSource(
                 roots = { DesktopSourcePrefs.libraryRoots().map { File(it) } },
                 thumbs = thumbCache,
+                index = LibraryScanIndex(
+                    File(System.getProperty("user.home"), ".comics8/cache/library-index/local.json"),
+                ),
             ),
         )
     }
