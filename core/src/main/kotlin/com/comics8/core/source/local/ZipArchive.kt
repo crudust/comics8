@@ -23,8 +23,8 @@ class ZipArchive(file: File) : Closeable {
         if (size > MAX_ENTRY_BYTES) {
             throw IllegalArgumentException("zip entry too large: ${entry.name} ($size bytes)")
         }
-        val stream = zip.getInputStream(entry)
-        return if (size < 0L) CappedInputStream(stream, MAX_ENTRY_BYTES) else stream
+        // Always cap actual bytes: DEFLATED entries can inflate past a lying CEN size.
+        return CappedInputStream(zip.getInputStream(entry), MAX_ENTRY_BYTES)
     }
 
     override fun close() {
@@ -57,7 +57,7 @@ class ZipArchive(file: File) : Closeable {
         return null
     }
 
-    private class CappedInputStream(
+    internal class CappedInputStream(
         inner: InputStream,
         private val maxBytes: Long,
     ) : FilterInputStream(inner) {
@@ -73,6 +73,18 @@ class ZipArchive(file: File) : Closeable {
             val n = super.read(b, off, len)
             if (n > 0) account(n.toLong())
             return n
+        }
+
+        override fun skip(n: Long): Long {
+            if (n <= 0L) return 0L
+            val buf = ByteArray(minOf(n, 8192L).toInt())
+            var skipped = 0L
+            while (skipped < n) {
+                val r = read(buf, 0, minOf(buf.size.toLong(), n - skipped).toInt())
+                if (r < 0) break
+                skipped += r
+            }
+            return skipped
         }
 
         private fun account(n: Long) {
@@ -98,7 +110,5 @@ class ZipArchive(file: File) : Closeable {
             } catch (_: IllegalArgumentException) {
                 null
             }
-
-        internal fun exceedsEntryCap(size: Long): Boolean = size > MAX_ENTRY_BYTES
     }
 }

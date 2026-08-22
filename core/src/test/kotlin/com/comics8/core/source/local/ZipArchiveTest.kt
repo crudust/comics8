@@ -3,6 +3,7 @@ package com.comics8.core.source.local
 import com.google.common.truth.Truth.assertThat
 import org.junit.Assert.assertThrows
 import org.junit.Test
+import java.io.ByteArrayInputStream
 import java.io.File
 import java.util.zip.ZipFile
 import kotlin.io.path.createTempDirectory
@@ -96,12 +97,32 @@ class ZipArchiveTest {
 
     @Test
     fun rejectsEntriesOver75Mb() {
-        assertThat(ZipArchive.exceedsEntryCap(ZipArchive.MAX_ENTRY_BYTES)).isFalse()
-        assertThat(ZipArchive.exceedsEntryCap(ZipArchive.MAX_ENTRY_BYTES + 1)).isTrue()
-        val zip = tempZip("tiny.jpg" to "x")
-        ZipArchive(zip).use { archive ->
-            assertThat(archive.open("tiny.jpg").readBytes()).hasLength(1)
+        val dir = createTempDirectory("zip-cap").toFile()
+        dir.deleteOnExit()
+        val zip = File(dir, "claimed.zip")
+        LocalTestZips.writeClaimedSize(
+            zip,
+            name = "tiny.jpg",
+            body = "x",
+            claimedUncompressedSize = ZipArchive.MAX_ENTRY_BYTES + 1,
+        )
+        ZipFile(zip).use { file ->
+            assertThat(file.getEntry("tiny.jpg").size).isEqualTo(ZipArchive.MAX_ENTRY_BYTES + 1)
         }
+        ZipArchive(zip).use { archive ->
+            val error = assertThrows(IllegalArgumentException::class.java) {
+                archive.open("tiny.jpg")
+            }
+            assertThat(error.message).contains("too large")
+        }
+    }
+
+    @Test
+    fun cappedStreamRejectsBytesPastMax() {
+        val over = ZipArchive.CappedInputStream(ByteArrayInputStream(byteArrayOf(1, 2, 3, 4)), 3)
+        assertThrows(IllegalArgumentException::class.java) { over.readBytes() }
+        val exact = ZipArchive.CappedInputStream(ByteArrayInputStream(byteArrayOf(1, 2, 3)), 3)
+        assertThat(exact.readBytes()).isEqualTo(byteArrayOf(1, 2, 3))
     }
 
     @Test
