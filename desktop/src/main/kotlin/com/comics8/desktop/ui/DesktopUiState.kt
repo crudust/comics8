@@ -3,6 +3,7 @@ package com.comics8.desktop.ui
 import com.comics8.core.model.BrowseTab
 import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.ReadDirection
+import com.comics8.core.model.SplitMode
 import com.comics8.core.model.ToonItem
 import com.comics8.core.model.ViewMode
 import com.comics8.core.source.ComicSource
@@ -59,6 +60,7 @@ data class DesktopUiState(
     val readerError: String? = null,
     val viewMode: ViewMode = ViewMode.DUAL,
     val readDirection: ReadDirection = ReadDirection.RIGHT_TO_LEFT,
+    val splitMode: SplitMode = SplitMode.FIT,
     val seriesHistory: ReadHistoryRecord? = null,
     val historyItems: List<ReadHistoryRecord> = emptyList(),
     val readCounts: Map<String, Int> = emptyMap(),

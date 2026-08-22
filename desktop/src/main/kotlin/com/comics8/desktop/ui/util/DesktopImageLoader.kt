@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
+import com.comics8.core.model.ImageHalf
 import com.comics8.core.network.ImageFallbacks
 import com.comics8.core.network.ImageReferer
 import com.comics8.core.source.LocalImageUri
@@ -332,6 +333,7 @@ fun DesktopAsyncImage(
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Fit,
     alignment: Alignment = Alignment.Center,
+    half: ImageHalf = ImageHalf.FULL,
     showPlaceholder: Boolean = true,
     onLoaded: ((ImageBitmap) -> Unit)? = null,
 ) {
@@ -365,13 +367,51 @@ fun DesktopAsyncImage(
     ) {
         val currentBitmap = displayedBitmap
         if (currentBitmap != null) {
-            Image(
-                bitmap = currentBitmap,
-                contentDescription = contentDescription,
-                contentScale = contentScale,
-                alignment = alignment,
-                modifier = Modifier.fillMaxSize(),
-            )
+            if (half == ImageHalf.FULL) {
+                Image(
+                    bitmap = currentBitmap,
+                    contentDescription = contentDescription,
+                    contentScale = contentScale,
+                    alignment = alignment,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                    val srcW = currentBitmap.width.toFloat()
+                    val srcH = currentBitmap.height.toFloat()
+                    if (srcW > 0 && srcH > 0) {
+                        val halfWidth = srcW / 2f
+                        val pageAspectRatio = halfWidth / srcH
+                        val containerWidth = size.width
+                        val containerHeight = size.height
+                        val containerAspectRatio = containerWidth / containerHeight
+
+                        val dstWidth: Float
+                        val dstHeight: Float
+                        if (containerAspectRatio > pageAspectRatio) {
+                            dstHeight = containerHeight
+                            dstWidth = dstHeight * pageAspectRatio
+                        } else {
+                            dstWidth = containerWidth
+                            dstHeight = dstWidth / pageAspectRatio
+                        }
+
+                        val dstLeft = (containerWidth - dstWidth) / 2f
+                        val dstTop = (containerHeight - dstHeight) / 2f
+
+                        val srcLeft = if (half == ImageHalf.LEFT) 0 else (srcW / 2).toInt()
+                        val srcRight = if (half == ImageHalf.LEFT) (srcW / 2).toInt() else srcW.toInt()
+
+                        drawImage(
+                            image = currentBitmap,
+                            srcOffset = androidx.compose.ui.unit.IntOffset(srcLeft, 0),
+                            srcSize = androidx.compose.ui.unit.IntSize(srcRight - srcLeft, srcH.toInt()),
+                            dstOffset = androidx.compose.ui.unit.IntOffset(dstLeft.toInt(), dstTop.toInt()),
+                            dstSize = androidx.compose.ui.unit.IntSize(dstWidth.toInt(), dstHeight.toInt()),
+                        )
+                    }
+                }
+            }
         } else if (loading && showPlaceholder) {
             Box(
                 modifier = Modifier

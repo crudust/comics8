@@ -4,6 +4,7 @@ import com.comics8.core.model.ArtistRef
 import com.comics8.core.model.BrowseTab
 import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.ReadDirection
+import com.comics8.core.model.SplitMode
 import com.comics8.core.model.ToonItem
 import com.comics8.core.model.ViewMode
 import com.comics8.core.source.ProgressDisplay
@@ -1829,6 +1830,10 @@ class DesktopViewModel(
         scope.launch {
             repository.saveReaderSetting(series.workId(), mode, direction)
         }
+    }
+
+    fun setSplitMode(mode: SplitMode) {
+        _state.update { it.copy(splitMode = mode) }
     }
 
     fun recordImageAspectRatio(index: Int, width: Int, height: Int) {

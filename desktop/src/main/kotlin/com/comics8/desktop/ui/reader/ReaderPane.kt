@@ -72,9 +72,12 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.comics8.core.model.DualSpread
+import com.comics8.core.model.ImageHalf
 import com.comics8.core.model.ReadDirection
+import com.comics8.core.model.SinglePageSlice
 import com.comics8.core.model.ViewMode
 import com.comics8.core.model.buildDualSpreads
+import com.comics8.core.model.buildSinglePageSlices
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
 import com.comics8.desktop.ui.components.ErrorPane
@@ -312,10 +315,14 @@ private fun ReaderSingleView(
     state: DesktopUiState,
     viewModel: DesktopViewModel,
 ) {
-    var currentPage by remember(state.currentEpisode?.wrId) {
-        mutableStateOf(
-            (state.currentEpisode?.lastReadPage ?: 0).coerceIn(0, (state.readerImages.size - 1).coerceAtLeast(0)),
-        )
+    val slices = remember(state.readerImages.size, state.imageAspectRatios, state.splitMode, state.readDirection) {
+        buildSinglePageSlices(state.readerImages.size, state.imageAspectRatios, state.splitMode, state.readDirection)
+    }
+    val totalPages = slices.size.coerceAtLeast(1)
+    var currentPage by remember(state.currentEpisode?.wrId, slices) {
+        val target = state.currentEpisode?.lastReadPage ?: 0
+        val idx = slices.indexOfFirst { it.imageIndex >= target }
+        mutableStateOf(if (idx >= 0) idx.coerceIn(0, totalPages - 1) else 0)
     }
     var controlsVisible by remember { mutableStateOf(false) }
     var nextPromptVisible by remember { mutableStateOf(false) }
@@ -323,30 +330,39 @@ private fun ReaderSingleView(
     var promptJob by remember { mutableStateOf<Job?>(null) }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(state.readerImages, state.currentEpisode?.lastReadPage) {
+    LaunchedEffect(slices, state.currentEpisode?.lastReadPage) {
         val target = state.currentEpisode?.lastReadPage ?: 0
-        if (state.readerImages.isNotEmpty() && target > 0) {
-            currentPage = target.coerceIn(0, state.readerImages.size - 1)
+        if (slices.isNotEmpty() && target > 0) {
+            val idx = slices.indexOfFirst { it.imageIndex >= target }
+            if (idx >= 0) {
+                currentPage = idx.coerceIn(0, totalPages - 1)
+            }
         }
     }
 
-    LaunchedEffect(currentPage) {
-        if (state.readerImages.isNotEmpty()) {
-            viewModel.savePage(currentPage)
+    LaunchedEffect(currentPage, slices) {
+        if (state.readerImages.isNotEmpty() && slices.isNotEmpty()) {
+            val slice = slices.getOrNull(currentPage)
+            if (slice != null) {
+                viewModel.savePage(slice.imageIndex)
+            }
         }
     }
 
-    LaunchedEffect(currentPage, state.readerImages) {
-        if (state.readerImages.isNotEmpty()) {
-            val preloadUrls = (1..1).mapNotNull { offset ->
-                state.readerImages.getOrNull(currentPage + offset)
+    LaunchedEffect(currentPage, slices, state.readerImages) {
+        if (state.readerImages.isNotEmpty() && slices.isNotEmpty()) {
+            val preloadUrls = (1..2).mapNotNull { offset ->
+                slices.getOrNull(currentPage + offset)?.let { slice ->
+                    state.readerImages.getOrNull(slice.imageIndex)
+                }
             }
             com.comics8.desktop.ui.util.DesktopImageCache.preload(preloadUrls)
         }
     }
 
-    val totalPages = state.readerImages.size
-    val currentImage = state.readerImages.getOrNull(currentPage)
+    val currentSlice = slices.getOrNull(currentPage)
+    val currentImage = currentSlice?.let { state.readerImages.getOrNull(it.imageIndex) }
+    val currentHalf = currentSlice?.half ?: ImageHalf.FULL
     val isR2L = state.readDirection == ReadDirection.RIGHT_TO_LEFT
 
     val onAdvance = {
@@ -437,6 +453,7 @@ private fun ReaderSingleView(
         if (currentImage != null) {
             DesktopAsyncImage(
                 url = currentImage,
+                half = currentHalf,
                 contentDescription = "페이지 ${currentPage + 1}",
                 contentScale = ContentScale.Fit,
                 modifier = Modifier
@@ -449,6 +466,13 @@ private fun ReaderSingleView(
                         nextPromptVisible = false
                         prevPromptVisible = false
                     },
+                onLoaded = { bitmap ->
+                    val w = bitmap.width
+                    val h = bitmap.height
+                    if (w > 0 && h > 0 && currentSlice != null) {
+                        viewModel.recordImageAspectRatio(currentSlice.imageIndex, w, h)
+                    }
+                },
             )
         }
 

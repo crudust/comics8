@@ -18,13 +18,11 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ChromeReaderMode
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Fullscreen
-import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -62,6 +60,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.model.ReadDirection
+import com.comics8.core.model.SplitMode
 import com.comics8.core.model.ViewMode
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
@@ -257,13 +256,28 @@ fun TopBar(
                     )
                 }
             }
-            if (state.screen == Screen.Reader) {
+            IconButton(
+                onClick = viewModel::refresh,
+                enabled = state.activeSourceId != null,
+            ) {
+                Icon(Icons.Default.Refresh, contentDescription = "새로고침")
+            }
+        }
+
+        // Reader Options Bar (Row 2)
+        if (state.screen == Screen.Reader) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp),
+            ) {
                 // View Mode Switcher [ Scroll | Page | Dual ]
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                     modifier = Modifier
-                        .padding(end = 6.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
                         .padding(2.dp),
@@ -275,9 +289,9 @@ fun TopBar(
                         label = "스크롤",
                     )
                     ViewModeChip(
-                        selected = state.viewMode == ViewMode.SINGLE,
-                        onClick = { viewModel.setViewMode(ViewMode.SINGLE) },
-                        icon = Icons.AutoMirrored.Filled.ChromeReaderMode,
+                        selected = state.viewMode == ViewMode.PAGE,
+                        onClick = { viewModel.setViewMode(ViewMode.PAGE) },
+                        icon = Icons.Default.Description,
                         label = "단면",
                     )
                     ViewModeChip(
@@ -288,13 +302,12 @@ fun TopBar(
                     )
                 }
 
-                // Read Direction Switcher
+                // Read Direction Switcher [ 우→좌 | 좌→우 ]
                 if (state.viewMode != ViewMode.SCROLL) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(2.dp),
                         modifier = Modifier
-                            .padding(end = 6.dp)
                             .clip(RoundedCornerShape(8.dp))
                             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
                             .padding(2.dp),
@@ -312,18 +325,28 @@ fun TopBar(
                     }
                 }
 
-                IconButton(onClick = viewModel::toggleFullscreen) {
-                    Icon(
-                        imageVector = if (state.isFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                        contentDescription = "전체화면",
-                    )
+                // Split Mode Switcher [ Fit | Slice ] (Only in Single Page mode)
+                if (state.viewMode == ViewMode.PAGE) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                            .padding(2.dp),
+                    ) {
+                        SplitModeChip(
+                            selected = state.splitMode == SplitMode.FIT,
+                            onClick = { viewModel.setSplitMode(SplitMode.FIT) },
+                            label = "Fit",
+                        )
+                        SplitModeChip(
+                            selected = state.splitMode == SplitMode.SLICE,
+                            onClick = { viewModel.setSplitMode(SplitMode.SLICE) },
+                            label = "Slice",
+                        )
+                    }
                 }
-            }
-            IconButton(
-                onClick = viewModel::refresh,
-                enabled = state.activeSourceId != null,
-            ) {
-                Icon(Icons.Default.Refresh, contentDescription = "새로고침")
             }
         }
 
@@ -464,6 +487,30 @@ private fun DirectionChip(
             style = MaterialTheme.typography.labelSmall,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
             color = if (selected) MaterialTheme.colorScheme.onSecondary else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun SplitModeChip(
+    selected: Boolean,
+    onClick: () -> Unit,
+    label: String,
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(
+                if (selected) MaterialTheme.colorScheme.tertiary else Color.Transparent,
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+            color = if (selected) MaterialTheme.colorScheme.onTertiary else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

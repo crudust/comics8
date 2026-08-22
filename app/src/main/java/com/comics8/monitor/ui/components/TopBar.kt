@@ -21,10 +21,10 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ChromeReaderMode
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -67,6 +67,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.model.ReadDirection
+import com.comics8.core.model.SplitMode
 import com.comics8.core.model.ViewMode
 import com.comics8.monitor.ui.ListingUiState
 import com.comics8.monitor.ui.ListingViewModel
@@ -264,13 +265,28 @@ fun TopBar(
                     )
                 }
             }
-            if (state.screen == Screen.Reader) {
+            IconButton(
+                onClick = { viewModel.refresh() },
+                enabled = state.activeSourceId != null,
+            ) {
+                Icon(Icons.Default.Refresh, contentDescription = "새로고침")
+            }
+        }
+
+        // Reader Options Bar (Row 2)
+        if (state.screen == Screen.Reader) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+            ) {
                 // View Mode Switcher [ Scroll | Page | Dual ]
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                     modifier = Modifier
-                        .padding(end = 4.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
                         .padding(2.dp),
@@ -297,7 +313,7 @@ fun TopBar(
                         modifier = Modifier.size(32.dp),
                     ) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.MenuBook,
+                            imageVector = Icons.Default.Description,
                             contentDescription = "단면 페이지",
                             tint = if (state.viewMode == ViewMode.PAGE) {
                                 MaterialTheme.colorScheme.primary
@@ -313,7 +329,7 @@ fun TopBar(
                         modifier = Modifier.size(32.dp),
                     ) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ChromeReaderMode,
+                            imageVector = Icons.AutoMirrored.Filled.MenuBook,
                             contentDescription = "양쪽보기",
                             tint = if (state.viewMode == ViewMode.DUAL) {
                                 MaterialTheme.colorScheme.primary
@@ -331,7 +347,6 @@ fun TopBar(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(2.dp),
                         modifier = Modifier
-                            .padding(end = 4.dp)
                             .clip(RoundedCornerShape(8.dp))
                             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
                             .padding(2.dp),
@@ -390,12 +405,71 @@ fun TopBar(
                         }
                     }
                 }
-            }
-            IconButton(
-                onClick = { viewModel.refresh() },
-                enabled = state.activeSourceId != null,
-            ) {
-                Icon(Icons.Default.Refresh, contentDescription = "새로고침")
+
+                // Split Mode Switcher [ Fit | Slice ] - Shown for Single Page mode
+                if (state.viewMode == ViewMode.PAGE) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                            .padding(2.dp),
+                    ) {
+                        // Fit
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(
+                                    if (state.splitMode == SplitMode.FIT) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        Color.Transparent
+                                    },
+                                )
+                                .clickable { viewModel.setSplitMode(SplitMode.FIT) }
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = "Fit",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (state.splitMode == SplitMode.FIT) {
+                                    MaterialTheme.colorScheme.onPrimary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                        }
+                        // Slice
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(
+                                    if (state.splitMode == SplitMode.SLICE) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        Color.Transparent
+                                    },
+                                )
+                                .clickable { viewModel.setSplitMode(SplitMode.SLICE) }
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = "Slice",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (state.splitMode == SplitMode.SLICE) {
+                                    MaterialTheme.colorScheme.onPrimary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                        }
+                    }
+                }
             }
         }
 

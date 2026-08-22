@@ -11,6 +11,7 @@ import com.comics8.core.model.ArtistRef
 import com.comics8.core.model.BrowseTab
 import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.ReadDirection
+import com.comics8.core.model.SplitMode
 import com.comics8.core.model.ToonItem
 import com.comics8.core.model.ViewMode
 import com.comics8.core.source.ComicSource
@@ -80,6 +81,7 @@ data class ListingUiState(
     val readerError: String? = null,
     val viewMode: ViewMode = ViewMode.SCROLL,
     val readDirection: ReadDirection = ReadDirection.RIGHT_TO_LEFT,
+    val splitMode: SplitMode = SplitMode.FIT,
     val scrollToTopTrigger: Int = 0,
     val seriesHistory: ReadHistory? = null,
     val historyItems: List<ReadHistory> = emptyList(),
@@ -1797,6 +1799,10 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     fun setReadDirection(direction: ReadDirection) {
         globalReadDirection = direction
         _state.update { it.copy(readDirection = direction) }
+    }
+
+    fun setSplitMode(mode: SplitMode) {
+        _state.update { it.copy(splitMode = mode) }
     }
 
     fun goToEpisodePage(page: Int) {

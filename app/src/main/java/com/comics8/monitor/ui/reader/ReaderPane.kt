@@ -1,6 +1,5 @@
 package com.comics8.monitor.ui.reader
 
-import com.comics8.core.model.DualSpread
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -53,11 +52,18 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.translate
 import coil.compose.AsyncImagePainter
 import coil.compose.SubcomposeAsyncImage
+import coil.compose.SubcomposeAsyncImageContent
+import com.comics8.core.model.DualSpread
+import com.comics8.core.model.ImageHalf
 import com.comics8.core.model.ReadDirection
+import com.comics8.core.model.SinglePageSlice
 import com.comics8.core.model.ViewMode
 import com.comics8.core.model.buildDualSpreads
+import com.comics8.core.model.buildSinglePageSlices
 import com.comics8.monitor.ui.ListingUiState
 import com.comics8.monitor.ui.ListingViewModel
 import com.comics8.monitor.ui.components.EpisodeBoundaryPrompt
@@ -236,12 +242,18 @@ private fun ReaderSinglePagePane(
     modifier: Modifier = Modifier,
 ) {
     val isR2L = state.readDirection == ReadDirection.RIGHT_TO_LEFT
-    val initialPage = remember(state.currentEpisode?.wrId) {
-        (state.currentEpisode?.lastReadPage ?: 0).coerceIn(0, (state.readerImages.size - 1).coerceAtLeast(0))
+    val slices = remember(state.readerImages.size, state.imageAspectRatios, state.splitMode, state.readDirection) {
+        buildSinglePageSlices(state.readerImages.size, state.imageAspectRatios, state.splitMode, state.readDirection)
+    }
+    val totalSlices = slices.size.coerceAtLeast(1)
+    val initialPage = remember(state.currentEpisode?.wrId, slices) {
+        val targetPage = state.currentEpisode?.lastReadPage ?: 0
+        val idx = slices.indexOfFirst { it.imageIndex >= targetPage }
+        if (idx >= 0) idx.coerceIn(0, totalSlices - 1) else 0
     }
     val pagerState = rememberPagerState(
         initialPage = initialPage,
-        pageCount = { state.readerImages.size },
+        pageCount = { totalSlices },
     )
     val scope = rememberCoroutineScope()
     var controlsVisible by remember { mutableStateOf(false) }
@@ -260,22 +272,28 @@ private fun ReaderSinglePagePane(
         }
     }
 
-    LaunchedEffect(pagerState.currentPage) {
-        if (state.readerImages.isNotEmpty()) {
-            viewModel.savePage(pagerState.currentPage)
+    LaunchedEffect(pagerState.currentPage, slices) {
+        if (state.readerImages.isNotEmpty() && slices.isNotEmpty()) {
+            val slice = slices.getOrNull(pagerState.currentPage)
+            if (slice != null) {
+                viewModel.savePage(slice.imageIndex)
+            }
         }
     }
 
-    LaunchedEffect(state.readerImages, state.currentEpisode?.lastReadPage) {
+    LaunchedEffect(slices, state.currentEpisode?.lastReadPage) {
         val target = state.currentEpisode?.lastReadPage ?: 0
-        if (state.readerImages.isNotEmpty() && target > 0) {
-            pagerState.scrollToPage(target.coerceIn(0, state.readerImages.size - 1))
+        if (slices.isNotEmpty() && target > 0) {
+            val idx = slices.indexOfFirst { it.imageIndex >= target }
+            if (idx in 0 until totalSlices) {
+                pagerState.scrollToPage(idx)
+            }
         }
     }
 
     val onAdvance = {
         controlsVisible = false
-        if (pagerState.currentPage < state.readerImages.size - 1) {
+        if (pagerState.currentPage < totalSlices - 1) {
             nextPromptVisible = false
             prevPromptVisible = false
             scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
@@ -326,11 +344,12 @@ private fun ReaderSinglePagePane(
     }
 
     val context = LocalContext.current
-    LaunchedEffect(pagerState.currentPage, state.readerImages) {
+    LaunchedEffect(pagerState.currentPage, slices, state.readerImages) {
         val imageLoader = coil.Coil.imageLoader(context)
         val maxEdge = coil.size.Size(1200, 1800)
         for (offset in 1..2) {
-            val targetUrl = state.readerImages.getOrNull(pagerState.currentPage + offset) ?: continue
+            val nextSlice = slices.getOrNull(pagerState.currentPage + offset) ?: continue
+            val targetUrl = state.readerImages.getOrNull(nextSlice.imageIndex) ?: continue
             val request = coil.request.ImageRequest.Builder(context)
                 .data(targetUrl)
                 .size(maxEdge)
@@ -350,6 +369,10 @@ private fun ReaderSinglePagePane(
             beyondViewportPageCount = 1,
             modifier = Modifier.fillMaxSize(),
         ) { page ->
+            val slice = slices.getOrNull(page)
+            val imageUrl = slice?.let { state.readerImages.getOrNull(it.imageIndex) }
+            val half = slice?.half ?: ImageHalf.FULL
+
             ZoomableBox(
                 modifier = Modifier.fillMaxSize(),
                 resetKey = page,
@@ -368,10 +391,18 @@ private fun ReaderSinglePagePane(
                 },
             ) { scale ->
                 ReaderImage(
-                    model = state.readerImages.getOrNull(page),
+                    model = imageUrl,
+                    half = half,
                     contentDescription = "페이지 ${page + 1}",
                     contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize(),
+                    onSuccess = { result ->
+                        val w = result.result.drawable.intrinsicWidth
+                        val h = result.result.drawable.intrinsicHeight
+                        if (w > 0 && h > 0 && slice != null) {
+                            viewModel.recordImageAspectRatio(slice.imageIndex, w, h)
+                        }
+                    },
                 )
             }
         }
@@ -379,7 +410,7 @@ private fun ReaderSinglePagePane(
         // Floating Page Indicator
         if (!controlsVisible && state.readerImages.isNotEmpty()) {
             Text(
-                text = "${pagerState.currentPage + 1} / ${state.readerImages.size}",
+                text = "${pagerState.currentPage + 1} / $totalSlices",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                 modifier = Modifier
@@ -443,9 +474,9 @@ private fun ReaderSinglePagePane(
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
             ReaderBottomBar(
-                currentRangeText = "${pagerState.currentPage + 1} / ${state.readerImages.size}",
+                currentRangeText = "${pagerState.currentPage + 1} / $totalSlices",
                 currentPage = pagerState.currentPage + 1,
-                maxPages = state.readerImages.size,
+                maxPages = totalSlices,
                 hasPrevEpisode = state.hasPrevEpisode,
                 hasNextEpisode = state.hasNextEpisode,
                 onPageChange = { targetPage ->
@@ -1006,6 +1037,7 @@ private fun ReaderImage(
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Fit,
     alignment: Alignment = Alignment.Center,
+    half: ImageHalf = ImageHalf.FULL,
     onSuccess: ((AsyncImagePainter.State.Success) -> Unit)? = null,
 ) {
     SubcomposeAsyncImage(
@@ -1053,6 +1085,56 @@ private fun ReaderImage(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
                     )
+                }
+            }
+        },
+        success = { successState ->
+            if (half == ImageHalf.FULL) {
+                SubcomposeAsyncImageContent()
+            } else {
+                val painter = successState.painter
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                        val intrinsicWidth = painter.intrinsicSize.width
+                        val intrinsicHeight = painter.intrinsicSize.height
+                        if (intrinsicWidth > 0 && intrinsicHeight > 0) {
+                            val halfWidth = intrinsicWidth / 2f
+                            val pageAspectRatio = halfWidth / intrinsicHeight
+                            val containerWidth = size.width
+                            val containerHeight = size.height
+                            val containerAspectRatio = containerWidth / containerHeight
+
+                            val dstWidth: Float
+                            val dstHeight: Float
+                            if (containerAspectRatio > pageAspectRatio) {
+                                dstHeight = containerHeight
+                                dstWidth = dstHeight * pageAspectRatio
+                            } else {
+                                dstWidth = containerWidth
+                                dstHeight = dstWidth / pageAspectRatio
+                            }
+
+                            val dstLeft = (containerWidth - dstWidth) / 2f
+                            val dstTop = (containerHeight - dstHeight) / 2f
+
+                            clipRect(
+                                left = dstLeft,
+                                top = dstTop,
+                                right = dstLeft + dstWidth,
+                                bottom = dstTop + dstHeight,
+                            ) {
+                                val drawX = if (half == ImageHalf.LEFT) dstLeft else dstLeft - dstWidth
+                                translate(left = drawX, top = dstTop) {
+                                    with(painter) {
+                                        draw(androidx.compose.ui.geometry.Size(dstWidth * 2f, dstHeight))
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         },

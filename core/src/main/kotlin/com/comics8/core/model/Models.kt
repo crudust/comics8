@@ -84,6 +84,51 @@ enum class ReadDirection(val label: String) {
     LEFT_TO_RIGHT("LR (좌우)"),
 }
 
+enum class SplitMode(val label: String) {
+    FIT("Fit"),
+    SLICE("Slice"),
+}
+
+enum class ImageHalf {
+    FULL,
+    LEFT,
+    RIGHT,
+}
+
+data class SinglePageSlice(
+    val imageIndex: Int,
+    val half: ImageHalf = ImageHalf.FULL,
+)
+
+fun buildSinglePageSlices(
+    imageCount: Int,
+    aspectRatios: Map<Int, Float>,
+    splitMode: SplitMode,
+    readDirection: ReadDirection,
+): List<SinglePageSlice> {
+    if (imageCount <= 0) return emptyList()
+    if (splitMode == SplitMode.FIT) {
+        return (0 until imageCount).map { SinglePageSlice(it, ImageHalf.FULL) }
+    }
+    val slices = mutableListOf<SinglePageSlice>()
+    for (i in 0 until imageCount) {
+        val ratio = aspectRatios[i]
+        val isWide = ratio != null && ratio >= 1.0f
+        if (isWide) {
+            if (readDirection == ReadDirection.RIGHT_TO_LEFT) {
+                slices.add(SinglePageSlice(i, ImageHalf.RIGHT))
+                slices.add(SinglePageSlice(i, ImageHalf.LEFT))
+            } else {
+                slices.add(SinglePageSlice(i, ImageHalf.LEFT))
+                slices.add(SinglePageSlice(i, ImageHalf.RIGHT))
+            }
+        } else {
+            slices.add(SinglePageSlice(i, ImageHalf.FULL))
+        }
+    }
+    return slices
+}
+
 sealed interface DualSpread {
     data class Single(val index: Int) : DualSpread
     data class Dual(val firstIndex: Int, val secondIndex: Int) : DualSpread
