@@ -338,7 +338,7 @@ private fun ReaderSingleView(
 
     LaunchedEffect(currentPage, state.readerImages) {
         if (state.readerImages.isNotEmpty()) {
-            val preloadUrls = (1..3).mapNotNull { offset ->
+            val preloadUrls = (1..1).mapNotNull { offset ->
                 state.readerImages.getOrNull(currentPage + offset)
             }
             com.comics8.desktop.ui.util.DesktopImageCache.preload(preloadUrls)
@@ -620,7 +620,7 @@ private fun ReaderDualView(
     LaunchedEffect(currentSpreadIndex, spreads, state.readerImages) {
         if (state.readerImages.isNotEmpty() && spreads.isNotEmpty()) {
             val preloadUrls = mutableListOf<String>()
-            for (offset in 1..3) {
+            for (offset in 1..1) {
                 val nextSpread = spreads.getOrNull(currentSpreadIndex + offset)
                 when (nextSpread) {
                     is DualSpread.Single -> state.readerImages.getOrNull(nextSpread.index)?.let { preloadUrls.add(it) }

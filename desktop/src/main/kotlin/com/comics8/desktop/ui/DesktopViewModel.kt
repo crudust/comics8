@@ -358,6 +358,7 @@ class DesktopViewModel(
                 currentEpisode = null,
                 readerImages = emptyList(),
                 readerError = null,
+                scrollToTopTrigger = it.scrollToTopTrigger + 1,
             )
         }
         if (cached == null) {

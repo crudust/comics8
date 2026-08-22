@@ -85,7 +85,8 @@ object AwtThumbEncoder : ThumbEncoder {
 }
 
 object DesktopImageCache {
-    private const val MEMORY_MAX_ENTRIES = 48
+    private const val MEMORY_MAX_ENTRIES = 12
+    private const val DISPLAY_LONG_EDGE = 2048
     private const val DISK_HARD_LIMIT_BYTES = 200L * 1024 * 1024
     private const val DISK_TARGET_BYTES = 160L * 1024 * 1024
 
@@ -199,15 +200,42 @@ object DesktopImageCache {
         val bytes = readImageBytes(url)
         if (bytes != null && bytes.isNotEmpty()) {
             try {
-                val skiaImage = Image.makeFromEncoded(bytes)
-                val bitmap = skiaImage.toComposeImageBitmap()
+                val bitmap = decodeForDisplay(bytes) ?: return@withContext null
                 putMemory(url, bitmap)
                 bitmap
             } catch (_: Exception) {
                 null
+            } catch (_: OutOfMemoryError) {
+                null
             }
         } else {
             null
+        }
+    }
+
+    private fun decodeForDisplay(bytes: ByteArray): ImageBitmap? {
+        Image.makeFromEncoded(bytes).use { src ->
+            val w = src.width.coerceAtLeast(1)
+            val h = src.height.coerceAtLeast(1)
+            val longEdge = maxOf(w, h)
+            if (longEdge <= DISPLAY_LONG_EDGE) {
+                return src.toComposeImageBitmap()
+            }
+            val scale = DISPLAY_LONG_EDGE.toFloat() / longEdge
+            val tw = (w * scale).toInt().coerceAtLeast(1)
+            val th = (h * scale).toInt().coerceAtLeast(1)
+            return Surface.makeRasterN32Premul(tw, th).use { surface ->
+                surface.canvas.clear(0xFFFFFFFF.toInt())
+                surface.canvas.drawImageRect(
+                    src,
+                    Rect.makeWH(w.toFloat(), h.toFloat()),
+                    Rect.makeWH(tw.toFloat(), th.toFloat()),
+                    SamplingMode.LINEAR,
+                    null,
+                    true,
+                )
+                surface.makeImageSnapshot().use { it.toComposeImageBitmap() }
+            }
         }
     }
 

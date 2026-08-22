@@ -487,6 +487,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         ) return
         readerJob?.cancel()
         episodeJob?.cancel()
+        listJob?.cancel()
         val cached = catalogCache[tab]
         val (cachedPage, cachedLastPage) = catalogPages[tab] ?: Pair(1, 1)
         _state.update {
@@ -2019,7 +2020,6 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                         readerError = null,
                     )
                 }
-                prefetchImageDimensions(images)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -2040,29 +2040,6 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         _state.update { current ->
             if (current.imageAspectRatios[index] == ratio) current
             else current.copy(imageAspectRatios = current.imageAspectRatios + (index to ratio))
-        }
-    }
-
-    private fun prefetchImageDimensions(images: List<String>) {
-        val context = getApplication<Application>()
-        val imageLoader = coil.Coil.imageLoader(context)
-        viewModelScope.launch {
-            images.forEachIndexed { index, url ->
-                val request = coil.request.ImageRequest.Builder(context)
-                    .data(url)
-                    .size(coil.size.Size.ORIGINAL)
-                    .target(
-                        onSuccess = { drawable ->
-                            val w = drawable.intrinsicWidth
-                            val h = drawable.intrinsicHeight
-                            if (w > 0 && h > 0) {
-                                recordImageAspectRatio(index, w, h)
-                            }
-                        }
-                    )
-                    .build()
-                imageLoader.enqueue(request)
-            }
         }
     }
 

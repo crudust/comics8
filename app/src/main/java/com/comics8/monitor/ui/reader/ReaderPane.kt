@@ -158,6 +158,11 @@ private fun ReaderScrollPane(
                         ) {
                             controlsVisible = !controlsVisible
                         },
+                    onSuccess = { result ->
+                        val w = result.result.drawable.intrinsicWidth
+                        val h = result.result.drawable.intrinsicHeight
+                        if (w > 0 && h > 0) viewModel.recordImageAspectRatio(index, w, h)
+                    },
                 )
             }
             item {
@@ -323,10 +328,12 @@ private fun ReaderSinglePagePane(
     val context = LocalContext.current
     LaunchedEffect(pagerState.currentPage, state.readerImages) {
         val imageLoader = coil.Coil.imageLoader(context)
-        for (offset in 1..4) {
+        val maxEdge = coil.size.Size(1200, 1800)
+        for (offset in 1..2) {
             val targetUrl = state.readerImages.getOrNull(pagerState.currentPage + offset) ?: continue
             val request = coil.request.ImageRequest.Builder(context)
                 .data(targetUrl)
+                .size(maxEdge)
                 .build()
             imageLoader.enqueue(request)
         }
@@ -340,7 +347,7 @@ private fun ReaderSinglePagePane(
         HorizontalPager(
             state = pagerState,
             reverseLayout = isR2L,
-            beyondViewportPageCount = 2,
+            beyondViewportPageCount = 1,
             modifier = Modifier.fillMaxSize(),
         ) { page ->
             ZoomableBox(
@@ -581,20 +588,27 @@ private fun ReaderDualPagePane(
     val context = LocalContext.current
     LaunchedEffect(pagerState.currentPage, spreads, state.readerImages) {
         val imageLoader = coil.Coil.imageLoader(context)
-        for (offset in 1..3) {
+        val maxEdge = coil.size.Size(1200, 1800)
+        for (offset in 1..1) {
             val nextSpread = spreads.getOrNull(pagerState.currentPage + offset)
             when (nextSpread) {
                 is DualSpread.Single -> {
                     state.readerImages.getOrNull(nextSpread.index)?.let { url ->
-                        imageLoader.enqueue(coil.request.ImageRequest.Builder(context).data(url).build())
+                        imageLoader.enqueue(
+                            coil.request.ImageRequest.Builder(context).data(url).size(maxEdge).build(),
+                        )
                     }
                 }
                 is DualSpread.Dual -> {
                     state.readerImages.getOrNull(nextSpread.firstIndex)?.let { url ->
-                        imageLoader.enqueue(coil.request.ImageRequest.Builder(context).data(url).build())
+                        imageLoader.enqueue(
+                            coil.request.ImageRequest.Builder(context).data(url).size(maxEdge).build(),
+                        )
                     }
                     state.readerImages.getOrNull(nextSpread.secondIndex)?.let { url ->
-                        imageLoader.enqueue(coil.request.ImageRequest.Builder(context).data(url).build())
+                        imageLoader.enqueue(
+                            coil.request.ImageRequest.Builder(context).data(url).size(maxEdge).build(),
+                        )
                     }
                 }
                 null -> {}
@@ -622,7 +636,7 @@ private fun ReaderDualPagePane(
         HorizontalPager(
             state = pagerState,
             reverseLayout = isR2L,
-            beyondViewportPageCount = 2,
+            beyondViewportPageCount = 1,
             modifier = Modifier.fillMaxSize(),
         ) { spreadIdx ->
             ZoomableBox(

@@ -44,6 +44,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.comics8.core.model.BrowseTab
 import com.comics8.core.model.ToonItem
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
@@ -103,7 +104,17 @@ fun BrowsePane(
                 if (isLocal) {
                     LibraryRootsBar(state = state, viewModel = viewModel)
                 }
-                if (isLocal && state.items.isEmpty() && !state.isSearch) {
+                if (state.tab is BrowseTab.Favorite && state.items.isEmpty() && !state.isSearch) {
+                    ErrorPane(
+                        message = "즐겨찾기한 작품이 없습니다.",
+                        actionLabel = "보관함으로",
+                        onRetry = {
+                            val dest = state.browseTabs.firstOrNull { it is BrowseTab.Remote } ?: state.tab
+                            dest?.let(viewModel::selectTab)
+                        },
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                    )
+                } else if (isLocal && state.items.isEmpty() && !state.isSearch) {
                     EmptyLibraryScanHint(modifier = Modifier.weight(1f).fillMaxWidth())
                 } else {
                     val gridState = rememberLazyGridState()

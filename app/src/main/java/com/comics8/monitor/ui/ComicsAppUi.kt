@@ -16,8 +16,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -183,8 +181,8 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                             }
                         }
                         else -> {
-                            key(state.activeSourceId) {
-                                BrowseTabsPager(
+                            key(state.activeSourceId, state.tab) {
+                                BrowseTabContent(
                                     catalogs = catalogs,
                                     state = state,
                                     viewModel = viewModel,
@@ -287,117 +285,91 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
 }
 
 @Composable
-private fun BrowseTabsPager(
+private fun BrowseTabContent(
     catalogs: List<BrowseTab>,
     state: ListingUiState,
     viewModel: ListingViewModel,
     onAddLibraryFolder: () -> Unit = {},
 ) {
-    val browsePagerState = rememberPagerState(
-        initialPage = catalogs.indexOf(state.tab).coerceAtLeast(0),
-        pageCount = { catalogs.size },
-    )
-
-    LaunchedEffect(state.tab, catalogs) {
-        val targetIndex = catalogs.indexOf(state.tab)
-        if (targetIndex >= 0 && browsePagerState.currentPage != targetIndex) {
-            browsePagerState.animateScrollToPage(targetIndex)
-        }
+    val pageCatalog = state.tab ?: catalogs.firstOrNull()
+    if (pageCatalog == null) {
+        LoadingPane()
+        return
     }
-
-    LaunchedEffect(browsePagerState.currentPage, catalogs) {
-        val targetCatalog = catalogs.getOrNull(browsePagerState.currentPage) ?: return@LaunchedEffect
-        if (targetCatalog != state.tab && !state.isSearch && state.screen == Screen.Browse) {
-            viewModel.selectTab(targetCatalog)
-        }
-    }
-
-    HorizontalPager(
-        state = browsePagerState,
-        modifier = Modifier.fillMaxSize(),
-    ) { pageIndex ->
-        val pageCatalog = catalogs.getOrNull(pageIndex)
-        if (pageCatalog == null) {
-            LoadingPane()
-            return@HorizontalPager
-        }
-        val isCurrent = pageCatalog == state.tab
-        val isLocal = state.activeSourceId == WorkId.LOCAL_SOURCE
-        when {
-            isCurrent && state.loading && state.items.isEmpty() -> {
-                Column(Modifier.fillMaxSize()) {
-                    if (isLocal) {
-                        LibraryRootsBar(
-                            state = state,
-                            viewModel = viewModel,
-                            onAddFolder = onAddLibraryFolder,
-                        )
-                    }
-                    LoadingPane(Modifier.weight(1f).fillMaxWidth())
-                    if (pageCatalog.paginated && state.lastPage > 1) {
-                        PageBar(
-                            page = state.page,
-                            lastPage = state.lastPage,
-                            onPrev = viewModel::prevPage,
-                            onNext = viewModel::nextPage,
-                            onJump = { viewModel.togglePageJump(true) },
-                            enabled = !state.loading,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
+    val isLocal = state.activeSourceId == WorkId.LOCAL_SOURCE
+    when {
+        state.loading && state.items.isEmpty() -> {
+            Column(Modifier.fillMaxSize()) {
+                if (isLocal) {
+                    LibraryRootsBar(
+                        state = state,
+                        viewModel = viewModel,
+                        onAddFolder = onAddLibraryFolder,
+                    )
+                }
+                LoadingPane(Modifier.weight(1f).fillMaxWidth())
+                if (pageCatalog.paginated && state.lastPage > 1) {
+                    PageBar(
+                        page = state.page,
+                        lastPage = state.lastPage,
+                        onPrev = viewModel::prevPage,
+                        onNext = viewModel::nextPage,
+                        onJump = { viewModel.togglePageJump(true) },
+                        enabled = !state.loading,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
             }
-            isCurrent && state.error != null && state.items.isEmpty() -> ErrorPane(
-                message = state.error!!,
-                onRetry = { viewModel.refresh(force = true) },
-            )
-            isCurrent && pageCatalog is BrowseTab.Favorite && state.items.isEmpty() -> ErrorPane(
-                message = "즐겨찾기한 작품이 없습니다.",
-                actionLabel = "최신으로",
-                onRetry = {
-                    val dest = state.browseTabs.firstOrNull { it is BrowseTab.Remote } ?: state.tab
-                    dest?.let(viewModel::selectTab)
-                },
-            )
-            isCurrent -> {
-                Column(Modifier.fillMaxSize()) {
-                    if (isLocal) {
-                        LibraryRootsBar(
-                            state = state,
-                            viewModel = viewModel,
-                            onAddFolder = onAddLibraryFolder,
-                        )
-                    }
-                    if (isLocal && state.items.isEmpty() && !state.isSearch && pageCatalog !is BrowseTab.Favorite) {
-                        EmptyLibraryScanHint(modifier = Modifier.weight(1f).fillMaxWidth())
-                    } else {
-                        ListingGrid(
-                            items = state.items,
-                            scrollToTopTrigger = state.scrollToTopTrigger,
-                            onOpen = viewModel::onListingOpen,
-                            onToggleFavorite = viewModel::toggleFavorite,
-                            showSourceChip = false,
-                            sourceRegistry = state.sourceRegistry,
-                            modifier = Modifier.weight(1f).fillMaxWidth(),
-                        )
-                    }
-                    if (pageCatalog.paginated && state.lastPage > 1) {
-                        PageBar(
-                            page = state.page,
-                            lastPage = state.lastPage,
-                            onPrev = viewModel::prevPage,
-                            onNext = viewModel::nextPage,
-                            onJump = { viewModel.togglePageJump(true) },
-                            enabled = !state.loading,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-                                .padding(horizontal = 16.dp, vertical = 4.dp),
-                        )
-                    }
+        }
+        state.error != null && state.items.isEmpty() -> ErrorPane(
+            message = state.error!!,
+            onRetry = { viewModel.refresh(force = true) },
+        )
+        pageCatalog is BrowseTab.Favorite && state.items.isEmpty() -> ErrorPane(
+            message = "즐겨찾기한 작품이 없습니다.",
+            actionLabel = "최신으로",
+            onRetry = {
+                val dest = state.browseTabs.firstOrNull { it is BrowseTab.Remote } ?: state.tab
+                dest?.let(viewModel::selectTab)
+            },
+        )
+        else -> {
+            Column(Modifier.fillMaxSize()) {
+                if (isLocal) {
+                    LibraryRootsBar(
+                        state = state,
+                        viewModel = viewModel,
+                        onAddFolder = onAddLibraryFolder,
+                    )
+                }
+                if (isLocal && state.items.isEmpty() && !state.isSearch && pageCatalog !is BrowseTab.Favorite) {
+                    EmptyLibraryScanHint(modifier = Modifier.weight(1f).fillMaxWidth())
+                } else {
+                    ListingGrid(
+                        items = state.items,
+                        scrollToTopTrigger = state.scrollToTopTrigger,
+                        onOpen = viewModel::onListingOpen,
+                        onToggleFavorite = viewModel::toggleFavorite,
+                        showSourceChip = false,
+                        sourceRegistry = state.sourceRegistry,
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                    )
+                }
+                if (pageCatalog.paginated && state.lastPage > 1) {
+                    PageBar(
+                        page = state.page,
+                        lastPage = state.lastPage,
+                        onPrev = viewModel::prevPage,
+                        onNext = viewModel::nextPage,
+                        onJump = { viewModel.togglePageJump(true) },
+                        enabled = !state.loading,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                    )
                 }
             }
-            else -> LoadingPane()
         }
     }
 }
