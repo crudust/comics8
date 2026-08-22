@@ -44,6 +44,7 @@ import com.comics8.monitor.ui.components.ArtistPickDialog
 import com.comics8.monitor.ui.components.EmptySourcePane
 import com.comics8.monitor.ui.components.ErrorPane
 import com.comics8.monitor.ui.components.LoadingPane
+import com.comics8.monitor.ui.components.NetworkSourceDialog
 import com.comics8.monitor.ui.components.PageBar
 import com.comics8.monitor.ui.components.PageJumpDialog
 import com.comics8.monitor.ui.components.SourceErrorDialog
@@ -122,7 +123,7 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
     }
     val addLibraryFolder = { treePicker.launch(null) }
 
-    val canGoBack = state.screen != Screen.Browse || state.isSearch || state.showPageJump || state.showSyncDialog || state.showUpdateDialog || state.showDownloadOptions || state.artistPick != null || state.showAddSourceSheet || state.showRemoveSourceSheet || state.sourceError != null
+    val canGoBack = state.screen != Screen.Browse || state.isSearch || state.showPageJump || state.showSyncDialog || state.showUpdateDialog || state.showDownloadOptions || state.artistPick != null || state.showAddSourceSheet || state.showRemoveSourceSheet || state.sourceError != null || state.networkDraft != null
     BackHandler(enabled = canGoBack) {
         viewModel.goBack()
     }
@@ -251,6 +252,18 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                 updateState = state.updateState,
                 onDismiss = viewModel::dismissUpdateDialog,
                 onConfirmUpdate = viewModel::startUpdate,
+            )
+        }
+        state.networkDraft?.let { draft ->
+            NetworkSourceDialog(
+                draft = draft,
+                testing = state.networkTesting,
+                testMessage = state.networkTestMessage,
+                testSucceeded = state.networkTestSucceeded,
+                onChange = viewModel::updateNetworkDraft,
+                onTest = viewModel::testNetworkConnection,
+                onRegister = viewModel::registerNetworkConnection,
+                onDismiss = viewModel::closeNetworkSourceDialog,
             )
         }
         val artistPick = state.artistPick

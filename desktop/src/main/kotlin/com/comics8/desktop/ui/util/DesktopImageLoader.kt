@@ -35,6 +35,8 @@ import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.local.ThumbEncoder
 import com.comics8.core.source.local.ZipArchive
 import com.comics8.core.source.local.ZipImageUri
+import com.comics8.core.source.network.NetworkImageUri
+import com.comics8.core.source.network.NetworkSourceRuntime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -140,6 +142,7 @@ object DesktopImageCache {
         val cachedFile = File(diskCacheDir, "$hash.img")
         val localFile = LocalImageUri.toFile(url)
         val zipRef = ZipImageUri.parse(url)
+        val networkRef = NetworkImageUri.parse(url)
         return if (localFile != null && localFile.isFile && localFile.length() > 0L) {
             try {
                 localFile.readBytes()
@@ -151,6 +154,12 @@ object DesktopImageCache {
                 ZipArchive(zipRef.zip).use { archive ->
                     archive.open(zipRef.entry).use { it.readBytes() }
                 }
+            } catch (_: Exception) {
+                null
+            }
+        } else if (networkRef != null) {
+            try {
+                NetworkSourceRuntime.open(url).use { it.readBytes() }
             } catch (_: Exception) {
                 null
             }
@@ -170,6 +179,7 @@ object DesktopImageCache {
         for (targetUrl in urlsToTry) {
             if (LocalImageUri.toFile(targetUrl) != null) continue
             if (ZipImageUri.parse(targetUrl) != null) continue
+            if (NetworkImageUri.parse(targetUrl) != null) continue
             try {
                 val request = Request.Builder()
                     .url(targetUrl)

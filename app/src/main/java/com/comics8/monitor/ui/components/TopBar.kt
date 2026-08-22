@@ -117,7 +117,13 @@ fun TopBar(
                     sources = state.installedSources,
                     registry = state.sourceRegistry,
                     onSelect = viewModel::setActiveSource,
-                    onAddSource = viewModel::openAddSourceSheet,
+                    onAddSmb = {
+                        viewModel.openNetworkSourceDialog(com.comics8.core.source.network.NetworkProtocol.SMB)
+                    },
+                    onAddWebDav = {
+                        viewModel.openNetworkSourceDialog(com.comics8.core.source.network.NetworkProtocol.WEBDAV)
+                    },
+                    onAddJs = viewModel::openAddSourceSheet,
                     onRemoveSource = viewModel::openRemoveSourceSheet,
                     titleStyle = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f),
@@ -512,7 +518,9 @@ private fun SourceTitleDropdown(
     sources: List<com.comics8.core.source.ComicSource>,
     registry: SourceRegistry,
     onSelect: (String) -> Unit,
-    onAddSource: () -> Unit,
+    onAddSmb: () -> Unit,
+    onAddWebDav: () -> Unit,
+    onAddJs: () -> Unit,
     onRemoveSource: () -> Unit,
     titleStyle: TextStyle,
     modifier: Modifier = Modifier,
@@ -574,10 +582,24 @@ private fun SourceTitleDropdown(
         }
         DropdownMenu(expanded = addExpanded, onDismissRequest = { addExpanded = false }) {
             DropdownMenuItem(
+                text = { Text("SMB") },
+                onClick = {
+                    addExpanded = false
+                    onAddSmb()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("WebDAV") },
+                onClick = {
+                    addExpanded = false
+                    onAddWebDav()
+                },
+            )
+            DropdownMenuItem(
                 text = { Text("JS 파일") },
                 onClick = {
                     addExpanded = false
-                    onAddSource()
+                    onAddJs()
                 },
             )
         }

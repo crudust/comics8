@@ -100,7 +100,7 @@ fun SourceRemoveDialog(
     val removableSources = sources.filterNot { it.id == WorkId.LOCAL_SOURCE }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("사이트 제거") },
+        title = { Text("소스 삭제") },
         text = {
             if (removableSources.isEmpty()) {
                 Text(EMPTY_SOURCE_MESSAGE)

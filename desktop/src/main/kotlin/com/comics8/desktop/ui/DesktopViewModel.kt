@@ -11,6 +11,11 @@ import com.comics8.core.source.WorkId
 import com.comics8.core.source.js.JsPackStore
 import com.comics8.core.source.local.CoverThumbCache
 import com.comics8.core.source.local.LocalSource
+import com.comics8.core.source.network.NetworkLibrarySource
+import com.comics8.core.source.network.NetworkProtocol
+import com.comics8.core.source.network.NetworkSourceConfig
+import com.comics8.core.source.network.NetworkSourceStore
+import com.comics8.core.source.network.createNetworkFileSystem
 import com.comics8.core.sync.AppUpdateChecker
 import com.comics8.core.sync.SyncConstants
 import com.comics8.desktop.DesktopVersion
@@ -36,6 +41,7 @@ import java.io.File
 class DesktopViewModel(
     val repository: DesktopToonRepository,
     private val jsPackStore: JsPackStore,
+    private val networkSourceStore: NetworkSourceStore,
     private val pickLibraryFolder: () -> File? = { DesktopFolderPicker.pickDirectory() },
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -92,6 +98,10 @@ class DesktopViewModel(
         }
         if (current.showAddSourceSheet) {
             dismissAddSourceSheet()
+            return true
+        }
+        if (current.networkDraft != null) {
+            closeNetworkSourceDialog()
             return true
         }
         if (current.showRemoveSourceSheet) {
@@ -410,6 +420,90 @@ class DesktopViewModel(
 
     fun closeAddSourceSheet() = dismissAddSourceSheet()
 
+    fun openNetworkSourceDialog(protocol: NetworkProtocol) {
+        val defaultName = if (protocol == NetworkProtocol.SMB) "SMB 저장소" else "WebDAV 저장소"
+        _state.update {
+            it.copy(
+                networkDraft = NetworkSourceConfig(protocol = protocol, name = defaultName),
+                networkTesting = false,
+                networkTestMessage = null,
+                networkTestSucceeded = false,
+                showAddSourceSheet = false,
+            )
+        }
+    }
+
+    fun updateNetworkDraft(draft: NetworkSourceConfig) {
+        _state.update {
+            it.copy(networkDraft = draft, networkTestMessage = null, networkTestSucceeded = false)
+        }
+    }
+
+    fun closeNetworkSourceDialog() {
+        _state.update {
+            it.copy(
+                networkDraft = null,
+                networkTesting = false,
+                networkTestMessage = null,
+                networkTestSucceeded = false,
+            )
+        }
+    }
+
+    fun testNetworkConnection() {
+        val draft = _state.value.networkDraft ?: return
+        scope.launch {
+            _state.update { it.copy(networkTesting = true, networkTestMessage = null, networkTestSucceeded = false) }
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val valid = draft.validated()
+                    createNetworkFileSystem(valid).use { it.test() }
+                    valid
+                }
+            }
+            _state.update {
+                if (it.networkDraft?.id != draft.id) it else it.copy(
+                    networkTesting = false,
+                    networkTestMessage = result.fold(
+                        onSuccess = { "연결에 성공했습니다" },
+                        onFailure = { error -> error.message?.ifBlank { null } ?: "연결에 실패했습니다" },
+                    ),
+                    networkTestSucceeded = result.isSuccess,
+                    networkDraft = result.getOrNull() ?: it.networkDraft,
+                )
+            }
+        }
+    }
+
+    fun registerNetworkConnection() {
+        val current = _state.value
+        val draft = current.networkDraft ?: return
+        if (!current.networkTestSucceeded) return
+        scope.launch {
+            try {
+                val source = withContext(Dispatchers.IO) {
+                    val valid = draft.validated()
+                    networkSourceStore.save(valid)
+                    NetworkLibrarySource(valid)
+                }
+                val registry = repository.sourceRegistry()
+                registry.remove(source.id)
+                check(registry.add(source)) { "연결을 등록할 수 없습니다" }
+                DesktopSourcePrefs.setInstalledIds(DesktopSourcePrefs.installedIds() + source.id)
+                repository.setSourceWriteAccess(DesktopSourcePrefs::isEnabled)
+                clearCatalogCache(source.id)
+                closeNetworkSourceDialog()
+                setActiveSource(source.id)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(networkTesting = false, networkTestMessage = e.message ?: "등록에 실패했습니다")
+                }
+            }
+        }
+    }
+
     fun openRemoveSourceSheet() {
         if (_state.value.installedSources.none { it.id != WorkId.LOCAL_SOURCE }) return
         _state.update { it.copy(showRemoveSourceSheet = true, showAddSourceSheet = false) }
@@ -471,6 +565,7 @@ class DesktopViewModel(
         val id = sourceId.trim()
         if (id.isEmpty() || id == WorkId.LOCAL_SOURCE) return
         jsPackStore.delete(id)
+        networkSourceStore.delete(id)
         repository.sourceRegistry().remove(id)
         DesktopSourcePrefs.setEnabled(id, false)
         repository.setSourceWriteAccess(DesktopSourcePrefs::isEnabled)

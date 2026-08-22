@@ -7,6 +7,7 @@ import com.comics8.core.model.ToonItem
 import com.comics8.core.model.ViewMode
 import com.comics8.core.source.ComicSource
 import com.comics8.core.source.SourceRegistry
+import com.comics8.core.source.network.NetworkSourceConfig
 import com.comics8.desktop.data.DesktopBackupStats
 import com.comics8.desktop.data.DesktopSyncState
 import com.comics8.desktop.data.ReadHistoryRecord
@@ -80,6 +81,10 @@ data class DesktopUiState(
     val showRemoveSourceSheet: Boolean = false,
     val sourceError: String? = null,
     val packsReady: Boolean = false,
+    val networkDraft: NetworkSourceConfig? = null,
+    val networkTesting: Boolean = false,
+    val networkTestMessage: String? = null,
+    val networkTestSucceeded: Boolean = false,
 ) {
     val isSearch: Boolean get() = searchQuery != null
 

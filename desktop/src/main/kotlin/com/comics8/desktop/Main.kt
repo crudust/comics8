@@ -30,6 +30,8 @@ import com.comics8.core.network.ToonClient
 import com.comics8.core.source.SourceLocator
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.js.JsPackStore
+import com.comics8.core.source.network.NetworkSourceStore
+import com.comics8.core.source.network.loadSources
 import com.comics8.desktop.data.DesktopDatabase
 import java.io.File
 import com.comics8.desktop.data.DesktopSourcePrefs
@@ -72,14 +74,20 @@ fun main() {
 
     application {
         val jsPackStore = remember { JsPackStore.desktopDefault() }
+        val networkSourceStore = remember {
+            NetworkSourceStore(File(System.getProperty("user.home"), ".comics8/network-connections.json"))
+        }
         val registry = remember {
             SourceRegistry().also {
                 DesktopSourcePrefs.registry = it
                 DesktopSourcePrefs.migrateIfNeeded()
                 val loaded = jsPackStore.loadInto(it)
-                if (loaded.isNotEmpty()) {
+                val networkSources = networkSourceStore.loadSources()
+                networkSources.forEach(it::add)
+                val loadedIds = loaded.map { source -> source.id } + networkSources.map { source -> source.id }
+                if (loadedIds.isNotEmpty()) {
                     DesktopSourcePrefs.setInstalledIds(
-                        DesktopSourcePrefs.installedIds() + loaded.map { source -> source.id },
+                        DesktopSourcePrefs.installedIds() + loadedIds,
                     )
                 }
             }
@@ -120,7 +128,7 @@ fun main() {
                 installedIds = installedIds,
             )
         }
-        val viewModel = remember { DesktopViewModel(repository, jsPackStore) }
+        val viewModel = remember { DesktopViewModel(repository, jsPackStore, networkSourceStore) }
         val state by viewModel.state.collectAsState()
         LaunchedEffect(Unit) {
             viewModel.onImportedPacksReady()
@@ -252,6 +260,19 @@ fun ComicsDesktopApp(
                 updateState = state.updateState,
                 onDismiss = viewModel::closeUpdateDialog,
                 onConfirmUpdate = viewModel::startUpdate,
+            )
+        }
+
+        state.networkDraft?.let { draft ->
+            com.comics8.desktop.ui.components.NetworkSourceDialog(
+                draft = draft,
+                testing = state.networkTesting,
+                testMessage = state.networkTestMessage,
+                testSucceeded = state.networkTestSucceeded,
+                onChange = viewModel::updateNetworkDraft,
+                onTest = viewModel::testNetworkConnection,
+                onRegister = viewModel::registerNetworkConnection,
+                onDismiss = viewModel::closeNetworkSourceDialog,
             )
         }
 

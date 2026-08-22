@@ -15,6 +15,8 @@ import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.js.JsPackStore
 import com.comics8.core.source.local.CoverThumbCache
 import com.comics8.core.source.local.LocalSource
+import com.comics8.core.source.network.NetworkSourceStore
+import com.comics8.core.source.network.loadSources
 import com.comics8.core.network.ToonClient
 import com.comics8.monitor.data.AndroidSourcePrefs
 import com.comics8.monitor.data.DownloadManager
@@ -24,6 +26,7 @@ import com.comics8.monitor.data.local.AppDatabase
 import com.comics8.monitor.data.local.BitmapThumbEncoder
 import com.comics8.monitor.data.local.SafLibraryMirror
 import com.comics8.monitor.data.local.ZipImageFetcher
+import com.comics8.monitor.data.local.NetworkImageFetcher
 import com.comics8.monitor.work.RefreshWorker
 import java.io.File
 
@@ -35,6 +38,9 @@ class ComicsApp : Application(), ImageLoaderFactory {
         private set
 
     lateinit var jsPackStore: JsPackStore
+        private set
+
+    lateinit var networkSourceStore: NetworkSourceStore
         private set
 
     lateinit var libraryMirror: SafLibraryMirror
@@ -63,8 +69,13 @@ class ComicsApp : Application(), ImageLoaderFactory {
         val store = JsPackStore.androidFiles(filesDir)
         jsPackStore = store
         val loaded = store.loadInto(registry)
-        if (loaded.isNotEmpty()) {
-            sourcePrefs.setInstalledIds(sourcePrefs.installedIds() + loaded.map { it.id })
+        val networkStore = NetworkSourceStore(File(filesDir, "sources/network-connections.json"))
+        networkSourceStore = networkStore
+        val networkSources = networkStore.loadSources()
+        networkSources.forEach(registry::add)
+        val loadedIds = loaded.map { it.id } + networkSources.map { it.id }
+        if (loadedIds.isNotEmpty()) {
+            sourcePrefs.setInstalledIds(sourcePrefs.installedIds() + loadedIds)
         }
         libraryMirror = SafLibraryMirror(this)
         coverThumbs = CoverThumbCache(File(cacheDir, "thumbs"), BitmapThumbEncoder)
@@ -142,7 +153,10 @@ class ComicsApp : Application(), ImageLoaderFactory {
             .build()
         return ImageLoader.Builder(this)
             .okHttpClient(http)
-            .components { add(ZipImageFetcher.Factory()) }
+            .components {
+                add(ZipImageFetcher.Factory())
+                add(NetworkImageFetcher.Factory())
+            }
             .crossfade(true)
             .memoryCache {
                 MemoryCache.Builder(this).maxSizePercent(0.25).build()

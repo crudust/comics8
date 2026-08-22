@@ -19,6 +19,10 @@ import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
 import com.comics8.core.source.js.JsPackStore
 import com.comics8.core.source.local.LocalSource
+import com.comics8.core.source.network.NetworkLibrarySource
+import com.comics8.core.source.network.NetworkProtocol
+import com.comics8.core.source.network.NetworkSourceConfig
+import com.comics8.core.source.network.createNetworkFileSystem
 import com.comics8.core.sync.AppUpdateChecker
 import com.comics8.core.sync.SyncConstants
 import com.comics8.monitor.BuildConfig
@@ -98,6 +102,10 @@ data class ListingUiState(
     val sourceError: String? = null,
     val libraryRoots: List<String> = emptyList(),
     val pendingLibraryTreePick: Boolean = false,
+    val networkDraft: NetworkSourceConfig? = null,
+    val networkTesting: Boolean = false,
+    val networkTestMessage: String? = null,
+    val networkTestSucceeded: Boolean = false,
 ) {
     val isSearch: Boolean get() = searchQuery != null
 
@@ -138,6 +146,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     private val repository = app.repository
     private val sourceSettings = app.sourceSettings
     private val jsPackStore: JsPackStore = app.jsPackStore
+    private val networkSourceStore = app.networkSourceStore
     private val libraryMirror = app.libraryMirror
     private val coverThumbs = app.coverThumbs
     private val prefs = application.getSharedPreferences("comics_reader_prefs", Context.MODE_PRIVATE)
@@ -227,6 +236,10 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         }
         if (current.showAddSourceSheet) {
             closeAddSourceSheet()
+            return true
+        }
+        if (current.networkDraft != null) {
+            closeNetworkSourceDialog()
             return true
         }
         if (current.showRemoveSourceSheet) {
@@ -557,6 +570,93 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
     fun closeAddSourceSheet() = dismissAddSourceSheet()
 
+    fun openNetworkSourceDialog(protocol: NetworkProtocol) {
+        val defaultName = if (protocol == NetworkProtocol.SMB) "SMB 저장소" else "WebDAV 저장소"
+        _state.update {
+            it.copy(
+                networkDraft = NetworkSourceConfig(protocol = protocol, name = defaultName),
+                networkTesting = false,
+                networkTestMessage = null,
+                networkTestSucceeded = false,
+                showAddSourceSheet = false,
+            )
+        }
+    }
+
+    fun updateNetworkDraft(draft: NetworkSourceConfig) {
+        _state.update {
+            it.copy(
+                networkDraft = draft,
+                networkTestMessage = null,
+                networkTestSucceeded = false,
+            )
+        }
+    }
+
+    fun closeNetworkSourceDialog() {
+        _state.update {
+            it.copy(
+                networkDraft = null,
+                networkTesting = false,
+                networkTestMessage = null,
+                networkTestSucceeded = false,
+            )
+        }
+    }
+
+    fun testNetworkConnection() {
+        val draft = _state.value.networkDraft ?: return
+        viewModelScope.launch {
+            _state.update { it.copy(networkTesting = true, networkTestMessage = null, networkTestSucceeded = false) }
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val valid = draft.validated()
+                    createNetworkFileSystem(valid).use { it.test() }
+                    valid
+                }
+            }
+            _state.update {
+                if (it.networkDraft?.id != draft.id) it else it.copy(
+                    networkTesting = false,
+                    networkTestMessage = result.fold(
+                        onSuccess = { "연결에 성공했습니다" },
+                        onFailure = { error -> error.message?.ifBlank { null } ?: "연결에 실패했습니다" },
+                    ),
+                    networkTestSucceeded = result.isSuccess,
+                    networkDraft = result.getOrNull() ?: it.networkDraft,
+                )
+            }
+        }
+    }
+
+    fun registerNetworkConnection() {
+        val current = _state.value
+        val draft = current.networkDraft ?: return
+        if (!current.networkTestSucceeded) return
+        viewModelScope.launch {
+            try {
+                val source = withContext(Dispatchers.IO) {
+                    val valid = draft.validated()
+                    networkSourceStore.save(valid)
+                    NetworkLibrarySource(valid)
+                }
+                val registry = repository.sourceRegistry()
+                registry.remove(source.id)
+                check(registry.add(source)) { "연결을 등록할 수 없습니다" }
+                sourceSettings.setInstalledIds(sourceSettings.installedIds() + source.id)
+                clearCatalogCache(source.id)
+                closeNetworkSourceDialog()
+                setActiveSource(source.id)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(networkTesting = false, networkTestMessage = e.message ?: "등록에 실패했습니다")
+                }
+            }
+        }
+    }
+
     fun openRemoveSourceSheet() {
         if (_state.value.installedSources.none { it.id != WorkId.LOCAL_SOURCE }) return
         _state.update { it.copy(showRemoveSourceSheet = true, showAddSourceSheet = false) }
@@ -616,6 +716,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         val id = sourceId.trim()
         if (id.isEmpty() || id == WorkId.LOCAL_SOURCE) return
         jsPackStore.delete(id)
+        networkSourceStore.delete(id)
         repository.sourceRegistry().remove(id)
         sourceSettings.setEnabled(id, false)
         clearCatalogCache(id)
