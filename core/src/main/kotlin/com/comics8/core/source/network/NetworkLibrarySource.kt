@@ -32,7 +32,10 @@ class NetworkLibrarySource(
         NetworkProtocol.WEBDAV -> config.url
     }
     override val kind: SourceKind = SourceKind.LOCAL
-    override val catalogs: List<SourceCatalog> = listOf(SourceCatalog("LIBRARY", "보관함", true))
+    override val catalogs: List<SourceCatalog> = listOf(
+        SourceCatalog("LIBRARY", "보관함", paginated = true),
+        SourceCatalog("LATEST", "최신순", paginated = true),
+    )
     override val defaultPolicy: RequestPolicy = RequestPolicy(userAgent = "Comics8/Network")
     override val searchPlaceholder: String = "파일명 검색"
     override val notificationMode: NotificationMode = NotificationMode.NONE
@@ -50,7 +53,13 @@ class NetworkLibrarySource(
     override fun useProxy(url: String): Boolean = false
 
     override suspend fun loadListing(catalogId: String, page: Int, http: SourceHttp): ListingPage {
-        val works = scan()
+        val allWorks = scan()
+        val works = when (catalogId.uppercase()) {
+            "LATEST" -> allWorks.sortedByDescending { work ->
+                work.episodes.maxOfOrNull { it.modifiedAt } ?: 0L
+            }
+            else -> allWorks
+        }
         val current = page.coerceIn(1, pageCount(works.size))
         return ListingPage(
             works.drop((current - 1) * PAGE_SIZE).take(PAGE_SIZE).map(::toItem),
@@ -58,6 +67,7 @@ class NetworkLibrarySource(
             pageCount(works.size),
         )
     }
+
 
     override suspend fun search(query: SearchQuery, http: SourceHttp): List<ToonItem> {
         val needle = query.text.trim()

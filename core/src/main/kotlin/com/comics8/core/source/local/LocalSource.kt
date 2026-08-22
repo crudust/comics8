@@ -27,6 +27,7 @@ class LocalSource(
     override val kind: SourceKind = SourceKind.LOCAL
     override val catalogs: List<SourceCatalog> = listOf(
         SourceCatalog("LIBRARY", "보관함", paginated = true),
+        SourceCatalog("LATEST", "최신순", paginated = true),
     )
     override val defaultPolicy: RequestPolicy = RequestPolicy(userAgent = "Comics8/Local")
     override val searchPlaceholder: String = "파일명 검색"
@@ -41,7 +42,13 @@ class LocalSource(
     override fun useProxy(url: String): Boolean = false
 
     override suspend fun loadListing(catalogId: String, page: Int, http: SourceHttp): ListingPage {
-        val works = scanWorks()
+        val allWorks = scanWorks()
+        val works = when (catalogId.uppercase()) {
+            "LATEST" -> allWorks.sortedByDescending { work ->
+                work.episodes.maxOfOrNull { it.path.lastModified() } ?: work.path.lastModified()
+            }
+            else -> allWorks
+        }
         val current = page.coerceIn(1, pageCount(works.size))
         return ListingPage(
             items = works.drop((current - 1) * PAGE_SIZE).take(PAGE_SIZE).map(::toItem),
@@ -49,6 +56,7 @@ class LocalSource(
             lastPage = pageCount(works.size),
         )
     }
+
 
     override suspend fun search(query: SearchQuery, http: SourceHttp): List<ToonItem> {
         val needle = query.text.trim()
