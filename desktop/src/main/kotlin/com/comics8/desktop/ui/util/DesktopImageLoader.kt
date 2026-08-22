@@ -44,10 +44,14 @@ import com.comics8.core.source.local.ZipArchive
 import com.comics8.core.source.local.ZipImageUri
 import com.comics8.core.source.network.NetworkImageUri
 import com.comics8.core.source.network.NetworkSourceRuntime
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
+
 import okhttp3.Request
 import org.jetbrains.skia.EncodedImageFormat
 import org.jetbrains.skia.Image
@@ -147,9 +151,25 @@ object DesktopImageCache {
         }
     }
 
+    private val loadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val inFlightLock = Any()
+    private val inFlightRequests = HashMap<String, Deferred<ImageBitmap?>>()
+
     private fun hashUrl(url: String): String {
         val digest = MessageDigest.getInstance("MD5").digest(url.toByteArray())
         return digest.joinToString("") { "%02x".format(it) }
+    }
+
+    private fun writeAtomically(targetFile: File, bytes: ByteArray) {
+        val tempFile = File(targetFile.parentFile, "${targetFile.name}.tmp.${java.util.UUID.randomUUID()}")
+        try {
+            tempFile.writeBytes(bytes)
+            if (tempFile.exists() && tempFile.length() > 0L) {
+                tempFile.renameTo(targetFile)
+            }
+        } catch (_: Exception) {
+            tempFile.delete()
+        }
     }
 
     internal fun readImageBytes(url: String): ByteArray? {
@@ -203,16 +223,15 @@ object DesktopImageCache {
         } else if (networkRef != null) {
             if (cachedFile.isFile && cachedFile.length() > 0L) {
                 cachedFile.setLastModified(System.currentTimeMillis())
-                runCatching { cachedFile.readBytes() }.getOrNull()
-            } else {
-                try {
-                    NetworkSourceRuntime.open(url).use { it.readBytes() }.also { bytes ->
-                        cachedFile.writeBytes(bytes)
-                        evictDiskIfNeeded(cachedFile)
-                    }
-                } catch (_: Exception) {
-                    null
+                val bytes = runCatching { cachedFile.readBytes() }.getOrNull()
+                if (bytes != null && bytes.isNotEmpty()) {
+                    bytes
+                } else {
+                    cachedFile.delete()
+                    fetchNetworkBytes(url, cachedFile)
                 }
+            } else {
+                fetchNetworkBytes(url, cachedFile)
             }
         } else if (cachedFile.exists() && cachedFile.length() > 0) {
             try {
@@ -222,6 +241,17 @@ object DesktopImageCache {
             }
         } else {
             fetchRemoteBytes(url, cachedFile)
+        }
+    }
+
+    private fun fetchNetworkBytes(url: String, cachedFile: File): ByteArray? {
+        return try {
+            NetworkSourceRuntime.open(url).use { it.readBytes() }.also { bytes ->
+                writeAtomically(cachedFile, bytes)
+                evictDiskIfNeeded(cachedFile)
+            }
+        } catch (_: Exception) {
+            null
         }
     }
 
@@ -243,7 +273,7 @@ object DesktopImageCache {
                 }
                 if (result != null && result.isNotEmpty()) {
                     try {
-                        cachedFile.writeBytes(result)
+                        writeAtomically(cachedFile, result)
                         evictDiskIfNeeded(cachedFile)
                     } catch (_: Exception) {
                     }
@@ -255,48 +285,75 @@ object DesktopImageCache {
         return null
     }
 
-    suspend fun loadImage(url: String): ImageBitmap? = runInterruptible(Dispatchers.IO) {
-        if (url.isBlank()) return@runInterruptible null
-        get(url)?.let { return@runInterruptible it }
-        val bytes = readImageBytes(url)
-        if (bytes != null && bytes.isNotEmpty()) {
-            try {
-                val bitmap = decodeForDisplay(bytes) ?: return@runInterruptible null
-                putMemory(url, bitmap)
-                bitmap
-            } catch (_: Exception) {
-                null
-            } catch (_: OutOfMemoryError) {
-                null
+    suspend fun loadImage(url: String): ImageBitmap? {
+        if (url.isBlank()) return null
+        get(url)?.let { return it }
+
+        val deferred = synchronized(inFlightLock) {
+            get(url)?.let { return it }
+            inFlightRequests[url]?.let { return@synchronized it }
+
+            val def = loadScope.async {
+                try {
+                    val bytes = readImageBytes(url)
+                    if (bytes != null && bytes.isNotEmpty()) {
+                        val bitmap = decodeForDisplay(bytes)
+                        if (bitmap != null) {
+                            putMemory(url, bitmap)
+                            bitmap
+                        } else {
+                            val hash = hashUrl(url)
+                            File(diskCacheDir, "$hash.img").delete()
+                            null
+                        }
+                    } else {
+                        null
+                    }
+                } catch (_: Exception) {
+                    null
+                } catch (_: OutOfMemoryError) {
+                    null
+                } finally {
+                    synchronized(inFlightLock) {
+                        inFlightRequests.remove(url)
+                    }
+                }
             }
-        } else {
-            null
+            inFlightRequests[url] = def
+            def
         }
+
+        return deferred.await()
     }
 
+
     private fun decodeForDisplay(bytes: ByteArray): ImageBitmap? {
-        Image.makeFromEncoded(bytes).use { src ->
-            val w = src.width.coerceAtLeast(1)
-            val h = src.height.coerceAtLeast(1)
-            val longEdge = maxOf(w, h)
-            if (longEdge <= DISPLAY_LONG_EDGE) {
-                return src.toComposeImageBitmap()
+        return try {
+            Image.makeFromEncoded(bytes).use { src ->
+                val w = src.width.coerceAtLeast(1)
+                val h = src.height.coerceAtLeast(1)
+                val longEdge = maxOf(w, h)
+                if (longEdge <= DISPLAY_LONG_EDGE) {
+                    return src.toComposeImageBitmap()
+                }
+                val scale = DISPLAY_LONG_EDGE.toFloat() / longEdge
+                val tw = (w * scale).toInt().coerceAtLeast(1)
+                val th = (h * scale).toInt().coerceAtLeast(1)
+                return Surface.makeRasterN32Premul(tw, th).use { surface ->
+                    surface.canvas.clear(0xFFFFFFFF.toInt())
+                    surface.canvas.drawImageRect(
+                        src,
+                        Rect.makeWH(w.toFloat(), h.toFloat()),
+                        Rect.makeWH(tw.toFloat(), th.toFloat()),
+                        SamplingMode.LINEAR,
+                        null,
+                        true,
+                    )
+                    surface.makeImageSnapshot().use { it.toComposeImageBitmap() }
+                }
             }
-            val scale = DISPLAY_LONG_EDGE.toFloat() / longEdge
-            val tw = (w * scale).toInt().coerceAtLeast(1)
-            val th = (h * scale).toInt().coerceAtLeast(1)
-            return Surface.makeRasterN32Premul(tw, th).use { surface ->
-                surface.canvas.clear(0xFFFFFFFF.toInt())
-                surface.canvas.drawImageRect(
-                    src,
-                    Rect.makeWH(w.toFloat(), h.toFloat()),
-                    Rect.makeWH(tw.toFloat(), th.toFloat()),
-                    SamplingMode.LINEAR,
-                    null,
-                    true,
-                )
-                surface.makeImageSnapshot().use { it.toComposeImageBitmap() }
-            }
+        } catch (_: Exception) {
+            null
         }
     }
 
@@ -307,6 +364,7 @@ object DesktopImageCache {
             }
         }
     }
+
 
     private fun evictDiskIfNeeded(keep: File) {
         try {
