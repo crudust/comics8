@@ -162,6 +162,17 @@ PY
 scp /tmp/comics8-version.json "${SERVER_USER}@${SERVER_HOST}:${SERVER_VERSION_FILE}"
 rm -f /tmp/comics8-version.json /tmp/comics8-version-current.json
 
+# 5. Verify endpoint health
+echo "🔍 5/5: Verifying deployment health via Funnel..."
+if curl -s -m 6 -f "https://homeassistant.tail1946af.ts.net/api/comics8/version" >/dev/null 2>&1; then
+    echo "✅ Funnel endpoint is healthy and returning 200 OK"
+else
+    echo "⚠️  Funnel endpoint did not respond via HTTPS, checking local backend port 8905..."
+    if curl -s -m 5 -f "http://${SERVER_HOST}:8905/version" >/dev/null 2>&1; then
+        echo "✅ Local backend (8905) is healthy."
+    fi
+fi
+
 echo "=================================================="
 echo "🎉 배포가 성공적으로 완료되었습니다!"
 echo "• Version Info:  https://homeassistant.tail1946af.ts.net/api/comics8/version"

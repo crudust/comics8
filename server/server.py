@@ -1223,10 +1223,24 @@ class SyncHandler(BaseHTTPRequestHandler):
         self._send_json(404, {"error": "Not Found"})
 
 def run():
+    import signal, threading
     os.makedirs(DATA_DIR, exist_ok=True)
     server = ThreadingHTTPServer(("0.0.0.0", PORT), SyncHandler)
+    server.daemon_threads = True
+
+    def handle_signal(sig, frame):
+        print(f"Received signal {sig}, shutting down server gracefully...")
+        threading.Thread(target=server.shutdown, daemon=True).start()
+
+    signal.signal(signal.SIGTERM, handle_signal)
+    signal.signal(signal.SIGINT, handle_signal)
+
     print(f"Comics8 Multi-User Sync Server listening on 0.0.0.0:{PORT} (data dir: {DATA_DIR})")
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    finally:
+        server.server_close()
+        print("Server stopped cleanly.")
 
 if __name__ == "__main__":
     run()
