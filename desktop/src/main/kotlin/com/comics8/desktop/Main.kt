@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
@@ -159,7 +160,7 @@ fun main() {
             onKeyEvent = { event ->
                 if (event.type == KeyEventType.KeyDown) {
                     val key = event.key
-                    val isCmd = event.isMetaPressed
+                    val isCmd = event.isMetaPressed || event.isCtrlPressed
                     val isAlt = event.isAltPressed
                     val isBack =
                         (isCmd && (key == Key.DirectionLeft || key == Key.LeftBracket || event.utf16CodePoint == '['.code)) ||

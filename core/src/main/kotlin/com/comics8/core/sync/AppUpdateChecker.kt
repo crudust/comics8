@@ -43,6 +43,7 @@ object AppUpdateChecker {
                     versionCode = it.optInt("versionCode", 0),
                     versionName = it.optString("versionName", ""),
                     downloadUrl = it.optString("downloadUrl", ""),
+                    windowsDownloadUrl = it.optString("windowsDownloadUrl", ""),
                     releaseNotes = it.optString("releaseNotes", ""),
                 )
             }
@@ -99,7 +100,13 @@ object AppUpdateChecker {
         val hasUpdate = (info.versionCode > currentVersionCode) ||
             (info.versionCode == 0 && info.versionName.isNotBlank() && info.versionName != currentVersionName)
 
-        val resolvedUrl = SyncConstants.resolveDownloadUrl(info.downloadUrl, serverUrl)
+        val isWindows = System.getProperty("os.name", "").lowercase().contains("win")
+        val rawUrl = if (isWindows && info.windowsDownloadUrl.isNotBlank()) {
+            info.windowsDownloadUrl
+        } else {
+            info.downloadUrl
+        }
+        val resolvedUrl = SyncConstants.resolveDownloadUrl(rawUrl, serverUrl)
 
         return AppUpdateState(
             hasUpdate = hasUpdate,
@@ -112,3 +119,4 @@ object AppUpdateChecker {
         )
     }
 }
+

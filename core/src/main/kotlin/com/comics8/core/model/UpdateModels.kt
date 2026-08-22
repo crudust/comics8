@@ -4,6 +4,7 @@ data class PlatformUpdateInfo(
     val versionCode: Int = 0,
     val versionName: String = "",
     val downloadUrl: String = "",
+    val windowsDownloadUrl: String = "",
     val releaseNotes: String = "",
 )
 

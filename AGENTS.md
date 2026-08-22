@@ -36,12 +36,13 @@ Android는 에뮬레이터로 돌리지 않습니다. 폰은 인앱 업데이트
 
 ## 3. 주요 빌드 및 실행 명령어 (Build & Run Commands)
 
-### 3.1. APK 단독 빌드
-정식 서명된 Release APK 파일을 빌드할 때 사용합니다:
+### 3.1. APK 및 Windows 포터블 단독 빌드
+정식 서명된 Release APK 및 Windows 무설치 포터블 Zip을 빌드할 때 사용합니다:
 ```bash
-./gradlew assembleRelease
+./gradlew assembleRelease :desktop:packageWindowsZip
 ```
 - **출력 APK 경로**: `app/build/outputs/apk/release/app-release.apk`
+- **출력 Windows Zip 경로**: `desktop/build/compose/binaries/main/Comics8-win.zip`
 
 ### 3.2. macOS 데스크톱 앱 실행 (개발용)
 Mac 코딩 클론에서:
@@ -58,7 +59,7 @@ Mac 코딩 클론에서:
 ```
 
 ### 3.4. 릴리즈 배포
-Linux에서 APK를 빌드하고, SSH로 Mac `.app`을 만든 뒤 서버에 둘 다 올립니다. Mac SSH는 `~/.comics8-deploy.env` (예: `scripts/deploy.env.example`).
+Linux에서 APK와 Windows Zip을 빌드하고, SSH로 Mac `.app`을 만든 뒤 서버에 3종을 모두 올립니다. Mac SSH는 `~/.comics8-deploy.env` (예: `scripts/deploy.env.example`).
 ```bash
 ./scripts/deploy-release.sh [versionName] [versionCode] [releaseNotes]
 # 예시:
@@ -81,7 +82,7 @@ Comics8/
 ├── app/                        # Android 모듈 (APK)
 │   ├── build.gradle.kts
 │   └── src/main/java/com/comics8/monitor/
-├── desktop/                    # macOS Desktop 모듈 (.app / .dmg)
+├── desktop/                    # Desktop 모듈 (macOS .app / Windows 포터블 zip)
 │   ├── build.gradle.kts
 │   └── src/main/kotlin/com/comics8/desktop/
 │       ├── Main.kt
@@ -91,13 +92,14 @@ Comics8/
 │   ├── build-mac-local.sh          # Mac에서 /Applications 첫 설치
 │   ├── update-mac-app-remote.sh    # Linux→Mac SSH 빌드/설치/zip
 │   ├── run-desktop.sh              # Mac에서 데스크톱 앱 직접 실행
-│   ├── deploy-release.sh           # APK + Mac zip 서버 배포
+│   ├── deploy-release.sh           # APK + Mac zip + Win zip 서버 배포
 │   └── deploy.env.example          # ~/.comics8-deploy.env 예시
 ├── build.gradle.kts
 ├── settings.gradle.kts
 ├── local.properties
 └── AGENTS.md
 ```
+
 
 ---
 

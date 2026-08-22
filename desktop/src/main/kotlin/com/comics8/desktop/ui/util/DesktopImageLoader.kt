@@ -96,10 +96,10 @@ object AwtThumbEncoder : ThumbEncoder {
 }
 
 object DesktopImageCache {
-    private const val MEMORY_MAX_ENTRIES = 12
+    private const val MEMORY_MAX_ENTRIES = 48
     private const val DISPLAY_LONG_EDGE = 2048
-    private const val DISK_HARD_LIMIT_BYTES = 200L * 1024 * 1024
-    private const val DISK_TARGET_BYTES = 160L * 1024 * 1024
+    private const val DISK_HARD_LIMIT_BYTES = 500L * 1024 * 1024
+    private const val DISK_TARGET_BYTES = 400L * 1024 * 1024
     private val previewSlots = Semaphore(2, true)
 
     private val memoryLock = Any()

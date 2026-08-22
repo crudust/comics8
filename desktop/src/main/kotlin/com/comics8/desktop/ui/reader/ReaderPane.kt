@@ -171,7 +171,7 @@ fun ReaderPane(
             .onKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown) {
                     val key = event.key
-                    val isCmd = event.isMetaPressed
+                    val isCmd = event.isMetaPressed || event.isCtrlPressed
                     val isAlt = event.isAltPressed
                     val isCmdOrAlt = isCmd || isAlt
                     val isBack =
@@ -354,7 +354,7 @@ private fun ReaderSingleView(
 
     LaunchedEffect(currentPage, slices, state.readerImages) {
         if (state.readerImages.isNotEmpty() && slices.isNotEmpty()) {
-            val preloadUrls = (1..2).mapNotNull { offset ->
+            val preloadUrls = listOf(-1, 1, 2).mapNotNull { offset ->
                 slices.getOrNull(currentPage + offset)?.let { slice ->
                     state.readerImages.getOrNull(slice.imageIndex)
                 }
@@ -647,7 +647,7 @@ private fun ReaderDualView(
     LaunchedEffect(currentSpreadIndex, spreads, state.readerImages) {
         if (state.readerImages.isNotEmpty() && spreads.isNotEmpty()) {
             val preloadUrls = mutableListOf<String>()
-            for (offset in 1..1) {
+            for (offset in listOf(-1, 1)) {
                 val nextSpread = spreads.getOrNull(currentSpreadIndex + offset)
                 when (nextSpread) {
                     is DualSpread.Single -> state.readerImages.getOrNull(nextSpread.index)?.let { preloadUrls.add(it) }

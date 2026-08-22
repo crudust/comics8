@@ -78,14 +78,19 @@ object DesktopVersion {
 }
 EOF
 
-# 1. Build Android Release APK
-echo "📦 1/5: Building Android Release APK..."
-./gradlew assembleRelease
+# 1. Build Android Release APK & Windows Portable Zip
+echo "📦 1/5: Building Android Release APK & Windows Portable Zip..."
+./gradlew assembleRelease :desktop:packageWindowsZip
 
 APK_PATH="app/build/outputs/apk/release/app-release.apk"
+WIN_ZIP_PATH="desktop/build/compose/binaries/main/Comics8-win.zip"
+
 if [ ! -f "$APK_PATH" ]; then
     echo "❌ APK file not found: $APK_PATH"
     exit 1
+fi
+if [ ! -f "$WIN_ZIP_PATH" ]; then
+    echo "⚠️  Windows ZIP not found: $WIN_ZIP_PATH"
 fi
 
 # 2. Build macOS Desktop App on the Mac builder
@@ -99,7 +104,7 @@ echo "📦 2/5: Building macOS Desktop App via ${COMICS8_MAC_SSH}..."
 if ./scripts/update-mac-app-remote.sh origin/main "${MAC_ZIP_PATH}"; then
     HAVE_MAC_ZIP=1
 else
-    echo "⚠️  Mac .app build failed. Continuing with Android APK only."
+    echo "⚠️  Mac .app build failed. Continuing with Android & Windows."
 fi
 
 # 3. Upload binaries and server code to Server
@@ -108,7 +113,7 @@ echo "🚀 3/5: Uploading server code and binaries to server ($SERVER_HOST)..."
 if [[ "$HAVE_MAC_ZIP" -eq 1 ]]; then
     "${SSH[@]}" "rm -rf ${SERVER_DOWNLOAD_DIR}/*"
 else
-    "${SSH[@]}" "rm -f ${SERVER_DOWNLOAD_DIR}/comics8-latest.apk"
+    "${SSH[@]}" "rm -f ${SERVER_DOWNLOAD_DIR}/comics8-latest.apk ${SERVER_DOWNLOAD_DIR}/Comics8-win.zip"
 fi
 
 if [ -f "server/server.py" ]; then
@@ -118,6 +123,9 @@ if [ -f "server/server.py" ]; then
 fi
 
 scp "$APK_PATH" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/comics8-latest.apk"
+if [ -f "$WIN_ZIP_PATH" ]; then
+    scp "$WIN_ZIP_PATH" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/Comics8-win.zip"
+fi
 if [[ "$HAVE_MAC_ZIP" -eq 1 ]]; then
     scp "$MAC_ZIP_PATH" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/Comics8-mac.zip"
 fi
@@ -146,13 +154,13 @@ android = {
     "releaseNotes": os.environ["COMICS8_RELEASE_NOTES"],
 }
 desktop = dict(current.get("desktop") or {})
+desktop["versionCode"] = int(os.environ["COMICS8_VERSION_CODE"])
+desktop["versionName"] = os.environ["COMICS8_VERSION_NAME"]
+desktop["releaseNotes"] = os.environ["COMICS8_RELEASE_NOTES"]
+desktop["windowsDownloadUrl"] = "/api/comics8/download/Comics8-win.zip"
+
 if os.environ["COMICS8_BUILD_MAC"] == "1":
-    desktop = {
-        "versionCode": int(os.environ["COMICS8_VERSION_CODE"]),
-        "versionName": os.environ["COMICS8_VERSION_NAME"],
-        "downloadUrl": "/api/comics8/download/Comics8-mac.zip",
-        "releaseNotes": os.environ["COMICS8_RELEASE_NOTES"],
-    }
+    desktop["downloadUrl"] = "/api/comics8/download/Comics8-mac.zip"
 else:
     desktop.setdefault("downloadUrl", "/api/comics8/download/Comics8-mac.zip")
 
@@ -178,7 +186,9 @@ echo "🎉 배포가 성공적으로 완료되었습니다!"
 echo "• Version Info:  https://homeassistant.tail1946af.ts.net/api/comics8/version"
 echo "• Android APK:   https://homeassistant.tail1946af.ts.net/api/comics8/download/comics8-latest.apk"
 echo "• Mac Desktop:   https://homeassistant.tail1946af.ts.net/api/comics8/download/Comics8-mac.zip"
+echo "• Windows Zip:   https://homeassistant.tail1946af.ts.net/api/comics8/download/Comics8-win.zip"
 if [[ "$HAVE_MAC_ZIP" -eq 0 ]]; then
-    echo "• Desktop zip was left unchanged (no Mac .app this run)"
+    echo "• Mac zip was left unchanged (no Mac .app this run)"
 fi
 echo "=================================================="
+

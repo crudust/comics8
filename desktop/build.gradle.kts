@@ -8,6 +8,9 @@ dependencies {
     implementation(project(":core"))
 
     implementation(compose.desktop.currentOs)
+    runtimeOnly("org.jetbrains.skiko:skiko-awt-runtime-windows-x64:0.8.18")
+    runtimeOnly("org.jetbrains.skiko:skiko-awt-runtime-macos-x64:0.8.18")
+    runtimeOnly("org.jetbrains.skiko:skiko-awt-runtime-macos-arm64:0.8.18")
     implementation(compose.material3)
     implementation(compose.materialIconsExtended)
 
@@ -30,6 +33,30 @@ compose.desktop {
                 dockName = "Comics8"
                 iconFile.set(project.file("src/main/resources/icon.icns"))
             }
+            windows {
+                menuGroup = "Comics8"
+                upgradeUuid = "68c92f54-5264-4e92-969c-29369f69747a"
+                iconFile.set(project.file("src/main/resources/icon.ico"))
+            }
         }
     }
 }
+
+val packageWindowsPortable = tasks.register<Zip>("packageWindowsZip") {
+    group = "compose desktop"
+    description = "Packages a portable Windows distribution with launcher scripts and icons."
+    dependsOn("packageUberJarForCurrentOS")
+
+    archiveFileName.set("Comics8-win.zip")
+    destinationDirectory.set(layout.buildDirectory.dir("compose/binaries/main"))
+
+    from(layout.buildDirectory.dir("compose/jars")) {
+        include("*.jar")
+        rename { "Comics8.jar" }
+    }
+    from(project.file("src/main/resources/icon.ico"))
+    from(project.file("src/main/resources/icon.png"))
+    from(project.file("src/main/resources/windows"))
+}
+
+
