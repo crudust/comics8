@@ -1,6 +1,6 @@
 package com.comics8.desktop
 
 object DesktopVersion {
-    const val VERSION_NAME = "1.5.13"
-    const val VERSION_CODE = 39
+    const val VERSION_NAME = "1.5.14"
+    const val VERSION_CODE = 40
 }

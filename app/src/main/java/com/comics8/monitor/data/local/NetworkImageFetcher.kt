@@ -18,6 +18,8 @@ import okio.Buffer
 import okio.source
 import java.util.concurrent.Semaphore
 
+import okio.ByteString.Companion.encodeUtf8
+
 class NetworkImageFetcher(
     private val url: String,
     private val options: Options,
@@ -27,7 +29,6 @@ class NetworkImageFetcher(
         val localRef = LocalPreviewUri.parse(url)
         val ref = NetworkImageUri.parse(url)
         require(localRef != null || ref != null) { "invalid preview uri" }
-        val buffer = Buffer()
         val preview = localRef != null || ref?.preview != null
         if (preview) {
             val thumbnailPx = localRef?.thumbnailPx ?: ref!!.thumbnailPx.takeIf { it > 0 } ?: 320
@@ -45,17 +46,49 @@ class NetworkImageFetcher(
             } finally {
                 PREVIEW_SLOTS.release()
             }
+            val buffer = Buffer()
             file.source().use { buffer.writeAll(it) }
+            SourceResult(
+                source = ImageSource(source = buffer, context = options.context),
+                mimeType = "image/webp",
+                dataSource = DataSource.DISK,
+            )
         } else {
-            NetworkSourceRuntime.open(url).use { input ->
-                input.source().use { buffer.writeAll(it) }
+            val cacheFile = getReaderCacheFile(options.context, url)
+            if (cacheFile.isFile && cacheFile.length() > 0L) {
+                cacheFile.setLastModified(System.currentTimeMillis())
+                val buffer = Buffer()
+                cacheFile.source().use { buffer.writeAll(it) }
+                SourceResult(
+                    source = ImageSource(source = buffer, context = options.context),
+                    mimeType = ZipImageFetcher.mimeType(ref!!.zipEntry ?: ref.path),
+                    dataSource = DataSource.DISK,
+                )
+            } else {
+                val tempFile = java.io.File(cacheFile.parentFile, "${cacheFile.name}.tmp")
+                try {
+                    NetworkSourceRuntime.open(url).use { input ->
+                        tempFile.outputStream().use { out ->
+                            input.copyTo(out)
+                        }
+                    }
+                    if (tempFile.exists() && tempFile.length() > 0L) {
+                        tempFile.renameTo(cacheFile)
+                    }
+                } catch (e: Exception) {
+                    tempFile.delete()
+                    throw e
+                }
+                val buffer = Buffer()
+                cacheFile.source().use { buffer.writeAll(it) }
+                SourceResult(
+                    source = ImageSource(source = buffer, context = options.context),
+                    mimeType = ZipImageFetcher.mimeType(ref!!.zipEntry ?: ref.path),
+                    dataSource = DataSource.NETWORK,
+                )
             }
+
         }
-        SourceResult(
-            source = ImageSource(source = buffer, context = options.context),
-            mimeType = if (preview) "image/webp" else ZipImageFetcher.mimeType(ref!!.zipEntry ?: ref.path),
-            dataSource = if (preview) DataSource.DISK else DataSource.NETWORK,
-        )
     }
 
     class Factory(private val thumbs: CoverThumbCache) : Fetcher.Factory<Uri> {
@@ -70,6 +103,14 @@ class NetworkImageFetcher(
     }
 
     private companion object {
-        val PREVIEW_SLOTS = Semaphore(2, true)
+        val PREVIEW_SLOTS = Semaphore(8, true)
+
+        fun getReaderCacheFile(context: android.content.Context, url: String): java.io.File {
+            val dir = java.io.File(context.cacheDir, "network_reader").apply { mkdirs() }
+            val hash = url.encodeUtf8().sha256().hex()
+            return java.io.File(dir, "$hash.bin")
+        }
     }
 }
+
+

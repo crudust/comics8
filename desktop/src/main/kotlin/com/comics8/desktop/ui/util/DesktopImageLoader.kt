@@ -100,7 +100,7 @@ object DesktopImageCache {
     private const val DISPLAY_LONG_EDGE = 2048
     private const val DISK_HARD_LIMIT_BYTES = 500L * 1024 * 1024
     private const val DISK_TARGET_BYTES = 400L * 1024 * 1024
-    private val previewSlots = Semaphore(2, true)
+    private val previewSlots = Semaphore(8, true)
 
     private val memoryLock = Any()
     private val memoryCache = object : LinkedHashMap<String, ImageBitmap>(64, 0.75f, true) {

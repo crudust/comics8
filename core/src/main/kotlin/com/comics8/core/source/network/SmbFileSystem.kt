@@ -152,25 +152,77 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
         private val file: com.hierynomus.smbj.share.File,
         private val length: Long,
     ) : ReadOnlySeekableChannel() {
+        private var blockStart = -1L
+        private var block = ByteArray(0)
+
         override fun size(): Long = length
 
         override fun read(dst: ByteBuffer): Int {
             check(open) { "channel closed" }
             if (cursor >= length) return -1
-            val count = minOf(dst.remaining().toLong(), length - cursor, 1024L * 1024L).toInt()
-            if (count <= 0) return 0
-            val bytes = ByteArray(count)
-            val read = file.read(bytes, cursor, 0, count)
-            if (read <= 0) return -1
-            dst.put(bytes, 0, read)
-            cursor += read
-            return read
+            var total = 0
+            while (dst.hasRemaining() && cursor < length) {
+                val remaining = dst.remaining()
+                if (remaining >= DIRECT_READ_THRESHOLD) {
+                    val toRead = minOf(remaining.toLong(), length - cursor, 1024L * 1024L).toInt()
+                    val bytes = ByteArray(toRead)
+                    val read = file.read(bytes, cursor, 0, toRead)
+                    if (read <= 0) break
+                    dst.put(bytes, 0, read)
+                    cursor += read
+                    total += read
+                    blockStart = -1L
+                    block = ByteArray(0)
+                    continue
+                }
+
+                val wantedStart = cursor / BLOCK_SIZE * BLOCK_SIZE
+                if (blockStart != wantedStart) {
+                    loadBlock(wantedStart)
+                }
+                val offset = (cursor - blockStart).toInt()
+                if (offset !in block.indices) break
+                val count = minOf(
+                    remaining.toLong(),
+                    (block.size - offset).toLong(),
+                    length - cursor,
+                ).toInt()
+                if (count <= 0) break
+                dst.put(block, offset, count)
+                cursor += count
+                total += count
+            }
+            return if (total == 0 && cursor >= length) -1 else total
+        }
+
+        private fun loadBlock(start: Long) {
+            val toFetch = minOf(BLOCK_SIZE, length - start).toInt()
+            if (toFetch <= 0) {
+                block = ByteArray(0)
+                blockStart = -1L
+                return
+            }
+            val buf = ByteArray(toFetch)
+            val read = file.read(buf, start, 0, toFetch)
+            if (read > 0) {
+                block = if (read == toFetch) buf else buf.copyOf(read)
+                blockStart = start
+            } else {
+                block = ByteArray(0)
+                blockStart = -1L
+            }
         }
 
         override fun close() {
             if (!open) return
             open = false
+            block = ByteArray(0)
             runCatching { file.close() }
+        }
+
+        companion object {
+            private const val BLOCK_SIZE = 256 * 1024L
+            private const val DIRECT_READ_THRESHOLD = 256 * 1024
         }
     }
 
@@ -183,8 +235,12 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
 
     companion object {
         private val SMB_CONFIG: SmbConfig = SmbConfig.builder()
-            .withTimeout(10L, TimeUnit.SECONDS)
-            .withSoTimeout(10L, TimeUnit.SECONDS)
+            .withTimeout(15L, TimeUnit.SECONDS)
+            .withSoTimeout(15L, TimeUnit.SECONDS)
+            .withReadBufferSize(1024 * 1024)
+            .withWriteBufferSize(1024 * 1024)
+            .withMultiProtocolNegotiate(true)
             .build()
     }
 }
+
