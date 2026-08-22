@@ -1,5 +1,6 @@
 -keep class com.comics8.** { *; }
 -keep class androidx.work.** { *; }
+-keep class org.mozilla.javascript.** { *; }
 -dontwarn okhttp3.**
 -dontwarn okio.**
 -dontwarn org.jsoup.**
