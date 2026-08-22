@@ -32,7 +32,7 @@ class WebDavFileSystemTest {
         server.start()
         try {
             val config = NetworkSourceConfig(
-                id = "network:dav-test",
+                id = "network-dav-test",
                 protocol = NetworkProtocol.WEBDAV,
                 name = "DAV",
                 url = server.url("/dav/").toString(),

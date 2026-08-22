@@ -28,7 +28,7 @@ class NetworkLibrarySourceTest {
         }.toByteArray()
         val backend = FakeFs(zip)
         val config = NetworkSourceConfig(
-            id = "network:source-test",
+            id = "network-source-test",
             protocol = NetworkProtocol.SMB,
             name = "NAS",
             host = "nas",

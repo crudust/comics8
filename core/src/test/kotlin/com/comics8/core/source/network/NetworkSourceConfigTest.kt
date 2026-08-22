@@ -6,9 +6,23 @@ import kotlin.io.path.createTempDirectory
 
 class NetworkSourceConfigTest {
     @Test
+    fun legacyColonIdIsMigratedToWorkIdSafeForm() {
+        val config = NetworkSourceConfig(
+            id = "network:legacy",
+            protocol = NetworkProtocol.SMB,
+            name = "NAS",
+            host = "nas",
+            share = "media",
+        ).validated()
+
+        assertThat(config.id).isEqualTo("network-legacy")
+        assertThat(com.comics8.core.source.WorkId(config.id, "book").sourceId).isEqualTo("network-legacy")
+    }
+
+    @Test
     fun smbValidationNormalizesConnection() {
         val config = NetworkSourceConfig(
-            id = "network:test",
+            id = "network-test",
             protocol = NetworkProtocol.SMB,
             name = " NAS ",
             host = "smb://nas.local/",
@@ -29,7 +43,7 @@ class NetworkSourceConfigTest {
         val dir = createTempDirectory("network-store").toFile().apply { deleteOnExit() }
         val store = NetworkSourceStore(dir.resolve("connections.json"))
         val config = NetworkSourceConfig(
-            id = "network:test",
+            id = "network-test",
             protocol = NetworkProtocol.WEBDAV,
             name = "DAV",
             url = "https://example.com/dav",

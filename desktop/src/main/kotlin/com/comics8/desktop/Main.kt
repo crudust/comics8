@@ -31,6 +31,7 @@ import com.comics8.core.source.SourceLocator
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.js.JsPackStore
 import com.comics8.core.source.network.NetworkSourceStore
+import com.comics8.core.source.network.NetworkSourceConfig
 import com.comics8.core.source.network.loadSources
 import com.comics8.desktop.data.DesktopDatabase
 import java.io.File
@@ -87,10 +88,17 @@ fun main() {
                 val loaded = jsPackStore.loadInto(it)
                 val networkSources = networkSourceStore.loadSources()
                 networkSources.forEach(it::add)
+                val migratedInstalled = DesktopSourcePrefs.installedIds()
+                    .map(NetworkSourceConfig::normalizeId)
+                    .toSet()
+                DesktopSourcePrefs.storedActiveRaw()?.let { active ->
+                    val migrated = NetworkSourceConfig.normalizeId(active)
+                    if (migrated != active) DesktopSourcePrefs.setActiveSourceId(migrated)
+                }
                 val loadedIds = loaded.map { source -> source.id } + networkSources.map { source -> source.id }
                 if (loadedIds.isNotEmpty()) {
                     DesktopSourcePrefs.setInstalledIds(
-                        DesktopSourcePrefs.installedIds() + loadedIds,
+                        migratedInstalled + loadedIds,
                     )
                 }
             }

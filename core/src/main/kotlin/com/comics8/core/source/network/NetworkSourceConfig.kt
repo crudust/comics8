@@ -9,7 +9,7 @@ import java.util.UUID
 enum class NetworkProtocol { SMB, WEBDAV }
 
 data class NetworkSourceConfig(
-    val id: String = "network:${UUID.randomUUID()}",
+    val id: String = "network-${UUID.randomUUID()}",
     val protocol: NetworkProtocol,
     val name: String,
     val host: String = "",
@@ -26,7 +26,8 @@ data class NetworkSourceConfig(
             "share=$share, path=$path, url=$url, username=$username, password=<redacted>, domain=$domain)"
 
     fun validated(): NetworkSourceConfig {
-        require(id.startsWith("network:") && id.length <= 128) { "잘못된 연결 ID입니다" }
+        val validId = normalizeId(id)
+        require(validId.startsWith("network-") && validId.length <= 128) { "잘못된 연결 ID입니다" }
         require(name.trim().isNotEmpty()) { "이름을 입력하세요" }
         require(name.length <= 80) { "이름이 너무 깁니다" }
         return when (protocol) {
@@ -35,6 +36,7 @@ data class NetworkSourceConfig(
                 require(port in 1..65535) { "포트가 올바르지 않습니다" }
                 require(share.trim().trim('/', '\\').isNotEmpty()) { "공유 이름을 입력하세요" }
                 copy(
+                    id = validId,
                     name = name.trim(),
                     host = host.trim().removePrefix("smb://").trimEnd('/'),
                     share = share.trim().trim('/', '\\'),
@@ -50,6 +52,7 @@ data class NetworkSourceConfig(
                     "WebDAV URL은 http:// 또는 https://로 시작해야 합니다"
                 }
                 copy(
+                    id = validId,
                     name = name.trim(),
                     url = normalizedUrl,
                     username = username.trim(),
@@ -96,6 +99,10 @@ data class NetworkSourceConfig(
             .filter { it.isNotBlank() && it != "." }
             .also { require(".." !in it) { "상위 경로(..)는 사용할 수 없습니다" } }
             .joinToString("/")
+
+        fun normalizeId(value: String): String = value.trim().let { id ->
+            if (id.startsWith("network:")) "network-${id.removePrefix("network:")}" else id
+        }
     }
 }
 

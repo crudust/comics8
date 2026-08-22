@@ -48,7 +48,7 @@ object NetworkImageUri {
             val preview = json.optString("preview").takeIf(String::isNotBlank)
                 ?.let { PreviewKind.valueOf(it) }
             val modifiedAt = json.optLong("modifiedAt")
-            if (!source.startsWith("network:") || path.isBlank()) null else Ref(source, path, entry, size, preview, modifiedAt)
+            if (!source.startsWith("network-") || path.isBlank()) null else Ref(source, path, entry, size, preview, modifiedAt)
         } catch (_: Exception) {
             null
         }

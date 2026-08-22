@@ -7,7 +7,7 @@ class NetworkImageUriTest {
     @Test
     fun roundTripsLazyPreviewMetadata() {
         val url = NetworkImageUri.encode(
-            sourceId = "network:test",
+            sourceId = "network-test",
             path = "series/book.cbz",
             size = 1_000_000_000L,
             preview = NetworkImageUri.PreviewKind.ZIP_FIRST,
@@ -16,7 +16,7 @@ class NetworkImageUriTest {
 
         assertThat(NetworkImageUri.parse(url)).isEqualTo(
             NetworkImageUri.Ref(
-                sourceId = "network:test",
+                sourceId = "network-test",
                 path = "series/book.cbz",
                 size = 1_000_000_000L,
                 preview = NetworkImageUri.PreviewKind.ZIP_FIRST,

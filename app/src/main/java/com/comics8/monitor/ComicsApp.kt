@@ -17,6 +17,7 @@ import com.comics8.core.source.local.CoverThumbCache
 import com.comics8.core.source.local.LibraryScanIndex
 import com.comics8.core.source.local.LocalSource
 import com.comics8.core.source.network.NetworkSourceStore
+import com.comics8.core.source.network.NetworkSourceConfig
 import com.comics8.core.source.network.loadSources
 import com.comics8.core.network.ToonClient
 import com.comics8.monitor.data.AndroidSourcePrefs
@@ -77,9 +78,14 @@ class ComicsApp : Application(), ImageLoaderFactory {
         networkSourceStore = networkStore
         val networkSources = networkStore.loadSources()
         networkSources.forEach(registry::add)
+        val migratedInstalled = sourcePrefs.installedIds().map(NetworkSourceConfig::normalizeId).toSet()
+        sourcePrefs.storedActiveRaw()?.let { active ->
+            val migrated = NetworkSourceConfig.normalizeId(active)
+            if (migrated != active) sourcePrefs.setActiveSourceId(migrated)
+        }
         val loadedIds = loaded.map { it.id } + networkSources.map { it.id }
         if (loadedIds.isNotEmpty()) {
-            sourcePrefs.setInstalledIds(sourcePrefs.installedIds() + loadedIds)
+            sourcePrefs.setInstalledIds(migratedInstalled + loadedIds)
         }
         libraryMirror = SafLibraryMirror(this)
         coverThumbs = CoverThumbCache(File(cacheDir, "thumbs"), BitmapThumbEncoder)
