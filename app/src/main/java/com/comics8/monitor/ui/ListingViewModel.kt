@@ -414,6 +414,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             )
         }
         loadPage(1, replace = true, asRefresh = true)
+        syncOnBrowseRefresh()
     }
 
     fun selectTab(tab: BrowseTab) {

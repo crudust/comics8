@@ -237,6 +237,8 @@ class ToonRepository(
         val updatedSeen = mutableListOf<SeenToon>()
         val nowMs = now()
 
+        var historyChanged = false
+
         for ((sourceId, rows) in favorites.groupBy { it.sourceId.ifBlank { WorkId.DEFAULT_SOURCE } }) {
             val source = sources.getOrNull(sourceId) ?: continue
             val candidates = try {
@@ -275,12 +277,45 @@ class ToonRepository(
                                 val isRead = readEpisodeDao.getReadEpisode(workId, latestWrId) != null ||
                                     readHistoryDao.get(workId)?.lastWrId == latestWrId
 
+                                val lastP = epPage.lastPage.coerceAtLeast(1)
+                                val exactTotal = if (lastP <= 1) {
+                                    epPage.items.size
+                                } else {
+                                    val pageSize = source.episodePageSize
+                                    try {
+                                        val lastPageRes = loadEpisodes(item, lastP)
+                                        (lastP - 1) * pageSize + lastPageRes.items.size
+                                    } catch (_: Exception) {
+                                        (lastP - 1) * pageSize + epPage.items.size
+                                    }
+                                }
+
+                                var changed = false
+                                if (exactTotal > 0) {
+                                    val existingHist = readHistoryDao.get(workId)
+                                    if (existingHist != null) {
+                                        val safeOrder = existingHist.lastReadOrder.coerceIn(0, exactTotal)
+                                        val hasNew = safeOrder < exactTotal
+                                        if (existingHist.totalEpisodes != exactTotal || existingHist.hasNew != hasNew) {
+                                            readHistoryDao.upsert(
+                                                existingHist.copy(
+                                                    totalEpisodes = exactTotal,
+                                                    lastReadOrder = safeOrder,
+                                                    hasNew = hasNew,
+                                                )
+                                            )
+                                            changed = true
+                                        }
+                                    }
+                                }
+
+                                val latestDate = latestEp.date ?: item.updatedAt
                                 val prev = existing[workId.storageKey()]
                                 val seen = SeenToon(
                                     sourceId = workId.sourceId,
                                     id = workId.toonId,
                                     title = item.title,
-                                    updatedAt = item.updatedAt,
+                                    updatedAt = latestDate,
                                     firstSeenAt = prev?.firstSeenAt ?: nowMs,
                                     lastSeenAt = nowMs,
                                     notifiedKey = notifyKey,
@@ -288,12 +323,12 @@ class ToonRepository(
                                 val unseenItem = if (!isRead) {
                                     item.copy(
                                         href = latestEp.href,
-                                        updatedAt = latestEp.date ?: item.updatedAt,
+                                        updatedAt = latestDate,
                                     )
                                 } else {
                                     null
                                 }
-                                seen to unseenItem
+                                Triple(seen, unseenItem, changed)
                             } catch (_: Exception) {
                                 null
                             }
@@ -305,11 +340,17 @@ class ToonRepository(
                 if (outcome == null) continue
                 updatedSeen.add(outcome.first)
                 outcome.second?.let { unseen.add(it) }
+                if (outcome.third) {
+                    historyChanged = true
+                }
             }
         }
 
         if (updatedSeen.isNotEmpty()) {
             seenDao.upsertAll(updatedSeen)
+        }
+        if (historyChanged) {
+            syncManager?.triggerDebouncedPush()
         }
 
         return unseen
