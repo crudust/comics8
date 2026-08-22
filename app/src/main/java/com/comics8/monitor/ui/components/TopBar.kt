@@ -158,11 +158,13 @@ fun TopBar(
                         contentDescription = "클라우드 동기화",
                     )
                 }
-                IconButton(onClick = viewModel::openDownloads) {
-                    Icon(
-                        imageVector = Icons.Default.Download,
-                        contentDescription = "다운로드 보관함",
-                    )
+                if (state.writesDownloads) {
+                    IconButton(onClick = viewModel::openDownloads) {
+                        Icon(
+                            imageVector = Icons.Default.Download,
+                            contentDescription = "다운로드 보관함",
+                        )
+                    }
                 }
                 IconButton(onClick = viewModel::openHistory) {
                     Icon(
@@ -235,12 +237,14 @@ fun TopBar(
                         )
                     }
                 }
-                IconButton(onClick = viewModel::openDownloadOptions) {
-                    Icon(
-                        imageVector = Icons.Default.Download,
-                        contentDescription = "오프라인 다운로드",
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
+                if (state.writesDownloads) {
+                    IconButton(onClick = viewModel::openDownloadOptions) {
+                        Icon(
+                            imageVector = Icons.Default.Download,
+                            contentDescription = "오프라인 다운로드",
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                 }
                 IconButton(onClick = viewModel::toggleFavorite) {
                     Icon(

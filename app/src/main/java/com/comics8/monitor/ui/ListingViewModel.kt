@@ -13,11 +13,15 @@ import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.ReadDirection
 import com.comics8.core.model.ToonItem
 import com.comics8.core.model.ViewMode
+import com.comics8.core.source.BuiltinOffers
 import com.comics8.core.source.ComicSource
 import com.comics8.core.source.ProgressDisplay
+import com.comics8.core.source.SourceImplementation
+import com.comics8.core.source.SourceOffer
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
 import com.comics8.core.source.js.JsPackStore
+import com.comics8.core.source.local.LocalSource
 import com.comics8.core.sync.AppUpdateChecker
 import com.comics8.core.sync.SyncConstants
 import com.comics8.monitor.BuildConfig
@@ -36,7 +40,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.nio.charset.StandardCharsets
 
 data class ArtistPickRequest(
     val item: ToonItem,
@@ -96,8 +99,17 @@ data class ListingUiState(
     val showAddSourceSheet: Boolean = false,
     val showRemoveSourceSheet: Boolean = false,
     val sourceError: String? = null,
+    val addSourceOffers: List<SourceOffer> = emptyList(),
+    val libraryRoots: List<String> = emptyList(),
+    val pendingLibraryTreePick: Boolean = false,
 ) {
     val isSearch: Boolean get() = searchQuery != null
+
+    val writesDownloads: Boolean
+        get() {
+            val id = series?.sourceId ?: activeSourceId ?: return false
+            return sourceRegistry.getOrNull(id)?.writesDownloads == true
+        }
 
     val currentEpisodeIndex: Int
         get() = currentEpisode?.let { ep -> episodes.indexOfFirst { it.wrId == ep.wrId } } ?: -1
@@ -126,9 +138,12 @@ sealed interface Screen {
 }
 
 class ListingViewModel(application: Application) : AndroidViewModel(application) {
-    private val repository = (application as ComicsApp).repository
-    private val sourceSettings = (application as ComicsApp).sourceSettings
-    private val jsPackStore: JsPackStore = (application as ComicsApp).jsPackStore
+    private val app = application as ComicsApp
+    private val repository = app.repository
+    private val sourceSettings = app.sourceSettings
+    private val jsPackStore: JsPackStore = app.jsPackStore
+    private val libraryMirror = app.libraryMirror
+    private val coverThumbs = app.coverThumbs
     private val prefs = application.getSharedPreferences("comics_reader_prefs", Context.MODE_PRIVATE)
 
     var singleViewPreference: ViewMode
@@ -310,6 +325,9 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 readDirection = globalReadDirection,
             )
         }
+        if (WorkId.LOCAL_SOURCE in sourceSettings.installedIds()) {
+            ensureLocalSourceLoaded()
+        }
         applyActiveSource(sourceSettings.activeSourceId(), loadListing = false)
         repository.syncManager?.let { sm ->
             viewModelScope.launch {
@@ -363,6 +381,10 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 error = if (source == null) null else it.error,
                 searchSuggestions = emptyList(),
                 sourceRegistry = repository.sourceRegistry(),
+                libraryRoots = sourceSettings.libraryRoots(),
+                addSourceOffers = catalogAddOffers(),
+                screen = if (source == null) Screen.Browse else it.screen,
+                series = if (source == null) null else it.series,
             )
         }
         if (source == null || nextTab == null) return
@@ -511,17 +533,34 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             uninstallSource(id)
             return
         }
+        if (id == WorkId.LOCAL_SOURCE) {
+            ensureLocalSourceLoaded()
+        }
         sourceSettings.setEnabled(id, true)
-        _state.update { it.copy(installedSources = repository.installedSources()) }
+        _state.update {
+            it.copy(
+                installedSources = repository.installedSources(),
+                addSourceOffers = catalogAddOffers(),
+                libraryRoots = sourceSettings.libraryRoots(),
+            )
+        }
     }
 
     fun openAddSourceSheet() {
-        _state.update { it.copy(showAddSourceSheet = true, showRemoveSourceSheet = false) }
+        _state.update {
+            it.copy(
+                showAddSourceSheet = true,
+                showRemoveSourceSheet = false,
+                addSourceOffers = catalogAddOffers(),
+            )
+        }
     }
 
-    fun closeAddSourceSheet() {
+    fun dismissAddSourceSheet() {
         _state.update { it.copy(showAddSourceSheet = false) }
     }
+
+    fun closeAddSourceSheet() = dismissAddSourceSheet()
 
     fun openRemoveSourceSheet() {
         if (_state.value.installedSources.isEmpty()) return
@@ -542,9 +581,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             val fileName = queryDisplayName(app, uri)
             val script = withContext(Dispatchers.IO) {
                 try {
-                    app.contentResolver.openInputStream(uri)?.use {
-                        it.readBytes().toString(StandardCharsets.UTF_8)
-                    }
+                    app.contentResolver.openInputStream(uri)?.use { JsPackStore.readCapped(it) }
                 } catch (_: Exception) {
                     null
                 }
@@ -595,9 +632,79 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 it.copy(
                     installedSources = repository.installedSources(),
                     sourceRegistry = repository.sourceRegistry(),
+                    addSourceOffers = catalogAddOffers(),
+                    libraryRoots = sourceSettings.libraryRoots(),
                 )
             }
         }
+    }
+
+    fun addCatalogOffer(offer: SourceOffer) {
+        if (offer.implementation != SourceImplementation.BUILTIN_LOCAL) return
+        dismissAddSourceSheet()
+        ensureLocalSourceLoaded()
+        sourceSettings.setEnabled(WorkId.LOCAL_SOURCE, true)
+        sourceSettings.setActiveSourceId(WorkId.LOCAL_SOURCE)
+        applyActiveSource(WorkId.LOCAL_SOURCE, loadListing = true)
+        if (sourceSettings.libraryRoots().isEmpty()) {
+            _state.update { it.copy(pendingLibraryTreePick = true) }
+        }
+    }
+
+    fun removeActiveSource() {
+        val id = _state.value.activeSourceId ?: return
+        uninstallSource(id)
+    }
+
+    fun consumeLibraryTreePick() {
+        _state.update { it.copy(pendingLibraryTreePick = false) }
+    }
+
+    fun addLibraryRoot(uri: Uri) {
+        if (_state.value.activeSourceId != WorkId.LOCAL_SOURCE) return
+        libraryMirror.takePersistable(uri)
+        val key = uri.toString()
+        val current = sourceSettings.libraryRoots()
+        if (key !in current) {
+            sourceSettings.setLibraryRoots(current + key)
+        }
+        _state.update {
+            it.copy(
+                libraryRoots = sourceSettings.libraryRoots(),
+                pendingLibraryTreePick = false,
+            )
+        }
+        catalogCache.clear()
+        catalogPages.clear()
+        refresh(force = true)
+    }
+
+    fun removeLibraryRoot(uriString: String) {
+        if (_state.value.activeSourceId != WorkId.LOCAL_SOURCE) return
+        runCatching { libraryMirror.releasePersistable(Uri.parse(uriString)) }
+        sourceSettings.setLibraryRoots(sourceSettings.libraryRoots().filterNot { it == uriString })
+        _state.update { it.copy(libraryRoots = sourceSettings.libraryRoots()) }
+        catalogCache.clear()
+        catalogPages.clear()
+        refresh(force = true)
+    }
+
+    fun libraryRootLabel(uriString: String): String = libraryMirror.displayName(uriString)
+
+    private fun ensureLocalSourceLoaded() {
+        val registry = repository.sourceRegistry()
+        if (registry.contains(WorkId.LOCAL_SOURCE)) return
+        registry.add(
+            LocalSource(
+                roots = { libraryMirror.materialize(sourceSettings.libraryRoots()) },
+                thumbs = coverThumbs,
+            ),
+        )
+    }
+
+    private fun catalogAddOffers(): List<SourceOffer> {
+        val installed = sourceSettings.installedIds()
+        return listOf(BuiltinOffers.LOCAL).filter { it.id !in installed }
     }
 
     fun onListingOpen(item: ToonItem) {
@@ -996,6 +1103,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun openDownloadOptions() {
+        if (!_state.value.writesDownloads) return
         val series = _state.value.series ?: return
         downloadCatalogJob?.cancel()
         _state.update {
@@ -1039,12 +1147,14 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun startDownloadEpisodes(episodesToDownload: List<EpisodeItem>) {
+        if (!_state.value.writesDownloads) return
         val series = _state.value.series ?: return
         closeDownloadOptions()
         repository.downloadManager?.enqueueEpisodes(series, episodesToDownload)
     }
 
     fun startDownloadEpisode(episode: EpisodeItem) {
+        if (!_state.value.writesDownloads) return
         val series = _state.value.series ?: return
         repository.downloadManager?.enqueueEpisodes(series, listOf(episode))
     }
@@ -1072,6 +1182,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun openDownloads() {
+        if (!_state.value.writesDownloads) return
         readerJob?.cancel()
         episodeJob?.cancel()
         _state.update {

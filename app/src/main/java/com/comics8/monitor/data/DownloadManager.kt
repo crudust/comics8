@@ -99,6 +99,7 @@ class DownloadManager(
 
     fun enqueueEpisodes(series: ToonItem, episodes: List<EpisodeItem>) {
         if (episodes.isEmpty()) return
+        if (sources.getOrNull(series.sourceId)?.writesDownloads != true) return
         val workId = SourceAccess.writable(series.sourceId, series.id, isSourceEnabled, installedIds()) ?: return
         scope.launch {
             migrateLegacyDownloads()

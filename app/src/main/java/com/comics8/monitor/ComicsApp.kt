@@ -12,13 +12,19 @@ import com.comics8.core.network.ImageReferer
 import com.comics8.core.source.SourceLocator
 import com.comics8.core.source.SourcePrefs
 import com.comics8.core.source.SourceRegistry
+import com.comics8.core.source.WorkId
 import com.comics8.core.source.js.JsPackStore
+import com.comics8.core.source.local.CoverThumbCache
+import com.comics8.core.source.local.LocalSource
 import com.comics8.core.network.ToonClient
 import com.comics8.monitor.data.AndroidSourcePrefs
 import com.comics8.monitor.data.DownloadManager
 import com.comics8.monitor.data.SyncManager
 import com.comics8.monitor.data.ToonRepository
 import com.comics8.monitor.data.local.AppDatabase
+import com.comics8.monitor.data.local.BitmapThumbEncoder
+import com.comics8.monitor.data.local.SafLibraryMirror
+import com.comics8.monitor.data.local.ZipImageFetcher
 import com.comics8.monitor.work.RefreshWorker
 import java.io.File
 
@@ -30,6 +36,12 @@ class ComicsApp : Application(), ImageLoaderFactory {
         private set
 
     lateinit var jsPackStore: JsPackStore
+        private set
+
+    lateinit var libraryMirror: SafLibraryMirror
+        private set
+
+    lateinit var coverThumbs: CoverThumbCache
         private set
 
     private lateinit var toonClient: ToonClient
@@ -54,6 +66,16 @@ class ComicsApp : Application(), ImageLoaderFactory {
         val loaded = store.loadInto(registry)
         if (loaded.isNotEmpty()) {
             sourcePrefs.setInstalledIds(sourcePrefs.installedIds() + loaded.map { it.id })
+        }
+        libraryMirror = SafLibraryMirror(this)
+        coverThumbs = CoverThumbCache(File(cacheDir, "thumbs"), BitmapThumbEncoder)
+        if (WorkId.LOCAL_SOURCE in sourcePrefs.installedIds()) {
+            registry.add(
+                LocalSource(
+                    roots = { libraryMirror.materialize(sourcePrefs.libraryRoots()) },
+                    thumbs = coverThumbs,
+                ),
+            )
         }
         val isSourceEnabled: (String) -> Boolean = { id -> sourcePrefs.isEnabled(id) }
         val installedIds: () -> Set<String> = { sourcePrefs.installedIds() }
@@ -123,6 +145,7 @@ class ComicsApp : Application(), ImageLoaderFactory {
             .build()
         return ImageLoader.Builder(this)
             .okHttpClient(http)
+            .components { add(ZipImageFetcher.Factory()) }
             .crossfade(true)
             .memoryCache {
                 MemoryCache.Builder(this).maxSizePercent(0.25).build()

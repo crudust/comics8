@@ -55,6 +55,7 @@ fun DownloadsPane(
     state: ListingUiState,
     viewModel: ListingViewModel,
     modifier: Modifier = Modifier,
+    onAddSource: (() -> Unit)? = null,
     onImportJs: (() -> Unit)? = null,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
@@ -68,7 +69,11 @@ fun DownloadsPane(
 
         when {
             state.activeSourceId == null -> {
-                EmptySourcePane(modifier = Modifier.weight(1f), onImportJs = onImportJs)
+                EmptySourcePane(
+                    modifier = Modifier.weight(1f),
+                    onAddSource = onAddSource,
+                    onImportJs = onImportJs,
+                )
             }
             state.downloadLoading && state.downloadSummaries.isEmpty() -> {
                 LoadingPane(modifier = Modifier.weight(1f))

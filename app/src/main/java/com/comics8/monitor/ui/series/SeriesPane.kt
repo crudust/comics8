@@ -75,7 +75,11 @@ fun SeriesPane(
                             isDownloaded = episode.wrId in state.downloadedWrIds,
                             isDownloading = state.downloadProgress.currentTask?.episode?.wrId == episode.wrId,
                             onClick = { viewModel.openEpisode(episode) },
-                            onDownload = { viewModel.startDownloadEpisode(episode) },
+                            onDownload = if (state.writesDownloads) {
+                                { viewModel.startDownloadEpisode(episode) }
+                            } else {
+                                null
+                            },
                             onPickArtist = if (episode.artistChoices.size >= 2) {
                                 {
                                     val series = state.series ?: return@EpisodeRow
@@ -112,7 +116,7 @@ fun SeriesPane(
 fun EpisodeRow(
     episode: EpisodeItem,
     onClick: () -> Unit,
-    onDownload: () -> Unit,
+    onDownload: (() -> Unit)?,
     modifier: Modifier = Modifier,
     highlighted: Boolean = false,
     isDownloaded: Boolean = false,
@@ -215,28 +219,30 @@ fun EpisodeRow(
                 )
             }
         }
-        IconButton(
-            onClick = onDownload,
-            enabled = !isDownloaded && !isDownloading,
-            modifier = Modifier.size(36.dp),
-        ) {
-            when {
-                isDownloading -> CircularProgressIndicator(
-                    modifier = Modifier.size(18.dp),
-                    strokeWidth = 2.dp,
-                )
-                isDownloaded -> Icon(
-                    imageVector = Icons.Filled.DownloadDone,
-                    contentDescription = "다운로드됨",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp),
-                )
-                else -> Icon(
-                    imageVector = Icons.Filled.Download,
-                    contentDescription = "이 회차 다운로드",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(20.dp),
-                )
+        if (onDownload != null) {
+            IconButton(
+                onClick = onDownload,
+                enabled = !isDownloaded && !isDownloading,
+                modifier = Modifier.size(36.dp),
+            ) {
+                when {
+                    isDownloading -> CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                    )
+                    isDownloaded -> Icon(
+                        imageVector = Icons.Filled.DownloadDone,
+                        contentDescription = "다운로드됨",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    else -> Icon(
+                        imageVector = Icons.Filled.Download,
+                        contentDescription = "이 회차 다운로드",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
             }
         }
     }

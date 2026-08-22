@@ -12,8 +12,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -58,25 +60,30 @@ const val REMOVE_SOURCE_LABEL = "소스 제거"
 @Composable
 fun EmptySourcePane(
     modifier: Modifier = Modifier,
+    onAddSource: (() -> Unit)? = null,
     onImportJs: (() -> Unit)? = null,
 ) {
     Column(
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
             .fillMaxSize()
             .padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
             text = EMPTY_SOURCE_MESSAGE,
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (onAddSource != null) {
+            Spacer(Modifier.height(16.dp))
+            Button(onClick = onAddSource) {
+                Text("소스 추가")
+            }
+        }
         if (onImportJs != null) {
-            Button(
-                onClick = onImportJs,
-                modifier = Modifier.padding(top = 16.dp),
-            ) {
+            Spacer(Modifier.height(12.dp))
+            Button(onClick = onImportJs) {
                 Text(IMPORT_JS_LABEL)
             }
         }

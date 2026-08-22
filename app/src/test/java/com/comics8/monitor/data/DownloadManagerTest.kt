@@ -18,6 +18,9 @@ import com.comics8.core.source.SourceHttp
 import com.comics8.core.source.SourceLocator
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
+import com.comics8.core.source.local.CoverThumbCache
+import com.comics8.core.source.local.LocalSource
+import com.comics8.core.source.local.ThumbEncoder
 import com.comics8.monitor.data.local.AppDatabase
 import com.comics8.monitor.data.local.DownloadedEpisode
 import com.comics8.monitor.data.local.get
@@ -194,6 +197,59 @@ class DownloadManagerTest {
             assertThat(img.readText()).isEqualTo("avif-bytes")
             val stored = db.downloadedEpisodeDao().get(workId, "1001")
             assertThat(stored?.sourceId).isEqualTo("hitomi")
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun enqueueLocalDoesNotCreateDownloadFiles() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        try {
+            val downloads = File(context.filesDir, "dl-local-${System.nanoTime()}").apply { mkdirs() }
+            val thumbs = CoverThumbCache(
+                File(context.cacheDir, "thumbs-local-${System.nanoTime()}"),
+                ThumbEncoder { bytes, _, _ -> bytes },
+            )
+            val registry = SourceRegistry(
+                listOf(LocalSource(roots = { emptyList() }, thumbs = thumbs)),
+            )
+            val manager = DownloadManager(
+                context,
+                db,
+                ToonClient(isProxyEnabled = false, sources = SourceLocator { registry }),
+                isSourceEnabled = { true },
+                baseDir = downloads,
+                sources = registry,
+                installedIds = { setOf(WorkId.LOCAL_SOURCE) },
+            )
+            val series = ToonItem(
+                id = "zip:/tmp/a.zip",
+                title = "Local",
+                thumbUrl = "",
+                href = "",
+                sourceId = WorkId.LOCAL_SOURCE,
+            )
+            manager.enqueueEpisodes(
+                series,
+                listOf(
+                    EpisodeItem(
+                        wrId = "/tmp/a.zip",
+                        title = "a",
+                        date = null,
+                        thumbUrl = null,
+                        href = "",
+                    ),
+                ),
+            )
+            Thread.sleep(100)
+            assertThat(File(downloads, WorkId.LOCAL_SOURCE).exists()).isFalse()
+            assertThat(
+                DownloadLayout.episodeDir(downloads, WorkId.local(series.id), "/tmp/a.zip").exists(),
+            ).isFalse()
         } finally {
             db.close()
         }

@@ -36,14 +36,19 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.comics8.core.model.BrowseTab
+import com.comics8.core.source.WorkId
+import com.comics8.monitor.data.local.PersistableOpenDocumentTree
+import com.comics8.monitor.ui.browse.EmptyLibraryPane
+import com.comics8.monitor.ui.browse.EmptyLibraryScanHint
+import com.comics8.monitor.ui.browse.LibraryRootsBar
 import com.comics8.monitor.ui.browse.ListingGrid
+import com.comics8.monitor.ui.components.AddSourceDialog
 import com.comics8.monitor.ui.components.ArtistPickDialog
 import com.comics8.monitor.ui.components.EmptySourcePane
 import com.comics8.monitor.ui.components.ErrorPane
 import com.comics8.monitor.ui.components.LoadingPane
 import com.comics8.monitor.ui.components.PageBar
 import com.comics8.monitor.ui.components.PageJumpDialog
-import com.comics8.monitor.ui.components.SourceAddDialog
 import com.comics8.monitor.ui.components.SourceErrorDialog
 import com.comics8.monitor.ui.components.SourceRemoveDialog
 import com.comics8.monitor.ui.components.SyncDialog
@@ -106,6 +111,17 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
         }
     }
 
+    val treePicker = rememberLauncherForActivityResult(PersistableOpenDocumentTree()) { uri ->
+        if (uri != null) viewModel.addLibraryRoot(uri)
+    }
+    LaunchedEffect(state.pendingLibraryTreePick) {
+        if (state.pendingLibraryTreePick) {
+            viewModel.consumeLibraryTreePick()
+            treePicker.launch(null)
+        }
+    }
+    val addLibraryFolder = { treePicker.launch(null) }
+
     val canGoBack = state.screen != Screen.Browse || state.isSearch || state.showPageJump || state.showSyncDialog || state.showUpdateDialog || state.showDownloadOptions || state.artistPick != null || state.showAddSourceSheet || state.showRemoveSourceSheet || state.sourceError != null
     BackHandler(enabled = canGoBack) {
         viewModel.goBack()
@@ -120,9 +136,29 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                     TopBar(state = state, viewModel = viewModel)
                     when {
                         state.screen == Screen.Series -> SeriesPane(state = state, viewModel = viewModel)
-                        state.screen == Screen.History -> HistoryPane(state = state, viewModel = viewModel, onImportJs = onImportJs)
-                        state.screen == Screen.Downloads -> com.comics8.monitor.ui.downloads.DownloadsPane(state = state, viewModel = viewModel, onImportJs = onImportJs)
-                        state.activeSourceId == null -> EmptySourcePane(onImportJs = onImportJs)
+                        state.screen == Screen.History -> HistoryPane(
+                            state = state,
+                            viewModel = viewModel,
+                            onAddSource = viewModel::openAddSourceSheet,
+                            onImportJs = onImportJs,
+                        )
+                        state.screen == Screen.Downloads -> com.comics8.monitor.ui.downloads.DownloadsPane(
+                            state = state,
+                            viewModel = viewModel,
+                            onAddSource = viewModel::openAddSourceSheet,
+                            onImportJs = onImportJs,
+                        )
+                        state.activeSourceId == null -> EmptySourcePane(
+                            onAddSource = viewModel::openAddSourceSheet,
+                            onImportJs = onImportJs,
+                        )
+                        state.activeSourceId == WorkId.LOCAL_SOURCE &&
+                            state.libraryRoots.isEmpty() &&
+                            !state.loading &&
+                            !state.isSearch &&
+                            state.screen == Screen.Browse -> EmptyLibraryPane(
+                            onAddFolder = addLibraryFolder,
+                        )
                         state.isSearch -> {
                             when {
                                 state.loading && state.items.isEmpty() -> LoadingPane()
@@ -152,6 +188,7 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                                     catalogs = catalogs,
                                     state = state,
                                     viewModel = viewModel,
+                                    onAddLibraryFolder = addLibraryFolder,
                                 )
                             }
                         }
@@ -216,18 +253,20 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                 onConfirmUpdate = viewModel::startUpdate,
             )
         }
+        if (state.showAddSourceSheet) {
+            AddSourceDialog(
+                offers = state.addSourceOffers,
+                onPick = viewModel::addCatalogOffer,
+                onImportJs = onImportJs,
+                onDismiss = viewModel::dismissAddSourceSheet,
+            )
+        }
         val artistPick = state.artistPick
         if (artistPick != null) {
             ArtistPickDialog(
                 artists = artistPick.item.artistChoices,
                 onPick = viewModel::pickArtist,
                 onDismiss = viewModel::dismissArtistPick,
-            )
-        }
-        if (state.showAddSourceSheet) {
-            SourceAddDialog(
-                onImportJs = onImportJs,
-                onDismiss = viewModel::closeAddSourceSheet,
             )
         }
         if (state.showRemoveSourceSheet) {
@@ -252,6 +291,7 @@ private fun BrowseTabsPager(
     catalogs: List<BrowseTab>,
     state: ListingUiState,
     viewModel: ListingViewModel,
+    onAddLibraryFolder: () -> Unit = {},
 ) {
     val browsePagerState = rememberPagerState(
         initialPage = catalogs.indexOf(state.tab).coerceAtLeast(0),
@@ -282,9 +322,17 @@ private fun BrowseTabsPager(
             return@HorizontalPager
         }
         val isCurrent = pageCatalog == state.tab
+        val isLocal = state.activeSourceId == WorkId.LOCAL_SOURCE
         when {
             isCurrent && state.loading && state.items.isEmpty() -> {
                 Column(Modifier.fillMaxSize()) {
+                    if (isLocal) {
+                        LibraryRootsBar(
+                            state = state,
+                            viewModel = viewModel,
+                            onAddFolder = onAddLibraryFolder,
+                        )
+                    }
                     LoadingPane(Modifier.weight(1f).fillMaxWidth())
                     if (pageCatalog.paginated && state.lastPage > 1) {
                         PageBar(
@@ -313,15 +361,26 @@ private fun BrowseTabsPager(
             )
             isCurrent -> {
                 Column(Modifier.fillMaxSize()) {
-                    ListingGrid(
-                        items = state.items,
-                        scrollToTopTrigger = state.scrollToTopTrigger,
-                        onOpen = viewModel::onListingOpen,
-                        onToggleFavorite = viewModel::toggleFavorite,
-                        showSourceChip = false,
-                        sourceRegistry = state.sourceRegistry,
-                        modifier = Modifier.weight(1f).fillMaxWidth(),
-                    )
+                    if (isLocal) {
+                        LibraryRootsBar(
+                            state = state,
+                            viewModel = viewModel,
+                            onAddFolder = onAddLibraryFolder,
+                        )
+                    }
+                    if (isLocal && state.items.isEmpty() && !state.isSearch && pageCatalog !is BrowseTab.Favorite) {
+                        EmptyLibraryScanHint(modifier = Modifier.weight(1f).fillMaxWidth())
+                    } else {
+                        ListingGrid(
+                            items = state.items,
+                            scrollToTopTrigger = state.scrollToTopTrigger,
+                            onOpen = viewModel::onListingOpen,
+                            onToggleFavorite = viewModel::toggleFavorite,
+                            showSourceChip = false,
+                            sourceRegistry = state.sourceRegistry,
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                        )
+                    }
                     if (pageCatalog.paginated && state.lastPage > 1) {
                         PageBar(
                             page = state.page,

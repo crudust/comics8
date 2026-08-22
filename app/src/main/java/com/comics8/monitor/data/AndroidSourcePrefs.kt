@@ -58,6 +58,13 @@ class AndroidSourcePrefs(
         prefs.edit().putString(SourcePrefs.languageKey(sourceId), value).apply()
     }
 
+    override fun libraryRoots(): List<String> =
+        SourcePrefs.parseIdList(rawPref(SourcePrefs.LIBRARY_ROOTS_KEY))
+
+    override fun setLibraryRoots(paths: List<String>) {
+        prefs.edit().putString(SourcePrefs.LIBRARY_ROOTS_KEY, SourcePrefs.formatIdList(paths)).apply()
+    }
+
     private fun hitomiEnabledRaw(): Boolean? {
         val key = SourcePrefs.enabledKey("hitomi")
         return if (prefs.contains(key)) prefs.getBoolean(key, false) else null
