@@ -91,11 +91,12 @@ object SyncWire {
     private fun probeUncached(client: OkHttpClient, serverUrl: String, key: String): ServerSchema {
         return try {
             val probeClient = client.newBuilder()
-                .connectTimeout(2, TimeUnit.SECONDS)
-                .readTimeout(3, TimeUnit.SECONDS)
-                .callTimeout(4, TimeUnit.SECONDS)
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(15, TimeUnit.SECONDS)
+                .callTimeout(20, TimeUnit.SECONDS)
                 .build()
             val req = Request.Builder()
+
                 .url(SyncConstants.healthUrl(serverUrl))
                 .addComics8SyncHeaders(key)
                 .get()

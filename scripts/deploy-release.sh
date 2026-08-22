@@ -117,10 +117,17 @@ else
 fi
 
 if [ -f "server/server.py" ]; then
-    echo "🐍 Updating server.py and restarting comics8-podman service..."
-    scp server/server.py "${SERVER_USER}@${SERVER_HOST}:/home/crudust/comics8-sync/server.py"
-    "${SSH[@]}" "sudo -n systemctl restart comics8-podman"
+    SERVER_MD5=$("${SSH[@]}" "md5sum /home/crudust/comics8-sync/server.py 2>/dev/null | awk '{print \$1}'" || true)
+    LOCAL_MD5=$(md5sum server/server.py | awk '{print $1}')
+    if [ "$SERVER_MD5" != "$LOCAL_MD5" ]; then
+        echo "🐍 server.py has changed. Updating and restarting comics8-podman service..."
+        scp server/server.py "${SERVER_USER}@${SERVER_HOST}:/home/crudust/comics8-sync/server.py"
+        "${SSH[@]}" "sudo -n systemctl restart comics8-podman"
+    else
+        echo "⚡ server.py unchanged, skipping service restart."
+    fi
 fi
+
 
 scp "$APK_PATH" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/comics8-latest.apk"
 if [ -f "$WIN_ZIP_PATH" ]; then
