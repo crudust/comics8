@@ -40,7 +40,6 @@ import com.comics8.monitor.ui.browse.EmptyLibraryPane
 import com.comics8.monitor.ui.browse.EmptyLibraryScanHint
 import com.comics8.monitor.ui.browse.LibraryRootsBar
 import com.comics8.monitor.ui.browse.ListingGrid
-import com.comics8.monitor.ui.components.AddSourceDialog
 import com.comics8.monitor.ui.components.ArtistPickDialog
 import com.comics8.monitor.ui.components.EmptySourcePane
 import com.comics8.monitor.ui.components.ErrorPane
@@ -102,6 +101,9 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
     val onImportJs: () -> Unit = {
         viewModel.closeAddSourceSheet()
         pickJs.launch("*/*")
+    }
+    LaunchedEffect(state.showAddSourceSheet) {
+        if (state.showAddSourceSheet) onImportJs()
     }
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT >= 33) {
@@ -249,12 +251,6 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                 updateState = state.updateState,
                 onDismiss = viewModel::dismissUpdateDialog,
                 onConfirmUpdate = viewModel::startUpdate,
-            )
-        }
-        if (state.showAddSourceSheet) {
-            AddSourceDialog(
-                onImportJs = onImportJs,
-                onDismiss = viewModel::dismissAddSourceSheet,
             )
         }
         val artistPick = state.artistPick

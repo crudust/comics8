@@ -184,6 +184,12 @@ fun ComicsDesktopApp(
     state: DesktopUiState,
     viewModel: DesktopViewModel,
 ) {
+    LaunchedEffect(state.showAddSourceSheet) {
+        if (state.showAddSourceSheet) {
+            viewModel.closeAddSourceSheet()
+            com.comics8.desktop.ui.components.pickJsFile()?.let(viewModel::importJsFile)
+        }
+    }
     Box(modifier = Modifier.fillMaxSize()) {
         if (state.screen == Screen.Reader) {
             ReaderPane(
@@ -246,16 +252,6 @@ fun ComicsDesktopApp(
                 updateState = state.updateState,
                 onDismiss = viewModel::closeUpdateDialog,
                 onConfirmUpdate = viewModel::startUpdate,
-            )
-        }
-
-        if (state.showAddSourceSheet) {
-            com.comics8.desktop.ui.components.AddSourceDialog(
-                onImportJs = {
-                    viewModel.closeAddSourceSheet()
-                    com.comics8.desktop.ui.components.pickJsFile()?.let(viewModel::importJsFile)
-                },
-                onDismiss = viewModel::dismissAddSourceSheet,
             )
         }
 

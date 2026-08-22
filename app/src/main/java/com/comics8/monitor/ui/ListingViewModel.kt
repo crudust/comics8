@@ -382,7 +382,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         }
         if (source == null || nextTab == null) return
         if (loadListing) {
-            selectTab(nextTab)
+            selectTab(nextTab, force = true)
         }
     }
 
@@ -472,8 +472,11 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         syncOnBrowseRefresh()
     }
 
-    fun selectTab(tab: BrowseTab) {
+    fun selectTab(tab: BrowseTab) = selectTab(tab, force = false)
+
+    private fun selectTab(tab: BrowseTab, force: Boolean) {
         if (
+            !force &&
             tab == _state.value.tab &&
             _state.value.screen == Screen.Browse &&
             !_state.value.isSearch

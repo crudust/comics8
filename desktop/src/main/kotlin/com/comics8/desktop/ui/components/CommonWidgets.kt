@@ -27,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.comics8.core.source.ComicSource
 import com.comics8.core.source.SourceRegistry
+import com.comics8.core.source.WorkId
 import java.awt.FileDialog
 import java.awt.Frame
 import java.io.File
@@ -103,45 +104,21 @@ fun EmptySourcePane(
 }
 
 @Composable
-fun SourceAddDialog(
-    onImportJs: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("소스 추가") },
-        text = {
-            TextButton(
-                onClick = onImportJs,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(IMPORT_JS_LABEL)
-            }
-        },
-        confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("취소")
-            }
-        },
-    )
-}
-
-@Composable
 fun SourceRemoveDialog(
     sources: List<ComicSource>,
     onRemove: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val removableSources = sources.filterNot { it.id == WorkId.LOCAL_SOURCE }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("소스 제거") },
+        title = { Text("사이트 제거") },
         text = {
-            if (sources.isEmpty()) {
+            if (removableSources.isEmpty()) {
                 Text(EMPTY_SOURCE_MESSAGE)
             } else {
                 LazyColumn {
-                    items(sources, key = { it.id }) { source ->
+                    items(removableSources, key = { it.id }) { source ->
                         Text(
                             text = source.displayName,
                             style = MaterialTheme.typography.bodyLarge,

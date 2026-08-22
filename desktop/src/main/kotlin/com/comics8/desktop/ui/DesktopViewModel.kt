@@ -261,7 +261,7 @@ class DesktopViewModel(
         }
         if (source == null || nextTab == null) return
         if (loadListing) {
-            selectTab(nextTab)
+            selectTab(nextTab, force = true)
         }
     }
 
@@ -324,8 +324,11 @@ class DesktopViewModel(
         }
     }
 
-    fun selectTab(tab: BrowseTab) {
+    fun selectTab(tab: BrowseTab) = selectTab(tab, force = false)
+
+    private fun selectTab(tab: BrowseTab, force: Boolean) {
         if (
+            !force &&
             tab == _state.value.tab &&
             _state.value.screen == Screen.Browse &&
             !_state.value.isSearch
