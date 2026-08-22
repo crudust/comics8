@@ -15,6 +15,7 @@ import com.comics8.core.source.SearchSuggestion
 import com.comics8.core.source.SourceCatalog
 import com.comics8.core.source.SourceConfig
 import com.comics8.core.source.SourceHttp
+import com.comics8.core.source.SourceRegistry
 import org.mozilla.javascript.Context
 import org.mozilla.javascript.EvaluatorException
 import org.mozilla.javascript.Function
@@ -229,6 +230,7 @@ class JsEngine(
         val policy = RequestPolicy(userAgent = userAgent, referer = referer, extraHeaders = extraHeaders)
         api.policy = policy
         api.sourceId = id
+        api.sourceObj = sourceObj
         api.language = JsValues.asString(ScriptableObject.getProperty(sourceObj, "defaultLanguage"))
         val functions = SOURCE_FUNCTIONS.filter { isFunction(sourceObj, it) }.toSet()
         return JsSourceHandle(
@@ -297,6 +299,8 @@ class JsSourceHandle internal constructor(
     internal val api: HostApiV1Impl,
     internal val lock: Any = Any(),
 ) {
+    internal val originHost: String? = SourceRegistry.hostOf(origin)
+
     fun hasFunction(name: String): Boolean = name in functions
 }
 

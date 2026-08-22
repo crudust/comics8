@@ -71,11 +71,22 @@ class JsComicSource(
     override fun coverUrl(toonId: String): String? =
         engine.callString(handle, "coverUrl", toonId)
 
-    override fun ownsHost(host: String): Boolean =
-        engine.callBoolean(handle, "ownsHost", host, default = false)
+    override fun ownsHost(host: String): Boolean {
+        val key = host.lowercase().trim().trim('.')
+        val query = handle.api.nestedHostQuery
+        if (query != null) {
+            return query.ownsHost[key] ?: (handle.originHost == key)
+        }
+        return engine.callBoolean(handle, "ownsHost", key, default = false)
+    }
 
-    override fun useProxy(url: String): Boolean =
-        engine.callBoolean(handle, "useProxy", url, default = true)
+    override fun useProxy(url: String): Boolean {
+        val query = handle.api.nestedHostQuery
+        if (query != null) {
+            return query.useProxy[url] ?: true
+        }
+        return engine.callBoolean(handle, "useProxy", url, default = true)
+    }
 
     override fun resolveParent(
         item: ToonItem,

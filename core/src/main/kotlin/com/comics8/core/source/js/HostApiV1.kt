@@ -6,10 +6,12 @@ import com.comics8.core.source.HostApi
 import com.comics8.core.source.HttpResult
 import com.comics8.core.source.RequestPolicy
 import com.comics8.core.source.SourceHttp
+import com.comics8.core.source.SourceRegistry
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import org.mozilla.javascript.Context
+import org.mozilla.javascript.Function
 import org.mozilla.javascript.Scriptable
 import org.mozilla.javascript.ScriptableObject
 import org.mozilla.javascript.json.JsonParser
@@ -73,6 +75,11 @@ internal fun toFetchSpec(policy: RequestPolicy, spec: HostFetchSpec): FetchSpec 
         headers = spec.headers,
     )
 
+internal class NestedHostQuery(
+    val ownsHost: Map<String, Boolean>,
+    val useProxy: Map<String, Boolean>,
+)
+
 internal class HostApiV1Impl(
     @Volatile var policy: RequestPolicy,
     @Volatile override var language: String?,
@@ -80,34 +87,12 @@ internal class HostApiV1Impl(
 ) : HostApiV1 {
     @Volatile var http: SourceHttp? = null
     @Volatile var deadlineEpochMs: Long = Long.MAX_VALUE
+    @Volatile var nestedHostQuery: NestedHostQuery? = null
     lateinit var scope: Scriptable
+    lateinit var sourceObj: Scriptable
 
-    override fun fetch(spec: HostFetchSpec): HostFetchResult {
-        val method = spec.method.ifBlank { "GET" }.uppercase()
-        require(method == "GET" || method == "HEAD") { "method must be GET or HEAD" }
-        val client = requireHttp()
-        if (method == "HEAD") {
-            checkAborted()
-            val ok = client.isAccessible(spec.url, policy)
-            return HostFetchResult(if (ok) 200 else 404, emptyMap(), ByteArray(0))
-        }
-        val fetchSpec = toFetchSpec(policy, spec)
-        var last: HttpResult? = null
-        for (attempt in 0..BACKOFF_MS.size) {
-            checkAborted()
-            last = try {
-                client.fetch(fetchSpec)
-            } catch (e: Exception) {
-                if (attempt == BACKOFF_MS.size) throw e
-                sleepBackoff(attempt)
-                continue
-            }
-            if (last.code in 200..299) return last.toHost()
-            if (!retryableStatus(last.code) || attempt == BACKOFF_MS.size) return last.toHost()
-            sleepBackoff(attempt)
-        }
-        return last!!.toHost()
-    }
+    override fun fetch(spec: HostFetchSpec): HostFetchResult =
+        withHostQuery(listOf(spec.url)) { fetchOnce(spec) }
 
     override fun fetchText(spec: HostFetchSpec): String {
         val result = fetch(spec)
@@ -119,28 +104,30 @@ internal class HostApiV1Impl(
 
     override fun fetchAll(specs: List<HostFetchSpec>, concurrency: Int): List<HostFetchResult> {
         if (specs.isEmpty()) return emptyList()
-        val conc = concurrency.coerceAtLeast(1).coerceAtMost(specs.size)
-        if (conc == 1 || specs.size == 1) {
-            return specs.map { fetch(it) }
-        }
-        val pool = Executors.newFixedThreadPool(conc)
-        try {
-            val futures = specs.map { spec -> pool.submit<HostFetchResult> { fetch(spec) } }
-            return futures.map { it.get() }
-        } catch (e: ExecutionException) {
-            throw e.cause ?: e
-        } catch (e: InterruptedException) {
-            Thread.currentThread().interrupt()
-            throw IllegalStateException("source call timed out", e)
-        } finally {
-            pool.shutdownNow()
+        return withHostQuery(specs.map { it.url }) {
+            val conc = concurrency.coerceAtLeast(1).coerceAtMost(specs.size)
+            if (conc == 1 || specs.size == 1) {
+                return@withHostQuery specs.map { fetchOnce(it) }
+            }
+            val pool = Executors.newFixedThreadPool(conc)
+            try {
+                val futures = specs.map { spec -> pool.submit<HostFetchResult> { fetchOnce(spec) } }
+                futures.map { it.get() }
+            } catch (e: ExecutionException) {
+                throw e.cause ?: e
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+                throw IllegalStateException("source call timed out", e)
+            } finally {
+                pool.shutdownNow()
+            }
         }
     }
 
     override fun isAccessible(url: String): Boolean {
         checkAborted()
         if (url.isBlank()) return false
-        return requireHttp().isAccessible(url, policy)
+        return withHostQuery(listOf(url)) { requireHttp().isAccessible(url, policy) }
     }
 
     override fun parseHtml(text: String, baseUrl: String?): HostHtmlDoc {
@@ -197,6 +184,84 @@ internal class HostApiV1Impl(
         if (System.currentTimeMillis() > deadlineEpochMs) {
             throw IllegalStateException("source call timed out")
         }
+    }
+
+    private fun fetchOnce(spec: HostFetchSpec): HostFetchResult {
+        val method = spec.method.ifBlank { "GET" }.uppercase()
+        require(method == "GET" || method == "HEAD") { "method must be GET or HEAD" }
+        val client = requireHttp()
+        if (method == "HEAD") {
+            checkAborted()
+            val ok = client.isAccessible(spec.url, policy)
+            return HostFetchResult(if (ok) 200 else 404, emptyMap(), ByteArray(0))
+        }
+        val fetchSpec = toFetchSpec(policy, spec)
+        var last: HttpResult? = null
+        for (attempt in 0..BACKOFF_MS.size) {
+            checkAborted()
+            last = try {
+                client.fetch(fetchSpec)
+            } catch (e: Exception) {
+                if (attempt == BACKOFF_MS.size) throw e
+                sleepBackoff(attempt)
+                continue
+            }
+            if (last.code in 200..299) return last.toHost()
+            if (!retryableStatus(last.code) || attempt == BACKOFF_MS.size) return last.toHost()
+            sleepBackoff(attempt)
+        }
+        return last!!.toHost()
+    }
+
+    private fun <T> withHostQuery(urls: List<String>, block: () -> T): T {
+        val prev = nestedHostQuery
+        nestedHostQuery = mergeHostQuery(urls, prev)
+        try {
+            return block()
+        } finally {
+            nestedHostQuery = prev
+        }
+    }
+
+    private fun mergeHostQuery(urls: List<String>, prev: NestedHostQuery?): NestedHostQuery {
+        val owns = LinkedHashMap<String, Boolean>()
+        if (prev != null) owns.putAll(prev.ownsHost)
+        val proxy = LinkedHashMap<String, Boolean>()
+        if (prev != null) proxy.putAll(prev.useProxy)
+        val cx = Context.getCurrentContext()
+        val src = sourceObjOrNull()
+        for (url in urls) {
+            val host = SourceRegistry.hostOf(url)
+            if (host != null && host !in owns) {
+                owns[host] = if (cx != null && src != null) {
+                    callSourceBoolean(cx, src, "ownsHost", host, false)
+                } else {
+                    false
+                }
+            }
+            if (url !in proxy) {
+                proxy[url] = if (cx != null && src != null) {
+                    callSourceBoolean(cx, src, "useProxy", url, true)
+                } else {
+                    true
+                }
+            }
+        }
+        return NestedHostQuery(owns, proxy)
+    }
+
+    private fun sourceObjOrNull(): Scriptable? = if (this::sourceObj.isInitialized) sourceObj else null
+
+    private fun callSourceBoolean(
+        cx: Context,
+        src: Scriptable,
+        name: String,
+        arg: String,
+        default: Boolean,
+    ): Boolean {
+        val fn = ScriptableObject.getProperty(src, name) as? Function ?: return default
+        val result = fn.call(cx, scope, src, arrayOf(arg))
+        return JsValues.asBoolean(result, default)
     }
 
     private fun requireHttp(): SourceHttp = http ?: error("host.fetch requires SourceHttp")

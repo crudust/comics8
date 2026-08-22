@@ -23,6 +23,18 @@ class JsSandboxTest {
     }
 
     @Test
+    fun classShutterAllowsOnlyJsHostPackage() {
+        val shutter = JsSandbox.classShutter()
+        assertThat(shutter.visibleToScripts("com.comics8.core.source.js.HostObject")).isTrue()
+        assertThat(shutter.visibleToScripts("com.comics8.core.source.js.HostApiV1Impl")).isTrue()
+        assertThat(shutter.visibleToScripts("java.lang.Runtime")).isFalse()
+        assertThat(shutter.visibleToScripts("java.nio.file.Files")).isFalse()
+        assertThat(shutter.visibleToScripts("java.io.File")).isFalse()
+        assertThat(shutter.visibleToScripts("org.mozilla.javascript.Context")).isFalse()
+        assertThat(shutter.visibleToScripts("com.comics8.core.source.ComicSource")).isFalse()
+    }
+
+    @Test
     fun apiLevelAboveHostIsRejected() {
         val error = assertThrows(IllegalArgumentException::class.java) {
             JsEngine().load(

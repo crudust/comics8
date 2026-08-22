@@ -189,6 +189,74 @@ class HostApiV1Test {
     }
 
     @Test
+    fun fetchAllDoesNotDeadlockWhenJsSourceIsRegistered() {
+        val engine = JsEngine(callTimeoutMs = 3_000)
+        val handle = engine.load(JsTestResources.read("js/hello.js"), "hello.js")
+        val source = JsComicSource(engine, handle)
+        val registry = SourceRegistry(listOf(source))
+        val http = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body("ok".toByteArray().toResponseBody("text/plain".toMediaType()))
+                    .build()
+            }
+            .build()
+        val client = ToonClient(
+            client = http,
+            proxyBaseUrl = "https://proxy.test/proxy",
+            isProxyEnabled = true,
+            sources = SourceLocator { registry },
+        )
+        val json = evalJsonOn(
+            engine,
+            handle,
+            """
+            (function() {
+              var results = host.fetchAll([
+                { url: "https://hello.test/a" },
+                { url: "https://hello.test/b" }
+              ]);
+              return { count: results.length, a: results[0].code, b: results[1].code };
+            })()
+            """.trimIndent(),
+            client,
+        )
+        assertThat(json.getInt("count")).isEqualTo(2)
+        assertThat(json.getInt("a")).isEqualTo(200)
+        assertThat(json.getInt("b")).isEqualTo(200)
+    }
+
+    @Test
+    fun evalSiteJsScopeHidesHostAndJava() {
+        val engine = JsEngine()
+        val handle = engine.load(JsTestResources.read("js/hello.js"), "hello.js")
+        val json = evalJsonOn(
+            engine,
+            handle,
+            """
+            (function() {
+              var hostType = host.evalSiteJs("gg", "var gg = { b: typeof host, m: function(){return 0}, s: function(){return ''} }").b;
+              var javaType = host.evalSiteJs("gg", "var gg = { b: typeof java + ',' + typeof Packages, m: function(){return 0}, s: function(){return ''} }").b;
+              return { hostType: hostType, javaType: javaType };
+            })()
+            """.trimIndent(),
+        )
+        assertThat(json.getString("hostType")).isEqualTo("undefined")
+        assertThat(json.getString("javaType")).isEqualTo("undefined,undefined")
+        val error = runCatching {
+            engine.eval(
+                handle,
+                """host.evalSiteJs("gg", "java.lang.Runtime.getRuntime(); var gg = { b: 'x', m: function(){return 0}, s: function(){return ''} }");""",
+            )
+        }.exceptionOrNull()
+        assertThat(error).isNotNull()
+    }
+
+    @Test
     fun evalSiteJsRejectsUnknownKind() {
         val engine = JsEngine()
         val handle = engine.load(JsTestResources.read("js/hello.js"), "hello.js")
