@@ -115,9 +115,10 @@ fun computeContentCropRect(
     regionTop: Int,
     regionRight: Int,
     regionBottom: Int,
-    maxCropFractionX: Float = 0.15f,
-    maxCropFractionY: Float = 0.12f,
-    whiteThreshold: Int = 240,
+    maxCropFractionX: Float = 0.40f,
+    maxCropFractionY: Float = 0.20f,
+    whiteThreshold: Int = 225,
+    whiteRatio: Float = 0.95f,
     getPixelRgb: (x: Int, y: Int) -> Int,
 ): CropRect {
     val regionW = regionRight - regionLeft
@@ -136,8 +137,8 @@ fun computeContentCropRect(
         return r >= whiteThreshold && g >= whiteThreshold && b >= whiteThreshold
     }
 
-    val sampleStepX = (regionW / 120).coerceIn(2, 8)
-    val sampleStepY = (regionH / 120).coerceIn(2, 8)
+    val sampleStepX = (regionW / 120).coerceIn(2, 6)
+    val sampleStepY = (regionH / 120).coerceIn(2, 6)
 
     // Top crop
     var cropTop = regionTop
@@ -152,7 +153,7 @@ fun computeContentCropRect(
                 whiteCount++
             }
         }
-        if (totalCount > 0 && whiteCount.toFloat() / totalCount >= 0.98f) {
+        if (totalCount > 0 && whiteCount.toFloat() / totalCount >= whiteRatio) {
             cropTop = y
             y += sampleStepY
         } else {
@@ -173,7 +174,7 @@ fun computeContentCropRect(
                 whiteCount++
             }
         }
-        if (totalCount > 0 && whiteCount.toFloat() / totalCount >= 0.98f) {
+        if (totalCount > 0 && whiteCount.toFloat() / totalCount >= whiteRatio) {
             cropBottom = y + 1
             y -= sampleStepY
         } else {
@@ -194,7 +195,7 @@ fun computeContentCropRect(
                 whiteCount++
             }
         }
-        if (totalCount > 0 && whiteCount.toFloat() / totalCount >= 0.98f) {
+        if (totalCount > 0 && whiteCount.toFloat() / totalCount >= whiteRatio) {
             cropLeft = x
             x += sampleStepX
         } else {
@@ -215,7 +216,7 @@ fun computeContentCropRect(
                 whiteCount++
             }
         }
-        if (totalCount > 0 && whiteCount.toFloat() / totalCount >= 0.98f) {
+        if (totalCount > 0 && whiteCount.toFloat() / totalCount >= whiteRatio) {
             cropRight = x + 1
             x -= sampleStepX
         } else {

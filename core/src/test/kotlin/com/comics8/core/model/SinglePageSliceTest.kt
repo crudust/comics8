@@ -98,4 +98,35 @@ class SinglePageSliceTest {
         assertThat(crop.bottom).isAtLeast(180)
         assertThat(crop.bottom).isAtMost(184)
     }
+
+    @Test
+    fun computeContentCropRectTrimsWideSpreadGutterMargin() {
+        // Simulated 1000x1500 left half of a 2-page scan
+        // Left margin is at [0..40], Content is at [40..650], Center gutter margin is at [650..1000] (35% of width)
+        // Background has off-white noise (RGB 0xEBEBEB = 235,235,235)
+        val width = 1000
+        val height = 1500
+        val getPixel = { x: Int, y: Int ->
+            if (x in 40..650 && y in 50..1420) {
+                0x101010 // Dark comic art
+            } else {
+                0xEBEBEB // Off-white scanner margin (RGB 235)
+            }
+        }
+
+        val crop = computeContentCropRect(
+            regionLeft = 0,
+            regionTop = 0,
+            regionRight = width,
+            regionBottom = height,
+            getPixelRgb = getPixel,
+        )
+
+        // Left margin should be cropped from 0 inwards towards ~34..42
+        assertThat(crop.left).isAtLeast(30)
+        assertThat(crop.left).isAtMost(45)
+        // Right gutter margin should be cropped from 1000 down towards ~645..660
+        assertThat(crop.right).isAtLeast(645)
+        assertThat(crop.right).isAtMost(660)
+    }
 }

@@ -1046,8 +1046,22 @@ private fun ReaderImage(
     half: ImageHalf = ImageHalf.FULL,
     onSuccess: ((AsyncImagePainter.State.Success) -> Unit)? = null,
 ) {
+    val context = LocalContext.current
+    val imageModel = remember(model, half) {
+        if (half == ImageHalf.FULL) {
+            model
+        } else if (model is coil.request.ImageRequest) {
+            model
+        } else {
+            coil.request.ImageRequest.Builder(context)
+                .data(model)
+                .allowHardware(false)
+                .build()
+        }
+    }
+
     SubcomposeAsyncImage(
-        model = model,
+        model = imageModel,
         contentDescription = contentDescription,
         contentScale = contentScale,
         alignment = alignment,
@@ -1099,7 +1113,13 @@ private fun ReaderImage(
                 SubcomposeAsyncImageContent()
             } else {
                 val drawable = successState.result.drawable
-                val bitmap = (drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
+                val rawBitmap = (drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
+                val bitmap = if (rawBitmap != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O && rawBitmap.config == android.graphics.Bitmap.Config.HARDWARE) {
+                    rawBitmap.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+                } else {
+                    rawBitmap
+                }
+
                 if (bitmap != null) {
                     val cropRect = remember(bitmap, half) {
                         val w = bitmap.width
@@ -1112,6 +1132,10 @@ private fun ReaderImage(
                                 regionTop = 0,
                                 regionRight = regionRight,
                                 regionBottom = h,
+                                maxCropFractionX = 0.45f,
+                                maxCropFractionY = 0.20f,
+                                whiteThreshold = 225,
+                                whiteRatio = 0.95f,
                                 getPixelRgb = { x, y -> bitmap.getPixel(x, y) },
                             )
                         } catch (_: Exception) {

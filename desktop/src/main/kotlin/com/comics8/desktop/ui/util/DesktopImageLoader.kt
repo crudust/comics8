@@ -391,6 +391,10 @@ fun DesktopAsyncImage(
                             regionTop = 0,
                             regionRight = regionRight,
                             regionBottom = h,
+                            maxCropFractionX = 0.45f,
+                            maxCropFractionY = 0.20f,
+                            whiteThreshold = 225,
+                            whiteRatio = 0.95f,
                             getPixelRgb = { x, y -> awtImage.getRGB(x, y) },
                         )
                     } catch (_: Exception) {
