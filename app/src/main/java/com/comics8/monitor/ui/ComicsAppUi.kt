@@ -103,19 +103,7 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
         if (isReader) {
             ReaderPane(state = state, viewModel = viewModel)
         } else {
-            PullToRefreshBox(
-                isRefreshing = state.refreshing,
-                onRefresh = {
-                    if (state.screen == Screen.History) {
-                        viewModel.loadHistory()
-                    } else if (state.screen == Screen.Downloads) {
-                        viewModel.loadDownloads()
-                    } else {
-                        viewModel.refresh()
-                    }
-                },
-                modifier = Modifier.fillMaxSize(),
-            ) {
+            val browseContent: @Composable () -> Unit = {
                 Column(Modifier.fillMaxSize()) {
                     TopBar(state = state, viewModel = viewModel)
                     when {
@@ -156,6 +144,25 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                             }
                         }
                     }
+                }
+            }
+            if (state.activeSourceId == null) {
+                browseContent()
+            } else {
+                PullToRefreshBox(
+                    isRefreshing = state.refreshing,
+                    onRefresh = {
+                        if (state.screen == Screen.History) {
+                            viewModel.loadHistory()
+                        } else if (state.screen == Screen.Downloads) {
+                            viewModel.loadDownloads()
+                        } else {
+                            viewModel.refresh()
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    browseContent()
                 }
             }
         }

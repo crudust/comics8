@@ -69,10 +69,13 @@ fun main() {
     System.setProperty("apple.laf.useScreenMenuBar", "true")
 
     application {
-        val registry = remember { SourceRegistry() }
+        val registry = remember {
+            SourceRegistry().also {
+                DesktopSourcePrefs.registry = it
+                DesktopSourcePrefs.migrateIfNeeded()
+            }
+        }
         val locator = remember { SourceLocator { registry } }
-        DesktopSourcePrefs.registry = registry
-        DesktopSourcePrefs.migrateIfNeeded()
         val database = remember {
             DesktopDatabase().apply {
                 installedIds = { DesktopSourcePrefs.installedIds() }
