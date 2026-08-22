@@ -79,6 +79,9 @@ data class DesktopUiState(
     val showAddSourceSheet: Boolean = false,
     val addSourceOffers: List<SourceOffer> = emptyList(),
     val libraryRoots: List<String> = emptyList(),
+    val showRemoveSourceSheet: Boolean = false,
+    val sourceError: String? = null,
+    val packsReady: Boolean = false,
 ) {
     val isSearch: Boolean get() = searchQuery != null
 

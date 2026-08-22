@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -22,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -44,24 +47,118 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.comics8.core.source.ComicSource
 import com.comics8.core.source.SourceRegistry
 
 const val EMPTY_SOURCE_MESSAGE = "소스를 추가하세요"
+const val IMPORT_JS_LABEL = "JS 파일 가져오기"
+const val ADD_SOURCE_LABEL = "소스 추가…"
+const val REMOVE_SOURCE_LABEL = "소스 제거"
 
 @Composable
-fun EmptySourcePane(modifier: Modifier = Modifier) {
-    Box(
+fun EmptySourcePane(
+    modifier: Modifier = Modifier,
+    onImportJs: (() -> Unit)? = null,
+) {
+    Column(
         modifier = modifier
             .fillMaxSize()
             .padding(24.dp),
-        contentAlignment = Alignment.Center,
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
             text = EMPTY_SOURCE_MESSAGE,
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (onImportJs != null) {
+            Button(
+                onClick = onImportJs,
+                modifier = Modifier.padding(top = 16.dp),
+            ) {
+                Text(IMPORT_JS_LABEL)
+            }
+        }
     }
+}
+
+@Composable
+fun SourceAddDialog(
+    onImportJs: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("소스 추가") },
+        text = {
+            TextButton(
+                onClick = onImportJs,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(IMPORT_JS_LABEL)
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("취소")
+            }
+        },
+    )
+}
+
+@Composable
+fun SourceRemoveDialog(
+    sources: List<ComicSource>,
+    onRemove: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("소스 제거") },
+        text = {
+            if (sources.isEmpty()) {
+                Text(EMPTY_SOURCE_MESSAGE)
+            } else {
+                LazyColumn {
+                    items(sources, key = { it.id }) { source ->
+                        Text(
+                            text = source.displayName,
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onRemove(source.id) }
+                                .padding(vertical = 10.dp),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("취소")
+            }
+        },
+    )
+}
+
+@Composable
+fun SourceErrorDialog(
+    message: String,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("소스를 가져올 수 없습니다") },
+        text = { Text(message) },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("확인")
+            }
+        },
+    )
 }
 
 @Composable

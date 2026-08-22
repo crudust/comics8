@@ -38,6 +38,7 @@ import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -116,6 +117,8 @@ fun TopBar(
                     sources = state.installedSources,
                     registry = state.sourceRegistry,
                     onSelect = viewModel::setActiveSource,
+                    onAddSource = viewModel::openAddSourceSheet,
+                    onRemoveSource = viewModel::openRemoveSourceSheet,
                     titleStyle = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f),
                 )
@@ -505,6 +508,8 @@ private fun SourceTitleDropdown(
     sources: List<com.comics8.core.source.ComicSource>,
     registry: SourceRegistry,
     onSelect: (String) -> Unit,
+    onAddSource: () -> Unit,
+    onRemoveSource: () -> Unit,
     titleStyle: TextStyle,
     modifier: Modifier = Modifier,
 ) {
@@ -533,13 +538,7 @@ private fun SourceTitleDropdown(
             )
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            if (sources.isEmpty()) {
-                DropdownMenuItem(
-                    text = { Text(EMPTY_SOURCE_MESSAGE) },
-                    onClick = { expanded = false },
-                    enabled = false,
-                )
-            } else {
+            if (sources.isNotEmpty()) {
                 sources.forEach { source ->
                     DropdownMenuItem(
                         text = { Text(source.displayName) },
@@ -549,7 +548,23 @@ private fun SourceTitleDropdown(
                         },
                     )
                 }
+                HorizontalDivider()
             }
+            DropdownMenuItem(
+                text = { Text(ADD_SOURCE_LABEL) },
+                onClick = {
+                    expanded = false
+                    onAddSource()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text(REMOVE_SOURCE_LABEL) },
+                onClick = {
+                    expanded = false
+                    onRemoveSource()
+                },
+                enabled = sources.isNotEmpty(),
+            )
         }
     }
 }

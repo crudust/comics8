@@ -54,10 +54,16 @@ fun HistoryPane(
     modifier: Modifier = Modifier,
 ) {
     when {
+        !state.packsReady -> {
+            LoadingPane(modifier = modifier)
+        }
         state.activeSourceId == null -> {
             EmptySourcePane(
                 modifier = modifier,
                 onAddSource = viewModel::openAddSourceSheet,
+                onImportJs = {
+                    com.comics8.desktop.ui.components.pickJsFile()?.let(viewModel::importJsFile)
+                },
             )
         }
         state.historyLoading && state.historyItems.isEmpty() -> {

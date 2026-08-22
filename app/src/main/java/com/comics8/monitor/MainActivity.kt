@@ -1,6 +1,7 @@
 package com.comics8.monitor
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -45,9 +46,34 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIntent(intent: Intent?) {
-        if (intent?.getBooleanExtra(RefreshWorker.EXTRA_FROM_NOTIFICATION, false) == true) {
+        if (intent == null) return
+        if (intent.getBooleanExtra(RefreshWorker.EXTRA_FROM_NOTIFICATION, false)) {
             val targetTab = intent.getStringExtra(RefreshWorker.EXTRA_TARGET_TAB)
             viewModel.handleNotificationLaunch(targetTab)
+            return
         }
+        val shared = sharedJsUri(intent) ?: return
+        viewModel.importJsFromUri(shared)
     }
+
+    private fun sharedJsUri(intent: Intent): Uri? {
+        val action = intent.action ?: return null
+        val uri = when (action) {
+            Intent.ACTION_SEND -> intent.parcelableUri(Intent.EXTRA_STREAM)
+            Intent.ACTION_VIEW -> intent.data
+            else -> null
+        } ?: return null
+        val name = uri.lastPathSegment.orEmpty()
+        val type = intent.type.orEmpty()
+        val looksJs = name.endsWith(".js", ignoreCase = true) ||
+            type.contains("javascript", ignoreCase = true) ||
+            type == "text/plain" ||
+            type == "application/octet-stream" ||
+            type.startsWith("text/")
+        return uri.takeIf { looksJs }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun Intent.parcelableUri(key: String): Uri? =
+        extras?.getParcelable(key) as? Uri
 }

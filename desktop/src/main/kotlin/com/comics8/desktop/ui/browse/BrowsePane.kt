@@ -64,10 +64,16 @@ fun BrowsePane(
 ) {
     val isLocal = state.activeSourceId == WorkId.LOCAL_SOURCE
     when {
+        !state.packsReady -> {
+            LoadingPane(modifier = modifier)
+        }
         state.activeSourceId == null -> {
             EmptySourcePane(
                 modifier = modifier,
                 onAddSource = viewModel::openAddSourceSheet,
+                onImportJs = {
+                    com.comics8.desktop.ui.components.pickJsFile()?.let(viewModel::importJsFile)
+                },
             )
         }
         isLocal && state.libraryRoots.isEmpty() && !state.loading -> {

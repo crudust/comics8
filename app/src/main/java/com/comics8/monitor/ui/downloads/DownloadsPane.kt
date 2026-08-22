@@ -55,6 +55,7 @@ fun DownloadsPane(
     state: ListingUiState,
     viewModel: ListingViewModel,
     modifier: Modifier = Modifier,
+    onImportJs: (() -> Unit)? = null,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
         // Download in progress banner
@@ -67,7 +68,7 @@ fun DownloadsPane(
 
         when {
             state.activeSourceId == null -> {
-                EmptySourcePane(modifier = Modifier.weight(1f))
+                EmptySourcePane(modifier = Modifier.weight(1f), onImportJs = onImportJs)
             }
             state.downloadLoading && state.downloadSummaries.isEmpty() -> {
                 LoadingPane(modifier = Modifier.weight(1f))

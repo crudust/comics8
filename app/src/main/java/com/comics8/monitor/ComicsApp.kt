@@ -12,6 +12,7 @@ import com.comics8.core.network.ImageReferer
 import com.comics8.core.source.SourceLocator
 import com.comics8.core.source.SourcePrefs
 import com.comics8.core.source.SourceRegistry
+import com.comics8.core.source.js.JsPackStore
 import com.comics8.core.network.ToonClient
 import com.comics8.monitor.data.AndroidSourcePrefs
 import com.comics8.monitor.data.DownloadManager
@@ -26,6 +27,9 @@ class ComicsApp : Application(), ImageLoaderFactory {
         private set
 
     lateinit var sourceSettings: AndroidSourcePrefs
+        private set
+
+    lateinit var jsPackStore: JsPackStore
         private set
 
     private lateinit var toonClient: ToonClient
@@ -45,6 +49,12 @@ class ComicsApp : Application(), ImageLoaderFactory {
         val prefs = getSharedPreferences("comics_reader_prefs", Context.MODE_PRIVATE)
         val sourcePrefs = AndroidSourcePrefs(prefs).also { it.migrateIfNeeded() }
         sourceSettings = sourcePrefs
+        val store = JsPackStore.androidFiles(filesDir)
+        jsPackStore = store
+        val loaded = store.loadInto(registry)
+        if (loaded.isNotEmpty()) {
+            sourcePrefs.setInstalledIds(sourcePrefs.installedIds() + loaded.map { it.id })
+        }
         val isSourceEnabled: (String) -> Boolean = { id -> sourcePrefs.isEnabled(id) }
         val installedIds: () -> Set<String> = { sourcePrefs.installedIds() }
         val syncManager = SyncManager(this, db, client)

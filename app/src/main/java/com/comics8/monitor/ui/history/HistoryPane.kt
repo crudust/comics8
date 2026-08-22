@@ -53,10 +53,11 @@ fun HistoryPane(
     state: ListingUiState,
     viewModel: ListingViewModel,
     modifier: Modifier = Modifier,
+    onImportJs: (() -> Unit)? = null,
 ) {
     when {
         state.activeSourceId == null -> {
-            EmptySourcePane(modifier = modifier)
+            EmptySourcePane(modifier = modifier, onImportJs = onImportJs)
         }
         state.historyLoading && state.historyItems.isEmpty() -> {
             LoadingPane(modifier = modifier)

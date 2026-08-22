@@ -43,6 +43,9 @@ import com.comics8.monitor.ui.components.ErrorPane
 import com.comics8.monitor.ui.components.LoadingPane
 import com.comics8.monitor.ui.components.PageBar
 import com.comics8.monitor.ui.components.PageJumpDialog
+import com.comics8.monitor.ui.components.SourceAddDialog
+import com.comics8.monitor.ui.components.SourceErrorDialog
+import com.comics8.monitor.ui.components.SourceRemoveDialog
 import com.comics8.monitor.ui.components.SyncDialog
 import com.comics8.monitor.ui.components.TopBar
 import com.comics8.monitor.ui.history.HistoryPane
@@ -88,13 +91,22 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
     val permission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { }
+    val pickJs = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent(),
+    ) { uri ->
+        uri?.let(viewModel::importJsFromUri)
+    }
+    val onImportJs: () -> Unit = {
+        viewModel.closeAddSourceSheet()
+        pickJs.launch("*/*")
+    }
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT >= 33) {
             permission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 
-    val canGoBack = state.screen != Screen.Browse || state.isSearch || state.showPageJump || state.showSyncDialog || state.showUpdateDialog || state.showDownloadOptions || state.artistPick != null
+    val canGoBack = state.screen != Screen.Browse || state.isSearch || state.showPageJump || state.showSyncDialog || state.showUpdateDialog || state.showDownloadOptions || state.artistPick != null || state.showAddSourceSheet || state.showRemoveSourceSheet || state.sourceError != null
     BackHandler(enabled = canGoBack) {
         viewModel.goBack()
     }
@@ -108,9 +120,9 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                     TopBar(state = state, viewModel = viewModel)
                     when {
                         state.screen == Screen.Series -> SeriesPane(state = state, viewModel = viewModel)
-                        state.screen == Screen.History -> HistoryPane(state = state, viewModel = viewModel)
-                        state.screen == Screen.Downloads -> com.comics8.monitor.ui.downloads.DownloadsPane(state = state, viewModel = viewModel)
-                        state.activeSourceId == null -> EmptySourcePane()
+                        state.screen == Screen.History -> HistoryPane(state = state, viewModel = viewModel, onImportJs = onImportJs)
+                        state.screen == Screen.Downloads -> com.comics8.monitor.ui.downloads.DownloadsPane(state = state, viewModel = viewModel, onImportJs = onImportJs)
+                        state.activeSourceId == null -> EmptySourcePane(onImportJs = onImportJs)
                         state.isSearch -> {
                             when {
                                 state.loading && state.items.isEmpty() -> LoadingPane()
@@ -210,6 +222,26 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                 artists = artistPick.item.artistChoices,
                 onPick = viewModel::pickArtist,
                 onDismiss = viewModel::dismissArtistPick,
+            )
+        }
+        if (state.showAddSourceSheet) {
+            SourceAddDialog(
+                onImportJs = onImportJs,
+                onDismiss = viewModel::closeAddSourceSheet,
+            )
+        }
+        if (state.showRemoveSourceSheet) {
+            SourceRemoveDialog(
+                sources = state.installedSources,
+                onRemove = viewModel::uninstallSource,
+                onDismiss = viewModel::closeRemoveSourceSheet,
+            )
+        }
+        val sourceError = state.sourceError
+        if (sourceError != null) {
+            SourceErrorDialog(
+                message = sourceError,
+                onDismiss = viewModel::dismissSourceError,
             )
         }
     }

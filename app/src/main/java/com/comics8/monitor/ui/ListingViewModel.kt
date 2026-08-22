@@ -3,6 +3,7 @@ package com.comics8.monitor.ui
 import android.app.Application
 import android.content.Context
 import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.comics8.core.model.AppUpdateState
@@ -16,6 +17,7 @@ import com.comics8.core.source.ComicSource
 import com.comics8.core.source.ProgressDisplay
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
+import com.comics8.core.source.js.JsPackStore
 import com.comics8.core.sync.AppUpdateChecker
 import com.comics8.core.sync.SyncConstants
 import com.comics8.monitor.BuildConfig
@@ -33,6 +35,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.nio.charset.StandardCharsets
 
 data class ArtistPickRequest(
     val item: ToonItem,
@@ -89,6 +93,9 @@ data class ListingUiState(
     val downloadedWrIds: Set<String> = emptySet(),
     val downloadProgress: com.comics8.monitor.data.DownloadProgressState = com.comics8.monitor.data.DownloadProgressState(),
     val sourceRegistry: SourceRegistry = SourceRegistry(),
+    val showAddSourceSheet: Boolean = false,
+    val showRemoveSourceSheet: Boolean = false,
+    val sourceError: String? = null,
 ) {
     val isSearch: Boolean get() = searchQuery != null
 
@@ -121,6 +128,7 @@ sealed interface Screen {
 class ListingViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = (application as ComicsApp).repository
     private val sourceSettings = (application as ComicsApp).sourceSettings
+    private val jsPackStore: JsPackStore = (application as ComicsApp).jsPackStore
     private val prefs = application.getSharedPreferences("comics_reader_prefs", Context.MODE_PRIVATE)
 
     var singleViewPreference: ViewMode
@@ -204,6 +212,18 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         }
         if (current.showDownloadOptions) {
             closeDownloadOptions()
+            return true
+        }
+        if (current.showAddSourceSheet) {
+            closeAddSourceSheet()
+            return true
+        }
+        if (current.showRemoveSourceSheet) {
+            closeRemoveSourceSheet()
+            return true
+        }
+        if (current.sourceError != null) {
+            dismissSourceError()
             return true
         }
 
@@ -487,11 +507,96 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     fun setSourceEnabled(sourceId: String, enabled: Boolean) {
         val id = sourceId.trim()
         if (id.isEmpty()) return
-        sourceSettings.setEnabled(id, enabled)
-        if (!enabled && _state.value.activeSourceId == id) {
+        if (!enabled) {
+            uninstallSource(id)
+            return
+        }
+        sourceSettings.setEnabled(id, true)
+        _state.update { it.copy(installedSources = repository.installedSources()) }
+    }
+
+    fun openAddSourceSheet() {
+        _state.update { it.copy(showAddSourceSheet = true, showRemoveSourceSheet = false) }
+    }
+
+    fun closeAddSourceSheet() {
+        _state.update { it.copy(showAddSourceSheet = false) }
+    }
+
+    fun openRemoveSourceSheet() {
+        if (_state.value.installedSources.isEmpty()) return
+        _state.update { it.copy(showRemoveSourceSheet = true, showAddSourceSheet = false) }
+    }
+
+    fun closeRemoveSourceSheet() {
+        _state.update { it.copy(showRemoveSourceSheet = false) }
+    }
+
+    fun dismissSourceError() {
+        _state.update { it.copy(sourceError = null) }
+    }
+
+    fun importJsFromUri(uri: Uri) {
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            val fileName = queryDisplayName(app, uri)
+            val script = withContext(Dispatchers.IO) {
+                try {
+                    app.contentResolver.openInputStream(uri)?.use {
+                        it.readBytes().toString(StandardCharsets.UTF_8)
+                    }
+                } catch (_: Exception) {
+                    null
+                }
+            }
+            if (script == null) {
+                _state.update { it.copy(sourceError = "파일을 읽을 수 없습니다") }
+                return@launch
+            }
+            importJsScript(script, fileName)
+        }
+    }
+
+    fun importJsScript(script: String, fileName: String = "source.js") {
+        viewModelScope.launch {
+            try {
+                val source = withContext(Dispatchers.IO) {
+                    jsPackStore.ingest(script, fileName)
+                }
+                val registry = repository.sourceRegistry()
+                registry.remove(source.id)
+                check(registry.add(source)) { "failed to register ${source.id}" }
+                sourceSettings.setInstalledIds(sourceSettings.installedIds() + source.id)
+                clearCatalogCache(source.id)
+                closeAddSourceSheet()
+                setActiveSource(source.id)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(sourceError = e.message?.ifBlank { null } ?: "가져오기에 실패했습니다")
+                }
+            }
+        }
+    }
+
+    fun uninstallSource(sourceId: String) {
+        val id = sourceId.trim()
+        if (id.isEmpty()) return
+        jsPackStore.delete(id)
+        repository.sourceRegistry().remove(id)
+        sourceSettings.setEnabled(id, false)
+        clearCatalogCache(id)
+        closeRemoveSourceSheet()
+        if (_state.value.activeSourceId == id) {
             applyActiveSource(null, loadListing = false)
         } else {
-            _state.update { it.copy(installedSources = repository.installedSources()) }
+            _state.update {
+                it.copy(
+                    installedSources = repository.installedSources(),
+                    sourceRegistry = repository.sourceRegistry(),
+                )
+            }
         }
     }
 
@@ -1892,4 +1997,35 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         updatedAt = null,
         sourceId = sourceId,
     )
+
+    private fun clearCatalogCache(sourceId: String) {
+        val stale = catalogCache.keys.filter { browseSourceId(it) == sourceId }
+        stale.forEach {
+            catalogCache.remove(it)
+            catalogPages.remove(it)
+        }
+    }
+
+    private fun browseSourceId(tab: BrowseTab): String = when (tab) {
+        is BrowseTab.Favorite -> tab.sourceId
+        is BrowseTab.Remote -> tab.sourceId
+    }
+
+    private fun queryDisplayName(context: Context, uri: Uri): String {
+        val cursor = try {
+            context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+        } catch (_: Exception) {
+            null
+        }
+        cursor?.use {
+            if (it.moveToFirst()) {
+                val idx = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (idx >= 0) {
+                    val name = it.getString(idx)
+                    if (!name.isNullOrBlank()) return name
+                }
+            }
+        }
+        return uri.lastPathSegment?.substringAfterLast('/') ?: "source.js"
+    }
 }

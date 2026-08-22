@@ -18,30 +18,33 @@ import com.comics8.core.source.SourceOffer
 fun AddSourceDialog(
     offers: List<SourceOffer>,
     onPick: (SourceOffer) -> Unit,
+    onImportJs: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("소스 추가") },
         text = {
-            if (offers.isEmpty()) {
-                Text(
-                    text = "추가할 소스가 없습니다.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                LazyColumn {
-                    items(offers, key = { it.id }) { offer ->
-                        Text(
-                            text = offer.displayName,
-                            style = MaterialTheme.typography.bodyLarge,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onPick(offer) }
-                                .padding(vertical = 10.dp),
-                        )
-                    }
+            LazyColumn {
+                items(offers, key = { it.id }) { offer ->
+                    Text(
+                        text = offer.displayName,
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onPick(offer) }
+                            .padding(vertical = 10.dp),
+                    )
+                }
+                item {
+                    Text(
+                        text = IMPORT_JS_LABEL,
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onImportJs() }
+                            .padding(vertical = 10.dp),
+                    )
                 }
             }
         },

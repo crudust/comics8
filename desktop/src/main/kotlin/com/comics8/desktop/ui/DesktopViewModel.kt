@@ -11,6 +11,7 @@ import com.comics8.core.source.ProgressDisplay
 import com.comics8.core.source.SourceImplementation
 import com.comics8.core.source.SourceOffer
 import com.comics8.core.source.WorkId
+import com.comics8.core.source.js.JsPackStore
 import com.comics8.core.source.local.CoverThumbCache
 import com.comics8.core.source.local.LocalSource
 import com.comics8.core.sync.AppUpdateChecker
@@ -32,10 +33,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 class DesktopViewModel(
     val repository: DesktopToonRepository,
+    private val jsPackStore: JsPackStore,
     private val pickLibraryFolder: () -> File? = { DesktopFolderPicker.pickDirectory() },
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -92,6 +95,14 @@ class DesktopViewModel(
         }
         if (current.showAddSourceSheet) {
             dismissAddSourceSheet()
+            return true
+        }
+        if (current.showRemoveSourceSheet) {
+            closeRemoveSourceSheet()
+            return true
+        }
+        if (current.sourceError != null) {
+            dismissSourceError()
             return true
         }
 
@@ -216,8 +227,26 @@ class DesktopViewModel(
         }
     }
 
+    fun onImportedPacksReady() {
+        repository.applyPreferences { id ->
+            DesktopSourcePrefs.language(id)?.ifBlank { null }
+        }
+        _state.update { it.copy(packsReady = true) }
+        applyActiveSource(DesktopSourcePrefs.activeSourceId(), loadListing = false)
+        if (_state.value.activeSourceId != null && _state.value.items.isEmpty()) {
+            loadPage(1)
+        }
+    }
+
     private fun applyActiveSource(sourceId: String?, loadListing: Boolean) {
         val source = sourceId?.let { repository.activeSource(it) }
+        if (source == null && !_state.value.packsReady) return
+        if (source == null) {
+            readerJob?.cancel()
+            episodeJob?.cancel()
+            lastViewedSeries = null
+            lastViewedEpisode = null
+        }
         val tabs = source?.let { BrowseTab.forSource(it) }.orEmpty()
         val nextTab = BrowseTab.afterSourceChange(_state.value.tab, tabs)
         _state.update {
@@ -233,6 +262,8 @@ class DesktopViewModel(
                 sourceRegistry = repository.sourceRegistry(),
                 libraryRoots = DesktopSourcePrefs.libraryRoots(),
                 addSourceOffers = catalogAddOffers(),
+                screen = if (source == null) Screen.Browse else it.screen,
+                series = if (source == null) null else it.series,
             )
         }
         if (source == null || nextTab == null) return
@@ -351,22 +382,20 @@ class DesktopViewModel(
         val id = sourceId.trim()
         if (id.isEmpty()) return
         if (!enabled) {
-            repository.sourceRegistry().remove(id)
-        } else if (id == WorkId.LOCAL_SOURCE) {
+            uninstallSource(id)
+            return
+        }
+        if (id == WorkId.LOCAL_SOURCE) {
             ensureLocalSourceLoaded()
         }
-        DesktopSourcePrefs.setEnabled(id, enabled)
+        DesktopSourcePrefs.setEnabled(id, true)
         repository.setSourceWriteAccess(DesktopSourcePrefs::isEnabled)
-        if (!enabled && _state.value.activeSourceId == id) {
-            applyActiveSource(null, loadListing = false)
-        } else {
-            _state.update {
-                it.copy(
-                    installedSources = repository.installedSources(),
-                    addSourceOffers = catalogAddOffers(),
-                    libraryRoots = DesktopSourcePrefs.libraryRoots(),
-                )
-            }
+        _state.update {
+            it.copy(
+                installedSources = repository.installedSources(),
+                addSourceOffers = catalogAddOffers(),
+                libraryRoots = DesktopSourcePrefs.libraryRoots(),
+            )
         }
     }
 
@@ -374,6 +403,7 @@ class DesktopViewModel(
         _state.update {
             it.copy(
                 showAddSourceSheet = true,
+                showRemoveSourceSheet = false,
                 addSourceOffers = catalogAddOffers(),
             )
         }
@@ -381,6 +411,88 @@ class DesktopViewModel(
 
     fun dismissAddSourceSheet() {
         _state.update { it.copy(showAddSourceSheet = false) }
+    }
+
+    fun closeAddSourceSheet() = dismissAddSourceSheet()
+
+    fun openRemoveSourceSheet() {
+        if (_state.value.installedSources.isEmpty()) return
+        _state.update { it.copy(showRemoveSourceSheet = true, showAddSourceSheet = false) }
+    }
+
+    fun closeRemoveSourceSheet() {
+        _state.update { it.copy(showRemoveSourceSheet = false) }
+    }
+
+    fun dismissSourceError() {
+        _state.update { it.copy(sourceError = null) }
+    }
+
+    fun importJsFile(file: File) {
+        scope.launch {
+            try {
+                val script = withContext(Dispatchers.IO) {
+                    if (file.length() > JsPackStore.MAX_SCRIPT_BYTES) {
+                        throw IllegalArgumentException("파일이 너무 큽니다")
+                    }
+                    file.inputStream().use { JsPackStore.readCapped(it) }
+                }
+                importJsScript(script, file.name)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(sourceError = e.message?.ifBlank { null } ?: "파일을 읽을 수 없습니다")
+                }
+            }
+        }
+    }
+
+    fun importJsScript(script: String, fileName: String = "source.js") {
+        scope.launch {
+            try {
+                val source = withContext(Dispatchers.IO) {
+                    jsPackStore.ingest(script, fileName)
+                }
+                val registry = repository.sourceRegistry()
+                registry.remove(source.id)
+                check(registry.add(source)) { "failed to register ${'$'}{source.id}" }
+                DesktopSourcePrefs.setInstalledIds(DesktopSourcePrefs.installedIds() + source.id)
+                repository.setSourceWriteAccess(DesktopSourcePrefs::isEnabled)
+                clearCatalogCache(source.id)
+                closeAddSourceSheet()
+                setActiveSource(source.id)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(sourceError = e.message?.ifBlank { null } ?: "가져오기에 실패했습니다")
+                }
+            }
+        }
+    }
+
+    fun uninstallSource(sourceId: String) {
+        val id = sourceId.trim()
+        if (id.isEmpty()) return
+        jsPackStore.delete(id)
+        repository.sourceRegistry().remove(id)
+        DesktopSourcePrefs.setEnabled(id, false)
+        repository.setSourceWriteAccess(DesktopSourcePrefs::isEnabled)
+        clearCatalogCache(id)
+        closeRemoveSourceSheet()
+        if (_state.value.activeSourceId == id) {
+            applyActiveSource(null, loadListing = false)
+        } else {
+            _state.update {
+                it.copy(
+                    installedSources = repository.installedSources(),
+                    sourceRegistry = repository.sourceRegistry(),
+                    addSourceOffers = catalogAddOffers(),
+                    libraryRoots = DesktopSourcePrefs.libraryRoots(),
+                )
+            }
+        }
     }
 
     fun addCatalogOffer(offer: SourceOffer) {
@@ -398,7 +510,7 @@ class DesktopViewModel(
 
     fun removeActiveSource() {
         val id = _state.value.activeSourceId ?: return
-        setSourceEnabled(id, false)
+        uninstallSource(id)
     }
 
     fun addLibraryRoot() {
@@ -1716,4 +1828,17 @@ class DesktopViewModel(
         updatedAt = null,
         sourceId = sourceId,
     )
+
+    private fun clearCatalogCache(sourceId: String) {
+        val stale = catalogCache.keys.filter { browseSourceId(it) == sourceId }
+        stale.forEach {
+            catalogCache.remove(it)
+            catalogPages.remove(it)
+        }
+    }
+
+    private fun browseSourceId(tab: BrowseTab): String = when (tab) {
+        is BrowseTab.Favorite -> tab.sourceId
+        is BrowseTab.Remote -> tab.sourceId
+    }
 }

@@ -63,10 +63,16 @@ fun DesktopDownloadsPane(
         }
 
         when {
+            !state.packsReady -> {
+                LoadingPane(modifier = Modifier.weight(1f))
+            }
             state.activeSourceId == null -> {
                 EmptySourcePane(
                     modifier = Modifier.weight(1f),
                     onAddSource = viewModel::openAddSourceSheet,
+                    onImportJs = {
+                        com.comics8.desktop.ui.components.pickJsFile()?.let(viewModel::importJsFile)
+                    },
                 )
             }
             state.downloadLoading && state.downloadSummaries.isEmpty() -> {

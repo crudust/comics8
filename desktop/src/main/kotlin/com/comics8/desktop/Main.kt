@@ -7,6 +7,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -28,6 +29,7 @@ import androidx.compose.ui.window.rememberWindowState
 import com.comics8.core.network.ToonClient
 import com.comics8.core.source.SourceLocator
 import com.comics8.core.source.SourceRegistry
+import com.comics8.core.source.js.JsPackStore
 import com.comics8.desktop.data.DesktopDatabase
 import java.io.File
 import com.comics8.desktop.data.DesktopSourcePrefs
@@ -69,10 +71,17 @@ fun main() {
     System.setProperty("apple.laf.useScreenMenuBar", "true")
 
     application {
+        val jsPackStore = remember { JsPackStore.desktopDefault() }
         val registry = remember {
             SourceRegistry().also {
                 DesktopSourcePrefs.registry = it
                 DesktopSourcePrefs.migrateIfNeeded()
+                val loaded = jsPackStore.loadInto(it)
+                if (loaded.isNotEmpty()) {
+                    DesktopSourcePrefs.setInstalledIds(
+                        DesktopSourcePrefs.installedIds() + loaded.map { source -> source.id },
+                    )
+                }
             }
         }
         val locator = remember { SourceLocator { registry } }
@@ -111,8 +120,11 @@ fun main() {
                 installedIds = installedIds,
             )
         }
-        val viewModel = remember { DesktopViewModel(repository) }
+        val viewModel = remember { DesktopViewModel(repository, jsPackStore) }
         val state by viewModel.state.collectAsState()
+        LaunchedEffect(Unit) {
+            viewModel.onImportedPacksReady()
+        }
 
         val windowState = rememberWindowState(
             width = 1280.dp,
@@ -241,6 +253,10 @@ fun ComicsDesktopApp(
             com.comics8.desktop.ui.components.AddSourceDialog(
                 offers = state.addSourceOffers,
                 onPick = viewModel::addCatalogOffer,
+                onImportJs = {
+                    viewModel.closeAddSourceSheet()
+                    com.comics8.desktop.ui.components.pickJsFile()?.let(viewModel::importJsFile)
+                },
                 onDismiss = viewModel::dismissAddSourceSheet,
             )
         }
@@ -251,6 +267,20 @@ fun ComicsDesktopApp(
                 artists = artistPick.item.artistChoices,
                 onPick = viewModel::pickArtist,
                 onDismiss = viewModel::dismissArtistPick,
+            )
+        }
+        if (state.showRemoveSourceSheet) {
+            com.comics8.desktop.ui.components.SourceRemoveDialog(
+                sources = state.installedSources,
+                onRemove = viewModel::uninstallSource,
+                onDismiss = viewModel::closeRemoveSourceSheet,
+            )
+        }
+        val sourceError = state.sourceError
+        if (sourceError != null) {
+            com.comics8.desktop.ui.components.SourceErrorDialog(
+                message = sourceError,
+                onDismiss = viewModel::dismissSourceError,
             )
         }
     }
