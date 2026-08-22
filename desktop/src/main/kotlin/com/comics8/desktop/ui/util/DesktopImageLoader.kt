@@ -342,8 +342,8 @@ fun DesktopAsyncImage(
 ) {
     // Check synchronous memory cache first
     val cachedBitmap = remember(url) { DesktopImageCache.get(url) }
-    var displayedBitmap by remember { mutableStateOf(cachedBitmap) }
-    var loading by remember { mutableStateOf(cachedBitmap == null) }
+    var displayedBitmap by remember(url) { mutableStateOf(cachedBitmap) }
+    var loading by remember(url) { mutableStateOf(cachedBitmap == null) }
 
     LaunchedEffect(url) {
         val memoryHit = DesktopImageCache.get(url)
@@ -352,6 +352,7 @@ fun DesktopAsyncImage(
             loading = false
             onLoaded?.invoke(memoryHit)
         } else {
+            displayedBitmap = null
             loading = true
             val loaded = DesktopImageCache.loadImage(url)
             if (loaded != null) {
@@ -363,6 +364,7 @@ fun DesktopAsyncImage(
             }
         }
     }
+
 
     Box(
         modifier = modifier,
