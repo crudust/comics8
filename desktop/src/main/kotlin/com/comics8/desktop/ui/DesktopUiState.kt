@@ -6,6 +6,7 @@ import com.comics8.core.model.ReadDirection
 import com.comics8.core.model.ToonItem
 import com.comics8.core.model.ViewMode
 import com.comics8.core.source.ComicSource
+import com.comics8.core.source.SourceOffer
 import com.comics8.core.source.SourceRegistry
 import com.comics8.desktop.data.DesktopBackupStats
 import com.comics8.desktop.data.DesktopSyncState
@@ -75,8 +76,17 @@ data class DesktopUiState(
     val downloadedWrIds: Set<String> = emptySet(),
     val downloadProgress: com.comics8.desktop.data.DesktopDownloadProgressState = com.comics8.desktop.data.DesktopDownloadProgressState(),
     val sourceRegistry: SourceRegistry = SourceRegistry(),
+    val showAddSourceSheet: Boolean = false,
+    val addSourceOffers: List<SourceOffer> = emptyList(),
+    val libraryRoots: List<String> = emptyList(),
 ) {
     val isSearch: Boolean get() = searchQuery != null
+
+    val writesDownloads: Boolean
+        get() {
+            val id = series?.sourceId ?: activeSourceId ?: return false
+            return sourceRegistry.getOrNull(id)?.writesDownloads == true
+        }
 
     val currentEpisodeIndex: Int
         get() = currentEpisode?.let { ep -> episodes.indexOfFirst { it.wrId == ep.wrId } } ?: -1

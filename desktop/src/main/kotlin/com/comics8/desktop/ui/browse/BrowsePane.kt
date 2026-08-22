@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -21,8 +23,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -40,6 +45,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.comics8.core.model.ToonItem
 import com.comics8.core.source.SourceRegistry
+import com.comics8.core.source.WorkId
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
 import com.comics8.desktop.ui.components.Badge
@@ -55,12 +61,25 @@ fun BrowsePane(
     viewModel: DesktopViewModel,
     modifier: Modifier = Modifier,
 ) {
+    val isLocal = state.activeSourceId == WorkId.LOCAL_SOURCE
     when {
         state.activeSourceId == null -> {
-            EmptySourcePane(modifier = modifier)
+            EmptySourcePane(
+                modifier = modifier,
+                onAddSource = viewModel::openAddSourceSheet,
+            )
+        }
+        isLocal && state.libraryRoots.isEmpty() && !state.loading -> {
+            EmptyLibraryPane(
+                onAddFolder = viewModel::addLibraryRoot,
+                modifier = modifier,
+            )
         }
         state.loading && state.items.isEmpty() -> {
             Column(modifier = modifier.fillMaxSize()) {
+                if (isLocal) {
+                    LibraryRootsBar(state = state, viewModel = viewModel)
+                }
                 LoadingPane(Modifier.weight(1f).fillMaxWidth())
                 BrowsePageBar(state, viewModel)
             }
@@ -74,6 +93,9 @@ fun BrowsePane(
         }
         else -> {
             Column(modifier = modifier.fillMaxSize()) {
+                if (isLocal) {
+                    LibraryRootsBar(state = state, viewModel = viewModel)
+                }
                 val gridState = rememberLazyGridState()
                 LaunchedEffect(state.scrollToTopTrigger) {
                     if (state.scrollToTopTrigger > 0) {
@@ -101,6 +123,85 @@ fun BrowsePane(
 
                 BrowsePageBar(state, viewModel)
             }
+        }
+    }
+}
+
+@Composable
+private fun EmptyLibraryPane(
+    onAddFolder: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier
+            .fillMaxSize()
+            .padding(24.dp),
+    ) {
+        Text(
+            text = "만화 폴더를 추가하세요",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(16.dp))
+        Button(onClick = onAddFolder) {
+            Text("폴더 추가")
+        }
+    }
+}
+
+@Composable
+private fun LibraryRootsBar(
+    state: DesktopUiState,
+    viewModel: DesktopViewModel,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (state.libraryRoots.isEmpty()) {
+                Text(
+                    text = "폴더 없음",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                state.libraryRoots.forEach { path ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = path.substringAfterLast('/').ifBlank { path },
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        IconButton(
+                            onClick = { viewModel.removeLibraryRoot(path) },
+                            modifier = Modifier.size(24.dp),
+                        ) {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = "폴더 제거",
+                                modifier = Modifier.size(14.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        TextButton(onClick = viewModel::addLibraryRoot) {
+            Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(4.dp))
+            Text("폴더 추가")
         }
     }
 }

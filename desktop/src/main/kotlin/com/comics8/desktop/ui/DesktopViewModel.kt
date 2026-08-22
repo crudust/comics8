@@ -6,8 +6,13 @@ import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.ReadDirection
 import com.comics8.core.model.ToonItem
 import com.comics8.core.model.ViewMode
+import com.comics8.core.source.BuiltinOffers
 import com.comics8.core.source.ProgressDisplay
+import com.comics8.core.source.SourceImplementation
+import com.comics8.core.source.SourceOffer
 import com.comics8.core.source.WorkId
+import com.comics8.core.source.local.CoverThumbCache
+import com.comics8.core.source.local.LocalSource
 import com.comics8.core.sync.AppUpdateChecker
 import com.comics8.core.sync.SyncConstants
 import com.comics8.desktop.DesktopVersion
@@ -15,6 +20,8 @@ import com.comics8.desktop.data.DesktopSourcePrefs
 import com.comics8.desktop.data.DesktopToonRepository
 import com.comics8.desktop.data.DesktopUpdateManager
 import com.comics8.desktop.data.ReadHistoryRecord
+import com.comics8.desktop.ui.util.AwtThumbEncoder
+import com.comics8.desktop.ui.util.DesktopFolderPicker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,6 +36,7 @@ import java.io.File
 
 class DesktopViewModel(
     val repository: DesktopToonRepository,
+    private val pickLibraryFolder: () -> File? = { DesktopFolderPicker.pickDirectory() },
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -46,6 +54,10 @@ class DesktopViewModel(
 
     private val catalogCache = mutableMapOf<BrowseTab, List<ToonItem>>()
     private val catalogPages = mutableMapOf<BrowseTab, Pair<Int, Int>>()
+    private val thumbCache = CoverThumbCache(
+        File(System.getProperty("user.home"), ".comics8/thumbs"),
+        AwtThumbEncoder,
+    )
 
     private val toonTotalCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
     private val toonLastPageCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
@@ -76,6 +88,10 @@ class DesktopViewModel(
         }
         if (current.showDownloadOptions) {
             closeDownloadOptions()
+            return true
+        }
+        if (current.showAddSourceSheet) {
+            dismissAddSourceSheet()
             return true
         }
 
@@ -159,6 +175,9 @@ class DesktopViewModel(
             DesktopSourcePrefs.language(id)?.ifBlank { null }
         }
         repository.setSourceWriteAccess(DesktopSourcePrefs::isEnabled)
+        if (WorkId.LOCAL_SOURCE in DesktopSourcePrefs.installedIds()) {
+            ensureLocalSourceLoaded()
+        }
         applyActiveSource(DesktopSourcePrefs.activeSourceId(), loadListing = false)
         if (_state.value.activeSourceId != null) {
             loadPage(1)
@@ -212,6 +231,8 @@ class DesktopViewModel(
                 error = if (source == null) null else it.error,
                 searchSuggestions = emptyList(),
                 sourceRegistry = repository.sourceRegistry(),
+                libraryRoots = DesktopSourcePrefs.libraryRoots(),
+                addSourceOffers = catalogAddOffers(),
             )
         }
         if (source == null || nextTab == null) return
@@ -329,13 +350,99 @@ class DesktopViewModel(
     fun setSourceEnabled(sourceId: String, enabled: Boolean) {
         val id = sourceId.trim()
         if (id.isEmpty()) return
+        if (!enabled) {
+            repository.sourceRegistry().remove(id)
+        } else if (id == WorkId.LOCAL_SOURCE) {
+            ensureLocalSourceLoaded()
+        }
         DesktopSourcePrefs.setEnabled(id, enabled)
         repository.setSourceWriteAccess(DesktopSourcePrefs::isEnabled)
         if (!enabled && _state.value.activeSourceId == id) {
             applyActiveSource(null, loadListing = false)
         } else {
-            _state.update { it.copy(installedSources = repository.installedSources()) }
+            _state.update {
+                it.copy(
+                    installedSources = repository.installedSources(),
+                    addSourceOffers = catalogAddOffers(),
+                    libraryRoots = DesktopSourcePrefs.libraryRoots(),
+                )
+            }
         }
+    }
+
+    fun openAddSourceSheet() {
+        _state.update {
+            it.copy(
+                showAddSourceSheet = true,
+                addSourceOffers = catalogAddOffers(),
+            )
+        }
+    }
+
+    fun dismissAddSourceSheet() {
+        _state.update { it.copy(showAddSourceSheet = false) }
+    }
+
+    fun addCatalogOffer(offer: SourceOffer) {
+        if (offer.implementation != SourceImplementation.BUILTIN_LOCAL) return
+        dismissAddSourceSheet()
+        ensureLocalSourceLoaded()
+        DesktopSourcePrefs.setEnabled(WorkId.LOCAL_SOURCE, true)
+        DesktopSourcePrefs.setActiveSourceId(WorkId.LOCAL_SOURCE)
+        repository.setSourceWriteAccess(DesktopSourcePrefs::isEnabled)
+        applyActiveSource(WorkId.LOCAL_SOURCE, loadListing = true)
+        if (DesktopSourcePrefs.libraryRoots().isEmpty()) {
+            addLibraryRoot()
+        }
+    }
+
+    fun removeActiveSource() {
+        val id = _state.value.activeSourceId ?: return
+        setSourceEnabled(id, false)
+    }
+
+    fun addLibraryRoot() {
+        if (_state.value.activeSourceId != WorkId.LOCAL_SOURCE) return
+        val dir = pickLibraryFolder() ?: return
+        val path = try {
+            dir.canonicalPath
+        } catch (_: Exception) {
+            dir.absolutePath
+        }
+        if (!File(path).isDirectory) return
+        val current = DesktopSourcePrefs.libraryRoots()
+        if (path !in current) {
+            DesktopSourcePrefs.setLibraryRoots(current + path)
+        }
+        _state.update { it.copy(libraryRoots = DesktopSourcePrefs.libraryRoots()) }
+        catalogCache.clear()
+        catalogPages.clear()
+        refresh()
+    }
+
+    fun removeLibraryRoot(path: String) {
+        if (_state.value.activeSourceId != WorkId.LOCAL_SOURCE) return
+        DesktopSourcePrefs.setLibraryRoots(DesktopSourcePrefs.libraryRoots().filterNot { it == path })
+        _state.update { it.copy(libraryRoots = DesktopSourcePrefs.libraryRoots()) }
+        catalogCache.clear()
+        catalogPages.clear()
+        refresh()
+    }
+
+    private fun ensureLocalSourceLoaded() {
+        val registry = repository.sourceRegistry()
+        if (registry.contains(WorkId.LOCAL_SOURCE)) return
+        registry.add(
+            LocalSource(
+                roots = { DesktopSourcePrefs.libraryRoots().map { File(it) } },
+                thumbs = thumbCache,
+            ),
+        )
+    }
+
+    private fun catalogAddOffers(): List<SourceOffer> {
+        val installed = DesktopSourcePrefs.installedIds()
+        return listOf(BuiltinOffers.LOCAL).filter { it.id !in installed }
     }
 
     fun onListingOpen(item: ToonItem) {
@@ -930,6 +1037,7 @@ class DesktopViewModel(
     }
 
     fun openDownloadOptions() {
+        if (!_state.value.writesDownloads) return
         val series = _state.value.series ?: return
         downloadCatalogJob?.cancel()
         _state.update {
@@ -973,12 +1081,14 @@ class DesktopViewModel(
     }
 
     fun startDownloadEpisodes(episodesToDownload: List<EpisodeItem>) {
+        if (!_state.value.writesDownloads) return
         val series = _state.value.series ?: return
         closeDownloadOptions()
         repository.downloadManager?.enqueueEpisodes(series, episodesToDownload)
     }
 
     fun startDownloadEpisode(episode: EpisodeItem) {
+        if (!_state.value.writesDownloads) return
         val series = _state.value.series ?: return
         repository.downloadManager?.enqueueEpisodes(series, listOf(episode))
     }
@@ -1006,6 +1116,7 @@ class DesktopViewModel(
     }
 
     fun openDownloads() {
+        if (!_state.value.writesDownloads) return
         readerJob?.cancel()
         episodeJob?.cancel()
         _state.update {

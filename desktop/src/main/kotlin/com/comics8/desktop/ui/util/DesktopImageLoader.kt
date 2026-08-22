@@ -32,14 +32,58 @@ import com.comics8.core.network.ImageFallbacks
 import com.comics8.core.network.ImageReferer
 import com.comics8.core.source.LocalImageUri
 import com.comics8.core.source.SourceRegistry
+import com.comics8.core.source.local.ThumbEncoder
+import com.comics8.core.source.local.ZipArchive
+import com.comics8.core.source.local.ZipImageUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.jetbrains.skia.Image
+import java.awt.Color
+import java.awt.RenderingHints
+import java.awt.image.BufferedImage
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
+import javax.imageio.IIOImage
+import javax.imageio.ImageIO
+import javax.imageio.ImageWriteParam
+
+object AwtThumbEncoder : ThumbEncoder {
+    override fun jpeg(bytes: ByteArray, longEdgePx: Int, quality: Int): ByteArray {
+        val src = ImageIO.read(ByteArrayInputStream(bytes)) ?: error("unreadable image")
+        val w = src.width.coerceAtLeast(1)
+        val h = src.height.coerceAtLeast(1)
+        val longEdge = maxOf(w, h)
+        val scale = if (longEdge <= longEdgePx) 1.0 else longEdgePx.toDouble() / longEdge
+        val tw = (w * scale).toInt().coerceAtLeast(1)
+        val th = (h * scale).toInt().coerceAtLeast(1)
+        val dest = BufferedImage(tw, th, BufferedImage.TYPE_INT_RGB)
+        val g = dest.createGraphics()
+        try {
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+            g.drawImage(src, 0, 0, tw, th, Color.WHITE, null)
+        } finally {
+            g.dispose()
+        }
+        val out = ByteArrayOutputStream()
+        val writer = ImageIO.getImageWritersByFormatName("jpeg").next()
+        ImageIO.createImageOutputStream(out).use { ios ->
+            writer.output = ios
+            val param = writer.defaultWriteParam
+            if (param.canWriteCompressed()) {
+                param.compressionMode = ImageWriteParam.MODE_EXPLICIT
+                param.compressionQuality = (quality / 100f).coerceIn(0.1f, 1f)
+            }
+            writer.write(null, IIOImage(dest, null, null), param)
+            writer.dispose()
+        }
+        return out.toByteArray()
+    }
+}
 
 object DesktopImageCache {
     private const val MEMORY_MAX_ENTRIES = 48
@@ -90,17 +134,23 @@ object DesktopImageCache {
         return digest.joinToString("") { "%02x".format(it) }
     }
 
-    suspend fun loadImage(url: String): ImageBitmap? = withContext(Dispatchers.IO) {
-        if (url.isBlank()) return@withContext null
-        get(url)?.let { return@withContext it }
-
+    internal fun readImageBytes(url: String): ByteArray? {
+        if (url.isBlank()) return null
         val hash = hashUrl(url)
         val cachedFile = File(diskCacheDir, "$hash.img")
-
         val localFile = LocalImageUri.toFile(url)
-        val bytes = if (localFile != null && localFile.isFile && localFile.length() > 0L) {
+        val zipRef = ZipImageUri.parse(url)
+        return if (localFile != null && localFile.isFile && localFile.length() > 0L) {
             try {
                 localFile.readBytes()
+            } catch (_: Exception) {
+                null
+            }
+        } else if (zipRef != null) {
+            try {
+                ZipArchive(zipRef.zip).use { archive ->
+                    archive.open(zipRef.entry).use { it.readBytes() }
+                }
             } catch (_: Exception) {
                 null
             }
@@ -111,37 +161,43 @@ object DesktopImageCache {
                 null
             }
         } else {
-            null
-        } ?: run {
-            val urlsToTry = listOf(url) + ImageFallbacks.forUrl(url, registry)
-            var fetchedBytes: ByteArray? = null
-            for (targetUrl in urlsToTry) {
-                if (LocalImageUri.toFile(targetUrl) != null) continue
-                try {
-                    val request = Request.Builder()
-                        .url(targetUrl)
-                        .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
-                        .header("Referer", ImageReferer.forUrl(targetUrl, registry))
-                        .get()
-                        .build()
-                    val result = httpClient.newCall(request).execute().use { resp ->
-                        if (resp.isSuccessful) resp.body?.bytes() else null
-                    }
-                    if (result != null && result.isNotEmpty()) {
-                        fetchedBytes = result
-                        try {
-                            cachedFile.writeBytes(result)
-                            evictDiskIfNeeded(cachedFile)
-                        } catch (_: Exception) {
-                        }
-                        break
-                    }
-                } catch (_: Exception) {
-                }
-            }
-            fetchedBytes
+            fetchRemoteBytes(url, cachedFile)
         }
+    }
 
+    private fun fetchRemoteBytes(url: String, cachedFile: File): ByteArray? {
+        val urlsToTry = listOf(url) + ImageFallbacks.forUrl(url, registry)
+        for (targetUrl in urlsToTry) {
+            if (LocalImageUri.toFile(targetUrl) != null) continue
+            if (ZipImageUri.parse(targetUrl) != null) continue
+            try {
+                val request = Request.Builder()
+                    .url(targetUrl)
+                    .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+                    .header("Referer", ImageReferer.forUrl(targetUrl, registry))
+                    .get()
+                    .build()
+                val result = httpClient.newCall(request).execute().use { resp ->
+                    if (resp.isSuccessful) resp.body?.bytes() else null
+                }
+                if (result != null && result.isNotEmpty()) {
+                    try {
+                        cachedFile.writeBytes(result)
+                        evictDiskIfNeeded(cachedFile)
+                    } catch (_: Exception) {
+                    }
+                    return result
+                }
+            } catch (_: Exception) {
+            }
+        }
+        return null
+    }
+
+    suspend fun loadImage(url: String): ImageBitmap? = withContext(Dispatchers.IO) {
+        if (url.isBlank()) return@withContext null
+        get(url)?.let { return@withContext it }
+        val bytes = readImageBytes(url)
         if (bytes != null && bytes.isNotEmpty()) {
             try {
                 val skiaImage = Image.makeFromEncoded(bytes)

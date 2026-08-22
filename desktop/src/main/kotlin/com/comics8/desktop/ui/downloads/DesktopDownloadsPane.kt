@@ -64,7 +64,10 @@ fun DesktopDownloadsPane(
 
         when {
             state.activeSourceId == null -> {
-                EmptySourcePane(modifier = Modifier.weight(1f))
+                EmptySourcePane(
+                    modifier = Modifier.weight(1f),
+                    onAddSource = viewModel::openAddSourceSheet,
+                )
             }
             state.downloadLoading && state.downloadSummaries.isEmpty() -> {
                 LoadingPane(modifier = Modifier.weight(1f))

@@ -103,4 +103,12 @@ class SourcePrefsTest {
         assertThat(SourcePrefs.formatIdList(listOf("local", " local ", "", "js")))
             .isEqualTo("""["local","js"]""")
     }
+
+    @Test
+    fun libraryRootsJsonRoundTrip() {
+        val paths = listOf("/Users/me/Comics", "/tmp/lib with space")
+        val encoded = SourcePrefs.formatIdList(paths)
+        assertThat(SourcePrefs.parseIdList(encoded)).containsExactlyElementsIn(paths).inOrder()
+        assertThat(SourcePrefs.LIBRARY_ROOTS_KEY).isEqualTo("local.library_roots")
+    }
 }

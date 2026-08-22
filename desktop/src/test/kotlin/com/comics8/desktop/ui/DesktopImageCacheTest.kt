@@ -1,16 +1,18 @@
 package com.comics8.desktop.ui
 
 import com.comics8.core.source.LocalImageUri
+import com.comics8.core.source.local.ZipImageUri
 import com.comics8.desktop.ui.util.DesktopImageCache
 import com.google.common.truth.Truth.assertThat
-import kotlinx.coroutines.runBlocking
 import org.junit.Test
 import java.io.File
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import kotlin.io.path.createTempDirectory
 
 class DesktopImageCacheTest {
     @Test
-    fun loadsLocalFileUrlWithColonInPath() = runBlocking<Unit> {
+    fun loadsLocalFileUrlWithColonInPath() {
         val root = createTempDirectory("desk-img").toFile()
         root.deleteOnExit()
         val file = File(root, "hitomi/artist:asanagi/0001.jpg")
@@ -20,11 +22,23 @@ class DesktopImageCacheTest {
         val encoded = LocalImageUri.fromFile(file)
         val raw = "file://" + file.absolutePath
         for (url in listOf(encoded, raw)) {
-            val bitmap = DesktopImageCache.loadImage(url)
-            assertThat(bitmap).isNotNull()
-            assertThat(bitmap!!.width).isAtLeast(1)
-            assertThat(bitmap.height).isAtLeast(1)
+            assertThat(DesktopImageCache.readImageBytes(url)).isEqualTo(ONE_PIXEL_PNG)
         }
+    }
+
+    @Test
+    fun loadsComics8ZipUri() {
+        val root = createTempDirectory("desk-zip-img").toFile()
+        root.deleteOnExit()
+        val zip = File(root, "book.cbz")
+        ZipOutputStream(zip.outputStream().buffered()).use { zos ->
+            zos.putNextEntry(ZipEntry("nested/0001.png"))
+            zos.write(ONE_PIXEL_PNG)
+            zos.closeEntry()
+        }
+        val url = ZipImageUri.encode(zip, "nested/0001.png")
+        assertThat(url).startsWith("${ZipImageUri.SCHEME}:")
+        assertThat(DesktopImageCache.readImageBytes(url)).isEqualTo(ONE_PIXEL_PNG)
     }
 
     companion object {

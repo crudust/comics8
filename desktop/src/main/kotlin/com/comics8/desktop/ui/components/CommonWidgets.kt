@@ -46,9 +46,13 @@ fun Badge(
 const val EMPTY_SOURCE_MESSAGE = "소스를 추가하세요"
 
 @Composable
-fun EmptySourcePane(modifier: Modifier = Modifier) {
-    Box(
-        contentAlignment = Alignment.Center,
+fun EmptySourcePane(
+    modifier: Modifier = Modifier,
+    onAddSource: (() -> Unit)? = null,
+) {
+    Column(
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
             .fillMaxSize()
             .padding(24.dp),
@@ -58,6 +62,12 @@ fun EmptySourcePane(modifier: Modifier = Modifier) {
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (onAddSource != null) {
+            Spacer(Modifier.height(16.dp))
+            Button(onClick = onAddSource) {
+                Text("소스 추가")
+            }
+        }
     }
 }
 

@@ -12,6 +12,6 @@ enum class SourceImplementation { BUILTIN_LOCAL, JS_PACK }
 object BuiltinOffers {
     val LOCAL = SourceOffer("local", "로컬", SourceImplementation.BUILTIN_LOCAL)
 
-    /** PR 4 adds [LOCAL] to the add-source sheet. PR 2 has no catalog offers. */
+    /** Desktop add-source sheet uses [LOCAL]. Android hides it until SAF (PR 9). */
     fun bundled(): List<SourceOffer> = emptyList()
 }

@@ -109,6 +109,8 @@ fun TopBar(
                     sources = state.installedSources,
                     registry = state.sourceRegistry,
                     onSelect = viewModel::setActiveSource,
+                    onAddSource = viewModel::openAddSourceSheet,
+                    onRemoveActive = viewModel::removeActiveSource,
                     titleStyle = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.weight(1f),
                 )
@@ -148,11 +150,13 @@ fun TopBar(
                         contentDescription = "클라우드 동기화",
                     )
                 }
-                IconButton(onClick = viewModel::openDownloads) {
-                    Icon(
-                        imageVector = Icons.Default.Download,
-                        contentDescription = "다운로드 보관함",
-                    )
+                if (state.writesDownloads) {
+                    IconButton(onClick = viewModel::openDownloads) {
+                        Icon(
+                            imageVector = Icons.Default.Download,
+                            contentDescription = "다운로드 보관함",
+                        )
+                    }
                 }
                 IconButton(onClick = viewModel::openHistory) {
                     Icon(
@@ -225,12 +229,14 @@ fun TopBar(
                         )
                     }
                 }
-                IconButton(onClick = viewModel::openDownloadOptions) {
-                    Icon(
-                        imageVector = Icons.Default.Download,
-                        contentDescription = "오프라인 다운로드",
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
+                if (state.writesDownloads) {
+                    IconButton(onClick = viewModel::openDownloadOptions) {
+                        Icon(
+                            imageVector = Icons.Default.Download,
+                            contentDescription = "오프라인 다운로드",
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                 }
                 IconButton(onClick = viewModel::toggleFavorite) {
                     Icon(
@@ -461,6 +467,8 @@ private fun SourceTitleDropdown(
     sources: List<com.comics8.core.source.ComicSource>,
     registry: SourceRegistry,
     onSelect: (String) -> Unit,
+    onAddSource: () -> Unit,
+    onRemoveActive: () -> Unit,
     titleStyle: TextStyle,
     modifier: Modifier = Modifier,
 ) {
@@ -489,22 +497,30 @@ private fun SourceTitleDropdown(
             )
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            if (sources.isEmpty()) {
+            sources.forEach { source ->
                 DropdownMenuItem(
-                    text = { Text(EMPTY_SOURCE_MESSAGE) },
-                    onClick = { expanded = false },
-                    enabled = false,
+                    text = { Text(source.displayName) },
+                    onClick = {
+                        onSelect(source.id)
+                        expanded = false
+                    },
                 )
-            } else {
-                sources.forEach { source ->
-                    DropdownMenuItem(
-                        text = { Text(source.displayName) },
-                        onClick = {
-                            onSelect(source.id)
-                            expanded = false
-                        },
-                    )
-                }
+            }
+            DropdownMenuItem(
+                text = { Text("소스 추가…") },
+                onClick = {
+                    onAddSource()
+                    expanded = false
+                },
+            )
+            if (activeSourceId != null) {
+                DropdownMenuItem(
+                    text = { Text("소스 제거") },
+                    onClick = {
+                        onRemoveActive()
+                        expanded = false
+                    },
+                )
             }
         }
     }

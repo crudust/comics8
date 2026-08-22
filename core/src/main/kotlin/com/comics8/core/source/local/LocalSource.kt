@@ -1,0 +1,163 @@
+package com.comics8.core.source.local
+
+import com.comics8.core.model.EpisodeItem
+import com.comics8.core.model.EpisodePage
+import com.comics8.core.model.ListingPage
+import com.comics8.core.model.ToonItem
+import com.comics8.core.source.ComicSource
+import com.comics8.core.source.LocalImageUri
+import com.comics8.core.source.NotificationMode
+import com.comics8.core.source.RequestPolicy
+import com.comics8.core.source.SearchQuery
+import com.comics8.core.source.SourceCatalog
+import com.comics8.core.source.SourceHttp
+import com.comics8.core.source.SourceKind
+import com.comics8.core.source.WorkId
+import java.io.File
+
+class LocalSource(
+    private val roots: () -> List<File>,
+    private val thumbs: CoverThumbCache,
+    private val scan: LibraryScanner = LibraryScanner(),
+) : ComicSource {
+    override val id: String = WorkId.LOCAL_SOURCE
+    override val displayName: String = "로컬"
+    override val origin: String = "local://"
+    override val kind: SourceKind = SourceKind.LOCAL
+    override val catalogs: List<SourceCatalog> = listOf(
+        SourceCatalog("LIBRARY", "보관함", paginated = false),
+    )
+    override val defaultPolicy: RequestPolicy = RequestPolicy(userAgent = "Comics8/Local")
+    override val searchPlaceholder: String = "파일명 검색"
+    override val emptyListingOk: Boolean = true
+    override val notificationMode: NotificationMode = NotificationMode.NONE
+    override val syncParticipates: Boolean = false
+    override val writesDownloads: Boolean = false
+    override val requiresHttp: Boolean = false
+    override val emptyEpisodesOk: Boolean = true
+
+    override fun useProxy(url: String): Boolean = false
+
+    override suspend fun loadListing(catalogId: String, page: Int, http: SourceHttp): ListingPage {
+        val items = scanWorks().map { toItem(it) }
+        return ListingPage(items = items, currentPage = 1, lastPage = 1)
+    }
+
+    override suspend fun search(query: SearchQuery, http: SourceHttp): List<ToonItem> {
+        val needle = query.text.trim()
+        if (needle.isEmpty()) return emptyList()
+        return scanWorks()
+            .filter { it.title.contains(needle, ignoreCase = true) }
+            .map { toItem(it) }
+    }
+
+    override suspend fun loadEpisodes(item: ToonItem, page: Int, http: SourceHttp): EpisodePage {
+        val work = workFor(item.id) ?: return EpisodePage(emptyList(), 1, 1)
+        val episodes = work.episodes.map { episode ->
+            EpisodeItem(
+                wrId = episode.wrId,
+                title = episode.title,
+                date = null,
+                thumbUrl = episodeThumb(episode),
+                href = LocalImageUri.fromFile(episode.path),
+            )
+        }
+        return EpisodePage(items = episodes, currentPage = 1, lastPage = 1)
+    }
+
+    override suspend fun resolveImages(episode: EpisodeItem, item: ToonItem, http: SourceHttp): List<String> {
+        val path = File(episode.wrId)
+        if (path.isFile && ZipImageNames.isZipName(path.name)) {
+            return ZipArchive(path).use { zip ->
+                zip.imageEntries().map { ZipImageUri.encode(path, it) }
+            }
+        }
+        if (path.isDirectory) {
+            return scan.listFolderImages(path).map { LocalImageUri.fromFile(it) }
+        }
+        return emptyList()
+    }
+
+    private fun scanWorks(): List<ScannedWork> = scan.scan(roots())
+
+    private fun workFor(toonId: String): ScannedWork? {
+        scanWorks().firstOrNull { it.toonId == toonId }?.let { return it }
+        val path = pathFromToonId(toonId) ?: return null
+        val parent = path.parentFile ?: return null
+        return scan.scan(parent).firstOrNull { it.toonId == toonId }
+    }
+
+    private fun toItem(work: ScannedWork): ToonItem =
+        ToonItem(
+            id = work.toonId,
+            title = work.title,
+            thumbUrl = coverUrl(work),
+            href = LocalImageUri.fromFile(work.path),
+            sourceId = id,
+        )
+
+    private fun coverUrl(work: ScannedWork): String {
+        val key = coverKey(work) ?: return ""
+        return try {
+            LocalImageUri.fromFile(thumbs.getOrCreate(key) { coverBytes(work) })
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    private fun episodeThumb(episode: ScannedEpisode): String? {
+        val key = episodeCoverKey(episode) ?: return null
+        return try {
+            LocalImageUri.fromFile(thumbs.getOrCreate(key) { episodeCoverBytes(episode) })
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun coverKey(work: ScannedWork): ThumbKey? =
+        work.episodes.firstOrNull()?.let(::episodeCoverKey)
+
+    private fun coverBytes(work: ScannedWork): ByteArray {
+        val episode = work.episodes.firstOrNull() ?: error("no episode")
+        return episodeCoverBytes(episode)
+    }
+
+    private fun episodeCoverKey(episode: ScannedEpisode): ThumbKey? =
+        when (episode.kind) {
+            LocalEpisodeKind.ZIP -> fileKey(episode.path)
+            LocalEpisodeKind.DIR -> scan.listFolderImages(episode.path).firstOrNull()?.let(::fileKey)
+        }
+
+    private fun episodeCoverBytes(episode: ScannedEpisode): ByteArray =
+        when (episode.kind) {
+            LocalEpisodeKind.ZIP -> ZipArchive(episode.path).use { zip ->
+                val entry = zip.firstImageEntry() ?: error("no image")
+                zip.open(entry).use { it.readBytes() }
+            }
+            LocalEpisodeKind.DIR -> {
+                val image = scan.listFolderImages(episode.path).firstOrNull() ?: error("no image")
+                image.readBytes()
+            }
+        }
+
+    private fun fileKey(file: File): ThumbKey? {
+        if (!file.exists()) return null
+        val path = try {
+            file.canonicalPath
+        } catch (_: Exception) {
+            file.absolutePath
+        }
+        return ThumbKey(path, file.lastModified(), file.length())
+    }
+
+    private fun pathFromToonId(toonId: String): File? {
+        val prefix = PREFIXES.firstOrNull { toonId.startsWith(it) } ?: return null
+        val raw = toonId.substring(prefix.length)
+        if (raw.isEmpty()) return null
+        return File(raw)
+    }
+
+    companion object {
+        private val PREFIXES = listOf("zip:", "dir:", "series:")
+    }
+}

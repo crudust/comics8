@@ -123,8 +123,9 @@ class ToonRepository(
     }
 
     suspend fun loadEpisodes(item: ToonItem, page: Int): EpisodePage = withContext(Dispatchers.IO) {
-        val parsed = sourceFor(item).loadEpisodes(item, page, client)
-        if (parsed.items.isEmpty()) {
+        val source = sourceFor(item)
+        val parsed = source.loadEpisodes(item, page, client)
+        if (parsed.items.isEmpty() && !source.emptyEpisodesOk) {
             error("회차 목록을 읽지 못했습니다.")
         }
         val firstDate = parsed.items.firstOrNull()?.date

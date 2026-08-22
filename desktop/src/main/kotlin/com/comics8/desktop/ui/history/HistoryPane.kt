@@ -55,7 +55,10 @@ fun HistoryPane(
 ) {
     when {
         state.activeSourceId == null -> {
-            EmptySourcePane(modifier = modifier)
+            EmptySourcePane(
+                modifier = modifier,
+                onAddSource = viewModel::openAddSourceSheet,
+            )
         }
         state.historyLoading && state.historyItems.isEmpty() -> {
             LoadingPane(modifier = modifier)

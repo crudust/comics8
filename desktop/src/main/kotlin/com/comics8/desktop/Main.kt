@@ -237,6 +237,14 @@ fun ComicsDesktopApp(
             )
         }
 
+        if (state.showAddSourceSheet) {
+            com.comics8.desktop.ui.components.AddSourceDialog(
+                offers = state.addSourceOffers,
+                onPick = viewModel::addCatalogOffer,
+                onDismiss = viewModel::dismissAddSourceSheet,
+            )
+        }
+
         val artistPick = state.artistPick
         if (artistPick != null) {
             com.comics8.desktop.ui.components.ArtistPickDialog(
