@@ -27,7 +27,7 @@ compose.desktop {
         nativeDistributions {
             modules("java.sql", "java.naming", "java.desktop")
             packageName = "Comics8"
-            packageVersion = "1.5.11"
+            packageVersion = "1.5.12"
             macOS {
                 bundleID = "com.comics8.desktop"
                 dockName = "Comics8"
@@ -47,6 +47,7 @@ val packageWindowsPortable = tasks.register<Zip>("packageWindowsZip") {
     description = "Packages a portable Windows distribution with launcher scripts and icons."
     dependsOn("packageUberJarForCurrentOS")
 
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     archiveFileName.set("Comics8-win.zip")
     destinationDirectory.set(layout.buildDirectory.dir("compose/binaries/main"))
 
@@ -58,5 +59,6 @@ val packageWindowsPortable = tasks.register<Zip>("packageWindowsZip") {
     from(project.file("src/main/resources/icon.png"))
     from(project.file("src/main/resources/windows"))
 }
+
 
 
