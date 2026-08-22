@@ -56,11 +56,11 @@ fun Badge(
 
 const val EMPTY_SOURCE_MESSAGE = "폴더를 추가하세요"
 const val IMPORT_JS_LABEL = "JS 파일 가져오기"
-const val ADD_SOURCE_LABEL = "사이트 추가…"
-const val REMOVE_SOURCE_LABEL = "사이트 제거"
+const val ADD_SOURCE_LABEL = "추가"
+const val REMOVE_SOURCE_LABEL = "삭제"
 
 fun pickJsFile(): File? {
-    val dialog = FileDialog(null as Frame?, ADD_SOURCE_LABEL, FileDialog.LOAD)
+    val dialog = FileDialog(null as Frame?, IMPORT_JS_LABEL, FileDialog.LOAD)
     dialog.setFilenameFilter { _, name -> name.lowercase().endsWith(".js") }
     dialog.file = "*.js"
     dialog.isVisible = true

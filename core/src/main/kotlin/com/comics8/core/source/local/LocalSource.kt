@@ -21,7 +21,7 @@ class LocalSource(
     private val scan: LibraryScanner = LibraryScanner(),
 ) : ComicSource {
     override val id: String = WorkId.LOCAL_SOURCE
-    override val displayName: String = "로컬"
+    override val displayName: String = "저장소"
     override val origin: String = "local://"
     override val kind: SourceKind = SourceKind.LOCAL
     override val catalogs: List<SourceCatalog> = listOf(

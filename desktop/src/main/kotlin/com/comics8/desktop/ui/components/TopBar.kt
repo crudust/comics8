@@ -41,6 +41,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -110,7 +111,7 @@ fun TopBar(
                     registry = state.sourceRegistry,
                     onSelect = viewModel::setActiveSource,
                     onAddSource = viewModel::openAddSourceSheet,
-                    onRemoveActive = viewModel::openRemoveSourceSheet,
+                    onRemoveSource = viewModel::openRemoveSourceSheet,
                     titleStyle = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.weight(1f),
                 )
@@ -468,12 +469,14 @@ private fun SourceTitleDropdown(
     registry: SourceRegistry,
     onSelect: (String) -> Unit,
     onAddSource: () -> Unit,
-    onRemoveActive: () -> Unit,
+    onRemoveSource: () -> Unit,
     titleStyle: TextStyle,
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val label = sources.firstOrNull { it.id == activeSourceId }?.displayName
+    var addExpanded by remember { mutableStateOf(false) }
+    val orderedSources = sources.sortedBy { it.id != com.comics8.core.source.WorkId.LOCAL_SOURCE }
+    val label = orderedSources.firstOrNull { it.id == activeSourceId }?.displayName
         ?: registry.chipLabel(activeSourceId.orEmpty()).ifBlank { "소스 추가" }
     Box(modifier = modifier) {
         Row(
@@ -497,7 +500,7 @@ private fun SourceTitleDropdown(
             )
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            sources.forEach { source ->
+            orderedSources.forEach { source ->
                 DropdownMenuItem(
                     text = { Text(source.displayName) },
                     onClick = {
@@ -506,22 +509,33 @@ private fun SourceTitleDropdown(
                     },
                 )
             }
+            if (orderedSources.isNotEmpty()) {
+                HorizontalDivider()
+            }
             DropdownMenuItem(
-                text = { Text("소스 추가…") },
+                text = { Text(ADD_SOURCE_LABEL) },
                 onClick = {
-                    onAddSource()
                     expanded = false
+                    addExpanded = true
                 },
             )
-            if (activeSourceId != null) {
-                DropdownMenuItem(
-                    text = { Text("소스 제거") },
-                    onClick = {
-                        onRemoveActive()
-                        expanded = false
-                    },
-                )
-            }
+            DropdownMenuItem(
+                text = { Text(REMOVE_SOURCE_LABEL) },
+                onClick = {
+                    expanded = false
+                    onRemoveSource()
+                },
+                enabled = orderedSources.any { it.id != com.comics8.core.source.WorkId.LOCAL_SOURCE },
+            )
+        }
+        DropdownMenu(expanded = addExpanded, onDismissRequest = { addExpanded = false }) {
+            DropdownMenuItem(
+                text = { Text("JS 파일") },
+                onClick = {
+                    addExpanded = false
+                    onAddSource()
+                },
+            )
         }
     }
 }

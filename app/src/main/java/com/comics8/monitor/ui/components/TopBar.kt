@@ -518,7 +518,9 @@ private fun SourceTitleDropdown(
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val label = sources.firstOrNull { it.id == activeSourceId }?.displayName
+    var addExpanded by remember { mutableStateOf(false) }
+    val orderedSources = sources.sortedBy { it.id != com.comics8.core.source.WorkId.LOCAL_SOURCE }
+    val label = orderedSources.firstOrNull { it.id == activeSourceId }?.displayName
         ?: registry.chipLabel(activeSourceId.orEmpty()).ifBlank { "소스 추가" }
     Box(modifier = modifier) {
         Row(
@@ -542,8 +544,8 @@ private fun SourceTitleDropdown(
             )
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            if (sources.isNotEmpty()) {
-                sources.forEach { source ->
+            if (orderedSources.isNotEmpty()) {
+                orderedSources.forEach { source ->
                     DropdownMenuItem(
                         text = { Text(source.displayName) },
                         onClick = {
@@ -558,7 +560,7 @@ private fun SourceTitleDropdown(
                 text = { Text(ADD_SOURCE_LABEL) },
                 onClick = {
                     expanded = false
-                    onAddSource()
+                    addExpanded = true
                 },
             )
             DropdownMenuItem(
@@ -567,7 +569,16 @@ private fun SourceTitleDropdown(
                     expanded = false
                     onRemoveSource()
                 },
-                enabled = sources.any { it.id != com.comics8.core.source.WorkId.LOCAL_SOURCE },
+                enabled = orderedSources.any { it.id != com.comics8.core.source.WorkId.LOCAL_SOURCE },
+            )
+        }
+        DropdownMenu(expanded = addExpanded, onDismissRequest = { addExpanded = false }) {
+            DropdownMenuItem(
+                text = { Text("JS 파일") },
+                onClick = {
+                    addExpanded = false
+                    onAddSource()
+                },
             )
         }
     }

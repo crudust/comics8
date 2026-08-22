@@ -55,8 +55,8 @@ import com.comics8.core.source.WorkId
 
 const val EMPTY_SOURCE_MESSAGE = "폴더를 추가하세요"
 const val IMPORT_JS_LABEL = "JS 파일 가져오기"
-const val ADD_SOURCE_LABEL = "사이트 추가…"
-const val REMOVE_SOURCE_LABEL = "사이트 제거"
+const val ADD_SOURCE_LABEL = "추가"
+const val REMOVE_SOURCE_LABEL = "삭제"
 
 @Composable
 fun EmptySourcePane(
