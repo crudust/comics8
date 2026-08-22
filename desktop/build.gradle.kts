@@ -24,7 +24,7 @@ compose.desktop {
         nativeDistributions {
             modules("java.sql", "java.naming", "java.desktop")
             packageName = "Comics8"
-            packageVersion = "1.5.8"
+            packageVersion = "1.5.9"
             macOS {
                 bundleID = "com.comics8.desktop"
                 dockName = "Comics8"
