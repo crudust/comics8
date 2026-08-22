@@ -1,51 +1,57 @@
 package com.comics8.core.network
 
+import com.comics8.core.source.RequestPolicy
 import com.comics8.core.source.SourceRegistry
+import com.comics8.core.source.StubComicSource
+import com.comics8.core.source.hostSuffixes
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 
 class ImageRefererTest {
-    private val registry = SourceRegistry.forTests()
+    private val source = StubComicSource(
+        id = "demo",
+        origin = "https://demo.example",
+        defaultPolicy = RequestPolicy(userAgent = "test", referer = "https://demo.example/"),
+        ownedHost = hostSuffixes("demo.example", "cdn.example"),
+        fallbacks = { url ->
+            buildList {
+                if (url.endsWith(".webp")) add(url.replace(".webp", ".avif"))
+                if (url.contains("old.cdn.example")) {
+                    add(url.replace("old.cdn.example", "cdn.example"))
+                }
+            }
+        },
+    )
+    private val registry = SourceRegistry(listOf(source))
 
     @Test
-    fun hitomiHostsUseHitomiReferer() {
-        val expected = registry.sourceForUrl(
-            "https://tn.gold-usergeneratedcontent.net/webpsmalltn/c/ab/x.webp",
-        )!!.imageReferer("https://tn.gold-usergeneratedcontent.net/webpsmalltn/c/ab/x.webp")
-        assertThat(ImageReferer.forUrl("https://tn.gold-usergeneratedcontent.net/webpsmalltn/c/ab/x.webp", registry))
-            .isEqualTo(expected)
-        assertThat(ImageReferer.forUrl("https://w2.gold-usergeneratedcontent.net/1/3243/x.webp", registry))
-            .isEqualTo(expected)
-        assertThat(ImageReferer.forUrl("https://ltn.gold-usergeneratedcontent.net/gg.js", registry))
-            .isEqualTo(expected)
+    fun owningSourceSuppliesReferer() {
+        val url = "https://img.cdn.example/x.webp"
+        assertThat(ImageReferer.forUrl(url, registry)).isEqualTo("https://demo.example/")
+        assertThat(ImageReferer.forUrl("https://demo.example/cover.png", registry))
+            .isEqualTo("https://demo.example/")
     }
 
     @Test
-    fun elevenHostsKeepOrigin() {
-        val url = "https://www.pl3040.com/kr/1.png"
-        assertThat(ImageReferer.forUrl(url, registry))
-            .isEqualTo(registry.sourceForUrl(url)!!.imageReferer(url))
+    fun unknownHostHasEmptyReferer() {
+        assertThat(ImageReferer.forUrl("https://example.invalid/x.png", registry)).isEmpty()
     }
 
     @Test
-    fun fallbacksIncludeElevenAndHitomiAlts() {
-        val eleven = ImageFallbacks.forUrl("https://www.pl3040.com/kr/1.png", registry)
-        assertThat(eleven).contains("https://www.pl4050.com/kr/1.png")
-        val hitomi = ImageFallbacks.forUrl(
-            "https://w2.gold-usergeneratedcontent.net/1690000000/3243/hash.webp",
-            registry,
-        )
-        assertThat(hitomi).containsExactly(
-            "https://a2.gold-usergeneratedcontent.net/1690000000/3243/hash.avif",
-        )
-        val oldThumb = ImageFallbacks.forUrl("https://tn.hitomi.la/webpsmalltn/c/ab/hash.webp", registry)
-        assertThat(oldThumb).contains("https://tn.gold-usergeneratedcontent.net/webpsmalltn/c/ab/hash.webp")
+    fun fallbacksComeFromOwningSource() {
+        assertThat(ImageFallbacks.forUrl("https://img.cdn.example/hash.webp", registry))
+            .containsExactly("https://img.cdn.example/hash.avif")
+        assertThat(ImageFallbacks.forUrl("https://old.cdn.example/hash.webp", registry))
+            .containsExactly(
+                "https://old.cdn.example/hash.avif",
+                "https://cdn.example/hash.webp",
+            )
     }
 
     @Test
-    fun fetchBytesRetriesHitomiWebpWithAvif() {
-        val webp = "https://w2.gold-usergeneratedcontent.net/1690000000/3243/hash.webp"
-        val avif = "https://a2.gold-usergeneratedcontent.net/1690000000/3243/hash.avif"
+    fun fetchBytesRetriesFallbackUrl() {
+        val webp = "https://img.cdn.example/hash.webp"
+        val avif = "https://img.cdn.example/hash.avif"
         val bytes = ImageFallbacks.fetchBytes(webp, registry) { url ->
             if (url == avif) "ok".toByteArray() else error("HTTP 404")
         }

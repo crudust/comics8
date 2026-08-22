@@ -5,13 +5,19 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.comics8.core.model.EpisodeItem
+import com.comics8.core.model.EpisodePage
+import com.comics8.core.model.ListingPage
 import com.comics8.core.model.ToonItem
 import com.comics8.core.network.ToonClient
+import com.comics8.core.source.ComicSource
 import com.comics8.core.source.DownloadLayout
+import com.comics8.core.source.RequestPolicy
+import com.comics8.core.source.SearchQuery
+import com.comics8.core.source.SourceCatalog
+import com.comics8.core.source.SourceHttp
 import com.comics8.core.source.SourceLocator
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
-import com.comics8.core.source.hitomi.HitomiUrls
 import com.comics8.monitor.data.local.AppDatabase
 import com.comics8.monitor.data.local.DownloadedEpisode
 import com.comics8.monitor.data.local.get
@@ -63,9 +69,9 @@ class DownloadManagerTest {
             val manager = DownloadManager(
                 context,
                 db,
-                ToonClient(isProxyEnabled = false, sources = testLocator()),
+                ToonClient(isProxyEnabled = false, sources = emptyLocator()),
                 baseDir = downloads,
-                sources = SourceRegistry.forTests(),
+                sources = SourceRegistry(),
             )
             manager.migrateLegacyDownloads()
 
@@ -118,9 +124,9 @@ class DownloadManagerTest {
             val manager = DownloadManager(
                 context,
                 db,
-                ToonClient(isProxyEnabled = false, sources = testLocator()),
+                ToonClient(isProxyEnabled = false, sources = emptyLocator()),
                 baseDir = downloads,
-                sources = SourceRegistry.forTests(),
+                sources = SourceRegistry(),
             )
             manager.migrateLegacyDownloads()
 
@@ -142,14 +148,15 @@ class DownloadManagerTest {
             .build()
         try {
             val downloads = File(context.filesDir, "dl-hitomi-${System.nanoTime()}").apply { mkdirs() }
-            val client = ToonClient(hitomiClient(), isProxyEnabled = false, sources = testLocator())
+            val sources = SourceRegistry(listOf(FallbackSource()))
+            val client = ToonClient(hitomiClient(), isProxyEnabled = false, sources = SourceLocator { sources })
             val manager = DownloadManager(
                 context,
                 db,
                 client,
                 isSourceEnabled = { true },
                 baseDir = downloads,
-                sources = SourceRegistry.forTests(),
+                sources = sources,
             )
             val toonId = "gallery:1001"
             manager.enqueueEpisodes(
@@ -157,8 +164,8 @@ class DownloadManagerTest {
                     id = toonId,
                     title = "hitomi-gal",
                     thumbUrl = "",
-                    href = HitomiUrls.galleryPage("1001"),
-                    sourceId = HitomiUrls.SOURCE_ID,
+                    href = "https://hitomi.la/galleries/1001.html",
+                    sourceId = "hitomi",
                 ),
                 listOf(
                     EpisodeItem(
@@ -166,11 +173,11 @@ class DownloadManagerTest {
                         title = "ep",
                         date = null,
                         thumbUrl = null,
-                        href = HitomiUrls.reader("1001"),
+                        href = "https://hitomi.la/reader/1001.html",
                     ),
                 ),
             )
-            val workId = WorkId(HitomiUrls.SOURCE_ID, toonId)
+            val workId = WorkId("hitomi", toonId)
             val dest = DownloadLayout.episodeDir(downloads, workId, "1001")
             val img = File(dest, "0001.jpg")
             val deadline = System.currentTimeMillis() + 15_000
@@ -186,7 +193,7 @@ class DownloadManagerTest {
             assertThat(img.exists()).isTrue()
             assertThat(img.readText()).isEqualTo("avif-bytes")
             val stored = db.downloadedEpisodeDao().get(workId, "1001")
-            assertThat(stored?.sourceId).isEqualTo(HitomiUrls.SOURCE_ID)
+            assertThat(stored?.sourceId).isEqualTo("hitomi")
         } finally {
             db.close()
         }
@@ -196,11 +203,9 @@ class DownloadManagerTest {
         OkHttpClient.Builder()
             .addInterceptor(Interceptor { chain ->
                 val url = chain.request().url.toString()
-                val (code, body) = when {
-                    url.endsWith("/galleries/1001.js") -> 200 to ONE_FILE_GALLERY
-                    url.endsWith("/gg.js") -> 200 to GG_JS
-                    url == WEBP -> 404 to "missing"
-                    url == AVIF -> 200 to "avif-bytes"
+                val (code, body) = when (url) {
+                    WEBP -> 404 to "missing"
+                    AVIF -> 200 to "avif-bytes"
                     else -> 404 to "no"
                 }
                 Response.Builder()
@@ -213,8 +218,38 @@ class DownloadManagerTest {
             })
             .build()
 
+    private class FallbackSource : ComicSource {
+        override val id: String = "hitomi"
+        override val displayName: String = "Hitomi"
+        override val origin: String = "https://hitomi.la"
+        override val catalogs: List<SourceCatalog> = emptyList()
+        override val defaultPolicy: RequestPolicy = RequestPolicy(userAgent = "test")
+
+        override suspend fun loadListing(catalogId: String, page: Int, http: SourceHttp): ListingPage =
+            ListingPage(emptyList(), page, page)
+
+        override suspend fun search(query: SearchQuery, http: SourceHttp): List<ToonItem> = emptyList()
+
+        override suspend fun loadEpisodes(item: ToonItem, page: Int, http: SourceHttp): EpisodePage =
+            EpisodePage(emptyList(), page, page)
+
+        override suspend fun resolveImages(episode: EpisodeItem, item: ToonItem, http: SourceHttp): List<String> =
+            listOf(WEBP)
+
+        override fun imageFallbacks(url: String): List<String> =
+            if (url == WEBP) listOf(AVIF) else emptyList()
+
+        override fun ownsHost(host: String): Boolean {
+            val key = host.lowercase()
+            return key == "hitomi.la" ||
+                key.endsWith(".hitomi.la") ||
+                key == "gold-usergeneratedcontent.net" ||
+                key.endsWith(".gold-usergeneratedcontent.net")
+        }
+    }
+
     companion object {
-        private fun testLocator(): SourceLocator = SourceLocator { SourceRegistry.forTests() }
+        private fun emptyLocator(): SourceLocator = SourceLocator { SourceRegistry() }
 
         private const val HASH =
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcabc"
@@ -222,41 +257,5 @@ class DownloadManagerTest {
             "https://w2.gold-usergeneratedcontent.net/1690000000/3243/$HASH.webp"
         private const val AVIF =
             "https://a2.gold-usergeneratedcontent.net/1690000000/3243/$HASH.avif"
-        private const val GG_JS = """
-var gg = {
-m: function(g) {
-switch (g) {
-case 3243:
-return 1;
-case 291:
-return 1;
-}
-return 0;
-},
-b: "1690000000/",
-s: function(h) {
-var m = /(..)(.)$/.exec(h);
-return parseInt(m[2]+m[1], 16).toString(10);
-}
-};
-"""
-        private const val ONE_FILE_GALLERY = """
-var galleryinfo = {
-  "id": 1001,
-  "title": "Single Artist Gallery",
-  "type": "doujinshi",
-  "language": "korean",
-  "date": "2024-08-15 12:34:56",
-  "artists": [{"artist": "Demo Artist"}],
-  "files": [
-    {
-      "hash": "$HASH",
-      "name": "01.jpg",
-      "haswebp": 1,
-      "hasavif": 1
-    }
-  ]
-};
-"""
     }
 }

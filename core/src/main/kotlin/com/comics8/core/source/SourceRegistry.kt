@@ -120,7 +120,7 @@ class SourceRegistry(initial: List<ComicSource> = emptyList()) {
             }
 
         /** Test helper. Production ToonClient, image stack, and UI must not call this. */
-        fun forTests(sources: List<ComicSource> = BuiltInSources.all()): SourceRegistry =
+        fun forTests(sources: List<ComicSource> = emptyList()): SourceRegistry =
             SourceRegistry(sources)
     }
 }

@@ -93,6 +93,13 @@ class SourcePrefsTest {
     }
 
     @Test
+    fun namedSourcePrefKeys() {
+        assertThat(SourcePrefs.ACTIVE_SOURCE_KEY).isEqualTo("pref_active_source_id")
+        assertThat(SourcePrefs.enabledKey("hitomi")).isEqualTo("sources.hitomi.enabled")
+        assertThat(SourcePrefs.languageKey("hitomi")).isEqualTo("hitomi.language")
+    }
+
+    @Test
     fun parseAndFormatIdListRoundTrip() {
         assertThat(SourcePrefs.parseIdList(null)).isEmpty()
         assertThat(SourcePrefs.parseIdList("")).isEmpty()

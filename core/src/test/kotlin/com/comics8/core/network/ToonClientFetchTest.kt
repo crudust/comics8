@@ -4,6 +4,8 @@ import com.comics8.core.source.FetchSpec
 import com.comics8.core.source.RequestPolicy
 import com.comics8.core.source.SourceLocator
 import com.comics8.core.source.SourceRegistry
+import com.comics8.core.source.StubComicSource
+import com.comics8.core.source.hostSuffixes
 import com.google.common.truth.Truth.assertThat
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
@@ -167,6 +169,16 @@ class ToonClientFetchTest {
     companion object {
         private const val PROXY_TARGET = "http://103.204.13.68:8904/bbs/board.php"
 
-        private fun testLocator(): SourceLocator = SourceLocator { SourceRegistry.forTests() }
+        private fun testLocator(): SourceLocator = SourceLocator {
+            SourceRegistry(
+                listOf(
+                    StubComicSource(
+                        id = "proxied",
+                        ownedHost = hostSuffixes("103.204.13.68"),
+                        proxy = true,
+                    ),
+                ),
+            )
+        }
     }
 }

@@ -1,6 +1,5 @@
 package com.comics8.core.source
 
-import com.comics8.core.source.hitomi.HitomiSource
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 
@@ -16,11 +15,23 @@ class ProgressDisplayTest {
     }
 
     @Test
-    fun hitomiUsesReadCountAndElevenKeepsOrder() {
-        val registry = SourceRegistry.forTests()
+    fun registryFormatsUsingLoadedSourceDisplay() {
+        val registry = SourceRegistry(
+            listOf(
+                StubComicSource(
+                    id = WorkId.DEFAULT_SOURCE,
+                    progressDisplay = ProgressDisplay.LAST_READ_ORDER,
+                ),
+                StubComicSource(
+                    id = "hitomi",
+                    progressDisplay = ProgressDisplay.READ_COUNT,
+                ),
+            ),
+        )
         assertThat(registry.get(WorkId.DEFAULT_SOURCE).progressDisplay).isEqualTo(ProgressDisplay.LAST_READ_ORDER)
-        assertThat(registry.get(HitomiSource.ID).progressDisplay).isEqualTo(ProgressDisplay.READ_COUNT)
+        assertThat(registry.get("hitomi").progressDisplay).isEqualTo(ProgressDisplay.READ_COUNT)
         assertThat(registry.formatReadProgress(WorkId.DEFAULT_SOURCE, 52, 64, 3)).isEqualTo("52/64")
-        assertThat(registry.formatReadProgress(HitomiSource.ID, 52, 64, 3)).isEqualTo("3/64")
+        assertThat(registry.formatReadProgress("hitomi", 52, 64, 3)).isEqualTo("3/64")
+        assertThat(registry.formatReadProgress("unknown", 52, 64, 3)).isEqualTo("52/64")
     }
 }

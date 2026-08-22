@@ -11,7 +11,6 @@ class SourcePackageIsolationTest {
         for (root in mainRoots()) {
             root.walkTopDown()
                 .filter { it.isFile && it.extension == "kt" }
-                .filterNot { allowedToImportSites(it) }
                 .forEach { file ->
                     val text = file.readText()
                     for (banned in BANNED_PACKAGES) {
@@ -25,21 +24,18 @@ class SourcePackageIsolationTest {
     }
 
     @Test
-    fun builtInSourcesIsTheOnlySharedWiringFile() {
-        val sharedSourceFiles = File(coreMain(), "source")
+    fun productionHasNoSiteParserPackages() {
+        val sourceDir = File(coreMain(), "source")
+        val sharedSourceFiles = sourceDir
             .listFiles { file -> file.isFile && file.extension == "kt" }
             .orEmpty()
             .map { it.name }
-        assertThat(sharedSourceFiles).contains("BuiltInSources.kt")
+        assertThat(sharedSourceFiles).doesNotContain("BuiltInSources.kt")
         assertThat(sharedSourceFiles).doesNotContain("ElevenToonSource.kt")
+        assertThat(File(sourceDir, "eleven").exists()).isFalse()
+        assertThat(File(sourceDir, "hitomi").exists()).isFalse()
         assertThat(File(coreMain(), "parser").exists()).isFalse()
         assertThat(File(coreMain(), "model/Catalog.kt").exists()).isFalse()
-    }
-
-    private fun allowedToImportSites(file: File): Boolean {
-        val rel = file.relativeTo(workspaceRoot()).invariantSeparatorsPath
-        if (rel.endsWith("/source/BuiltInSources.kt")) return true
-        return rel.contains("/source/eleven/") || rel.contains("/source/hitomi/")
     }
 
     private fun mainRoots(): List<File> = listOf(
