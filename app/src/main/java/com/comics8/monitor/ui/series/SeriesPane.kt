@@ -68,7 +68,7 @@ fun SeriesPane(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                 ) {
-                    items(state.episodes, key = { it.wrId }) { episode ->
+                    items(state.episodes.distinctBy { it.wrId }, key = { it.wrId }) { episode ->
                         EpisodeRow(
                             episode = episode,
                             highlighted = episode.wrId == state.highlightedEpisodeId,

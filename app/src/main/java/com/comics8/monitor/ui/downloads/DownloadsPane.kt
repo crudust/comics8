@@ -82,7 +82,7 @@ fun DownloadsPane(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.weight(1f),
                 ) {
-                    items(state.downloadSummaries, key = { it.workId().storageKey() }) { item ->
+                    items(state.downloadSummaries.distinctBy { it.workId().storageKey() }, key = { it.workId().storageKey() }) { item ->
                         DownloadedItemCard(
                             item = item,
                             onOpenSeries = {

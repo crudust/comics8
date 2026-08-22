@@ -218,6 +218,27 @@ class HitomiSourceTest {
         assertThat(source().catalogs.map { it.id }).containsAtLeast("LATEST", "POPULAR", "TODAY")
     }
 
+    @Test
+    fun loadEpisodesDeduplicatesGalleriesWithSameIdFromMultipleNozomiIds() = runBlocking<Unit> {
+        val http = FakeHitomiHttp(
+            extraFixtures = mapOf(
+                "1002" to readFixture("hitomi/gallery_one_artist.js"), // returns id="1001"
+            ),
+            customNozomi = mapOf(
+                "/artist/dup%20artist-" to listOf(1001L, 1002L, 2002L),
+            ),
+        )
+        val item = ToonItem(
+            id = "artist:dup_artist",
+            title = "Dup Artist",
+            thumbUrl = "",
+            href = HitomiUrls.artistPage("dup_artist"),
+            sourceId = "hitomi",
+        )
+        val page = source().loadEpisodes(item, 1, http)
+        assertThat(page.items.map { it.wrId }).containsExactly("1001", "2002").inOrder()
+    }
+
     private fun source() = HitomiSource(delayMillis = {})
 
     private class FakeHitomiHttp(
@@ -227,6 +248,8 @@ class HitomiSourceTest {
         private val failFirstCode: Int = 429,
         private val failFirstNozomi: Boolean = false,
         private val missingNozomi: Set<String> = emptySet(),
+        private val extraFixtures: Map<String, String> = emptyMap(),
+        private val customNozomi: Map<String, List<Long>> = emptyMap(),
     ) : SourceHttp {
         val recorded = CopyOnWriteArrayList<FetchSpec>()
         val galleryHits = ConcurrentHashMap<String, AtomicInteger>()
@@ -236,7 +259,7 @@ class HitomiSourceTest {
             "2002" to readFixture("hitomi/gallery_two_artists.js"),
             "3003" to readFixture("hitomi/gallery_no_artist.js"),
             "4004" to readFixture("hitomi/gallery_anime.js"),
-        )
+        ) + extraFixtures
 
         override fun fetch(spec: FetchSpec): HttpResult {
             recorded += spec
@@ -274,7 +297,9 @@ class HitomiSourceTest {
             if (failFirstNozomi && nozomiHits.incrementAndGet() == 1) {
                 return HttpResult(429, emptyMap(), ByteArray(0))
             }
+            val custom = customNozomi.entries.firstOrNull { url.contains(it.key) }?.value
             val ids = when {
+                custom != null -> custom
                 url.contains("/artist/demo%20artist-") || url.contains("/artist/demo_artist-") ->
                     listOf(1001L, 2002L)
                 url.contains("/female/") -> listOf(1001L, 3003L)

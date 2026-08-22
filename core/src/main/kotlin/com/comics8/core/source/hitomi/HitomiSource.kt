@@ -109,7 +109,7 @@ class HitomiSource(
             val result = fetchNozomiPage(HitomiUrls.nsNozomi(nsItem.first, nsItem.second, language), p, http)
             val ids = NozomiIndex.parseIds(result.body)
             val lastPage = NozomiIndex.lastPage(p, ids, result.totalLength())
-            val episodes = loadGalleryInfos(ids, http).map { it.toEpisodeItem() }
+            val episodes = loadGalleryInfos(ids, http).map { it.toEpisodeItem() }.distinctBy { it.wrId }
             return EpisodePage(items = episodes, currentPage = p, lastPage = lastPage)
         }
         val galleryId = galleryIdOf(item) ?: return EpisodePage(emptyList(), p, 1)
@@ -248,7 +248,7 @@ class HitomiSource(
     private suspend fun loadGalleryInfos(ids: List<Long>, http: SourceHttp): List<GalleryInfo> {
         if (ids.isEmpty()) return emptyList()
         val semaphore = Semaphore(GALLERY_CONCURRENCY)
-        return coroutineScope {
+        val list = coroutineScope {
             ids.map { id ->
                 async {
                     semaphore.withPermit {
@@ -258,10 +258,11 @@ class HitomiSource(
                 }
             }.awaitAll().filterNotNull()
         }
+        return list.distinctBy { it.id }
     }
 
     private suspend fun loadGalleryCards(ids: List<Long>, http: SourceHttp): List<ToonItem> =
-        loadGalleryInfos(ids, http).mapNotNull(::toListingItem)
+        loadGalleryInfos(ids, http).mapNotNull(::toListingItem).distinctBy { it.listingKey() }
 
     private suspend fun loadGg(http: SourceHttp): GgJsRouter {
         val now = System.currentTimeMillis()

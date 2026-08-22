@@ -83,7 +83,7 @@ fun BrowsePane(
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                 ) {
-                    items(state.items, key = { it.listingKey() }) { item ->
+                    items(state.items.distinctBy { it.listingKey() }, key = { it.listingKey() }) { item ->
                         ToonCard(
                             item = item,
                             onClick = { viewModel.onListingOpen(item) },

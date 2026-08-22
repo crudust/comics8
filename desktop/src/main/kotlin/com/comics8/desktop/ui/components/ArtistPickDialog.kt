@@ -25,7 +25,7 @@ fun ArtistPickDialog(
         title = { Text("작가 선택") },
         text = {
             LazyColumn {
-                items(artists, key = { it.slug }) { artist ->
+                items(artists.distinctBy { it.slug }, key = { it.slug }) { artist ->
                     Text(
                         text = artist.displayName,
                         style = MaterialTheme.typography.bodyLarge,

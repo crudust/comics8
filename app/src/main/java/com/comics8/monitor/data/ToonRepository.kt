@@ -108,7 +108,7 @@ class ToonRepository(
         if (parsed.items.isEmpty() && !source.emptyListingOk) {
             error("목록을 읽지 못했습니다. 사이트 구조가 바뀌었을 수 있습니다.")
         }
-        return parsed.copy(items = applyFlags(parsed.items))
+        return parsed.copy(items = applyFlags(parsed.items).distinctBy { it.listingKey() })
     }
 
     suspend fun loadEpisodes(item: ToonItem, page: Int): EpisodePage = withContext(Dispatchers.IO) {
@@ -128,7 +128,7 @@ class ToonRepository(
                 ep
             }
         }
-        parsed.copy(items = enriched)
+        parsed.copy(items = enriched.distinctBy { it.wrId })
     }
 
     suspend fun loadAllEpisodes(item: ToonItem): List<EpisodeItem> =
@@ -153,7 +153,7 @@ class ToonRepository(
             readAtByWrId = readMap.mapValues { it.value.readAt },
             lastPageByWrId = readMap.mapValues { it.value.lastPage },
         )
-        EpisodePage(items = items, currentPage = 1, lastPage = 1)
+        EpisodePage(items = items.distinctBy { it.wrId }, currentPage = 1, lastPage = 1)
     }
 
     suspend fun fetchTotalEpisodes(item: ToonItem): Int = withContext(Dispatchers.IO) {
@@ -206,7 +206,7 @@ class ToonRepository(
             if (q.isEmpty()) return@withContext emptyList()
             val source = sources.get(sourceId)
             val items = source.search(SearchQuery(q, language = source.searchLanguage()), client)
-            applyFlags(items)
+            applyFlags(items).distinctBy { it.listingKey() }
         }
 
     suspend fun markSeen(items: List<ToonItem>) = withContext(Dispatchers.IO) {

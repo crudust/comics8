@@ -635,7 +635,7 @@ class DesktopViewModel(
                 if (result.items.isNotEmpty()) {
                     val lastP = result.lastPage.coerceAtLeast(1)
                     val currP = result.currentPage.coerceIn(1, lastP)
-                    val pageSize = 100
+                    val pageSize = repository.sourceOrDefault(item.sourceId).episodePageSize
 
                     val itemKey = item.workId().storageKey()
                     if (lastP <= 1) {

@@ -70,7 +70,7 @@ fun HistoryPane(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = modifier.fillMaxSize(),
             ) {
-                items(state.historyItems, key = { it.workId().storageKey() }) { item ->
+                items(state.historyItems.distinctBy { it.workId().storageKey() }, key = { it.workId().storageKey() }) { item ->
                     HistoryItemCard(
                         item = item,
                         progressText = state.progressLabel(item),

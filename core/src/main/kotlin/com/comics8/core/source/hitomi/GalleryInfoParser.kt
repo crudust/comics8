@@ -85,7 +85,7 @@ object GalleryInfoParser {
             val slug = ArtistSlug.fromArtistUrl(url) ?: ArtistSlug.normalize(name)
             out += ArtistRef(slug = slug, displayName = name)
         }
-        return out
+        return out.distinctBy { it.slug }
     }
 
     private fun parseFiles(array: JSONArray?): List<GalleryFile> {
