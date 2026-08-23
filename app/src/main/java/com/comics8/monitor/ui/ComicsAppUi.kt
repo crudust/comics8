@@ -9,6 +9,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
@@ -26,6 +27,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -185,12 +188,52 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                         }
                         else -> {
                             key(state.activeSourceId, state.tab) {
-                                BrowseTabContent(
-                                    catalogs = catalogs,
-                                    state = state,
-                                    viewModel = viewModel,
-                                    onAddLibraryFolder = addLibraryFolder,
-                                )
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .pointerInput(catalogs, state.tab) {
+                                            val currentTab = state.tab ?: catalogs.firstOrNull() ?: return@pointerInput
+                                            val currentIndex = catalogs.indexOf(currentTab)
+                                            if (currentIndex < 0 || catalogs.size <= 1) return@pointerInput
+
+                                            var totalDragX = 0f
+                                            val velocityTracker = VelocityTracker()
+
+                                            detectHorizontalDragGestures(
+                                                onDragStart = {
+                                                    totalDragX = 0f
+                                                    velocityTracker.resetTracking()
+                                                },
+                                                onHorizontalDrag = { change, dragAmount ->
+                                                    change.consume()
+                                                    totalDragX += dragAmount
+                                                    velocityTracker.addPosition(change.uptimeMillis, change.position)
+                                                },
+                                                onDragEnd = {
+                                                    val velocityX = velocityTracker.calculateVelocity().x
+                                                    val thresholdPx = 50.dp.toPx()
+                                                    val velocityThresholdPx = 300.dp.toPx()
+
+                                                    if ((totalDragX < -thresholdPx || velocityX < -velocityThresholdPx) && currentIndex < catalogs.size - 1) {
+                                                        viewModel.selectTab(catalogs[currentIndex + 1])
+                                                    } else if ((totalDragX > thresholdPx || velocityX > velocityThresholdPx) && currentIndex > 0) {
+                                                        viewModel.selectTab(catalogs[currentIndex - 1])
+                                                    }
+                                                    totalDragX = 0f
+                                                },
+                                                onDragCancel = {
+                                                    totalDragX = 0f
+                                                },
+                                            )
+                                        },
+                                ) {
+                                    BrowseTabContent(
+                                        catalogs = catalogs,
+                                        state = state,
+                                        viewModel = viewModel,
+                                        onAddLibraryFolder = addLibraryFolder,
+                                    )
+                                }
                             }
                         }
                     }

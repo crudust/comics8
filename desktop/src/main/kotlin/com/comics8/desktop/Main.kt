@@ -105,9 +105,12 @@ fun main() {
             }
         }
         val locator = remember { SourceLocator { registry } }
+        val sourceEnabled = { id: String -> DesktopSourcePrefs.isEnabled(id) }
+        val installedIds = { DesktopSourcePrefs.installedIds() }
         val database = remember {
             DesktopDatabase().apply {
-                installedIds = { DesktopSourcePrefs.installedIds() }
+                isSourceEnabled = sourceEnabled
+                this.installedIds = installedIds
             }
         }
         val cacheDir = File(System.getProperty("user.home"), ".comics8/http-cache")
@@ -117,8 +120,6 @@ fun main() {
                 com.comics8.desktop.ui.util.DesktopImageCache.registry = registry
             }
         }
-        val sourceEnabled = { id: String -> DesktopSourcePrefs.isEnabled(id) }
-        val installedIds = { DesktopSourcePrefs.installedIds() }
         val syncManager = remember { DesktopSyncManager(database, toonClient) }
         val downloadManager = remember {
             com.comics8.desktop.data.DesktopDownloadManager(

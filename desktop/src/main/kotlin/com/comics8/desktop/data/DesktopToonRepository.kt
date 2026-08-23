@@ -32,6 +32,11 @@ class DesktopToonRepository(
     private val isSourceEnabled: (String) -> Boolean = { false },
     private val installedIds: () -> Set<String> = { sources.knownIds() },
 ) {
+    init {
+        database.isSourceEnabled = isSourceEnabled
+        database.installedIds = installedIds
+    }
+
     fun sourceRegistry(): SourceRegistry = sources
 
     fun source(id: String) = sources.get(id)

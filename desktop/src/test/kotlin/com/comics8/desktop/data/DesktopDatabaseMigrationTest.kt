@@ -72,4 +72,54 @@ class DesktopDatabaseMigrationTest {
             db.close()
         }
     }
+
+    @Test
+    fun foreignSourceFavoritesAndHistorySaveWhenSourceEnabled() {
+        val file = File.createTempFile("comics8-hitomi", ".db")
+        file.deleteOnExit()
+        val db = DesktopDatabase(file).apply {
+            isSourceEnabled = { it in setOf("hitomi", "eleven") }
+            installedIds = { setOf("hitomi", "eleven") }
+        }
+        try {
+            val hitomiFav = FavoriteRecord(
+                sourceId = "hitomi",
+                id = "gallery:12345",
+                title = "Hitomi Title",
+                thumbUrl = "https://tn.hitomi.la/thumb.webp",
+                href = "https://hitomi.la/reader/12345.html",
+                genre = "doujinshi",
+                updatedAt = "2026-08-24",
+                savedAt = 1000L,
+            )
+            db.saveFavorite(hitomiFav)
+            assertThat(db.isFavorite(WorkId("hitomi", "gallery:12345"))).isTrue()
+
+            val favs = db.getAllFavorites()
+            assertThat(favs).hasSize(1)
+            assertThat(favs[0].sourceId).isEqualTo("hitomi")
+            assertThat(favs[0].id).isEqualTo("gallery:12345")
+
+            val hitomiHist = ReadHistoryRecord(
+                sourceId = "hitomi",
+                toonId = "gallery:12345",
+                toonTitle = "Hitomi Title",
+                toonThumbUrl = "https://tn.hitomi.la/thumb.webp",
+                toonHref = "https://hitomi.la/reader/12345.html",
+                lastWrId = "gallery:12345",
+                lastEpisodeTitle = "Hitomi Title",
+                lastEpisodeHref = "https://hitomi.la/reader/12345.html",
+                lastReadOrder = 1,
+                totalEpisodes = 1,
+                lastReadAt = 2000L,
+            )
+            db.saveHistory(hitomiHist)
+            val history = db.getHistory(WorkId("hitomi", "gallery:12345"))
+            assertThat(history).isNotNull()
+            assertThat(history!!.toonTitle).isEqualTo("Hitomi Title")
+            assertThat(history.sourceId).isEqualTo("hitomi")
+        } finally {
+            db.close()
+        }
+    }
 }
