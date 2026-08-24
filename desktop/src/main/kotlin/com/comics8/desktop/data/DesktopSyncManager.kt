@@ -2,7 +2,6 @@ package com.comics8.desktop.data
 
 import com.comics8.core.network.ToonClient
 import com.comics8.core.source.WorkId
-import com.comics8.core.sync.ServerSchema
 import com.comics8.core.sync.SyncConstants
 import com.comics8.core.sync.SyncWire
 import com.comics8.core.sync.addComics8SyncHeaders
@@ -221,8 +220,8 @@ class DesktopSyncManager(
         val key = state.syncKey.trim()
         if (key.isBlank()) return@withContext DesktopSyncResult(false, "동기화 키가 비어있습니다.")
 
-        val elevenSince = properties.getProperty(KEY_LAST_SYNCED_AT, "0").toLongOrNull() ?: 0L
-        if (elevenSince == 0L) {
+        val since = properties.getProperty(KEY_LAST_SYNCED_AT, "0").toLongOrNull() ?: 0L
+        if (since == 0L) {
             // First time sync: perform full sync
             return@withContext doFullSync()
         }
@@ -232,19 +231,11 @@ class DesktopSyncManager(
         }
 
         try {
-            val schema = SyncWire.probeServerSchema(client, state.serverUrl, key)
-            val foreignSince = properties.getProperty(KEY_FOREIGN_LAST_SYNCED_AT, "0").toLongOrNull() ?: 0L
-            val querySince = SyncWire.localQuerySince(elevenSince, foreignSince, schema)
-            val localFavs = database.getFavoritesSince(querySince)
-                .filter { SyncWire.includeRow(it.sourceId, it.savedAt, elevenSince, foreignSince, schema) }
-            val localHist = database.getHistorySince(querySince)
-                .filter { SyncWire.includeRow(it.sourceId, it.lastReadAt, elevenSince, foreignSince, schema) }
-            val localEps = database.getReadEpisodesSince(querySince)
-                .filter { SyncWire.includeRow(it.sourceId, it.readAt, elevenSince, foreignSince, schema) }
-            val localSettings = database.getReaderSettingsSince(querySince)
-                .filter { SyncWire.includeRow(it.sourceId, it.updatedAt, elevenSince, foreignSince, schema) }
-            val localTombs = database.getTombstonesSince(querySince)
-                .filter { SyncWire.includeTombstone(it.entityId, it.deletedAt, elevenSince, foreignSince, schema) }
+            val localFavs = database.getFavoritesSince(since).filter { SyncWire.isSyncableSource(it.sourceId) }
+            val localHist = database.getHistorySince(since).filter { SyncWire.isSyncableSource(it.sourceId) }
+            val localEps = database.getReadEpisodesSince(since).filter { SyncWire.isSyncableSource(it.sourceId) }
+            val localSettings = database.getReaderSettingsSince(since).filter { SyncWire.isSyncableSource(it.sourceId) }
+            val localTombs = database.getTombstonesSince(since).filter { SyncWire.isSyncableSource(WorkId.parse(it.entityId).sourceId) }
 
             val changesObj = JSONObject().apply {
                 val favArr = JSONArray()
@@ -313,19 +304,18 @@ class DesktopSyncManager(
                 localTombs.forEach { t ->
                     tombArr.put(JSONObject().apply {
                         put("entityType", t.entityType)
-                        put("entityId", t.entityId)
+                        put("entityId", SyncWire.tombstoneEntityId(t.entityId))
                         put("deletedAt", t.deletedAt)
                     })
                 }
                 put("tombstones", tombArr)
             }
 
-            val outbound = SyncWire.filterOutbound(changesObj, schema)
             val reqObj = JSONObject().apply {
-                put("since", SyncWire.requestSince(elevenSince, foreignSince, schema))
+                put("since", since)
                 put("clientTime", System.currentTimeMillis())
-                put("schemaVersion", SyncConstants.SCHEMA_VERSION)
-                put("changes", outbound.json)
+                put("version", 2)
+                put("changes", changesObj)
             }
 
             val mediaType = "application/json; charset=utf-8".toMediaType()
@@ -338,7 +328,6 @@ class DesktopSyncManager(
 
             val resp = client.newCall(req).execute()
             if (!resp.isSuccessful) {
-                // Fallback to legacy full sync if delta endpoint 404
                 if (resp.code == 404) {
                     return@withContext syncPullInternal(isSilent)
                 }
@@ -376,11 +365,11 @@ class DesktopSyncManager(
                     FavoriteRecord(
                         sourceId = workId.sourceId,
                         id = workId.toonId,
-                        title = f.getString("title"),
+                        title = f.optString("title", ""),
                         thumbUrl = f.optString("thumbUrl", ""),
                         href = f.optString("href", ""),
                         genre = f.optString("genre", ""),
-                        updatedAt = if (f.isNull("updatedAt")) null else f.getString("updatedAt"),
+                        updatedAt = if (f.isNull("updatedAt")) null else f.optString("updatedAt", "").ifBlank { null },
                         savedAt = f.optLong("savedAt", serverTime),
                     )
                 )
@@ -397,18 +386,18 @@ class DesktopSyncManager(
                     ReadHistoryRecord(
                         sourceId = workId.sourceId,
                         toonId = workId.toonId,
-                        toonTitle = h.getString("toonTitle"),
+                        toonTitle = h.optString("toonTitle", ""),
                         toonThumbUrl = h.optString("toonThumbUrl", ""),
                         toonHref = h.optString("toonHref", ""),
-                        lastWrId = h.getString("lastWrId"),
-                        lastEpisodeTitle = h.getString("lastEpisodeTitle"),
+                        lastWrId = h.optString("lastWrId", ""),
+                        lastEpisodeTitle = h.optString("lastEpisodeTitle", ""),
                         lastEpisodeHref = h.optString("lastEpisodeHref", ""),
                         lastReadOrder = h.optInt("lastReadOrder", 1),
                         totalEpisodes = h.optInt("totalEpisodes", 1),
                         lastReadAt = h.optLong("lastReadAt", serverTime),
-                        nextWrId = if (h.isNull("nextWrId")) null else h.getString("nextWrId"),
-                        nextEpisodeTitle = if (h.isNull("nextEpisodeTitle")) null else h.getString("nextEpisodeTitle"),
-                        nextEpisodeHref = if (h.isNull("nextEpisodeHref")) null else h.getString("nextEpisodeHref"),
+                        nextWrId = if (h.isNull("nextWrId")) null else h.optString("nextWrId", "").ifBlank { null },
+                        nextEpisodeTitle = if (h.isNull("nextEpisodeTitle")) null else h.optString("nextEpisodeTitle", "").ifBlank { null },
+                        nextEpisodeHref = if (h.isNull("nextEpisodeHref")) null else h.optString("nextEpisodeHref", "").ifBlank { null },
                         hasNew = h.optBoolean("hasNew", false),
                     )
                 )
@@ -425,7 +414,7 @@ class DesktopSyncManager(
                     ReadEpisodeRecord(
                         sourceId = workId.sourceId,
                         toonId = workId.toonId,
-                        wrId = ep.getString("wrId"),
+                        wrId = ep.optString("wrId", ""),
                         readAt = ep.optLong("readAt", serverTime),
                         lastPage = ep.optInt("lastPage", 0),
                     )
@@ -455,13 +444,10 @@ class DesktopSyncManager(
             // Cleanup old tombstones
             database.deleteTombstonesOlderThan(System.currentTimeMillis() - 30L * 86400000L)
 
-            persistSyncCursors(serverTime, schema, outbound.omittedForeignSource)
+            properties.setProperty(KEY_LAST_SYNCED_AT, serverTime.toString())
+            saveProperties()
 
-            val msg = SyncWire.withOmittedHint(
-                "증분 동기화 완료: 수신 (즐겨찾기 ${favList.size}개, 기록 ${histList.size}개)",
-                outbound.omittedForeignSource,
-                schema,
-            )
+            val msg = "증분 동기화 완료: 수신 (즐겨찾기 ${favList.size}개, 기록 ${histList.size}개)"
             _syncState.value = _syncState.value.copy(
                 isSyncing = false,
                 isSuccess = true,
@@ -555,12 +541,9 @@ class DesktopSyncManager(
         }
 
         try {
-            val backupJson = JSONObject(DesktopBackupManager.createBackupJson(database))
-            backupJson.put("schemaVersion", SyncConstants.SCHEMA_VERSION)
-            val schema = SyncWire.probeServerSchema(client, state.serverUrl, key)
-            val outbound = SyncWire.filterOutbound(backupJson, schema)
+            val backupJson = DesktopBackupManager.createBackupJson(database)
             val mediaType = "application/json; charset=utf-8".toMediaType()
-            val reqBody = outbound.json.toString().toRequestBody(mediaType)
+            val reqBody = backupJson.toRequestBody(mediaType)
 
             val req = Request.Builder()
                 .url(url)
@@ -578,14 +561,11 @@ class DesktopSyncManager(
             }
 
             val nowMs = System.currentTimeMillis()
-            persistSyncCursors(nowMs, schema, outbound.omittedForeignSource)
+            properties.setProperty(KEY_LAST_SYNCED_AT, nowMs.toString())
+            saveProperties()
 
             val stats = DesktopBackupManager.getStats(database)
-            val successMsg = SyncWire.withOmittedHint(
-                "서버 동기화 완료: 즐겨찾기 ${stats.favoriteCount}개, 기록 ${stats.historyCount}개",
-                outbound.omittedForeignSource,
-                schema,
-            )
+            val successMsg = "서버 동기화 완료: 즐겨찾기 ${stats.favoriteCount}개, 기록 ${stats.historyCount}개"
             _syncState.value = _syncState.value.copy(
                 isSyncing = false,
                 isSuccess = true,
@@ -602,20 +582,11 @@ class DesktopSyncManager(
         }
     }
 
-    private fun persistSyncCursors(serverTime: Long, schema: ServerSchema, omittedForeign: Boolean) {
-        properties.setProperty(KEY_LAST_SYNCED_AT, serverTime.toString())
-        if (SyncWire.shouldCommitForeign(schema, omittedForeign)) {
-            properties.setProperty(KEY_FOREIGN_LAST_SYNCED_AT, serverTime.toString())
-        }
-        saveProperties()
-    }
-
     companion object {
         const val KEY_SYNC_KEY = com.comics8.core.sync.SyncConstants.KEY_SYNC_KEY
         const val KEY_SERVER_URL = com.comics8.core.sync.SyncConstants.KEY_SERVER_URL
         const val KEY_AUTO_SYNC = com.comics8.core.sync.SyncConstants.KEY_AUTO_SYNC
         const val KEY_LAST_SYNCED_AT = com.comics8.core.sync.SyncConstants.KEY_LAST_SYNCED_AT
-        const val KEY_FOREIGN_LAST_SYNCED_AT = com.comics8.core.sync.SyncConstants.KEY_FOREIGN_LAST_SYNCED_AT
         const val KEY_USE_SERVER_PROXY = com.comics8.core.sync.SyncConstants.KEY_USE_SERVER_PROXY
         const val DEFAULT_SERVER_URL = com.comics8.core.sync.SyncConstants.DEFAULT_SERVER_URL
 

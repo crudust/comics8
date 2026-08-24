@@ -8,7 +8,6 @@ import com.comics8.core.source.SearchQuery
 import com.comics8.core.source.SourceHttp
 import com.comics8.core.source.SourceKind
 import com.comics8.core.source.WorkId
-import com.comics8.core.sync.ServerSchema
 import com.comics8.core.sync.SyncWire
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.runBlocking
@@ -28,8 +27,6 @@ class LocalSourceTest {
             assertThat(item.sourceId).isEqualTo(WorkId.LOCAL_SOURCE)
             assertThat(item.sourceId).isNotEmpty()
             assertThat(SyncWire.isSyncableSource(item.sourceId)).isFalse()
-            assertThat(SyncWire.allowOutbound(item.sourceId, ServerSchema.Known(1))).isFalse()
-            assertThat(SyncWire.allowOutbound(item.sourceId, ServerSchema.Known(2))).isFalse()
         }
         assertThat(source.syncParticipates).isFalse()
         assertThat(source.writesDownloads).isFalse()

@@ -122,4 +122,69 @@ class DesktopDatabaseMigrationTest {
             db.close()
         }
     }
+
+    @Test
+    fun restoreBackupJsonWithNullFieldsAndHitomiSucceeds() {
+        val file = File.createTempFile("comics8-restore", ".db")
+        file.deleteOnExit()
+        val db = DesktopDatabase(file).apply {
+            isSourceEnabled = { true }
+            installedIds = { setOf("hitomi", "eleven") }
+        }
+        try {
+            val json = """
+                {
+                  "version": 2,
+                  "appName": "Comics8",
+                  "exportedAt": 1700000000000,
+                  "favorites": [
+                    {
+                      "id": "gallery:12345",
+                      "sourceId": "hitomi",
+                      "title": "Hitomi Null Title Test",
+                      "savedAt": 1700000000000
+                    }
+                  ],
+                  "history": [
+                    {
+                      "toonId": "gallery:12345",
+                      "sourceId": "hitomi",
+                      "toonTitle": "Hitomi Null Title Test",
+                      "lastWrId": "gallery:12345",
+                      "lastEpisodeTitle": null,
+                      "lastEpisodeHref": null,
+                      "lastReadOrder": 1,
+                      "totalEpisodes": 1,
+                      "lastReadAt": 1700000000000
+                    }
+                  ],
+                  "readEpisodes": [
+                    {
+                      "toonId": "gallery:12345",
+                      "sourceId": "hitomi",
+                      "wrId": "gallery:12345",
+                      "readAt": 1700000000000
+                    }
+                  ]
+                }
+            """.trimIndent()
+            val result = DesktopBackupManager.restoreBackupJson(db, json)
+            assertThat(result.success).isTrue()
+            assertThat(result.favoriteCount).isEqualTo(1)
+            assertThat(result.historyCount).isEqualTo(1)
+            assertThat(result.episodeCount).isEqualTo(1)
+
+            val favs = db.getAllFavorites()
+            assertThat(favs).hasSize(1)
+            assertThat(favs[0].sourceId).isEqualTo("hitomi")
+
+            val hist = db.getAllHistory()
+            assertThat(hist).hasSize(1)
+            assertThat(hist[0].sourceId).isEqualTo("hitomi")
+            assertThat(hist[0].lastEpisodeTitle).isEmpty()
+            assertThat(hist[0].lastEpisodeHref).isEmpty()
+        } finally {
+            db.close()
+        }
+    }
 }

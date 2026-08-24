@@ -82,8 +82,9 @@ def row_source_id(row: dict | None) -> str:
     return (row.get("sourceId") or DEFAULT_SOURCE_ID).strip() or DEFAULT_SOURCE_ID
 
 
-def accept_inbound_row(row: dict, schema: int) -> bool:
-    return schema >= 2 or row_source_id(row) == DEFAULT_SOURCE_ID
+def accept_inbound_row(row: dict) -> bool:
+    source = row_source_id(row)
+    return source != "local"
 
 
 def favorite_local_id(row: dict) -> str | None:
@@ -94,13 +95,14 @@ def favorite_local_id(row: dict) -> str | None:
     return text or None
 
 
-def emit_favorite(row: dict, schema: int) -> dict | None:
+def emit_favorite(row: dict) -> dict | None:
     source_id = row_source_id(row)
-    if schema < 2 and source_id != DEFAULT_SOURCE_ID:
-        return None
     toon_id = favorite_local_id(row)
-    out = {
+    if not toon_id:
+        return None
+    return {
         "id": toon_id,
+        "sourceId": source_id,
         "title": row.get("title", ""),
         "thumbUrl": row.get("thumbUrl", ""),
         "href": row.get("href", ""),
@@ -108,30 +110,21 @@ def emit_favorite(row: dict, schema: int) -> dict | None:
         "updatedAt": row.get("updatedAt"),
         "savedAt": row.get("savedAt"),
     }
-    if schema >= 2:
-        out["sourceId"] = source_id
-    return out
 
 
-def emit_work_row(row: dict, schema: int) -> dict | None:
+def emit_work_row(row: dict) -> dict | None:
     source_id = row_source_id(row)
-    if schema < 2 and source_id != DEFAULT_SOURCE_ID:
-        return None
     out = dict(row)
-    if schema < 2:
-        out.pop("sourceId", None)
-    else:
-        out["sourceId"] = source_id
+    out["sourceId"] = source_id
     if "hasNew" in out:
         out["hasNew"] = bool(out.get("hasNew"))
     return out
 
 
-def emit_tombstone(row: dict, schema: int) -> dict | None:
-    source_id, local_id = parse_entity_id(row.get("entityId"))
-    if schema < 2 and source_id != DEFAULT_SOURCE_ID:
+def emit_tombstone(row: dict) -> dict | None:
+    entity_id = row.get("entityId")
+    if not entity_id:
         return None
-    entity_id = local_id if schema < 2 else f"{source_id}:{local_id}"
     return {
         "entityType": row.get("entityType"),
         "entityId": entity_id,
@@ -531,11 +524,11 @@ def init_user_db(conn: sqlite3.Connection, user_id: str):
                 print(f"Error migrating legacy JSON for {user_id}: {e}")
 
 
-def import_full_snapshot(conn: sqlite3.Connection, data: dict, now_ms: int, schema: int = 2):
+def import_full_snapshot(conn: sqlite3.Connection, data: dict, now_ms: int):
     with conn:
         favs = data.get("favorites", [])
         for f in favs:
-            if not accept_inbound_row(f, schema):
+            if not accept_inbound_row(f):
                 continue
             source_id = row_source_id(f)
             f_id = favorite_local_id(f)
@@ -558,7 +551,7 @@ def import_full_snapshot(conn: sqlite3.Connection, data: dict, now_ms: int, sche
 
         hist = data.get("history", [])
         for h in hist:
-            if not accept_inbound_row(h, schema):
+            if not accept_inbound_row(h):
                 continue
             source_id = row_source_id(h)
             toon_id = h.get("toonId")
@@ -592,7 +585,7 @@ def import_full_snapshot(conn: sqlite3.Connection, data: dict, now_ms: int, sche
 
         eps = data.get("readEpisodes", [])
         for ep in eps:
-            if not accept_inbound_row(ep, schema):
+            if not accept_inbound_row(ep):
                 continue
             source_id = row_source_id(ep)
             toon_id = ep.get("toonId")
@@ -611,7 +604,7 @@ def import_full_snapshot(conn: sqlite3.Connection, data: dict, now_ms: int, sche
 
         settings = data.get("readerSettings", [])
         for s in settings:
-            if not accept_inbound_row(s, schema):
+            if not accept_inbound_row(s):
                 continue
             source_id = row_source_id(s)
             toon_id = s.get("toonId")
@@ -630,7 +623,7 @@ def import_full_snapshot(conn: sqlite3.Connection, data: dict, now_ms: int, sche
             """, (source_id, toon_id, s.get("viewMode", "SINGLE"), s.get("readDirection", "RIGHT_TO_LEFT"), s.get("splitMode", "FIT"), up_at, now_ms))
 
 
-def export_full_snapshot(conn: sqlite3.Connection, schema: int = 2) -> dict:
+def export_full_snapshot(conn: sqlite3.Connection) -> dict:
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
@@ -638,7 +631,7 @@ def export_full_snapshot(conn: sqlite3.Connection, schema: int = 2) -> dict:
     for row in cursor.execute(
         "SELECT sourceId, toonId, title, thumbUrl, href, genre, updatedAt, savedAt FROM favorites ORDER BY savedAt DESC"
     ):
-        emitted = emit_favorite(dict(row), schema)
+        emitted = emit_favorite(dict(row))
         if emitted:
             favs.append(emitted)
 
@@ -648,24 +641,24 @@ def export_full_snapshot(conn: sqlite3.Connection, schema: int = 2) -> dict:
         "lastReadOrder, totalEpisodes, lastReadAt, nextWrId, nextEpisodeTitle, nextEpisodeHref, hasNew FROM history "
         "ORDER BY lastReadAt DESC"
     ):
-        emitted = emit_work_row(dict(row), schema)
+        emitted = emit_work_row(dict(row))
         if emitted:
             hist.append(emitted)
 
     eps = []
     for row in cursor.execute("SELECT sourceId, toonId, wrId, readAt, lastPage FROM read_episodes"):
-        emitted = emit_work_row(dict(row), schema)
+        emitted = emit_work_row(dict(row))
         if emitted:
             eps.append(emitted)
 
     settings = []
     for row in cursor.execute("SELECT sourceId, toonId, viewMode, readDirection, splitMode, updatedAt FROM reader_settings"):
-        emitted = emit_work_row(dict(row), schema)
+        emitted = emit_work_row(dict(row))
         if emitted:
             settings.append(emitted)
 
     return {
-        "version": 2 if schema >= 2 else 1,
+        "version": 2,
         "appName": "Comics8",
         "exportedAt": int(time.time() * 1000),
         "favorites": favs,
@@ -675,15 +668,13 @@ def export_full_snapshot(conn: sqlite3.Connection, schema: int = 2) -> dict:
     }
 
 
-def apply_delta_changes(conn: sqlite3.Connection, changes: dict, now_ms: int, schema: int):
+def apply_delta_changes(conn: sqlite3.Connection, changes: dict, now_ms: int):
     with conn:
         tombstones = changes.get("tombstones", [])
         for t in tombstones:
             e_type = (t.get("entityType") or "").upper()
             source_id, local_id = parse_entity_id(t.get("entityId", ""))
-            if schema < 2 and source_id != DEFAULT_SOURCE_ID:
-                continue
-            if not local_id:
+            if not local_id or source_id == "local":
                 continue
             del_at = int(t.get("deletedAt", now_ms))
             stored_id = f"{source_id}:{local_id}"
@@ -700,7 +691,7 @@ def apply_delta_changes(conn: sqlite3.Connection, changes: dict, now_ms: int, sc
                 conn.execute("DELETE FROM read_episodes WHERE sourceId = ? AND toonId = ?", (source_id, local_id))
 
         for f in changes.get("favorites", []):
-            if not accept_inbound_row(f, schema):
+            if not accept_inbound_row(f):
                 continue
             source_id = row_source_id(f)
             f_id = favorite_local_id(f)
@@ -727,7 +718,7 @@ def apply_delta_changes(conn: sqlite3.Connection, changes: dict, now_ms: int, sc
             )
 
         for h in changes.get("history", []):
-            if not accept_inbound_row(h, schema):
+            if not accept_inbound_row(h):
                 continue
             source_id = row_source_id(h)
             toon_id = h.get("toonId")
@@ -765,7 +756,7 @@ def apply_delta_changes(conn: sqlite3.Connection, changes: dict, now_ms: int, sc
             )
 
         for ep in changes.get("readEpisodes", []):
-            if not accept_inbound_row(ep, schema):
+            if not accept_inbound_row(ep):
                 continue
             source_id = row_source_id(ep)
             toon_id = ep.get("toonId")
@@ -784,7 +775,7 @@ def apply_delta_changes(conn: sqlite3.Connection, changes: dict, now_ms: int, sc
             """, (source_id, toon_id, wr_id, read_at, ep.get("lastPage", 0), now_ms, now_ms))
 
         for s in changes.get("readerSettings", []):
-            if not accept_inbound_row(s, schema):
+            if not accept_inbound_row(s):
                 continue
             source_id = row_source_id(s)
             toon_id = s.get("toonId")
@@ -804,7 +795,7 @@ def apply_delta_changes(conn: sqlite3.Connection, changes: dict, now_ms: int, sc
             """, (source_id, toon_id, s.get("viewMode", "SINGLE"), s.get("readDirection", "RIGHT_TO_LEFT"), s.get("splitMode", "FIT"), up_at, now_ms, now_ms))
 
 
-def collect_delta_changes(conn: sqlite3.Connection, since: int, schema: int) -> dict:
+def collect_delta_changes(conn: sqlite3.Connection, since: int) -> dict:
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 
@@ -813,7 +804,7 @@ def collect_delta_changes(conn: sqlite3.Connection, since: int, schema: int) -> 
         "SELECT sourceId, toonId, title, thumbUrl, href, genre, updatedAt, savedAt FROM favorites WHERE syncUpdatedAt > ?",
         (since,),
     ):
-        emitted = emit_favorite(dict(r), schema)
+        emitted = emit_favorite(dict(r))
         if emitted:
             server_favs.append(emitted)
 
@@ -824,7 +815,7 @@ def collect_delta_changes(conn: sqlite3.Connection, since: int, schema: int) -> 
         "FROM history WHERE syncUpdatedAt > ?",
         (since,),
     ):
-        emitted = emit_work_row(dict(r), schema)
+        emitted = emit_work_row(dict(r))
         if emitted:
             server_hist.append(emitted)
 
@@ -833,7 +824,7 @@ def collect_delta_changes(conn: sqlite3.Connection, since: int, schema: int) -> 
         "SELECT sourceId, toonId, wrId, readAt, lastPage FROM read_episodes WHERE syncUpdatedAt > ?",
         (since,),
     ):
-        emitted = emit_work_row(dict(r), schema)
+        emitted = emit_work_row(dict(r))
         if emitted:
             server_eps.append(emitted)
 
@@ -842,7 +833,7 @@ def collect_delta_changes(conn: sqlite3.Connection, since: int, schema: int) -> 
         "SELECT sourceId, toonId, viewMode, readDirection, splitMode, updatedAt FROM reader_settings WHERE syncUpdatedAt > ?",
         (since,),
     ):
-        emitted = emit_work_row(dict(r), schema)
+        emitted = emit_work_row(dict(r))
         if emitted:
             server_settings.append(emitted)
 
@@ -851,7 +842,7 @@ def collect_delta_changes(conn: sqlite3.Connection, since: int, schema: int) -> 
         "SELECT entityType, entityId, deletedAt FROM tombstones WHERE deletedAt > ?",
         (since,),
     ):
-        emitted = emit_tombstone(dict(r), schema)
+        emitted = emit_tombstone(dict(r))
         if emitted:
             server_tombs.append(emitted)
 
@@ -898,9 +889,6 @@ class SyncHandler(BaseHTTPRequestHandler):
             if token:
                 return token
         return None
-
-    def _request_schema(self) -> int:
-        return parse_sync_schema(self.headers.get(SYNC_SCHEMA_HEADER))
 
     def _proxy_forward_headers(self, query: dict, include_accept: bool = True) -> dict:
         return build_proxy_forward_headers(query, self.headers, include_accept=include_accept)
@@ -1137,7 +1125,7 @@ class SyncHandler(BaseHTTPRequestHandler):
             conn = sqlite3.connect(db_path)
             try:
                 init_user_db(conn, user_id)
-                snapshot = export_full_snapshot(conn, schema=self._request_schema())
+                snapshot = export_full_snapshot(conn)
                 self._send_json(200, snapshot)
             finally:
                 conn.close()
@@ -1164,15 +1152,14 @@ class SyncHandler(BaseHTTPRequestHandler):
 
                 since = int(req_json.get("since", 0))
                 changes = req_json.get("changes", {})
-                schema = self._request_schema()
 
                 user_id = get_safe_user_id(key)
                 db_path = get_user_db_path(user_id)
                 conn = sqlite3.connect(db_path)
                 try:
                     init_user_db(conn, user_id)
-                    apply_delta_changes(conn, changes, now_ms, schema)
-                    server_changes = collect_delta_changes(conn, since, schema)
+                    apply_delta_changes(conn, changes, now_ms)
+                    server_changes = collect_delta_changes(conn, since)
 
                     self._send_json(200, {
                         "status": "success",
@@ -1201,14 +1188,13 @@ class SyncHandler(BaseHTTPRequestHandler):
                     return
                 body = self.rfile.read(content_len).decode("utf-8")
                 parsed_json = json.loads(body)
-                schema = self._request_schema()
 
                 user_id = get_safe_user_id(key)
                 db_path = get_user_db_path(user_id)
                 conn = sqlite3.connect(db_path)
                 try:
                     init_user_db(conn, user_id)
-                    import_full_snapshot(conn, parsed_json, now_ms, schema=schema)
+                    import_full_snapshot(conn, parsed_json, now_ms)
                 finally:
                     conn.close()
 

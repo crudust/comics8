@@ -21,7 +21,6 @@ from server import (
     migrate_user_db,
     next_proxy_url,
     parse_entity_id,
-    parse_sync_schema,
     passthrough_proxy_headers,
 )
 
@@ -157,39 +156,25 @@ class MigrateUserDbTest(unittest.TestCase):
         self.assertEqual(pk, {1, 2})
 
 
-class SchemaFilterTest(unittest.TestCase):
-    def test_parse_sync_schema_defaults_to_one(self):
-        self.assertEqual(parse_sync_schema(None), 1)
-        self.assertEqual(parse_sync_schema(""), 1)
-        self.assertEqual(parse_sync_schema("2"), 2)
-        self.assertEqual(parse_sync_schema("nope"), 1)
-
-    def test_schema1_strips_source_id_and_keeps_favorite_id(self):
-        fav = emit_favorite({"sourceId": "eleven", "toonId": "9", "title": "A", "savedAt": 1}, schema=1)
-        self.assertEqual(fav["id"], "9")
-        self.assertNotIn("sourceId", fav)
-        self.assertNotIn("toonId", fav)
-        self.assertIsNone(emit_favorite({"sourceId": "hitomi", "toonId": "9", "title": "B"}, schema=1))
-
-        hist = emit_work_row({"sourceId": "eleven", "toonId": "9", "hasNew": 1}, schema=1)
-        self.assertNotIn("sourceId", hist)
-        self.assertEqual(hist["toonId"], "9")
-        self.assertTrue(hist["hasNew"])
-        self.assertIsNone(emit_work_row({"sourceId": "hitomi", "toonId": "1"}, schema=1))
-
-        tomb = emit_tombstone({"entityType": "FAVORITE", "entityId": "eleven:9", "deletedAt": 1}, schema=1)
-        self.assertEqual(tomb["entityId"], "9")
-        self.assertIsNone(emit_tombstone({"entityType": "FAVORITE", "entityId": "hitomi:1", "deletedAt": 1}, schema=1))
-
-    def test_schema2_emits_source_id(self):
-        fav = emit_favorite({"sourceId": "hitomi", "id": "9", "title": "A"}, schema=2)
+class SyncSnapshotAndDeltaTest(unittest.TestCase):
+    def test_emit_favorite_includes_source_id_and_id(self):
+        fav = emit_favorite({"sourceId": "hitomi", "id": "9", "title": "A", "savedAt": 1})
         self.assertEqual(fav["sourceId"], "hitomi")
         self.assertEqual(fav["id"], "9")
         self.assertNotIn("toonId", fav)
-        tomb = emit_tombstone({"entityType": "HISTORY", "entityId": "100", "deletedAt": 1}, schema=2)
-        self.assertEqual(tomb["entityId"], "eleven:100")
 
-    def test_export_and_delta_filter_schema1(self):
+    def test_emit_work_row_includes_source_id(self):
+        hist = emit_work_row({"sourceId": "eleven", "toonId": "9", "hasNew": 1})
+        self.assertEqual(hist["sourceId"], "eleven")
+        self.assertEqual(hist["toonId"], "9")
+        self.assertTrue(hist["hasNew"])
+
+    def test_emit_tombstone_emits_entity_id(self):
+        tomb = emit_tombstone({"entityType": "FAVORITE", "entityId": "hitomi:123", "deletedAt": 1})
+        self.assertEqual(tomb["entityType"], "FAVORITE")
+        self.assertEqual(tomb["entityId"], "hitomi:123")
+
+    def test_export_and_delta_sync_all_sources(self):
         conn = sqlite3.connect(":memory:")
         init_user_db(conn, "tester")
         import_full_snapshot(conn, {
@@ -201,54 +186,31 @@ class SchemaFilterTest(unittest.TestCase):
                 {"sourceId": "eleven", "toonId": "1", "lastReadAt": 1},
                 {"sourceId": "hitomi", "toonId": "2", "lastReadAt": 1},
             ],
-        }, now_ms=5, schema=2)
-
-        schema1 = export_full_snapshot(conn, schema=1)
-        self.assertEqual(schema1["version"], 1)
-        self.assertEqual([f["id"] for f in schema1["favorites"]], ["1"])
-        self.assertNotIn("sourceId", schema1["favorites"][0])
-        self.assertEqual([h["toonId"] for h in schema1["history"]], ["1"])
-        self.assertNotIn("sourceId", schema1["history"][0])
-
-        schema2 = export_full_snapshot(conn, schema=2)
-        self.assertEqual(schema2["version"], 2)
-        self.assertEqual({(f["sourceId"], f["id"]) for f in schema2["favorites"]}, {("eleven", "1"), ("hitomi", "2")})
-
-        apply_delta_changes(conn, {
-            "favorites": [{"sourceId": "hitomi", "id": "99", "title": "Nope", "savedAt": 9}],
-            "tombstones": [{"entityType": "FAVORITE", "entityId": "hitomi:2", "deletedAt": 9}],
-        }, now_ms=9, schema=1)
-        remaining = {(r[0], r[1]) for r in conn.execute("SELECT sourceId, toonId FROM favorites")}
-        self.assertEqual(remaining, {("eleven", "1"), ("hitomi", "2")})
-
-        apply_delta_changes(conn, {
-            "tombstones": [{"entityType": "EPISODE", "entityId": "1", "deletedAt": 10}],
             "readEpisodes": [
-                {"toonId": "1", "wrId": "a", "readAt": 10},
-                {"sourceId": "hitomi", "toonId": "2", "wrId": "b", "readAt": 10},
+                {"sourceId": "eleven", "toonId": "1", "wrId": "a", "readAt": 1},
+                {"sourceId": "hitomi", "toonId": "2", "wrId": "b", "readAt": 1},
             ],
-        }, now_ms=10, schema=2)
+            "readerSettings": [
+                {"sourceId": "hitomi", "toonId": "2", "viewMode": "SINGLE", "updatedAt": 1},
+            ],
+        }, now_ms=5)
+
+        snapshot = export_full_snapshot(conn)
+        self.assertEqual(snapshot["version"], 2)
+        self.assertEqual({(f["sourceId"], f["id"]) for f in snapshot["favorites"]}, {("eleven", "1"), ("hitomi", "2")})
+        self.assertEqual({(h["sourceId"], h["toonId"]) for h in snapshot["history"]}, {("eleven", "1"), ("hitomi", "2")})
+
         apply_delta_changes(conn, {
-            "tombstones": [{"entityType": "EPISODE", "entityId": "1", "deletedAt": 11}],
-        }, now_ms=11, schema=1)
-        eps = [tuple(r) for r in conn.execute("SELECT sourceId, toonId, wrId FROM read_episodes")]
-        self.assertEqual(eps, [("hitomi", "2", "b")])
+            "favorites": [{"sourceId": "hitomi", "id": "99", "title": "Hitomi 99", "savedAt": 9}],
+            "tombstones": [{"entityType": "FAVORITE", "entityId": "hitomi:2", "deletedAt": 9}],
+        }, now_ms=9)
 
-        changes = collect_delta_changes(conn, since=0, schema=1)
-        self.assertEqual([f["id"] for f in changes["favorites"]], ["1"])
-        self.assertTrue(all("sourceId" not in f for f in changes["favorites"]))
+        remaining_favs = {(r[0], r[1]) for r in conn.execute("SELECT sourceId, toonId FROM favorites")}
+        self.assertEqual(remaining_favs, {("eleven", "1"), ("hitomi", "99")})
 
-    def test_schema1_import_ignores_hitomi(self):
-        conn = sqlite3.connect(":memory:")
-        init_user_db(conn, "tester")
-        import_full_snapshot(conn, {
-            "favorites": [
-                {"id": "1", "title": "Old"},
-                {"sourceId": "hitomi", "id": "2", "title": "Nope"},
-            ],
-        }, now_ms=1, schema=1)
-        rows = list(conn.execute("SELECT sourceId, toonId FROM favorites"))
-        self.assertEqual(rows, [("eleven", "1")])
+        changes = collect_delta_changes(conn, since=5)
+        self.assertEqual({(f["sourceId"], f["id"]) for f in changes["favorites"]}, {("hitomi", "99")})
+        self.assertEqual({t["entityId"] for t in changes["tombstones"]}, {"hitomi:2"})
 
 
 class ProxyAllowlistTest(unittest.TestCase):
