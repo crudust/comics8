@@ -157,9 +157,20 @@ fun ReaderPane(
     modifier: Modifier = Modifier,
 ) {
     val focusRequester = remember { FocusRequester() }
+    var onAdvanceAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var onRetreatAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val isR2L = state.readDirection == ReadDirection.RIGHT_TO_LEFT
 
     LaunchedEffect(Unit) {
-        focusRequester.requestFocus()
+        try {
+            focusRequester.requestFocus()
+        } catch (_: Exception) {}
+    }
+
+    LaunchedEffect(state.currentEpisode?.wrId) {
+        try {
+            focusRequester.requestFocus()
+        } catch (_: Exception) {}
     }
 
     Box(
@@ -198,29 +209,64 @@ fun ReaderPane(
                             viewModel.toggleFullscreen()
                             true
                         }
+                        !isCmdOrAlt && key == Key.DirectionRight -> {
+                            if (isR2L) onRetreatAction?.invoke() else onAdvanceAction?.invoke()
+                            true
+                        }
+                        !isCmdOrAlt && key == Key.DirectionLeft -> {
+                            if (isR2L) onAdvanceAction?.invoke() else onRetreatAction?.invoke()
+                            true
+                        }
+                        !isCmdOrAlt && (key == Key.Spacebar || key == Key.PageDown) -> {
+                            onAdvanceAction?.invoke()
+                            true
+                        }
+                        !isCmdOrAlt && key == Key.PageUp -> {
+                            onRetreatAction?.invoke()
+                            true
+                        }
                         else -> false
                     }
                 } else false
             },
     ) {
-        when {
-            state.readerLoading && state.readerImages.isEmpty() -> {
-                LoadingPane()
-            }
-            state.readerError != null && state.readerImages.isEmpty() -> {
-                ErrorPane(
-                    message = state.readerError,
-                    actionLabel = "다시 시도",
-                    onRetry = { state.currentEpisode?.let { viewModel.openEpisode(it) } },
-                )
-            }
-            else -> {
-                when (state.viewMode) {
-                    ViewMode.SCROLL -> ReaderScrollView(state, viewModel)
-                    ViewMode.PAGE -> ReaderSingleView(state, viewModel)
-                    ViewMode.DUAL -> ReaderDualView(state, viewModel)
-                }
-            }
+        when (state.viewMode) {
+            ViewMode.SCROLL -> ReaderScrollView(
+                state = state,
+                viewModel = viewModel,
+                onRegisterActions = { adv, ret ->
+                    onAdvanceAction = adv
+                    onRetreatAction = ret
+                },
+            )
+            ViewMode.PAGE -> ReaderSingleView(
+                state = state,
+                viewModel = viewModel,
+                onRegisterActions = { adv, ret ->
+                    onAdvanceAction = adv
+                    onRetreatAction = ret
+                },
+            )
+            ViewMode.DUAL -> ReaderDualView(
+                state = state,
+                viewModel = viewModel,
+                onRegisterActions = { adv, ret ->
+                    onAdvanceAction = adv
+                    onRetreatAction = ret
+                },
+            )
+        }
+
+        if (state.readerLoading && state.readerImages.isEmpty()) {
+            LoadingPane()
+        }
+
+        if (state.readerError != null && state.readerImages.isEmpty()) {
+            ErrorPane(
+                message = state.readerError,
+                actionLabel = "다시 시도",
+                onRetry = { state.currentEpisode?.let { viewModel.openEpisode(it) } },
+            )
         }
     }
 }
@@ -229,9 +275,34 @@ fun ReaderPane(
 private fun ReaderScrollView(
     state: DesktopUiState,
     viewModel: DesktopViewModel,
+    onRegisterActions: (onAdvance: () -> Unit, onRetreat: () -> Unit) -> Unit,
 ) {
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     var controlsVisible by remember { mutableStateOf(false) }
+
+    val onAdvance = {
+        scope.launch {
+            if (state.readerImages.isNotEmpty()) {
+                val next = (listState.firstVisibleItemIndex + 1).coerceAtMost(state.readerImages.size - 1)
+                listState.animateScrollToItem(next)
+            }
+        }
+        Unit
+    }
+    val onRetreat = {
+        scope.launch {
+            if (state.readerImages.isNotEmpty()) {
+                val prev = (listState.firstVisibleItemIndex - 1).coerceAtLeast(0)
+                listState.animateScrollToItem(prev)
+            }
+        }
+        Unit
+    }
+
+    LaunchedEffect(onAdvance, onRetreat) {
+        onRegisterActions(onAdvance, onRetreat)
+    }
 
     LaunchedEffect(state.readerImages, state.currentEpisode?.lastReadPage) {
         val target = state.currentEpisode?.lastReadPage ?: 0
@@ -314,6 +385,7 @@ private fun ReaderScrollView(
 private fun ReaderSingleView(
     state: DesktopUiState,
     viewModel: DesktopViewModel,
+    onRegisterActions: (onAdvance: () -> Unit, onRetreat: () -> Unit) -> Unit,
 ) {
     val slices = remember(state.readerImages.size, state.imageAspectRatios, state.splitMode, state.readDirection) {
         buildSinglePageSlices(state.readerImages.size, state.imageAspectRatios, state.splitMode, state.readDirection)
@@ -368,7 +440,7 @@ private fun ReaderSingleView(
     val currentHalf = currentSlice?.half ?: ImageHalf.FULL
     val isR2L = state.readDirection == ReadDirection.RIGHT_TO_LEFT
 
-    val onAdvance = {
+    val onAdvance: () -> Unit = {
         controlsVisible = false
         if (currentPage < totalPages - 1) {
             nextPromptVisible = false
@@ -394,7 +466,7 @@ private fun ReaderSingleView(
         }
     }
 
-    val onRetreat = {
+    val onRetreat: () -> Unit = {
         controlsVisible = false
         if (currentPage > 0) {
             nextPromptVisible = false
@@ -420,6 +492,10 @@ private fun ReaderSingleView(
         }
     }
 
+    LaunchedEffect(onAdvance, onRetreat) {
+        onRegisterActions(onAdvance, onRetreat)
+    }
+
     val wheelModifier = rememberWheelPageScroller(
         onNextPage = { onAdvance() },
         onPrevPage = { onRetreat() },
@@ -429,29 +505,7 @@ private fun ReaderSingleView(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .then(wheelModifier)
-            .onKeyEvent { event ->
-                if (event.type == KeyEventType.KeyDown) {
-                    if (event.isMetaPressed || event.isAltPressed || event.isCtrlPressed) {
-                        return@onKeyEvent false
-                    }
-                    when (event.key) {
-                        Key.DirectionRight -> {
-                            if (isR2L) onRetreat() else onAdvance()
-                            true
-                        }
-                        Key.DirectionLeft -> {
-                            if (isR2L) onAdvance() else onRetreat()
-                            true
-                        }
-                        Key.Spacebar -> {
-                            onAdvance()
-                            true
-                        }
-                        else -> false
-                    }
-                } else false
-            },
+            .then(wheelModifier),
     ) {
         if (currentImage != null) {
             DesktopAsyncImage(
@@ -472,7 +526,7 @@ private fun ReaderSingleView(
                 onLoaded = { bitmap ->
                     val w = bitmap.width
                     val h = bitmap.height
-                    if (w > 0 && h > 0 && currentSlice != null) {
+                    if (w > 0 && h > 0) {
                         viewModel.recordImageAspectRatio(currentSlice.imageIndex, w, h)
                     }
                 },
@@ -605,6 +659,7 @@ private fun ReaderSingleView(
 private fun ReaderDualView(
     state: DesktopUiState,
     viewModel: DesktopViewModel,
+    onRegisterActions: (onAdvance: () -> Unit, onRetreat: () -> Unit) -> Unit,
 ) {
     val totalImages = state.readerImages.size
     val spreads = remember(state.readerImages.size, state.imageAspectRatios) {
@@ -664,7 +719,7 @@ private fun ReaderDualView(
 
     val isR2L = state.readDirection == ReadDirection.RIGHT_TO_LEFT
 
-    val onAdvance = {
+    val onAdvance: () -> Unit = {
         controlsVisible = false
         if (currentSpreadIndex < totalSpreads - 1) {
             nextPromptVisible = false
@@ -690,7 +745,7 @@ private fun ReaderDualView(
         }
     }
 
-    val onRetreat = {
+    val onRetreat: () -> Unit = {
         controlsVisible = false
         if (currentSpreadIndex > 0) {
             nextPromptVisible = false
@@ -716,6 +771,10 @@ private fun ReaderDualView(
         }
     }
 
+    LaunchedEffect(onAdvance, onRetreat) {
+        onRegisterActions(onAdvance, onRetreat)
+    }
+
     val wheelModifier = rememberWheelPageScroller(
         onNextPage = { onAdvance() },
         onPrevPage = { onRetreat() },
@@ -725,29 +784,7 @@ private fun ReaderDualView(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .then(wheelModifier)
-            .onKeyEvent { event ->
-                if (event.type == KeyEventType.KeyDown) {
-                    if (event.isMetaPressed || event.isAltPressed || event.isCtrlPressed) {
-                        return@onKeyEvent false
-                    }
-                    when (event.key) {
-                        Key.DirectionRight -> {
-                            if (isR2L) onRetreat() else onAdvance()
-                            true
-                        }
-                        Key.DirectionLeft -> {
-                            if (isR2L) onAdvance() else onRetreat()
-                            true
-                        }
-                        Key.Spacebar -> {
-                            onAdvance()
-                            true
-                        }
-                        else -> false
-                    }
-                } else false
-            },
+            .then(wheelModifier),
     ) {
         when (val spread = spreads.getOrNull(currentSpreadIndex)) {
             is DualSpread.Single -> {
