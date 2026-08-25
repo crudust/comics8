@@ -25,6 +25,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.comics8.core.i18n.AppStrings
+import com.comics8.core.i18n.displaySourceTitle
 import com.comics8.core.source.ComicSource
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
@@ -33,7 +35,8 @@ import java.awt.FileDialog
 import java.awt.Frame
 import java.io.File
 
-fun sourceChipLabel(sourceId: String, registry: SourceRegistry): String = registry.chipLabel(sourceId)
+fun sourceChipLabel(sourceId: String, registry: SourceRegistry, strings: AppStrings): String =
+    registry.displaySourceTitle(sourceId, strings)
 
 @Composable
 fun Badge(

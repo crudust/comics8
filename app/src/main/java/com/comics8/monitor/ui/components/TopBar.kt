@@ -45,6 +45,11 @@ import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.StarBorder
+import com.comics8.core.i18n.displayLabel
+import com.comics8.core.i18n.displaySearchPlaceholder
+import com.comics8.core.i18n.displaySourceTitle
+import com.comics8.core.i18n.displayTitle
+import com.comics8.core.i18n.getSourceOrNull
 import com.comics8.core.source.SourceType
 import com.comics8.core.source.resolveSourceType
 import androidx.compose.material3.DropdownMenu
@@ -141,12 +146,11 @@ fun TopBar(
                     text = when (state.screen) {
                         Screen.Reader -> state.currentEpisode?.title.orEmpty().ifBlank { strings.navReader }
                         Screen.Series -> state.series?.title.orEmpty()
-                        Screen.Browse -> state.sourceRegistry.chipLabel(state.activeSourceId.orEmpty())
-                            .ifBlank { strings.promptAddFolder }
+                        Screen.Browse -> state.sourceRegistry.displaySourceTitle(state.activeSourceId, strings)
                         Screen.History -> strings.navHistory
                         Screen.Downloads -> {
-                            val label = state.sourceRegistry.chipLabel(state.activeSourceId.orEmpty())
-                            if (label.isBlank()) strings.navStorage else strings.navStorageNamed(label)
+                            val label = state.sourceRegistry.displaySourceTitle(state.activeSourceId, strings)
+                            strings.navStorageNamed(label)
                         }
                         Screen.Settings -> strings.navSettings
                         Screen.SourceManager -> strings.navSourceManager
@@ -501,7 +505,7 @@ fun TopBar(
                     FilterChip(
                         selected = !state.isSearch && state.tab == tab,
                         onClick = { viewModel.selectTab(tab) },
-                        label = { Text(tab.label, fontWeight = if (!state.isSearch && state.tab == tab) FontWeight.Bold else FontWeight.Normal) },
+                        label = { Text(tab.displayLabel(strings), fontWeight = if (!state.isSearch && state.tab == tab) FontWeight.Bold else FontWeight.Normal) },
                         shape = RoundedCornerShape(10.dp),
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = MaterialTheme.colorScheme.primary,
@@ -548,7 +552,7 @@ fun SearchBar(
                 .focusRequester(requester),
             singleLine = true,
             placeholder = {
-                Text(state.sourceRegistry.searchPlaceholder(state.activeSourceId.orEmpty()))
+                Text(state.sourceRegistry.getSourceOrNull(state.activeSourceId).displaySearchPlaceholder(strings))
             },
             trailingIcon = {
                 if (state.searchInput.isNotEmpty()) {
@@ -603,8 +607,7 @@ private fun SourceTitleDropdown(
     var expanded by remember { mutableStateOf(false) }
     val orderedSources = sources
     val activeSource = orderedSources.firstOrNull { it.id == activeSourceId }
-    val label = activeSource?.displayName
-        ?: registry.chipLabel(activeSourceId.orEmpty()).ifBlank { strings.promptSelectSource }
+    val label = activeSource.displayTitle(strings)
     val activeType = activeSource?.resolveSourceType() ?: com.comics8.core.source.SourceType.LOCAL
     val activeIcon = when (activeType) {
         com.comics8.core.source.SourceType.LOCAL -> Icons.Default.Folder
@@ -674,7 +677,7 @@ private fun SourceTitleDropdown(
                         DropdownMenuItem(
                             text = {
                                 Text(
-                                    text = source.displayName,
+                                    text = source.displayTitle(strings),
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                     color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                                 )

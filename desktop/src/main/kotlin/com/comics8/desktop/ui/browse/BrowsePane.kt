@@ -286,7 +286,7 @@ fun ToonCard(
                         .padding(6.dp),
                 ) {
                     if (showSourceChip) {
-                        Badge(sourceChipLabel(item.sourceId, sourceRegistry))
+                        Badge(sourceChipLabel(item.sourceId, sourceRegistry, strings))
                     }
                     if (item.isNew) {
                         Badge("NEW")

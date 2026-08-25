@@ -25,6 +25,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import com.comics8.core.i18n.AppStrings
+import com.comics8.core.i18n.displaySourceTitle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -183,7 +185,8 @@ fun ErrorPane(
     }
 }
 
-fun sourceChipLabel(sourceId: String, registry: SourceRegistry): String = registry.chipLabel(sourceId)
+fun sourceChipLabel(sourceId: String, registry: SourceRegistry, strings: AppStrings): String =
+    registry.displaySourceTitle(sourceId, strings)
 
 @Composable
 fun Badge(text: String, modifier: Modifier = Modifier) {

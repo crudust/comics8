@@ -1,5 +1,11 @@
 package com.comics8.core.i18n
 
+import com.comics8.core.model.BrowseTab
+import com.comics8.core.model.ProgressDisplayMode
+import com.comics8.core.source.SourceCatalog
+import com.comics8.core.source.SourceRegistry
+import com.comics8.core.source.SourceType
+import com.comics8.core.source.WorkId
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 
@@ -39,5 +45,34 @@ class I18nTest {
             assertThat(lang.searchResultCount(5)).isNotEmpty()
             assertThat(lang.downloadTotalEpisodes(10)).isNotEmpty()
         }
+    }
+
+    @Test
+    fun testI18nExtensions() {
+        val en = EnStrings
+        val ja = JaStrings
+
+        // BrowseTab
+        val favoriteTab = BrowseTab.Favorite("local")
+        assertThat(favoriteTab.displayLabel(en)).isEqualTo("Favorites")
+        assertThat(favoriteTab.displayLabel(ja)).isEqualTo("お気に入り")
+
+        val libraryTab = BrowseTab.Remote("local", SourceCatalog("LIBRARY", "보관함", paginated = true))
+        assertThat(libraryTab.displayLabel(en)).isEqualTo("Library")
+        assertThat(libraryTab.displayLabel(ja)).isEqualTo("本棚")
+
+        val latestTab = BrowseTab.Remote("local", SourceCatalog("LATEST", "최신순", paginated = true))
+        assertThat(latestTab.displayLabel(en)).isEqualTo("Latest")
+        assertThat(latestTab.displayLabel(ja)).isEqualTo("最新順")
+
+        // SourceRegistry & displaySourceTitle
+        val registry = SourceRegistry()
+        assertThat(registry.displaySourceTitle(WorkId.LOCAL_SOURCE, en)).isEqualTo("Storage")
+        assertThat(registry.displaySourceTitle(WorkId.LOCAL_SOURCE, ja)).isEqualTo("ストレージ")
+        assertThat(registry.displaySourceTitle(null, en)).isEqualTo("Storage")
+
+        // ProgressDisplayMode & SourceType
+        assertThat(ProgressDisplayMode.LATEST_EPISODE.displayLabel(en)).isEqualTo("Latest Chapter")
+        assertThat(SourceType.LOCAL.displayLabel(en)).isEqualTo("Local Storage")
     }
 }

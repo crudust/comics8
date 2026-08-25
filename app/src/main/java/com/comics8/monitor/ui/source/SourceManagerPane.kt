@@ -41,6 +41,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.zIndex
+import com.comics8.core.i18n.displayLabel
+import com.comics8.core.i18n.displayTitle
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -191,9 +193,9 @@ fun SourceManagerPane(
 
                     SourceItemCard(
                         icon = Icons.Default.Folder,
-                        title = localSource.displayName,
+                        title = localSource.displayTitle(strings),
                         subtitle = subtitle,
-                        modeLabel = currentMode.label,
+                        modeLabel = currentMode.displayLabel(strings),
                         onClick = { selectedSourceForDetail = localSource },
                     )
                 }
@@ -219,14 +221,14 @@ fun SourceManagerPane(
                                 val netSource = source as? NetworkLibrarySource
                                 if (netSource != null) strings.subtitleWebDavUrl(netSource.config.url.ifBlank { netSource.config.host }) else strings.subtitleWebDavDefault
                             }
-                            else -> sType.label
+                            else -> sType.displayLabel(strings)
                         }
 
                         SourceItemCard(
                             icon = icon,
-                            title = source.displayName,
+                            title = source.displayTitle(strings),
                             subtitle = subtitle,
-                            modeLabel = currentMode.label,
+                            modeLabel = currentMode.displayLabel(strings),
                             onClick = { selectedSourceForDetail = source },
                             dragHandleModifier = dragModifier,
                             isDragging = isDragging,
@@ -262,14 +264,14 @@ fun SourceManagerPane(
                     ) { source, dragModifier, isDragging ->
                         val sType = source.resolveSourceType()
                         val icon = if (sType == SourceType.JS) Icons.Default.Description else Icons.Default.Language
-                        val subtitle = sType.label
+                        val subtitle = sType.displayLabel(strings)
                         val currentMode = viewModel.getSourceProgressDisplayMode(source.id)
 
                         SourceItemCard(
                             icon = icon,
-                            title = source.displayName,
+                            title = source.displayTitle(strings),
                             subtitle = subtitle,
-                            modeLabel = currentMode.label,
+                            modeLabel = currentMode.displayLabel(strings),
                             onClick = { selectedSourceForDetail = source },
                             dragHandleModifier = dragModifier,
                             isDragging = isDragging,

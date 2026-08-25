@@ -71,6 +71,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.comics8.core.i18n.displayLabel
+import com.comics8.core.i18n.displayTitle
 import com.comics8.core.model.ProgressDisplayMode
 import com.comics8.core.source.ComicSource
 import com.comics8.core.source.SourceType
@@ -198,7 +200,7 @@ fun SourceDetailSettingsPane(
             TopAppBar(
                 title = {
                     Text(
-                        text = strings.titleSourceSettings(source.displayName),
+                        text = strings.titleSourceSettings(source.displayTitle(strings)),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onBackground,
@@ -267,7 +269,7 @@ fun SourceDetailSettingsPane(
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
                                 Text(
-                                    text = source.displayName,
+                                    text = source.displayTitle(strings),
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSurface,
@@ -280,7 +282,7 @@ fun SourceDetailSettingsPane(
                                         .padding(horizontal = 8.dp, vertical = 4.dp),
                                 ) {
                                     Text(
-                                        text = sourceType.label,
+                                        text = sourceType.displayLabel(strings),
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.onPrimaryContainer,
