@@ -80,7 +80,7 @@ class DesktopSyncManager(
     private val _syncState = MutableStateFlow(
         DesktopSyncState(
             syncKey = getOrGenerateSyncKey(),
-            serverUrl = properties.getProperty(KEY_SERVER_URL, DEFAULT_SERVER_URL),
+            serverUrl = SyncConstants.DEFAULT_SERVER_URL,
             autoSyncEnabled = properties.getProperty(KEY_AUTO_SYNC, "true").toBoolean(),
             useServerProxy = properties.getProperty(KEY_USE_SERVER_PROXY, "true").toBoolean(),
             lastSyncedAt = properties.getProperty(KEY_LAST_SYNCED_AT, "0").toLongOrNull() ?: 0L,

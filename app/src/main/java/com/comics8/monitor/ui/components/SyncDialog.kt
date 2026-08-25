@@ -72,7 +72,6 @@ fun SyncDialog(
 ) {
     val context = LocalContext.current
     val syncState = state.syncState
-    var editServerUrl by remember(syncState.serverUrl) { mutableStateOf(syncState.serverUrl) }
     var showAdvancedSettings by remember { mutableStateOf(false) }
     var showPairingDialog by remember { mutableStateOf(false) }
     var showConnectDialog by remember { mutableStateOf(false) }
@@ -206,7 +205,7 @@ fun SyncDialog(
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        text = if (showAdvancedSettings) "고급 설정 접기" else "고급 설정 (마스터 복구 키, 서버 주소)",
+                        text = if (showAdvancedSettings) "고급 설정 접기" else "고급 설정 (마스터 복구 키)",
                         style = MaterialTheme.typography.labelSmall,
                     )
                 }
@@ -260,17 +259,6 @@ fun SyncDialog(
                                 }
                             }
                         }
-
-                        OutlinedTextField(
-                            value = editServerUrl,
-                            onValueChange = {
-                                editServerUrl = it
-                                viewModel.updateSyncServerUrl(it)
-                            },
-                            label = { Text("서버 URL") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
                     }
                 }
 
@@ -286,28 +274,6 @@ fun SyncDialog(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-
-                // 6. 상태 메시지 배너
-                if (syncState.syncMessage != null) {
-                    val isSuccess = syncState.isSuccess == true
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(
-                                if (isSuccess) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
-                                else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
-                            )
-                            .padding(10.dp),
-                    ) {
-                        Text(
-                            text = syncState.syncMessage,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (isSuccess) MaterialTheme.colorScheme.onPrimaryContainer
-                            else MaterialTheme.colorScheme.onErrorContainer,
-                        )
-                    }
-                }
             }
         },
         confirmButton = {

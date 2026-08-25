@@ -80,7 +80,7 @@ class SyncManager(
     private val _syncState = MutableStateFlow(
         SyncState(
             syncKey = getOrGenerateSyncKey(),
-            serverUrl = prefs.getString(KEY_SERVER_URL, DEFAULT_SERVER_URL) ?: DEFAULT_SERVER_URL,
+            serverUrl = DEFAULT_SERVER_URL,
             autoSyncEnabled = prefs.getBoolean(KEY_AUTO_SYNC, true),
             useServerProxy = prefs.getBoolean(KEY_USE_SERVER_PROXY, true),
             lastSyncedAt = prefs.getLong(KEY_LAST_SYNCED_AT, 0L),

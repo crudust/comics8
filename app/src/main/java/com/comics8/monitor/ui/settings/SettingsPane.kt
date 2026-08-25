@@ -92,7 +92,6 @@ fun SettingsPane(
 ) {
     val context = LocalContext.current
     val syncState = state.syncState
-    var editServerUrl by remember(syncState.serverUrl) { mutableStateOf(syncState.serverUrl) }
     var showAdvancedSyncSettings by remember { mutableStateOf(false) }
     var showPairingCodeDialog by remember { mutableStateOf(false) }
     var showConnectDialog by remember { mutableStateOf(false) }
@@ -332,7 +331,7 @@ fun SettingsPane(
                                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
                             )
 
-                            // 4. 고급 동기화 설정 (서버 주소, 마스터 복구 키)
+                            // 4. 고급 동기화 설정 (마스터 복구 키)
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
@@ -348,7 +347,7 @@ fun SettingsPane(
                                 )
                                 Spacer(Modifier.width(6.dp))
                                 Text(
-                                    text = if (showAdvancedSyncSettings) "고급 동기화 설정 접기" else "고급 동기화 설정 (서버 주소, 마스터 복구 키)",
+                                    text = if (showAdvancedSyncSettings) "고급 동기화 설정 접기" else "고급 동기화 설정 (마스터 복구 키)",
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -419,55 +418,6 @@ fun SettingsPane(
                                             }
                                         }
                                     }
-
-                                    // 서버 주소 변경
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        modifier = Modifier.fillMaxWidth(),
-                                    ) {
-                                        OutlinedTextField(
-                                            value = editServerUrl,
-                                            onValueChange = { editServerUrl = it },
-                                            label = { Text("서버 URL") },
-                                            singleLine = true,
-                                            modifier = Modifier.weight(1f),
-                                        )
-                                        Button(
-                                            onClick = {
-                                                viewModel.updateSyncServerUrl(editServerUrl)
-                                                Toast.makeText(context, "서버 주소가 저장되었습니다.", Toast.LENGTH_SHORT).show()
-                                            },
-                                            shape = RoundedCornerShape(10.dp),
-                                            colors = ButtonDefaults.buttonColors(
-                                                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                                            ),
-                                        ) {
-                                            Text("저장")
-                                        }
-                                    }
-                                }
-                            }
-
-                            if (syncState.syncMessage != null) {
-                                val isSuccess = syncState.isSuccess == true
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(
-                                            if (isSuccess) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
-                                            else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
-                                        )
-                                        .padding(10.dp),
-                                ) {
-                                    Text(
-                                        text = syncState.syncMessage,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = if (isSuccess) MaterialTheme.colorScheme.onPrimaryContainer
-                                        else MaterialTheme.colorScheme.onErrorContainer,
-                                    )
                                 }
                             }
                         }
