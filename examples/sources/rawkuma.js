@@ -63,10 +63,10 @@ var source = {
   displayName: "Rawkuma",
   origin: ORIGIN,
   catalogs: [
-    { id: "LATEST", label: "최신", paginated: false },
-    { id: "ALL", label: "전체", paginated: true }
+    { id: "LATEST", label: "Latest", paginated: false },
+    { id: "ALL", label: "All Manga", paginated: true }
   ],
-  searchPlaceholder: "작품 검색",
+  searchPlaceholder: "Search manga...",
   episodePageSize: 500,
   extraHeaders: {
     "Referer": ORIGIN + "/"

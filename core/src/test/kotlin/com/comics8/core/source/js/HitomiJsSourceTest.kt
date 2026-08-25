@@ -30,7 +30,7 @@ class HitomiJsSourceTest {
         assertThat(source.progressDisplay).isEqualTo(ProgressDisplay.READ_COUNT)
         assertThat(source.episodePageSize).isEqualTo(25)
         assertThat(source.defaultLanguage).isEqualTo("korean")
-        assertThat(source.searchPlaceholder).isEqualTo("작가 검색 (artist: 이름)")
+        assertThat(source.searchPlaceholder).isEqualTo("Search artist:name...")
         assertThat(source.catalogs.map { it.id }).containsExactly(
             "LATEST", "POPULAR", "TODAY", "MONTH", "YEAR",
             "DOUJINSHI", "MANGA", "ARTISTCG", "GAMECG", "IMAGESET",

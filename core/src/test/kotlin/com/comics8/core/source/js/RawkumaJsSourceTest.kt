@@ -29,7 +29,7 @@ class RawkumaJsSourceTest {
         assertThat(source.catalogs.map { it.id }).containsExactly("LATEST", "ALL").inOrder()
         assertThat(source.catalogs.map { it.paginated }).containsExactly(false, true).inOrder()
         assertThat(source.episodePageSize).isEqualTo(500)
-        assertThat(source.searchPlaceholder).isEqualTo("작품 검색")
+        assertThat(source.searchPlaceholder).isEqualTo("Search manga...")
         assertThat(source.imageReferer("https://kuma.kyut.dev/1.jpg")).isEqualTo("$ORIGIN/")
         assertThat(source.imageReferer("https://rcdn.kyut.dev/2.jpg")).isEqualTo("$ORIGIN/")
     }

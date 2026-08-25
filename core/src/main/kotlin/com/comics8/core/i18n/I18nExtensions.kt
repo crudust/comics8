@@ -9,16 +9,21 @@ import com.comics8.core.source.WorkId
 
 fun BrowseTab.displayLabel(strings: AppStrings): String = when (this) {
     is BrowseTab.Favorite -> strings.tabFavorite
-    is BrowseTab.Remote -> when (catalog.id.uppercase()) {
-        "LIBRARY" -> strings.catalogLibrary
-        "LATEST" -> strings.catalogLatest
-        else -> catalog.label
+    is BrowseTab.Remote -> {
+        if (sourceId == WorkId.LOCAL_SOURCE) {
+            when (catalog.id.uppercase()) {
+                "LIBRARY" -> strings.catalogLibrary
+                "LATEST" -> strings.catalogLatest
+                else -> catalog.label
+            }
+        } else {
+            catalog.label
+        }
     }
 }
 
 fun ComicSource?.displayTitle(strings: AppStrings): String {
-    if (this == null) return strings.navStorage
-    if (id == WorkId.LOCAL_SOURCE) return strings.navStorage
+    if (this == null || id == WorkId.LOCAL_SOURCE) return strings.navStorage
     return displayName
 }
 
@@ -34,9 +39,7 @@ fun SourceRegistry.displaySourceTitle(sourceId: String?, strings: AppStrings): S
 
 fun ComicSource?.displaySearchPlaceholder(strings: AppStrings): String {
     if (this == null || id == WorkId.LOCAL_SOURCE) return strings.placeholderSearchFileName
-    if (searchPlaceholder.isBlank() || searchPlaceholder == "제목 검색" || searchPlaceholder == "Search title") {
-        return strings.placeholderSearchTitle
-    }
+    if (searchPlaceholder.isBlank()) return strings.placeholderSearchTitle
     return searchPlaceholder
 }
 

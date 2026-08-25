@@ -65,6 +65,11 @@ class I18nTest {
         assertThat(latestTab.displayLabel(en)).isEqualTo("Latest")
         assertThat(latestTab.displayLabel(ja)).isEqualTo("最新順")
 
+        // External JS source catalog should preserve original label as-is
+        val externalTab = BrowseTab.Remote("rawkuma", SourceCatalog("LATEST", "Recent Updates", paginated = true))
+        assertThat(externalTab.displayLabel(en)).isEqualTo("Recent Updates")
+        assertThat(externalTab.displayLabel(ja)).isEqualTo("Recent Updates")
+
         // SourceRegistry & displaySourceTitle
         val registry = SourceRegistry()
         assertThat(registry.displaySourceTitle(WorkId.LOCAL_SOURCE, en)).isEqualTo("Storage")
