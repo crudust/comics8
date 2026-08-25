@@ -16,7 +16,6 @@ object AppUpdateChecker {
         .readTimeout(20, TimeUnit.SECONDS)
         .build()
 
-
     fun fetchVersionInfo(serverUrl: String = SyncConstants.DEFAULT_SERVER_URL): VersionResponse? {
         val url = SyncConstants.versionUrl(serverUrl)
         return try {
@@ -64,10 +63,12 @@ object AppUpdateChecker {
         val response = fetchVersionInfo(serverUrl) ?: return AppUpdateState(
             currentVersion = currentVersionName,
             currentVersionCode = currentVersionCode,
+            error = "업데이트 서버에 연결할 수 없습니다",
         )
         val info = response.android ?: return AppUpdateState(
             currentVersion = currentVersionName,
             currentVersionCode = currentVersionCode,
+            error = "서버에 Android 버전 정보가 없습니다",
         )
 
         val hasUpdate = (info.versionCode > currentVersionCode) ||
@@ -94,10 +95,12 @@ object AppUpdateChecker {
         val response = fetchVersionInfo(serverUrl) ?: return AppUpdateState(
             currentVersion = currentVersionName,
             currentVersionCode = currentVersionCode,
+            error = "업데이트 서버에 연결할 수 없습니다",
         )
         val info = response.desktop ?: return AppUpdateState(
             currentVersion = currentVersionName,
             currentVersionCode = currentVersionCode,
+            error = "서버에 Desktop 버전 정보가 없습니다",
         )
 
         val hasUpdate = (info.versionCode > currentVersionCode) ||
@@ -122,4 +125,3 @@ object AppUpdateChecker {
         )
     }
 }
-

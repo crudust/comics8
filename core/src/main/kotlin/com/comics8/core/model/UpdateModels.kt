@@ -14,6 +14,7 @@ data class VersionResponse(
 )
 
 data class AppUpdateState(
+    val isChecking: Boolean = false,
     val hasUpdate: Boolean = false,
     val currentVersion: String = "",
     val currentVersionCode: Int = 0,

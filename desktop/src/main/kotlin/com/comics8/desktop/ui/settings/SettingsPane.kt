@@ -512,21 +512,50 @@ fun SettingsPane(
                                 )
                             }
 
-                            Button(
-                                onClick = { viewModel.checkForUpdate() },
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                                ),
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.SystemUpdate,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp),
-                                )
-                                Spacer(Modifier.width(4.dp))
-                                Text("업데이트 확인")
+                            var updateFeedbackMessage by remember { mutableStateOf<String?>(null) }
+                            val isChecking = state.updateState.isChecking
+
+                            Column(horizontalAlignment = Alignment.End) {
+                                Button(
+                                    onClick = {
+                                        updateFeedbackMessage = null
+                                        viewModel.checkForUpdate(manual = true) { msg ->
+                                            updateFeedbackMessage = msg
+                                        }
+                                    },
+                                    enabled = !isChecking,
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    ),
+                                ) {
+                                    if (isChecking) {
+                                        androidx.compose.material3.CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            strokeWidth = 2.dp,
+                                            color = MaterialTheme.colorScheme.primary,
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("확인 중...")
+                                    } else {
+                                        Icon(
+                                            imageVector = Icons.Default.SystemUpdate,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("업데이트 확인")
+                                    }
+                                }
+                                if (updateFeedbackMessage != null) {
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        text = updateFeedbackMessage.orEmpty(),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
                             }
                         }
                     }

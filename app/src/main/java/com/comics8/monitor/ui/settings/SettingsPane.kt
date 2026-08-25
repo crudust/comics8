@@ -517,21 +517,37 @@ fun SettingsPane(
                                 )
                             }
 
+                            val isChecking = state.updateState.isChecking
                             Button(
-                                onClick = { viewModel.checkForUpdate() },
+                                onClick = {
+                                    viewModel.checkForUpdate(manual = true) { msg ->
+                                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                enabled = !isChecking,
                                 shape = RoundedCornerShape(10.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                                     contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                                 ),
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.SystemUpdate,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp),
-                                )
-                                Spacer(Modifier.width(4.dp))
-                                Text("업데이트 확인")
+                                if (isChecking) {
+                                    androidx.compose.material3.CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("확인 중...")
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.SystemUpdate,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("업데이트 확인")
+                                }
                             }
                         }
                     }

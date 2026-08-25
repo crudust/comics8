@@ -280,17 +280,33 @@ class DesktopViewModel(
         }
     }
 
-    fun checkForUpdate() {
-        scope.launch(Dispatchers.IO) {
+    fun checkForUpdate(manual: Boolean = false, onFeedback: ((String) -> Unit)? = null) {
+        if (_state.value.updateState.isChecking) return
+        scope.launch {
+            _state.update { it.copy(updateState = it.updateState.copy(isChecking = true)) }
             val currentVersionName = DesktopVersion.VERSION_NAME
             val currentVersionCode = DesktopVersion.VERSION_CODE
             val serverUrl = _state.value.syncState.serverUrl.ifBlank { SyncConstants.DEFAULT_SERVER_URL }
-            val updateState = AppUpdateChecker.checkDesktopUpdate(
-                currentVersionName = currentVersionName,
-                currentVersionCode = currentVersionCode,
-                serverUrl = serverUrl,
-            )
-            _state.update { it.copy(updateState = updateState) }
+            val updateState = withContext(Dispatchers.IO) {
+                AppUpdateChecker.checkDesktopUpdate(
+                    currentVersionName = currentVersionName,
+                    currentVersionCode = currentVersionCode,
+                    serverUrl = serverUrl,
+                )
+            }
+            _state.update {
+                it.copy(
+                    updateState = updateState.copy(isChecking = false),
+                    showUpdateDialog = if (manual && updateState.hasUpdate) true else it.showUpdateDialog,
+                )
+            }
+            if (manual) {
+                if (updateState.error != null) {
+                    onFeedback?.invoke(updateState.error ?: "업데이트 확인 실패")
+                } else if (!updateState.hasUpdate) {
+                    onFeedback?.invoke("현재 최신 버전(v${currentVersionName})을 사용 중입니다.")
+                }
+            }
         }
     }
 
