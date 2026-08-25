@@ -177,8 +177,31 @@ PY
 scp /tmp/comics8-version.json "${SERVER_USER}@${SERVER_HOST}:${SERVER_VERSION_FILE}"
 rm -f /tmp/comics8-version.json /tmp/comics8-version-current.json
 
-# 5. Verify endpoint health
-echo "🔍 5/5: Verifying deployment health via Funnel..."
+# 5. Generate Homebrew Cask Formula
+if [[ -f "$MAC_ZIP_PATH" && -f "templates/homebrew/comics8.rb" ]]; then
+    echo "🍺 Generating Homebrew Cask..."
+    MAC_SHA256=$(sha256sum "$MAC_ZIP_PATH" | awk '{print $1}')
+    mkdir -p build/homebrew
+    sed "s/__VERSION__/${VERSION_NAME}/g; s/__SHA256__/${MAC_SHA256}/g" templates/homebrew/comics8.rb > build/homebrew/comics8.rb
+    echo "  ✅ Generated build/homebrew/comics8.rb (SHA256: ${MAC_SHA256})"
+fi
+
+# 6. Publish to GitHub Releases (if GITHUB_TOKEN is present)
+RELEASE_FILES=("$APK_PATH")
+if [ -f "$WIN_ZIP_PATH" ]; then
+    RELEASE_FILES+=("$WIN_ZIP_PATH")
+fi
+if [[ "$HAVE_MAC_ZIP" -eq 1 ]]; then
+    RELEASE_FILES+=("$MAC_ZIP_PATH")
+fi
+
+RELEASE_TAG="v${VERSION_NAME}" \
+RELEASE_TITLE="Comics8 v${VERSION_NAME}" \
+RELEASE_NOTES="${RELEASE_NOTES}" \
+python3 scripts/github-release.py "${RELEASE_FILES[@]}" || true
+
+# 7. Verify endpoint health
+echo "🔍 Verifying deployment health via Funnel..."
 if curl -s -m 6 -f "https://homeassistant.tail1946af.ts.net/api/comics8/version" >/dev/null 2>&1; then
     echo "✅ Funnel endpoint is healthy and returning 200 OK"
 else
@@ -194,8 +217,12 @@ echo "• Version Info:  https://homeassistant.tail1946af.ts.net/api/comics8/ver
 echo "• Android APK:   https://homeassistant.tail1946af.ts.net/api/comics8/download/comics8-latest.apk"
 echo "• Mac Desktop:   https://homeassistant.tail1946af.ts.net/api/comics8/download/Comics8-mac.zip"
 echo "• Windows Zip:   https://homeassistant.tail1946af.ts.net/api/comics8/download/Comics8-win.zip"
+if [[ -f "build/homebrew/comics8.rb" ]]; then
+    echo "• Homebrew Cask: build/homebrew/comics8.rb"
+fi
 if [[ "$HAVE_MAC_ZIP" -eq 0 ]]; then
     echo "• Mac zip was left unchanged (no Mac .app this run)"
 fi
 echo "=================================================="
+
 
