@@ -125,7 +125,6 @@ fun TopBar(
                     registry = state.sourceRegistry,
                     onSelect = viewModel::setActiveSource,
                     onOpenSourceManager = viewModel::openSourceManager,
-                    onOpenSettings = viewModel::openSettings,
                     titleStyle = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f),
                 )
@@ -605,7 +604,6 @@ private fun SourceTitleDropdown(
     registry: SourceRegistry,
     onSelect: (String) -> Unit,
     onOpenSourceManager: () -> Unit,
-    onOpenSettings: () -> Unit,
     titleStyle: TextStyle,
     modifier: Modifier = Modifier,
 ) {
@@ -697,21 +695,6 @@ private fun SourceTitleDropdown(
                     onClick = {
                         expanded = false
                         onOpenSourceManager()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text("설정") },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Default.Settings,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    },
-                    onClick = {
-                        expanded = false
-                        onOpenSettings()
                     },
                 )
             }
