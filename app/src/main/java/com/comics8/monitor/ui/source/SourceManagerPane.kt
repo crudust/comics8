@@ -383,11 +383,16 @@ private fun <T : Any> ReorderableItemColumn(
                     },
                     onDragEnd = {
                         val from = draggedIndex
-                        val to = targetIndex
+                        val offset = dragOffsetY
+                        val height = if (itemHeightPx > 0f) itemHeightPx + spacingPx else (68f * density.density)
                         draggedIndex = null
                         dragOffsetY = 0f
-                        if (from != null && to != null && from != to) {
-                            latestOnReorder(from, to)
+                        if (from != null && height > 0f) {
+                            val delta = (offset / height).roundToInt()
+                            val to = (from + delta).coerceIn(0, items.lastIndex)
+                            if (from != to) {
+                                latestOnReorder(from, to)
+                            }
                         }
                     },
                     onDragCancel = {

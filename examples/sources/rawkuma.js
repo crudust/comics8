@@ -62,7 +62,7 @@ var source = {
   displayName: "Rawkuma",
   origin: ORIGIN,
   catalogs: [
-    { id: "LATEST", label: "최신", paginated: true },
+    { id: "LATEST", label: "최신", paginated: false },
     { id: "ALL", label: "전체", paginated: true }
   ],
   searchPlaceholder: "작품 검색",
@@ -75,10 +75,30 @@ var source = {
     var cat = String(catalogId || "LATEST").toUpperCase();
     var p = page < 1 ? 1 : page;
 
-    var url = (cat === "LATEST")
-      ? (p === 1 ? ORIGIN + "/latest-update/" : ORIGIN + "/latest-update/page/" + p + "/")
-      : (p === 1 ? ORIGIN + "/manga/" : ORIGIN + "/manga/page/" + p + "/");
+    if (cat === "LATEST") {
+      var html = host.fetchText({ url: ORIGIN + "/latest-update/" });
+      var doc = host.parseHtml(html, ORIGIN);
+      var cards = doc.select("div.group-data-\\[direction\\=horizontal\\]\\:hidden, div.overflow-hidden.relative.flex.flex-col.min-w-0");
+      var items = [];
+      var seen = {};
 
+      for (var i = 0; i < cards.length; i++) {
+        var card = cards[i];
+        var item = parseCard(card, ORIGIN);
+        if (item && !seen[item.id]) {
+          seen[item.id] = true;
+          items.push(item);
+        }
+      }
+
+      return {
+        items: items,
+        pageInfo: { currentPage: 1, lastPage: 1 }
+      };
+    }
+
+    // ALL (Archive /manga/page/{p}/)
+    var url = (p === 1 ? ORIGIN + "/manga/" : ORIGIN + "/manga/page/" + p + "/");
     var html = host.fetchText({ url: url });
     var doc = host.parseHtml(html, ORIGIN);
     var cards = doc.select("div.group-data-\\[direction\\=horizontal\\]\\:hidden, div.overflow-hidden.relative.flex.flex-col.min-w-0");
@@ -96,15 +116,14 @@ var source = {
 
     var pageInfo = host.parsePageInfo(doc);
     if (pageInfo.lastPage <= 1) {
-      var pattern = (cat === "LATEST") ? "/latest-update/page/(\\d+)" : "/manga/page/(\\d+)";
-      var pagLinks = doc.select("a[href*='page/']");
+      var pagLinks = doc.select("a[href*='/manga/page/']");
       var maxP = p;
       for (var l = 0; l < pagLinks.length; l++) {
         var pHref = pagLinks[l].attr("href");
-        var pNum = parseInt(host.match(pHref, pattern, 1), 10);
+        var pNum = parseInt(host.match(pHref, "/manga/page/(\\d+)", 1), 10);
         if (!isNaN(pNum) && pNum > maxP) maxP = pNum;
       }
-      pageInfo = { currentPage: p, lastPage: maxP > p ? maxP : p + 1 };
+      pageInfo = { currentPage: p, lastPage: maxP };
     }
 
     return {
