@@ -215,7 +215,7 @@ class JsEngine(
     ): JsSourceHandle {
         val id = requiredString(sourceObj, "id")
         val displayName = requiredString(sourceObj, "displayName")
-        val apiLevel = JsValues.asInt(ScriptableObject.getProperty(sourceObj, "apiLevel"), 0)
+        val apiLevel = JsValues.asInt(ScriptableObject.getProperty(sourceObj, "apiLevel"), 1)
         if (apiLevel < 1) throw IllegalArgumentException("apiLevel")
         if (apiLevel > HostApi.LEVEL) throw IllegalArgumentException("앱 업데이트가 필요합니다")
         requireFunction(sourceObj, "loadListing")
@@ -233,12 +233,13 @@ class JsEngine(
         api.sourceObj = sourceObj
         api.language = JsValues.asString(ScriptableObject.getProperty(sourceObj, "defaultLanguage"))
         val functions = SOURCE_FUNCTIONS.filter { isFunction(sourceObj, it) }.toSet()
+        val catalogs = catalogsFromJs(ScriptableObject.getProperty(sourceObj, "catalogs"))
         return JsSourceHandle(
             id = id,
             displayName = displayName,
             apiLevel = apiLevel,
             origin = origin,
-            catalogs = catalogsFromJs(ScriptableObject.getProperty(sourceObj, "catalogs")),
+            catalogs = if (catalogs.isEmpty()) listOf(SourceCatalog("LATEST", "최신", true)) else catalogs,
             defaultPolicy = policy,
             searchPlaceholder = JsValues.asString(ScriptableObject.getProperty(sourceObj, "searchPlaceholder"))
                 ?: "제목 검색",
@@ -299,9 +300,9 @@ class JsSourceHandle internal constructor(
     internal val api: HostApiV1Impl,
     internal val lock: Any = Any(),
 ) {
-    internal val originHost: String? = SourceRegistry.hostOf(origin)
+    val originHost: String? = SourceRegistry.hostOf(origin)
 
-    fun hasFunction(name: String): Boolean = name in functions
+    fun hasFunction(name: String): Boolean = functions.contains(name)
 }
 
 internal fun translate(error: Throwable): RuntimeException {
@@ -335,29 +336,33 @@ private fun unwrapRhino(error: Throwable): Throwable {
     return cur
 }
 
-private fun requiredString(obj: Scriptable, name: String): String {
-    val value = JsValues.asString(ScriptableObject.getProperty(obj, name))?.trim()
-    if (value.isNullOrEmpty()) throw IllegalArgumentException("$name 없음")
-    return value
-}
+private fun requiredString(obj: Scriptable, name: String): String =
+    JsValues.asString(ScriptableObject.getProperty(obj, name))?.takeIf { it.isNotBlank() }
+        ?: throw IllegalArgumentException("source.$name is required")
 
 private fun requireFunction(obj: Scriptable, name: String) {
-    if (!isFunction(obj, name)) throw IllegalArgumentException("source.$name 없음")
+    if (!isFunction(obj, name)) {
+        throw IllegalArgumentException("source.$name function is required")
+    }
 }
 
-private fun isFunction(obj: Scriptable, name: String): Boolean =
-    ScriptableObject.getProperty(obj, name) is Function
-
-private fun parseNotificationMode(raw: String?): NotificationMode = when (raw) {
-    "LATEST_INTERSECTION" -> NotificationMode.LATEST_INTERSECTION
-    "PER_FAVORITE" -> NotificationMode.PER_FAVORITE
-    else -> NotificationMode.NONE
+internal fun isFunction(scope: Scriptable, name: String): Boolean {
+    val prop = ScriptableObject.getProperty(scope, name)
+    return prop is Function
 }
 
-private fun parseProgressDisplay(raw: String?): ProgressDisplay = when (raw) {
-    "READ_COUNT" -> ProgressDisplay.READ_COUNT
-    else -> ProgressDisplay.LAST_READ_ORDER
-}
+private fun parseNotificationMode(value: String?): NotificationMode =
+    when (value?.uppercase()) {
+        "LATEST_INTERSECTION" -> NotificationMode.LATEST_INTERSECTION
+        "PER_FAVORITE" -> NotificationMode.PER_FAVORITE
+        else -> NotificationMode.NONE
+    }
+
+private fun parseProgressDisplay(value: String?): ProgressDisplay =
+    when (value?.uppercase()) {
+        "READ_COUNT" -> ProgressDisplay.READ_COUNT
+        else -> ProgressDisplay.LAST_READ_ORDER
+    }
 
 private fun catalogsFromJs(value: Any?): List<SourceCatalog> {
     return JsValues.asList(value).mapNotNull { entry ->
@@ -372,20 +377,42 @@ private fun catalogsFromJs(value: Any?): List<SourceCatalog> {
 private fun listingFromJs(value: Any?, sourceId: String): ListingPage {
     val obj = value as? Scriptable ?: error("expected listing page")
     val items = JsValues.asList(ScriptableObject.getProperty(obj, "items")).map { toonFromJs(it, sourceId) }
+    val pageInfo = ScriptableObject.getProperty(obj, "pageInfo") as? Scriptable
+    val currentPage = if (pageInfo != null) {
+        JsValues.asInt(ScriptableObject.getProperty(pageInfo, "currentPage"), 1)
+    } else {
+        JsValues.asInt(ScriptableObject.getProperty(obj, "currentPage"), 1)
+    }
+    val lastPage = if (pageInfo != null) {
+        JsValues.asInt(ScriptableObject.getProperty(pageInfo, "lastPage"), currentPage)
+    } else {
+        JsValues.asInt(ScriptableObject.getProperty(obj, "lastPage"), currentPage)
+    }
     return ListingPage(
         items = items,
-        currentPage = JsValues.asInt(ScriptableObject.getProperty(obj, "currentPage"), 1),
-        lastPage = JsValues.asInt(ScriptableObject.getProperty(obj, "lastPage"), 1),
+        currentPage = currentPage,
+        lastPage = lastPage,
     )
 }
 
 private fun episodePageFromJs(value: Any?): EpisodePage {
     val obj = value as? Scriptable ?: error("expected episode page")
     val items = JsValues.asList(ScriptableObject.getProperty(obj, "items")).map { episodeFromJs(it) }
+    val pageInfo = ScriptableObject.getProperty(obj, "pageInfo") as? Scriptable
+    val currentPage = if (pageInfo != null) {
+        JsValues.asInt(ScriptableObject.getProperty(pageInfo, "currentPage"), 1)
+    } else {
+        JsValues.asInt(ScriptableObject.getProperty(obj, "currentPage"), 1)
+    }
+    val lastPage = if (pageInfo != null) {
+        JsValues.asInt(ScriptableObject.getProperty(pageInfo, "lastPage"), currentPage)
+    } else {
+        JsValues.asInt(ScriptableObject.getProperty(obj, "lastPage"), currentPage)
+    }
     return EpisodePage(
         items = items,
-        currentPage = JsValues.asInt(ScriptableObject.getProperty(obj, "currentPage"), 1),
-        lastPage = JsValues.asInt(ScriptableObject.getProperty(obj, "lastPage"), 1),
+        currentPage = currentPage,
+        lastPage = lastPage,
     )
 }
 

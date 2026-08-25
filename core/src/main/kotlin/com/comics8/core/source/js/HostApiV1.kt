@@ -18,6 +18,11 @@ import org.mozilla.javascript.json.JsonParser
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 
+data class PageInfoResult(
+    val currentPage: Int,
+    val lastPage: Int,
+)
+
 interface HostApiV1 {
     val apiLevel: Int get() = HostApi.LEVEL
     val language: String?
@@ -34,6 +39,13 @@ interface HostApiV1 {
     fun byteLength(body: ByteArray): Int
     fun slice(body: ByteArray, start: Int, endExclusive: Int): ByteArray
     fun log(level: String, message: String)
+
+    // 편의 헬퍼
+    fun absUrl(url: String, baseUrl: String? = null): String
+    fun digits(text: String?): String
+    fun match(text: String?, regex: String, groupIndex: Int = 1): String?
+    fun extractImages(htmlOrText: String, baseUrl: String? = null): List<String>
+    fun parsePageInfo(doc: HostHtmlDoc): PageInfoResult
 }
 
 data class HostFetchSpec(
@@ -55,6 +67,10 @@ class HostFetchResult(
 
 class HostHtmlDoc(internal val document: Document) {
     fun select(css: String): List<HostHtmlEl> = document.select(css).map { HostHtmlEl(it) }
+    fun selectFirst(css: String): HostHtmlEl? = document.selectFirst(css)?.let { HostHtmlEl(it) }
+    fun textOf(css: String): String = document.selectFirst(css)?.text().orEmpty()
+    fun attrOf(css: String, attr: String): String = document.selectFirst(css)?.attr(attr).orEmpty()
+    fun absUrlOf(css: String, attr: String): String = document.selectFirst(css)?.absUrl(attr).orEmpty()
 }
 
 class HostHtmlEl(internal val element: Element) {
@@ -63,6 +79,11 @@ class HostHtmlEl(internal val element: Element) {
     fun attr(name: String): String = element.attr(name)
     fun absUrl(attr: String): String = element.absUrl(attr)
     fun select(css: String): List<HostHtmlEl> = element.select(css).map { HostHtmlEl(it) }
+    fun selectFirst(css: String): HostHtmlEl? = element.selectFirst(css)?.let { HostHtmlEl(it) }
+    fun textOf(css: String): String = element.selectFirst(css)?.text().orEmpty()
+    fun attrOf(css: String, attr: String): String = element.selectFirst(css)?.attr(attr).orEmpty()
+    fun absUrlOf(css: String, attr: String): String = element.selectFirst(css)?.absUrl(attr).orEmpty()
+    fun bgUrl(): String? = HostApiV1Impl.extractBackgroundUrl(element.attr("style"))
 }
 
 fun toFetchSpec(src: ComicSource, spec: HostFetchSpec): FetchSpec =
@@ -175,6 +196,132 @@ internal class HostApiV1Impl(
 
     override fun log(level: String, message: String) {
         System.err.println("[js:$sourceId] $level: $message")
+    }
+
+    override fun absUrl(url: String, baseUrl: String?): String {
+        val value = url.trim().trim('\'', '"')
+        if (value.isEmpty()) return value
+        if (value.startsWith("http://", ignoreCase = true) || value.startsWith("https://", ignoreCase = true)) return value
+        if (value.startsWith("//")) return "https:$value"
+        val root = baseUrl?.trimEnd('/') ?: ""
+        if (root.isEmpty()) return value
+        if (value.startsWith("/")) return "$root$value"
+        return "$root/$value"
+    }
+
+    override fun digits(text: String?): String =
+        text?.replace(Regex("""\D"""), "").orEmpty()
+
+    override fun match(text: String?, regex: String, groupIndex: Int): String? {
+        if (text == null) return null
+        return runCatching {
+            Regex(regex).find(text)?.groups?.get(groupIndex)?.value
+        }.getOrNull()
+    }
+
+    override fun extractImages(htmlOrText: String, baseUrl: String?): List<String> {
+        val base = baseUrl.orEmpty()
+        val candidateLists = parseAllImageCandidateLists(htmlOrText, base)
+        if (candidateLists.isNotEmpty()) {
+            if (candidateLists.size == 1) return candidateLists[0]
+            val primary = candidateLists[0]
+            if (primary.isNotEmpty() && isAccessible(primary[0])) return primary
+            for (i in 1 until candidateLists.size) {
+                val cand = candidateLists[i]
+                if (cand.isNotEmpty() && isAccessible(cand[0])) return cand
+            }
+            return primary
+        }
+        return parseImagesFromDom(htmlOrText, base)
+    }
+
+    override fun parsePageInfo(doc: HostHtmlDoc): PageInfoResult {
+        val d = doc.document
+        var current = 1
+        val curEl = d.selectFirst("strong.pg_current, .pagination .active, .page-item.active, .current-page")
+        if (curEl != null) {
+            val parsed = curEl.text().replace(Regex("""\D"""), "").toIntOrNull()
+            if (parsed != null && parsed > 0) current = parsed
+        }
+        var last = current
+        val pageRegex = Regex("""(?:[?&]|&amp;)page=(\d+)""")
+        fun extractPage(href: String?): Int? {
+            if (href.isNullOrBlank()) return null
+            return pageRegex.find(href)?.groupValues?.get(1)?.toIntOrNull()
+        }
+        val endEl = d.selectFirst("a.pg_end, a.page-end, a[title*='끝']")
+        if (endEl != null) {
+            val fromEnd = extractPage(endEl.attr("href"))
+            if (fromEnd != null && fromEnd > last) last = fromEnd
+        }
+        val pageEls = d.select("a.pg_page, .pagination a, .page-link")
+        for (el in pageEls) {
+            val fromPage = extractPage(el.attr("href")) ?: el.text().replace(Regex("""\D"""), "").toIntOrNull()
+            if (fromPage != null && fromPage > last) last = fromPage
+        }
+        return PageInfoResult(currentPage = current, lastPage = last)
+    }
+
+    private fun parseAllImageCandidateLists(html: String, baseUri: String): List<List<String>> {
+        val result = mutableListOf<List<String>>()
+        val matches = JS_IMG_ARRAY_RE.findAll(html)
+        for (m in matches) {
+            val body = m.groupValues[1]
+            val urls = mutableListOf<String>()
+            val seen = mutableSetOf<String>()
+            val urlMatches = JS_STRING_URL_RE.findAll(body)
+            for (um in urlMatches) {
+                val rawUrl = um.groupValues[1].trim()
+                if (rawUrl.isNotBlank() && isComicImageUrl(rawUrl)) {
+                    val full = absUrl(rawUrl, baseUri)
+                    if (seen.add(full)) urls.add(full)
+                }
+            }
+            if (urls.isNotEmpty()) result.add(urls)
+        }
+        return result
+    }
+
+    private fun parseImagesFromDom(html: String, baseUri: String): List<String> {
+        val doc = if (baseUri.isBlank()) Jsoup.parse(html) else Jsoup.parse(html, baseUri)
+        val containers = doc.select("#scroll-list, .view-content, .scroll-viewer, #page-list, #contents-wrapper, #toon_view, .comic-view")
+        val useDoc = containers.isEmpty()
+        val imgNodes = if (useDoc) doc.select("img") else containers[0].select("img")
+        val bgNodes = if (useDoc) doc.select("[style*='background']") else containers[0].select("[style*='background']")
+        val urls = mutableListOf<String>()
+        val seen = mutableSetOf<String>()
+        for (img in imgNodes) {
+            val raw = when {
+                img.hasAttr("data-src") -> img.absUrl("data-src").ifBlank { img.attr("data-src") }
+                img.hasAttr("data-original") -> img.absUrl("data-original").ifBlank { img.attr("data-original") }
+                img.hasAttr("data-lazy") -> img.absUrl("data-lazy").ifBlank { img.attr("data-lazy") }
+                else -> img.absUrl("src").ifBlank { img.attr("src") }
+            }
+            if (raw.isNotBlank() && isComicImageUrl(raw)) {
+                val full = absUrl(raw, baseUri)
+                if (seen.add(full)) urls.add(full)
+            }
+        }
+        for (bg in bgNodes) {
+            val extracted = extractBackgroundUrl(bg.attr("style")) ?: continue
+            if (isComicImageUrl(extracted)) {
+                val full = absUrl(extracted, baseUri)
+                if (seen.add(full)) urls.add(full)
+            }
+        }
+        return urls
+    }
+
+    private fun isImageUrl(url: String): Boolean {
+        val lower = url.lowercase()
+        return lower.contains(".jpg") || lower.contains(".jpeg") || lower.contains(".png") ||
+            lower.contains(".webp") || lower.contains(".avif") || lower.contains(".gif")
+    }
+
+    private fun isComicImageUrl(url: String): Boolean {
+        if (!isImageUrl(url)) return false
+        val lower = url.lowercase()
+        return IGNORE_IMAGE_PATTERNS.none { lower.contains(it) }
     }
 
     internal fun checkAborted() {
@@ -308,6 +455,15 @@ internal class HostApiV1Impl(
     companion object {
         const val FETCH_CONCURRENCY = 6
         val BACKOFF_MS = listOf(250L, 1_000L, 4_000L)
+        private val JS_IMG_ARRAY_RE = Regex("""(?:var|let|const)\s+(?:img_list|img_list_2|data_list|arr_img|images|toon_images)\s*=\s*\[([\s\S]*?)\]""", RegexOption.IGNORE_CASE)
+        private val JS_STRING_URL_RE = Regex("""["']([^"']+\.(?:jpg|jpeg|png|webp|gif|avif)(?:\?[^"']*)?)["']""", RegexOption.IGNORE_CASE)
+        private val BG_URL_RE = Regex("""url\(\s*(['"]?)(.+?)\1\s*\)""", RegexOption.IGNORE_CASE)
+        private val IGNORE_IMAGE_PATTERNS = listOf("icon-", "favicon", "192x192", "/toonfile/toonres/", "logo", "banner", "avatar")
+
+        fun extractBackgroundUrl(style: String?): String? {
+            if (style.isNullOrBlank()) return null
+            return BG_URL_RE.find(style)?.groups?.get(2)?.value?.trim('\'', '"', ' ')
+        }
 
         fun retryableStatus(code: Int): Boolean =
             code == 403 || code == 408 || code == 425 || code == 429 ||

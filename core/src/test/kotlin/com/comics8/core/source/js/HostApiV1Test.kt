@@ -316,6 +316,102 @@ class HostApiV1Test {
         assertThat(error!!.message).contains("galleryinfo or gg")
     }
 
+    @Test
+    fun testConvenienceHelpers() {
+        val engine = JsEngine()
+        val handle = engine.load(JsTestResources.read("js/hello.js"), "hello.js")
+
+        // 1. host.absUrl
+        val abs1 = engine.eval(handle, """host.absUrl("/view/123", "https://example.com")""")
+        assertThat(abs1).isEqualTo("https://example.com/view/123")
+        val abs2 = engine.eval(handle, """host.absUrl("//cdn.example.com/img.jpg")""")
+        assertThat(abs2).isEqualTo("https://cdn.example.com/img.jpg")
+
+        // 2. host.digits
+        val dig = engine.eval(handle, """host.digits("제 123 화 (완결)")""")
+        assertThat(dig).isEqualTo("123")
+
+        // 3. host.match
+        val mat = engine.eval(handle, """host.match("wr_id=5678&page=2", "wr_id=(\\d+)")""")
+        assertThat(mat).isEqualTo("5678")
+
+        // 4. host.parsePageInfo
+        val html = """
+            <div class="pg_wrap">
+                <strong class="pg_current">3</strong>
+                <a href="?page=1" class="pg_page">1</a>
+                <a href="?page=2" class="pg_page">2</a>
+                <a href="?page=3" class="pg_page">3</a>
+                <a href="?page=15" class="pg_end">끝</a>
+            </div>
+        """.trimIndent()
+        val jsonPage = evalJsonOn(
+            engine,
+            handle,
+            """
+            (function() {
+                var doc = host.parseHtml(${jsString(html)});
+                return host.parsePageInfo(doc);
+            })()
+            """.trimIndent(),
+        )
+        assertThat(jsonPage.getInt("currentPage")).isEqualTo(3)
+        assertThat(jsonPage.getInt("lastPage")).isEqualTo(15)
+
+        // 5. host.extractImages from script variable
+        val htmlWithScript = """
+            <html>
+                <script>
+                    var img_list = [
+                        "https://example.com/data/001.webp",
+                        "https://example.com/data/002.webp",
+                        "https://example.com/data/logo.png"
+                    ];
+                </script>
+            </html>
+        """.trimIndent()
+        val jsonImgs = evalJsonOn(
+            engine,
+            handle,
+            """
+            (function() {
+                return { images: host.extractImages(${jsString(htmlWithScript)}) };
+            })()
+            """.trimIndent(),
+        )
+        val arr = jsonImgs.getJSONArray("images")
+        val imgList = (0 until arr.length()).map { arr.getString(it) }
+        assertThat(imgList).containsExactly(
+            "https://example.com/data/001.webp",
+            "https://example.com/data/002.webp",
+        )
+
+        // 6. selectFirst, textOf, attrOf
+        val htmlDoc = """
+            <div class="item" data-id="999" style="background: url('/thumb.jpg')">
+                <span class="title">만화 제목</span>
+            </div>
+        """.trimIndent()
+        val jsonDoc = evalJsonOn(
+            engine,
+            handle,
+            """
+            (function() {
+                var doc = host.parseHtml(${jsString(htmlDoc)}, "https://example.com");
+                var el = doc.selectFirst(".item");
+                return {
+                    id: el.attr("data-id"),
+                    title: el.textOf(".title"),
+                    bg: el.bgUrl()
+                };
+            })()
+            """.trimIndent(),
+        )
+        assertThat(jsonDoc.getString("id")).isEqualTo("999")
+        assertThat(jsonDoc.getString("title")).isEqualTo("만화 제목")
+        assertThat(jsonDoc.getString("bg")).isEqualTo("/thumb.jpg")
+    }
+
     private fun evalJson(expression: String, http: SourceHttp): JSONObject {
         val engine = JsEngine()
         val handle = engine.load(JsTestResources.read("js/hello.js"), "hello.js")

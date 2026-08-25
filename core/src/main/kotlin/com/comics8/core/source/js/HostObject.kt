@@ -82,6 +82,43 @@ internal class HostObject(
             )
             Undefined.instance
         }
+
+        // --- 신규 편의 헬퍼 메서드 바인딩 ---
+        defineHostFn("absUrl", 1) { _, _, args ->
+            val url = Context.toString(JsValues.arg(args, 0))
+            val base = if (args.size >= 2 && !JsValues.isNullish(args[1])) Context.toString(args[1]) else null
+            api.absUrl(url, base)
+        }
+        defineHostFn("digits", 1) { _, _, args ->
+            val text = if (args.isNotEmpty() && !JsValues.isNullish(args[0])) Context.toString(args[0]) else null
+            api.digits(text)
+        }
+        defineHostFn("match", 2) { _, _, args ->
+            val text = if (args.isNotEmpty() && !JsValues.isNullish(args[0])) Context.toString(args[0]) else null
+            val regex = Context.toString(JsValues.arg(args, 1))
+            val group = if (args.size >= 3 && !JsValues.isNullish(args[2])) JsValues.asInt(args[2], 1) else 1
+            api.match(text, regex, group)
+        }
+        defineHostFn("extractImages", 1) { cx, callScope, args ->
+            val html = Context.toString(JsValues.arg(args, 0))
+            val base = if (args.size >= 2 && !JsValues.isNullish(args[1])) Context.toString(args[1]) else null
+            val images = api.extractImages(html, base)
+            cx.jsArray(callScope, images)
+        }
+        defineHostFn("parsePageInfo", 1) { cx, callScope, args ->
+            val arg0 = JsValues.arg(args, 0)
+            val doc = when (arg0) {
+                is JsHtmlDocView -> arg0.doc
+                is HostHtmlDoc -> arg0
+                else -> api.parseHtml(Context.toString(arg0), null)
+            }
+            val pageInfo = api.parsePageInfo(doc)
+            val obj = cx.newObject(callScope)
+            obj.put("currentPage", obj, pageInfo.currentPage)
+            obj.put("lastPage", obj, pageInfo.lastPage)
+            obj
+        }
+
         scope.defineProperty("host", this, READONLY or PERMANENT)
     }
 
@@ -129,7 +166,7 @@ private class JsFetchResultView(private val result: HostFetchResult) : Scriptabl
     }
 }
 
-private class JsHtmlDocView(private val doc: HostHtmlDoc) : ScriptableObject() {
+private class JsHtmlDocView(val doc: HostHtmlDoc) : ScriptableObject() {
     override fun getClassName(): String = "HostHtmlDoc"
 
     fun attach(scope: Scriptable) {
@@ -137,6 +174,25 @@ private class JsHtmlDocView(private val doc: HostHtmlDoc) : ScriptableObject() {
         prototype = getObjectPrototype(scope)
         defineHostFn("select", 1) { cx, callScope, args ->
             wrapElements(cx, callScope, doc.select(Context.toString(JsValues.arg(args, 0))))
+        }
+        defineHostFn("selectFirst", 1) { _, callScope, args ->
+            val el = doc.selectFirst(Context.toString(JsValues.arg(args, 0)))
+            el?.let { JsHtmlElView(it).also { view -> view.attach(callScope) } }
+        }
+        defineHostFn("textOf", 1) { _, _, args ->
+            doc.textOf(Context.toString(JsValues.arg(args, 0)))
+        }
+        defineHostFn("attrOf", 2) { _, _, args ->
+            doc.attrOf(
+                Context.toString(JsValues.arg(args, 0)),
+                Context.toString(JsValues.arg(args, 1)),
+            )
+        }
+        defineHostFn("absUrlOf", 2) { _, _, args ->
+            doc.absUrlOf(
+                Context.toString(JsValues.arg(args, 0)),
+                Context.toString(JsValues.arg(args, 1)),
+            )
         }
     }
 }
@@ -153,6 +209,28 @@ private class JsHtmlElView(private val el: HostHtmlEl) : ScriptableObject() {
         defineHostFn("absUrl", 1) { _, _, args -> el.absUrl(Context.toString(JsValues.arg(args, 0))) }
         defineHostFn("select", 1) { cx, callScope, args ->
             wrapElements(cx, callScope, el.select(Context.toString(JsValues.arg(args, 0))))
+        }
+        defineHostFn("selectFirst", 1) { _, callScope, args ->
+            val child = el.selectFirst(Context.toString(JsValues.arg(args, 0)))
+            child?.let { JsHtmlElView(it).also { view -> view.attach(callScope) } }
+        }
+        defineHostFn("textOf", 1) { _, _, args ->
+            el.textOf(Context.toString(JsValues.arg(args, 0)))
+        }
+        defineHostFn("attrOf", 2) { _, _, args ->
+            el.attrOf(
+                Context.toString(JsValues.arg(args, 0)),
+                Context.toString(JsValues.arg(args, 1)),
+            )
+        }
+        defineHostFn("absUrlOf", 2) { _, _, args ->
+            el.absUrlOf(
+                Context.toString(JsValues.arg(args, 0)),
+                Context.toString(JsValues.arg(args, 1)),
+            )
+        }
+        defineHostFn("bgUrl", 0) { _, _, _ ->
+            el.bgUrl()
         }
     }
 }
