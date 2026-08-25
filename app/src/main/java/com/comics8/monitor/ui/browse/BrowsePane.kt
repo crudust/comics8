@@ -40,6 +40,14 @@ import com.comics8.monitor.ui.components.sourceChipLabel
 
 import androidx.compose.foundation.border
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import coil.request.CachePolicy
+import coil.request.ImageRequest
+
 @Composable
 fun ListingGrid(
     items: List<ToonItem>,
@@ -49,6 +57,7 @@ fun ListingGrid(
     scrollToTopTrigger: Int = 0,
     showSourceChip: Boolean = false,
     sourceRegistry: SourceRegistry,
+    refreshEpoch: Long = 0L,
 ) {
     val gridState = rememberLazyGridState()
 
@@ -73,6 +82,7 @@ fun ListingGrid(
                 onToggleFavorite = { onToggleFavorite(item) },
                 showSourceChip = showSourceChip,
                 sourceRegistry = sourceRegistry,
+                refreshEpoch = refreshEpoch,
             )
         }
     }
@@ -86,6 +96,7 @@ fun ToonCard(
     modifier: Modifier = Modifier,
     showSourceChip: Boolean = false,
     sourceRegistry: SourceRegistry,
+    refreshEpoch: Long = 0L,
 ) {
     Column(
         modifier = modifier
@@ -104,10 +115,26 @@ fun ToonCard(
                     shape = RoundedCornerShape(12.dp),
                 ),
         ) {
+            var isError by remember(item.thumbUrl) { mutableStateOf(false) }
+            val retryKey = if (isError) refreshEpoch else 0L
+            val context = LocalContext.current
+            val imageModel = remember(item.thumbUrl, retryKey) {
+                if (retryKey > 0L) {
+                    ImageRequest.Builder(context)
+                        .data(item.thumbUrl)
+                        .memoryCachePolicy(CachePolicy.WRITE_ONLY)
+                        .diskCachePolicy(CachePolicy.WRITE_ONLY)
+                        .build()
+                } else {
+                    item.thumbUrl
+                }
+            }
             AsyncImage(
-                model = item.thumbUrl,
+                model = imageModel,
                 contentDescription = item.title,
                 contentScale = ContentScale.Crop,
+                onError = { isError = true },
+                onSuccess = { isError = false },
                 modifier = Modifier.fillMaxSize(),
             )
             if (item.isNew || showSourceChip) {

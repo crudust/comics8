@@ -60,6 +60,7 @@ data class ListingUiState(
     val items: List<ToonItem> = emptyList(),
     val loading: Boolean = false,
     val refreshing: Boolean = false,
+    val refreshEpoch: Long = 0L,
     val error: String? = null,
     val screen: Screen = Screen.Browse,
     val series: ToonItem? = null,
@@ -1009,6 +1010,8 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
     fun refresh(force: Boolean = false) {
         checkForUpdate()
+        coverThumbs.clearFailures()
+        _state.update { it.copy(refreshEpoch = it.refreshEpoch + 1) }
         if (_state.value.activeSourceId == null) return
         if (force) {
             catalogCache.clear()

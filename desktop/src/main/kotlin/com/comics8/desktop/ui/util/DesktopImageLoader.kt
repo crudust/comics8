@@ -36,6 +36,7 @@ import com.comics8.core.network.ImageFallbacks
 import com.comics8.core.network.ImageReferer
 import com.comics8.core.source.LocalImageUri
 import com.comics8.core.source.SourceRegistry
+import com.comics8.core.source.local.PreviewImageResolver
 import com.comics8.core.source.local.ThumbEncoder
 import com.comics8.core.source.local.CoverThumbCache
 import com.comics8.core.source.local.LocalPreviewUri
@@ -100,7 +101,7 @@ object AwtThumbEncoder : ThumbEncoder {
 }
 
 object DesktopImageCache {
-    private const val MEMORY_MAX_ENTRIES = 48
+    private const val MEMORY_MAX_ENTRIES = 192
     private const val DISPLAY_LONG_EDGE = 2048
     private const val DISK_HARD_LIMIT_BYTES = 500L * 1024 * 1024
     private const val DISK_TARGET_BYTES = 400L * 1024 * 1024
@@ -173,13 +174,20 @@ object DesktopImageCache {
         }
     }
 
-    internal fun readImageBytes(url: String): ByteArray? {
+    fun clearFailures() {
+        coverThumbs.clearFailures()
+    }
+
+    internal fun readImageBytes(url: String, forceRetry: Boolean = false): ByteArray? {
         if (url.isBlank()) return null
         val hash = hashUrl(url)
         val cachedFile = File(diskCacheDir, "$hash.img")
+        if (forceRetry && cachedFile.isFile && cachedFile.length() == 0L) {
+            cachedFile.delete()
+        }
         val localFile = LocalImageUri.toFile(url)
         val zipRef = ZipImageUri.parse(url)
-        val localPreviewRef = LocalPreviewUri.parse(url)
+        val previewSpec = PreviewImageResolver.resolve(url)
         val networkRef = NetworkImageUri.parse(url)
         return if (localFile != null && localFile.isFile && localFile.length() > 0L) {
             try {
@@ -195,25 +203,12 @@ object DesktopImageCache {
             } catch (_: Exception) {
                 null
             }
-        } else if (localPreviewRef != null || networkRef?.preview != null) {
+        } else if (previewSpec != null) {
             try {
-                val key = if (localPreviewRef != null) {
-                    ThumbKey("local|${localPreviewRef.path}|${localPreviewRef.kind}", localPreviewRef.modifiedAt, localPreviewRef.size)
-                } else {
-                    ThumbKey(
-                        "${networkRef!!.sourceId}|${networkRef.path}|${networkRef.preview}",
-                        networkRef.modifiedAt,
-                        networkRef.size,
-                    )
-                }
-                val thumbnailPx = localPreviewRef?.thumbnailPx
-                    ?: networkRef!!.thumbnailPx.takeIf { it > 0 }
-                    ?: 320
                 previewSlots.acquire()
                 try {
-                    coverThumbs.getOrCreate(key, thumbnailPx) {
-                        if (localPreviewRef != null) LocalPreviewUri.open(localPreviewRef).use { it.readBytes() }
-                        else NetworkSourceRuntime.open(url).use { it.readBytes() }
+                    coverThumbs.getOrCreate(previewSpec.key, previewSpec.thumbnailPx, forceRetry = forceRetry) {
+                        previewSpec.readSourceBytes()
                     }.readBytes()
                 } finally {
                     previewSlots.release()
@@ -222,7 +217,7 @@ object DesktopImageCache {
                 null
             }
         } else if (networkRef != null) {
-            if (cachedFile.isFile && cachedFile.length() > 0L) {
+            if (!forceRetry && cachedFile.isFile && cachedFile.length() > 0L) {
                 cachedFile.setLastModified(System.currentTimeMillis())
                 val bytes = runCatching { cachedFile.readBytes() }.getOrNull()
                 if (bytes != null && bytes.isNotEmpty()) {
@@ -234,7 +229,7 @@ object DesktopImageCache {
             } else {
                 fetchNetworkBytes(url, cachedFile)
             }
-        } else if (cachedFile.exists() && cachedFile.length() > 0) {
+        } else if (!forceRetry && cachedFile.exists() && cachedFile.length() > 0) {
             try {
                 cachedFile.readBytes()
             } catch (_: Exception) {
@@ -286,17 +281,27 @@ object DesktopImageCache {
         }
     }
 
-    suspend fun loadImage(url: String): ImageBitmap? {
+    suspend fun loadImage(url: String, forceRetry: Boolean = false): ImageBitmap? {
         if (url.isBlank()) return null
-        get(url)?.let { return it }
+        if (!forceRetry) {
+            get(url)?.let { return it }
+        } else {
+            synchronized(memoryLock) { memoryCache.remove(url) }
+        }
 
         val deferred = synchronized(inFlightLock) {
-            get(url)?.let { return it }
-            inFlightRequests[url]?.let { return@synchronized it }
+            if (!forceRetry) {
+                get(url)?.let { return it }
+            }
+            if (forceRetry) {
+                inFlightRequests.remove(url)
+            } else {
+                inFlightRequests[url]?.let { return@synchronized it }
+            }
 
             val def = loadScope.async {
                 try {
-                    val bytes = readImageBytes(url)
+                    val bytes = readImageBytes(url, forceRetry = forceRetry)
                     if (bytes != null && bytes.isNotEmpty()) {
                         val bitmap = decodeForDisplay(bytes)
                         if (bitmap != null) {
@@ -397,6 +402,7 @@ fun DesktopAsyncImage(
     alignment: Alignment = Alignment.Center,
     half: ImageHalf = ImageHalf.FULL,
     showPlaceholder: Boolean = true,
+    refreshEpoch: Long = 0L,
     onLoaded: ((ImageBitmap) -> Unit)? = null,
 ) {
     // Check synchronous memory cache first
@@ -404,7 +410,9 @@ fun DesktopAsyncImage(
     var displayedBitmap by remember(url) { mutableStateOf(cachedBitmap) }
     var loading by remember(url) { mutableStateOf(cachedBitmap == null) }
 
-    LaunchedEffect(url) {
+    val retryKey = if (displayedBitmap == null) refreshEpoch else 0L
+
+    LaunchedEffect(url, retryKey) {
         if (url.isBlank()) {
             displayedBitmap = null
             loading = false
@@ -416,9 +424,9 @@ fun DesktopAsyncImage(
             loading = false
             onLoaded?.invoke(memoryHit)
         } else {
-            displayedBitmap = null
             loading = true
-            val loaded = DesktopImageCache.loadImage(url)
+            val force = retryKey > 0L
+            val loaded = DesktopImageCache.loadImage(url, forceRetry = force)
             displayedBitmap = loaded
             loading = false
             if (loaded != null) {

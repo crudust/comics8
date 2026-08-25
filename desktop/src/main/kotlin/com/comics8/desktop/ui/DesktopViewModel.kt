@@ -24,6 +24,7 @@ import com.comics8.desktop.data.DesktopToonRepository
 import com.comics8.desktop.data.DesktopUpdateManager
 import com.comics8.desktop.data.ReadHistoryRecord
 import com.comics8.desktop.ui.util.DesktopFolderPicker
+import com.comics8.desktop.ui.util.DesktopImageCache
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -864,9 +865,18 @@ class DesktopViewModel(
 
     fun refresh() {
         checkForUpdate()
+        DesktopImageCache.clearFailures()
+        _state.update { it.copy(refreshEpoch = it.refreshEpoch + 1) }
         if (_state.value.activeSourceId == null) return
         if (_state.value.screen == Screen.Browse) {
             syncOnBrowseRefresh()
+        }
+        if (_state.value.screen == Screen.Series) {
+            val series = _state.value.series
+            if (series != null) {
+                loadEpisodes(series, _state.value.episodePage)
+            }
+            return
         }
         if (_state.value.isSearch) {
             val query = _state.value.searchQuery.orEmpty()

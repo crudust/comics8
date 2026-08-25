@@ -99,6 +99,7 @@ class CoverThumbCacheTest {
             encoder = ThumbEncoder { bytes, _, _ -> bytes },
             maxSizeBytes = 10L,
             targetSizeBytes = 6L,
+            evictionInterval = 1,
         )
         val first = cache.getOrCreate(ThumbKey("/first", 1L, 1L)) { ByteArray(4) { 1 } }
         first.setLastModified(1L)
@@ -112,6 +113,69 @@ class CoverThumbCacheTest {
     }
 
     @Test
+    fun clearFailuresRemovesFailedMarkersAndAllowsRetry() {
+        val dir = createTempDirectory("thumbs-clear-fail").toFile()
+        dir.deleteOnExit()
+        var attempts = 0
+        val cache = CoverThumbCache(dir, ThumbEncoder { bytes, _, _ -> bytes })
+        val key = ThumbKey("/failing.jpg", 1L, 1L)
+
+        runCatching {
+            cache.getOrCreate(key) {
+                attempts++
+                error("simulated network/IO error")
+            }
+        }
+        assertThat(attempts).isEqualTo(1)
+
+        // Second attempt fails immediately due to .fail marker
+        val immediateFail = runCatching {
+            cache.getOrCreate(key) {
+                attempts++
+                byteArrayOf(1)
+            }
+        }.exceptionOrNull()
+        assertThat(immediateFail).hasMessageThat().contains("recently failed")
+        assertThat(attempts).isEqualTo(1)
+
+        // Clear failures
+        cache.clearFailures()
+
+        // After clearing, retry succeeds
+        val created = cache.getOrCreate(key) {
+            attempts++
+            byteArrayOf(1)
+        }
+        assertThat(attempts).isEqualTo(2)
+        assertThat(created.isFile).isTrue()
+    }
+
+    @Test
+    fun forceRetryBypassesFailureMarker() {
+        val dir = createTempDirectory("thumbs-force-retry").toFile()
+        dir.deleteOnExit()
+        var attempts = 0
+        val cache = CoverThumbCache(dir, ThumbEncoder { bytes, _, _ -> bytes })
+        val key = ThumbKey("/force.jpg", 1L, 1L)
+
+        runCatching {
+            cache.getOrCreate(key) {
+                attempts++
+                error("initial error")
+            }
+        }
+        assertThat(attempts).isEqualTo(1)
+
+        // Force retry succeeds
+        val created = cache.getOrCreate(key, requestedLongEdgePx = 320, forceRetry = true) {
+            attempts++
+            byteArrayOf(1)
+        }
+        assertThat(attempts).isEqualTo(2)
+        assertThat(created.isFile).isTrue()
+    }
+
+    @Test
     fun sourceDoesNotUseImageIo() {
         val text = LocalTestZips.sourceFile("CoverThumbCache.kt").readText()
         assertThat(text).doesNotContain("ImageIO")
@@ -119,3 +183,4 @@ class CoverThumbCacheTest {
         assertThat(text).contains("SHA-256")
     }
 }
+

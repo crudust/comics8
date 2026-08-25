@@ -40,6 +40,7 @@ data class DesktopUiState(
     val items: List<ToonItem> = emptyList(),
     val loading: Boolean = false,
     val refreshing: Boolean = false,
+    val refreshEpoch: Long = 0L,
     val scrollToTopTrigger: Int = 0,
     val error: String? = null,
     val screen: Screen = Screen.Browse,

@@ -185,6 +185,7 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                                     onToggleFavorite = viewModel::toggleFavorite,
                                     showSourceChip = false,
                                     sourceRegistry = state.sourceRegistry,
+                                    refreshEpoch = state.refreshEpoch,
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             }
@@ -391,6 +392,7 @@ private fun BrowseTabContent(
                         onToggleFavorite = viewModel::toggleFavorite,
                         showSourceChip = false,
                         sourceRegistry = state.sourceRegistry,
+                        refreshEpoch = state.refreshEpoch,
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                     )
                 }

@@ -20,28 +20,21 @@ import java.util.concurrent.Semaphore
 
 import okio.ByteString.Companion.encodeUtf8
 
+import com.comics8.core.source.local.PreviewImageResolver
+
 class NetworkImageFetcher(
     private val url: String,
     private val options: Options,
     private val thumbs: CoverThumbCache,
 ) : Fetcher {
     override suspend fun fetch(): SourceResult = runInterruptible(Dispatchers.IO) {
-        val localRef = LocalPreviewUri.parse(url)
+        val previewSpec = PreviewImageResolver.resolve(url)
         val ref = NetworkImageUri.parse(url)
-        require(localRef != null || ref != null) { "invalid preview uri" }
-        val preview = localRef != null || ref?.preview != null
-        if (preview) {
-            val thumbnailPx = localRef?.thumbnailPx ?: ref!!.thumbnailPx.takeIf { it > 0 } ?: 320
-            val key = if (localRef != null) {
-                ThumbKey("local|${localRef.path}|${localRef.kind}", localRef.modifiedAt, localRef.size)
-            } else {
-                ThumbKey("${ref!!.sourceId}|${ref.path}|${ref.preview}", ref.modifiedAt, ref.size)
-            }
+        if (previewSpec != null) {
             PREVIEW_SLOTS.acquire()
             val file = try {
-                thumbs.getOrCreate(key, thumbnailPx) {
-                    if (localRef != null) LocalPreviewUri.open(localRef).use { it.readBytes() }
-                    else NetworkSourceRuntime.open(url).use { it.readBytes() }
+                thumbs.getOrCreate(previewSpec.key, previewSpec.thumbnailPx) {
+                    previewSpec.readSourceBytes()
                 }
             } finally {
                 PREVIEW_SLOTS.release()
@@ -54,6 +47,7 @@ class NetworkImageFetcher(
                 dataSource = DataSource.DISK,
             )
         } else {
+            requireNotNull(ref) { "invalid network uri" }
             val cacheFile = getReaderCacheFile(options.context, url)
             if (cacheFile.isFile && cacheFile.length() > 0L) {
                 cacheFile.setLastModified(System.currentTimeMillis())

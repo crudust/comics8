@@ -24,15 +24,22 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.request.CachePolicy
+import coil.request.ImageRequest
 import com.comics8.core.model.EpisodeItem
 import com.comics8.monitor.ui.ListingUiState
 import com.comics8.monitor.ui.ListingViewModel
@@ -54,6 +61,17 @@ fun SeriesPane(
     viewModel: ListingViewModel,
     modifier: Modifier = Modifier,
 ) {
+    val series = state.series
+    if (series == null) {
+        ErrorPane(
+            message = "작품 정보가 없습니다.",
+            actionLabel = "목록으로",
+            onRetry = viewModel::closeSeries,
+            modifier = modifier,
+        )
+        return
+    }
+
     when {
         state.episodeLoading && state.episodes.isEmpty() -> LoadingPane(modifier)
         state.episodeError != null && state.episodes.isEmpty() ->
@@ -75,6 +93,7 @@ fun SeriesPane(
                             highlighted = episode.wrId == state.highlightedEpisodeId,
                             isDownloaded = episode.wrId in state.downloadedWrIds,
                             isDownloading = state.downloadProgress.currentTask?.episode?.wrId == episode.wrId,
+                            refreshEpoch = state.refreshEpoch,
                             onClick = { viewModel.openEpisode(episode) },
                             onDownload = if (state.writesDownloads) {
                                 { viewModel.startDownloadEpisode(episode) }
@@ -122,6 +141,7 @@ fun EpisodeRow(
     highlighted: Boolean = false,
     isDownloaded: Boolean = false,
     isDownloading: Boolean = false,
+    refreshEpoch: Long = 0L,
     onPickArtist: (() -> Unit)? = null,
 ) {
     androidx.compose.foundation.layout.Row(
@@ -154,11 +174,28 @@ fun EpisodeRow(
                 .clip(RoundedCornerShape(8.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant),
         ) {
-            if (episode.thumbUrl != null) {
+            val thumbUrl = episode.thumbUrl
+            if (thumbUrl != null) {
+                var isError by remember(thumbUrl) { mutableStateOf(false) }
+                val retryKey = if (isError) refreshEpoch else 0L
+                val context = LocalContext.current
+                val imageModel = remember(thumbUrl, retryKey) {
+                    if (retryKey > 0L) {
+                        ImageRequest.Builder(context)
+                            .data(thumbUrl)
+                            .memoryCachePolicy(CachePolicy.WRITE_ONLY)
+                            .diskCachePolicy(CachePolicy.WRITE_ONLY)
+                            .build()
+                    } else {
+                        thumbUrl
+                    }
+                }
                 AsyncImage(
-                    model = episode.thumbUrl,
+                    model = imageModel,
                     contentDescription = episode.title,
                     contentScale = ContentScale.Crop,
+                    onError = { isError = true },
+                    onSuccess = { isError = false },
                     modifier = Modifier.fillMaxSize(),
                 )
             }

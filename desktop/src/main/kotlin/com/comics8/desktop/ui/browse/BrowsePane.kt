@@ -134,6 +134,7 @@ fun BrowsePane(
                                 onToggleFavorite = { viewModel.toggleFavorite(item) },
                                 showSourceChip = false,
                                 sourceRegistry = state.sourceRegistry,
+                                refreshEpoch = state.refreshEpoch,
                             )
                         }
                     }
@@ -248,6 +249,7 @@ fun ToonCard(
     modifier: Modifier = Modifier,
     showSourceChip: Boolean = false,
     sourceRegistry: SourceRegistry,
+    refreshEpoch: Long = 0L,
 ) {
     Column(
         modifier = modifier
@@ -272,6 +274,7 @@ fun ToonCard(
                 url = item.thumbUrl,
                 contentDescription = item.title,
                 contentScale = ContentScale.Crop,
+                refreshEpoch = refreshEpoch,
                 modifier = Modifier.fillMaxSize(),
             )
             if (item.isNew || showSourceChip) {

@@ -93,6 +93,7 @@ fun SeriesPane(
                             highlighted = ep.wrId == state.highlightedEpisodeId,
                             isDownloaded = ep.wrId in state.downloadedWrIds,
                             isDownloading = state.downloadProgress.currentTask?.episode?.wrId == ep.wrId,
+                            refreshEpoch = state.refreshEpoch,
                             onClick = { viewModel.openEpisode(ep) },
                             onDownload = if (state.writesDownloads) {
                                 { viewModel.startDownloadEpisode(ep) }
@@ -164,6 +165,7 @@ fun EpisodeCard(
     highlighted: Boolean = false,
     isDownloaded: Boolean = false,
     isDownloading: Boolean = false,
+    refreshEpoch: Long = 0L,
     onPickArtist: (() -> Unit)? = null,
 ) {
     Surface(
@@ -204,6 +206,7 @@ fun EpisodeCard(
                         url = thumbUrl,
                         contentDescription = episode.title,
                         contentScale = ContentScale.Crop,
+                        refreshEpoch = refreshEpoch,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
