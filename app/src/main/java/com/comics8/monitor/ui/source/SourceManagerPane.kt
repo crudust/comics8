@@ -224,7 +224,7 @@ fun SourceManagerPane(
                         title = source.displayName,
                         subtitle = subtitle,
                         modeLabel = currentMode.label,
-                        canDelete = isJs,
+                        canDelete = true,
                         onOpenSettings = {
                             configSourceId = source.id
                             configSourceName = source.displayName
