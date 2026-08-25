@@ -116,7 +116,8 @@ fun main() {
         val cacheDir = File(System.getProperty("user.home"), ".comics8/http-cache")
         val toonClient = remember {
             ToonClient(ToonClient.defaultClient(cacheDir), sources = locator).also { client ->
-                com.comics8.desktop.ui.util.DesktopImageCache.shareHttpClient(client.httpClient)
+                val imageClient = ToonClient.newImageHttpClient(client.httpClient, registry)
+                com.comics8.desktop.ui.util.DesktopImageCache.shareHttpClient(imageClient)
                 com.comics8.desktop.ui.util.DesktopImageCache.registry = registry
             }
         }

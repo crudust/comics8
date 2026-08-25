@@ -257,34 +257,29 @@ object DesktopImageCache {
     }
 
     private fun fetchRemoteBytes(url: String, cachedFile: File): ByteArray? {
+        if (LocalImageUri.toFile(url) != null) return null
+        if (ZipImageUri.parse(url) != null) return null
+        if (NetworkImageUri.parse(url) != null) return null
+
         remoteSlots.acquire()
         try {
-            val urlsToTry = listOf(url) + ImageFallbacks.forUrl(url, registry)
-            for (targetUrl in urlsToTry) {
-                if (LocalImageUri.toFile(targetUrl) != null) continue
-                if (ZipImageUri.parse(targetUrl) != null) continue
-                if (NetworkImageUri.parse(targetUrl) != null) continue
+            val request = Request.Builder()
+                .url(url)
+                .get()
+                .build()
+            val result = httpClient.newCall(request).execute().use { resp ->
+                if (resp.isSuccessful) resp.body?.bytes() else null
+            }
+            if (result != null && result.isNotEmpty()) {
                 try {
-                    val request = Request.Builder()
-                        .url(targetUrl)
-                        .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
-                        .header("Referer", ImageReferer.forUrl(targetUrl, registry))
-                        .get()
-                        .build()
-                    val result = httpClient.newCall(request).execute().use { resp ->
-                        if (resp.isSuccessful) resp.body?.bytes() else null
-                    }
-                    if (result != null && result.isNotEmpty()) {
-                        try {
-                            writeAtomically(cachedFile, result)
-                            evictDiskIfNeeded(cachedFile)
-                        } catch (_: Exception) {
-                        }
-                        return result
-                    }
+                    writeAtomically(cachedFile, result)
+                    evictDiskIfNeeded(cachedFile)
                 } catch (_: Exception) {
                 }
+                return result
             }
+            return null
+        } catch (_: Exception) {
             return null
         } finally {
             remoteSlots.release()
@@ -423,19 +418,11 @@ fun DesktopAsyncImage(
         } else {
             displayedBitmap = null
             loading = true
-            var loaded = DesktopImageCache.loadImage(url)
-            var retry = 0
-            while (loaded == null && retry < 2) {
-                retry++
-                kotlinx.coroutines.delay(retry * 400L)
-                loaded = DesktopImageCache.loadImage(url)
-            }
+            val loaded = DesktopImageCache.loadImage(url)
+            displayedBitmap = loaded
+            loading = false
             if (loaded != null) {
-                displayedBitmap = loaded
-                loading = false
                 onLoaded?.invoke(loaded)
-            } else {
-                loading = false
             }
         }
     }

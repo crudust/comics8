@@ -128,40 +128,7 @@ class ComicsApp : Application(), ImageLoaderFactory {
     }
 
     override fun newImageLoader(): ImageLoader {
-        val registry = sourceRegistry
-        val http = toonClient.httpClient.newBuilder()
-            .addInterceptor { chain ->
-                val originalUrl = chain.request().url.toString()
-                val request = chain.request().newBuilder()
-                    .header("User-Agent", ToonClient.USER_AGENT)
-                    .header("Referer", ImageReferer.forUrl(originalUrl, registry))
-                    .build()
-                var response = chain.proceed(request)
-                if (!response.isSuccessful && (response.code == 404 || response.code >= 500)) {
-                    val urlStr = request.url.toString()
-                    val fallbacks = ImageFallbacks.forUrl(urlStr, registry)
-                    for (fallback in fallbacks) {
-                        response.close()
-                        val retryReq = request.newBuilder()
-                            .url(fallback)
-                            .header("Referer", ImageReferer.forUrl(fallback, registry))
-                            .build()
-                        val retryResp = try {
-                            chain.proceed(retryReq)
-                        } catch (_: Exception) {
-                            null
-                        }
-                        if (retryResp != null && retryResp.isSuccessful) {
-                            return@addInterceptor retryResp
-                        }
-                        if (retryResp != null) {
-                            response = retryResp
-                        }
-                    }
-                }
-                response
-            }
-            .build()
+        val http = ToonClient.newImageHttpClient(toonClient.httpClient, sourceRegistry)
         return ImageLoader.Builder(this)
             .okHttpClient(http)
             .components {

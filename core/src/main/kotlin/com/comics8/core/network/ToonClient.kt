@@ -188,6 +188,15 @@ class ToonClient(
             return builder.build()
         }
 
+        fun newImageHttpClient(
+            baseClient: OkHttpClient = defaultClient(),
+            sources: com.comics8.core.source.SourceRegistry,
+        ): OkHttpClient {
+            return baseClient.newBuilder()
+                .addInterceptor(ComicImageInterceptor(sources))
+                .build()
+        }
+
 
         private fun parseBytesRange(header: String, total: Int): Pair<Int, Int>? {
             if (total <= 0) return null
