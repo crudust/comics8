@@ -23,6 +23,9 @@ internal class HostObject(
         defineHostFn("fetchText", 1) { _, _, args ->
             api.fetchText(parseFetchSpec(JsValues.arg(args, 0)))
         }
+        defineHostFn("fetchJson", 1) { _, _, args ->
+            api.fetchJson(parseFetchSpec(JsValues.arg(args, 0)))
+        }
         defineHostFn("fetchAll", 1) { cx, callScope, args ->
             val specs = JsValues.asList(JsValues.arg(args, 0)).map { parseFetchSpec(it) }
             val concurrency = if (args.size >= 2 && !JsValues.isNullish(args[1])) {

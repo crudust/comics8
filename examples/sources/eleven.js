@@ -52,8 +52,7 @@ var source = {
 
   loadListing: function (catalogId, page) {
     var path = listingPath(catalogId, page);
-    var html = host.fetchText({ url: ORIGIN + path });
-    var doc = host.parseHtml(html, ORIGIN);
+    var doc = host.parseHtml(host.fetchText({ url: ORIGIN + path }), ORIGIN);
     var nodes = doc.select("li[data-id]");
     var items = [];
     var seen = {};
@@ -89,8 +88,7 @@ var source = {
   search: function (query) {
     var q = (query && query.text || "").trim();
     if (!q) return [];
-    var json = host.fetchText({ url: ORIGIN + "/bbs/ajax.search.php?search_key=" + encodeURIComponent(q) });
-    var root = host.json(json);
+    var root = host.fetchJson({ url: ORIGIN + "/bbs/ajax.search.php?search_key=" + encodeURIComponent(q) });
     if (!root || root.status !== "success" || !root.list) return [];
     var list = root.list;
     var items = [];
@@ -118,8 +116,7 @@ var source = {
   },
 
   loadEpisodes: function (item, page) {
-    var html = host.fetchText({ url: seriesUrl(item.id, item.title, page) });
-    var doc = host.parseHtml(html, ORIGIN);
+    var doc = host.parseHtml(host.fetchText({ url: seriesUrl(item.id, item.title, page) }), ORIGIN);
     var nodes = doc.select("button.episode.is-series");
     var items = [];
     var seen = {};
@@ -155,10 +152,7 @@ var source = {
   },
 
   resolveImages: function (episode) {
-    var html = host.fetchText({ url: episode.href });
-    var images = host.extractImages(html, ORIGIN);
-    if (!images || !images.length) throw new Error("만화 이미지를 불러오지 못했습니다.");
-    return images;
+    return host.extractImages(host.fetchText({ url: episode.href }), ORIGIN);
   },
 
   imageFallbacks: function (url) {

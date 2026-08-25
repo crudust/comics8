@@ -97,7 +97,6 @@ var source;
       });
     }
 
-    var date = host.match(obj.date, "(\\d{4})-(\\d{2})-(\\d{2})", 1);
     var updatedAt = null;
     if (obj.date) {
       var m = /(\d{4})-(\d{2})-(\d{2})/.exec(String(obj.date));
@@ -351,10 +350,7 @@ var source;
       var path = term.split("").map(function (ch) {
         return ch === " " ? "_" : ch === "/" ? "slash" : ch === "." ? "dot" : ch;
       }).join("/");
-      var url = TAGINDEX + "/" + ns + "/" + path + ".json";
-      var res = host.fetch({ url: url });
-      if (res.code < 200 || res.code > 299) return [];
-      var root = host.json(host.utf8(res.body));
+      var root = host.fetchJson({ url: TAGINDEX + "/" + ns + "/" + path + ".json" });
       if (!root || !root.length) return [];
       var out = [];
       for (var i = 0; i < root.length && out.length < 10; i++) {
@@ -388,11 +384,11 @@ var source;
 
     resolveImages: function (episode) {
       var info = fetchGalleryInfo(episode.wrId);
-      if (!info || !info.files.length) throw new Error("만화 이미지를 불러오지 못했습니다.");
+      if (!info || !info.files.length) return [];
       var res = host.fetch({ url: LTN + "/gg.js" });
-      if (res.code < 200 || res.code > 299) throw new Error("만화 이미지를 불러오지 못했습니다.");
+      if (res.code < 200 || res.code > 299) return [];
       var gg = host.evalSiteJs("gg", host.utf8(res.body));
-      if (!gg || !gg.b) throw new Error("만화 이미지를 불러오지 못했습니다.");
+      if (!gg || !gg.b) return [];
 
       var urls = [];
       for (var i = 0; i < info.files.length; i++) {
@@ -439,16 +435,6 @@ var source;
         updatedAt: item.updatedAt,
         entryEpisodeId: entryEpisodeId || item.entryEpisodeId
       };
-    },
-
-    supportsChapterNotifications: function (item) {
-      return String(item.id || "").indexOf(ARTIST_PREFIX) === 0;
-    },
-
-    notificationCandidates: function (favorites) {
-      return (favorites || []).filter(function (f) {
-        return String(f.id || "").indexOf(ARTIST_PREFIX) === 0;
-      });
     },
 
     applyConfig: function (config) {

@@ -37,6 +37,7 @@ interface HostApiV1 {
     // Network & Serialization
     fun fetch(spec: HostFetchSpec): HostFetchResult
     fun fetchText(spec: HostFetchSpec): String
+    fun fetchJson(spec: HostFetchSpec): Any?
     fun fetchAll(specs: List<HostFetchSpec>, concurrency: Int = 6): List<HostFetchResult>
     fun isAccessible(url: String): Boolean
     fun json(text: String): Any?
@@ -135,6 +136,11 @@ internal class HostApiV1Impl(
             error("HTTP ${result.code}")
         }
         return utf8(result.body)
+    }
+
+    override fun fetchJson(spec: HostFetchSpec): Any? {
+        val text = fetchText(spec)
+        return json(text)
     }
 
     override fun fetchAll(specs: List<HostFetchSpec>, concurrency: Int): List<HostFetchResult> {

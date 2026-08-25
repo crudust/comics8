@@ -411,6 +411,26 @@ class HostApiV1Test {
         assertThat(jsonDoc.getString("id")).isEqualTo("999")
         assertThat(jsonDoc.getString("title")).isEqualTo("만화 제목")
         assertThat(jsonDoc.getString("bg")).isEqualTo("/thumb.jpg")
+
+        // 7. host.fetchJson
+        val mockHttp = object : SourceHttp {
+            override fun fetch(spec: FetchSpec): HttpResult =
+                HttpResult(200, emptyMap(), """{"status":"ok","count":42}""".toByteArray())
+            override fun fetchText(spec: FetchSpec): String = """{"status":"ok","count":42}"""
+            override fun isAccessible(url: String, policy: RequestPolicy): Boolean = true
+        }
+        val jsonFetch = evalJsonOn(
+            engine,
+            handle,
+            """
+            (function() {
+                return host.fetchJson({ url: "https://example.com/api" });
+            })()
+            """.trimIndent(),
+            mockHttp,
+        )
+        assertThat(jsonFetch.getString("status")).isEqualTo("ok")
+        assertThat(jsonFetch.getInt("count")).isEqualTo(42)
     }
 
     private fun evalJson(expression: String, http: SourceHttp): JSONObject {

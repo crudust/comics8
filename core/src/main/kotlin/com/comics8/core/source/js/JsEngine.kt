@@ -103,7 +103,11 @@ class JsEngine(
         item: ToonItem,
     ): List<String> {
         val result = invoke(handle, "resolveImages", http, arrayOf(episode, item))
-        return JsValues.asList(result).map { Context.toString(it) }
+        val images = JsValues.asList(result).map { Context.toString(it) }
+        if (images.isEmpty()) {
+            error("만화 이미지를 불러오지 못했습니다.")
+        }
+        return images
     }
 
     fun callStringList(handle: JsSourceHandle, name: String, arg: Any?): List<String> {
@@ -130,22 +134,43 @@ class JsEngine(
         choice: ArtistRef,
         entryEpisodeId: String?,
     ): ToonItem? {
-        if (!handle.hasFunction("resolveParent")) return null
-        val result = invoke(handle, "resolveParent", http = null, args = arrayOf(item, choice, entryEpisodeId))
-        if (JsValues.isNullish(result)) return null
-        return toonFromJs(result, handle.id)
+        if (handle.hasFunction("resolveParent")) {
+            val result = invoke(handle, "resolveParent", http = null, args = arrayOf(item, choice, entryEpisodeId))
+            if (!JsValues.isNullish(result)) return toonFromJs(result, handle.id)
+        }
+        val entry = entryEpisodeId?.takeIf { it.isNotBlank() } ?: item.entryEpisodeId
+        return ToonItem(
+            id = "artist:${choice.slug}",
+            title = choice.displayName,
+            thumbUrl = item.thumbUrl,
+            href = item.href,
+            genre = item.genre,
+            updatedAt = item.updatedAt,
+            sourceId = handle.id,
+            entryEpisodeId = entry,
+        )
     }
 
     fun callNotificationCandidates(handle: JsSourceHandle, favorites: List<ToonItem>): List<ToonItem> {
-        if (!handle.hasFunction("notificationCandidates")) return favorites
-        val result = invoke(handle, "notificationCandidates", http = null, args = arrayOf(favorites))
-        return JsValues.asList(result).map { toonFromJs(it, handle.id) }
+        if (handle.hasFunction("notificationCandidates")) {
+            val result = invoke(handle, "notificationCandidates", http = null, args = arrayOf(favorites))
+            return JsValues.asList(result).map { toonFromJs(it, handle.id) }
+        }
+        if (handle.notificationMode == NotificationMode.PER_FAVORITE) {
+            return favorites.filter { it.id.startsWith("artist:") }
+        }
+        return favorites
     }
 
     fun callSupportsChapterNotifications(handle: JsSourceHandle, item: ToonItem, default: Boolean): Boolean {
-        if (!handle.hasFunction("supportsChapterNotifications")) return default
-        val result = invoke(handle, "supportsChapterNotifications", http = null, args = arrayOf(item))
-        return JsValues.asBoolean(result, default)
+        if (handle.hasFunction("supportsChapterNotifications")) {
+            val result = invoke(handle, "supportsChapterNotifications", http = null, args = arrayOf(item))
+            return JsValues.asBoolean(result, default)
+        }
+        if (handle.notificationMode == NotificationMode.PER_FAVORITE) {
+            return item.id.startsWith("artist:")
+        }
+        return default
     }
 
     fun applyConfig(handle: JsSourceHandle, config: SourceConfig) {
