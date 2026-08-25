@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,10 +27,16 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.zIndex
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -95,6 +102,8 @@ fun SourceManagerPane(
 
     val sources = state.installedSources
     val storageSources = sources.filter { it.resolveSourceType().isStorage }
+    val localSource = storageSources.firstOrNull { it.id == WorkId.LOCAL_SOURCE || it.resolveSourceType() == SourceType.LOCAL }
+    val networkStorageSources = storageSources.filterNot { it == localSource }
     val onlineSources = sources.filterNot { it.resolveSourceType().isStorage }
 
     Scaffold(
@@ -156,52 +165,74 @@ fun SourceManagerPane(
                 top = innerPadding.calculateTopPadding() + 8.dp,
                 bottom = innerPadding.calculateBottomPadding() + 24.dp,
             ),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxSize(),
         ) {
             // ==========================================
-            // 분류 1: 파일 저장소 (로컬 & 네트워크 SMB/WebDAV)
+            // 분류 1: 로컬 / SMB / WebDAV
             // ==========================================
             item {
-                SectionHeader(title = "파일 저장소 (로컬 / SMB / WebDAV)", icon = Icons.Default.Storage)
+                SectionHeader(title = "로컬 / SMB / WebDAV", icon = Icons.Default.Storage)
             }
-            items(storageSources, key = { it.id }) { source ->
-                val sType = source.resolveSourceType()
-                val currentMode = viewModel.getSourceProgressDisplayMode(source.id)
-                val icon = when (sType) {
-                    SourceType.LOCAL -> Icons.Default.Folder
-                    SourceType.SMB -> Icons.Default.Dns
-                    SourceType.WEBDAV -> Icons.Default.Cloud
-                    else -> Icons.Default.Folder
-                }
-                val subtitle = when (sType) {
-                    SourceType.LOCAL -> if (state.libraryRoots.isEmpty()) "등록된 폴더 없음" else "${state.libraryRoots.size}개 폴더 연결됨"
-                    SourceType.SMB -> {
-                        val netSource = source as? NetworkLibrarySource
-                        if (netSource != null) "SMB: ${netSource.config.host}/${netSource.config.share}" else "SMB 드라이브"
-                    }
-                    SourceType.WEBDAV -> {
-                        val netSource = source as? NetworkLibrarySource
-                        if (netSource != null) "WebDAV: ${netSource.config.url.ifBlank { netSource.config.host }}" else "WebDAV 드라이브"
-                    }
-                    else -> sType.label
-                }
 
-                SourceItemCard(
-                    icon = icon,
-                    title = source.displayName,
-                    subtitle = subtitle,
-                    modeLabel = currentMode.label,
-                    onClick = { selectedSourceForDetail = source },
-                )
+            // 최상단 고정 로컬 저장소
+            if (localSource != null) {
+                item(key = localSource.id) {
+                    val currentMode = viewModel.getSourceProgressDisplayMode(localSource.id)
+                    val subtitle = if (state.libraryRoots.isEmpty()) "등록된 폴더 없음" else "${state.libraryRoots.size}개 폴더 연결됨"
+
+                    SourceItemCard(
+                        icon = Icons.Default.Folder,
+                        title = localSource.displayName,
+                        subtitle = subtitle,
+                        modeLabel = currentMode.label,
+                        onClick = { selectedSourceForDetail = localSource },
+                    )
+                }
+            }
+
+            // SMB / WebDAV 저장소 목록 (드래그 정렬 가능)
+            if (networkStorageSources.isNotEmpty()) {
+                item {
+                    ReorderableItemColumn(
+                        items = networkStorageSources,
+                        key = { it.id },
+                        onReorder = viewModel::reorderStorageSources,
+                    ) { source, dragModifier, isDragging ->
+                        val sType = source.resolveSourceType()
+                        val currentMode = viewModel.getSourceProgressDisplayMode(source.id)
+                        val icon = if (sType == SourceType.SMB) Icons.Default.Dns else Icons.Default.Cloud
+                        val subtitle = when (sType) {
+                            SourceType.SMB -> {
+                                val netSource = source as? NetworkLibrarySource
+                                if (netSource != null) "SMB: ${netSource.config.host}/${netSource.config.share}" else "SMB 드라이브"
+                            }
+                            SourceType.WEBDAV -> {
+                                val netSource = source as? NetworkLibrarySource
+                                if (netSource != null) "WebDAV: ${netSource.config.url.ifBlank { netSource.config.host }}" else "WebDAV 드라이브"
+                            }
+                            else -> sType.label
+                        }
+
+                        SourceItemCard(
+                            icon = icon,
+                            title = source.displayName,
+                            subtitle = subtitle,
+                            modeLabel = currentMode.label,
+                            onClick = { selectedSourceForDetail = source },
+                            dragHandleModifier = dragModifier,
+                            isDragging = isDragging,
+                        )
+                    }
+                }
             }
 
             // ==========================================
-            // 분류 2: 온라인 & 확장 스크립트 (웹 / JS 확장)
+            // 분류 2: 웹 / JS 스크립트
             // ==========================================
             item {
-                Spacer(Modifier.height(8.dp))
-                SectionHeader(title = "온라인 & 확장 소스 (웹 / JS 스크립트)", icon = Icons.Default.Public)
+                Spacer(Modifier.height(4.dp))
+                SectionHeader(title = "웹 / JS 스크립트", icon = Icons.Default.Public)
             }
             if (onlineSources.isEmpty()) {
                 item {
@@ -215,19 +246,27 @@ fun SourceManagerPane(
                     )
                 }
             } else {
-                items(onlineSources, key = { it.id }) { source ->
-                    val sType = source.resolveSourceType()
-                    val icon = if (sType == SourceType.JS) Icons.Default.Description else Icons.Default.Language
-                    val subtitle = sType.label
-                    val currentMode = viewModel.getSourceProgressDisplayMode(source.id)
+                item {
+                    ReorderableItemColumn(
+                        items = onlineSources,
+                        key = { it.id },
+                        onReorder = viewModel::reorderOnlineSources,
+                    ) { source, dragModifier, isDragging ->
+                        val sType = source.resolveSourceType()
+                        val icon = if (sType == SourceType.JS) Icons.Default.Description else Icons.Default.Language
+                        val subtitle = sType.label
+                        val currentMode = viewModel.getSourceProgressDisplayMode(source.id)
 
-                    SourceItemCard(
-                        icon = icon,
-                        title = source.displayName,
-                        subtitle = subtitle,
-                        modeLabel = currentMode.label,
-                        onClick = { selectedSourceForDetail = source },
-                    )
+                        SourceItemCard(
+                            icon = icon,
+                            title = source.displayName,
+                            subtitle = subtitle,
+                            modeLabel = currentMode.label,
+                            onClick = { selectedSourceForDetail = source },
+                            dragHandleModifier = dragModifier,
+                            isDragging = isDragging,
+                        )
+                    }
                 }
             }
         }
@@ -280,19 +319,122 @@ private fun SectionHeader(title: String, icon: ImageVector) {
 }
 
 @Composable
+private fun <T : Any> ReorderableItemColumn(
+    items: List<T>,
+    key: (T) -> Any,
+    onReorder: (fromIndex: Int, toIndex: Int) -> Unit,
+    modifier: Modifier = Modifier,
+    spacing: androidx.compose.ui.unit.Dp = 10.dp,
+    itemContent: @Composable (item: T, dragHandleModifier: Modifier, isDragging: Boolean) -> Unit,
+) {
+    var localList by remember(items) { mutableStateOf(items) }
+    var draggingKey by remember { mutableStateOf<Any?>(null) }
+    var dragOffsetY by remember { mutableStateOf(0f) }
+    val itemHeights = remember { mutableMapOf<Any, Float>() }
+    val density = LocalDensity.current
+
+    Column(
+        verticalArrangement = Arrangement.spacedBy(spacing),
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        localList.forEachIndexed { index, item ->
+            val itemKey = key(item)
+            val isDragging = draggingKey == itemKey
+            val yOffset = if (isDragging) dragOffsetY else 0f
+            val zIndex = if (isDragging) 10f else 1f
+
+            val dragHandleModifier = Modifier.pointerInput(itemKey, localList) {
+                detectDragGestures(
+                    onDragStart = {
+                        draggingKey = itemKey
+                        dragOffsetY = 0f
+                    },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        dragOffsetY += dragAmount.y
+                        val currentK = draggingKey ?: return@detectDragGestures
+                        val currentIndex = localList.indexOfFirst { key(it) == currentK }
+                        if (currentIndex == -1) return@detectDragGestures
+
+                        val itemHeight = itemHeights[currentK] ?: (60f * density.density)
+                        val threshold = itemHeight * 0.5f
+
+                        if (dragOffsetY > threshold && currentIndex < localList.lastIndex) {
+                            val targetIndex = currentIndex + 1
+                            val targetHeight = itemHeights[key(localList[targetIndex])] ?: itemHeight
+                            localList = localList.toMutableList().apply {
+                                val elem = removeAt(currentIndex)
+                                add(targetIndex, elem)
+                            }
+                            dragOffsetY -= targetHeight
+                        } else if (dragOffsetY < -threshold && currentIndex > 0) {
+                            val targetIndex = currentIndex - 1
+                            val targetHeight = itemHeights[key(localList[targetIndex])] ?: itemHeight
+                            localList = localList.toMutableList().apply {
+                                val elem = removeAt(currentIndex)
+                                add(targetIndex, elem)
+                            }
+                            dragOffsetY += targetHeight
+                        }
+                    },
+                    onDragEnd = {
+                        val currentK = draggingKey
+                        draggingKey = null
+                        dragOffsetY = 0f
+                        if (currentK != null) {
+                            val originalIndex = items.indexOfFirst { key(it) == currentK }
+                            val newIndex = localList.indexOfFirst { key(it) == currentK }
+                            if (originalIndex != -1 && newIndex != -1 && originalIndex != newIndex) {
+                                onReorder(originalIndex, newIndex)
+                            }
+                        }
+                    },
+                    onDragCancel = {
+                        draggingKey = null
+                        dragOffsetY = 0f
+                        localList = items
+                    },
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .zIndex(zIndex)
+                    .graphicsLayer {
+                        translationY = yOffset
+                        if (isDragging) {
+                            shadowElevation = 8.dp.toPx()
+                            shape = RoundedCornerShape(12.dp)
+                            clip = false
+                        }
+                    }
+                    .onGloballyPositioned { coordinates ->
+                        itemHeights[itemKey] = coordinates.size.height.toFloat()
+                    },
+            ) {
+                itemContent(item, dragHandleModifier, isDragging)
+            }
+        }
+    }
+}
+
+@Composable
 private fun SourceItemCard(
     icon: ImageVector,
     title: String,
     subtitle: String,
     modeLabel: String,
     onClick: () -> Unit,
+    dragHandleModifier: Modifier? = null,
+    isDragging: Boolean = false,
 ) {
     Surface(
         shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        color = if (isDragging) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f) else MaterialTheme.colorScheme.surfaceVariant,
         border = androidx.compose.foundation.BorderStroke(
-            width = 1.dp,
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+            width = if (isDragging) 1.5.dp else 1.dp,
+            color = if (isDragging) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
         ),
         modifier = Modifier
             .fillMaxWidth()
@@ -377,6 +519,24 @@ private fun SourceItemCard(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                 modifier = Modifier.size(16.dp),
             )
+
+            if (dragHandleModifier != null) {
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .then(dragHandleModifier)
+                        .clip(RoundedCornerShape(6.dp))
+                        .padding(4.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.DragHandle,
+                        contentDescription = "순서 변경",
+                        tint = if (isDragging) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
         }
     }
 }

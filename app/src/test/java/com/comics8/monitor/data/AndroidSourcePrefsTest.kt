@@ -24,5 +24,9 @@ class AndroidSourcePrefsTest {
         assertThat(settings.libraryRoots()).containsExactly(uri)
         settings.setEnabled(WorkId.LOCAL_SOURCE, true)
         assertThat(settings.installedIds()).contains(WorkId.LOCAL_SOURCE)
+
+        val customOrder = linkedSetOf("local", "smb:nas", "webdav:drive", "hitomi", "eleven")
+        settings.setInstalledIds(customOrder)
+        assertThat(settings.installedIds().toList()).containsExactly("local", "smb:nas", "webdav:drive", "hitomi", "eleven").inOrder()
     }
 }

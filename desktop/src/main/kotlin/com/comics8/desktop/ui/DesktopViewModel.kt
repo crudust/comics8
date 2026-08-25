@@ -16,6 +16,7 @@ import com.comics8.core.source.network.NetworkProtocol
 import com.comics8.core.source.network.NetworkSourceConfig
 import com.comics8.core.source.network.NetworkSourceStore
 import com.comics8.core.source.network.createNetworkFileSystem
+import com.comics8.core.source.resolveSourceType
 import com.comics8.core.sync.AppUpdateChecker
 import com.comics8.core.sync.SyncConstants
 import com.comics8.desktop.DesktopVersion
@@ -1461,6 +1462,42 @@ class DesktopViewModel(
 
     fun closeSourceManager() {
         _state.update { it.copy(screen = Screen.Browse) }
+    }
+
+    fun reorderStorageSources(fromIndex: Int, toIndex: Int) {
+        val current = _state.value.installedSources
+        val networkStorage = current.filter { it.resolveSourceType().isStorage && it.id != WorkId.LOCAL_SOURCE }
+        if (fromIndex !in networkStorage.indices || toIndex !in networkStorage.indices) return
+        val mutable = networkStorage.toMutableList()
+        val moved = mutable.removeAt(fromIndex)
+        mutable.add(toIndex, moved)
+
+        val online = current.filterNot { it.resolveSourceType().isStorage }
+        val newIds = linkedSetOf<String>().apply {
+            add(WorkId.LOCAL_SOURCE)
+            mutable.forEach { add(it.id) }
+            online.forEach { add(it.id) }
+        }
+        DesktopSourcePrefs.setInstalledIds(newIds)
+        _state.update { it.copy(installedSources = repository.installedSources()) }
+    }
+
+    fun reorderOnlineSources(fromIndex: Int, toIndex: Int) {
+        val current = _state.value.installedSources
+        val online = current.filterNot { it.resolveSourceType().isStorage }
+        if (fromIndex !in online.indices || toIndex !in online.indices) return
+        val mutable = online.toMutableList()
+        val moved = mutable.removeAt(fromIndex)
+        mutable.add(toIndex, moved)
+
+        val storage = current.filter { it.resolveSourceType().isStorage && it.id != WorkId.LOCAL_SOURCE }
+        val newIds = linkedSetOf<String>().apply {
+            add(WorkId.LOCAL_SOURCE)
+            storage.forEach { add(it.id) }
+            mutable.forEach { add(it.id) }
+        }
+        DesktopSourcePrefs.setInstalledIds(newIds)
+        _state.update { it.copy(installedSources = repository.installedSources()) }
     }
 
     fun setSourceProgressDisplayMode(sourceId: String, mode: com.comics8.core.model.ProgressDisplayMode) {

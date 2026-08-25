@@ -597,7 +597,7 @@ private fun SourceTitleDropdown(
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val orderedSources = sources.sortedBy { it.id != com.comics8.core.source.WorkId.LOCAL_SOURCE }
+    val orderedSources = sources
     val activeSource = orderedSources.firstOrNull { it.id == activeSourceId }
     val label = activeSource?.displayName
         ?: registry.chipLabel(activeSourceId.orEmpty()).ifBlank { "소스 선택" }

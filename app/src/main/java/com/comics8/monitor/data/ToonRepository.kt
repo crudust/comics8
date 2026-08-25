@@ -22,6 +22,7 @@ import com.comics8.core.source.SourceAccess
 import com.comics8.core.source.SourceConfig
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
+import com.comics8.core.source.resolveSourceType
 import com.comics8.monitor.data.local.AppDatabase
 import com.comics8.monitor.data.local.FavoriteDao
 import com.comics8.monitor.data.local.FavoriteToon
@@ -76,7 +77,34 @@ class ToonRepository(
 
     fun installedSources(): List<ComicSource> {
         val ids = installedIds()
-        return sources.all().filter { it.id in ids }
+        val all = sources.all()
+        val byId = all.associateBy { it.id }
+
+        val local = byId[WorkId.LOCAL_SOURCE]
+
+        val orderedStorage = ids.mapNotNull { id ->
+            if (id != WorkId.LOCAL_SOURCE) {
+                byId[id]?.takeIf { it.resolveSourceType().isStorage }
+            } else null
+        }
+        val remainingStorage = all.filter {
+            it.id in ids && it.resolveSourceType().isStorage && it.id != WorkId.LOCAL_SOURCE && it !in orderedStorage
+        }
+
+        val orderedOnline = ids.mapNotNull { id ->
+            byId[id]?.takeIf { !it.resolveSourceType().isStorage }
+        }
+        val remainingOnline = all.filter {
+            it.id in ids && !it.resolveSourceType().isStorage && it !in orderedOnline
+        }
+
+        return buildList {
+            if (local != null && local.id in ids) add(local)
+            addAll(orderedStorage)
+            addAll(remainingStorage)
+            addAll(orderedOnline)
+            addAll(remainingOnline)
+        }
     }
 
     fun activeSource(stored: String?): ComicSource? = sources.resolveActive(stored, installedIds())
