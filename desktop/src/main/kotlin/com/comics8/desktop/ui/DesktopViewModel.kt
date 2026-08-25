@@ -632,7 +632,8 @@ class DesktopViewModel(
     }
 
     fun getJsSourceScript(sourceId: String): String? {
-        val file = jsPackStore.fileFor(sourceId)
+        if (sourceId == WorkId.LOCAL_SOURCE || sourceId.startsWith("network-")) return null
+        val file = runCatching { jsPackStore.fileFor(sourceId) }.getOrNull() ?: return null
         return if (file.isFile) {
             runCatching { file.readText(Charsets.UTF_8) }.getOrNull()
         } else null

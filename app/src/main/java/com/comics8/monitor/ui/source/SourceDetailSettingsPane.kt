@@ -91,10 +91,10 @@ fun SourceDetailSettingsPane(
 ) {
     val context = LocalContext.current
     val isLocal = source.id == WorkId.LOCAL_SOURCE
-    val netConfig = remember(source.id) { viewModel.getNetworkSourceConfig(source.id) }
+    val netConfig = remember(source.id) { if (isLocal) null else viewModel.getNetworkSourceConfig(source.id) }
     val isSmb = netConfig?.protocol == NetworkProtocol.SMB
     val isWebDav = netConfig?.protocol == NetworkProtocol.WEBDAV
-    val isJs = source is JsComicSource || viewModel.getJsSourceScript(source.id) != null
+    val isJs = source is JsComicSource || (!isLocal && !isSmb && !isWebDav && viewModel.getJsSourceScript(source.id) != null)
 
     var currentProgressMode by remember {
         mutableStateOf(viewModel.getSourceProgressDisplayMode(source.id))
@@ -121,13 +121,15 @@ fun SourceDetailSettingsPane(
 
     // JS 스크립트 편집 상태
     var jsScriptCode by remember(source.id) {
-        mutableStateOf(viewModel.getJsSourceScript(source.id).orEmpty())
+        mutableStateOf(if (isJs) viewModel.getJsSourceScript(source.id).orEmpty() else "")
     }
 
-    LaunchedEffect(source.id) {
-        val loaded = viewModel.getJsSourceScript(source.id)
-        if (loaded != null && jsScriptCode.isEmpty()) {
-            jsScriptCode = loaded
+    LaunchedEffect(source.id, isJs) {
+        if (isJs) {
+            val loaded = viewModel.getJsSourceScript(source.id)
+            if (loaded != null && jsScriptCode.isEmpty()) {
+                jsScriptCode = loaded
+            }
         }
     }
 
@@ -135,53 +137,57 @@ fun SourceDetailSettingsPane(
     var folderToDelete by remember { mutableStateOf<String?>(null) }
     var isSaving by remember { mutableStateOf(false) }
 
-    fun doSave() {
-        if (isSmb && netConfig != null) {
-            isSaving = true
-            val newConfig = netConfig.copy(
-                name = smbName.trim().ifBlank { "SMB" },
-                host = smbHost.trim(),
-                port = smbPort.toIntOrNull() ?: 445,
-                share = smbShare.trim(),
-                path = smbPath.trim(),
-                username = smbUsername.trim(),
-                password = smbPassword,
-                domain = smbDomain.trim(),
-            )
-            viewModel.updateNetworkSourceConfig(newConfig) { success, msg ->
-                isSaving = false
-                if (success) {
-                    Toast.makeText(context, "연결 설정이 저장되었습니다.", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(context, msg ?: "저장 실패", Toast.LENGTH_LONG).show()
-                }
+    fun saveSmb() {
+        if (netConfig == null) return
+        isSaving = true
+        val newConfig = netConfig.copy(
+            name = smbName.trim().ifBlank { "SMB" },
+            host = smbHost.trim(),
+            port = smbPort.toIntOrNull() ?: 445,
+            share = smbShare.trim(),
+            path = smbPath.trim(),
+            username = smbUsername.trim(),
+            password = smbPassword,
+            domain = smbDomain.trim(),
+        )
+        viewModel.updateNetworkSourceConfig(newConfig) { success, msg ->
+            isSaving = false
+            if (success) {
+                Toast.makeText(context, "SMB 연결 설정이 저장되었습니다.", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, msg ?: "저장 실패", Toast.LENGTH_LONG).show()
             }
-        } else if (isWebDav && netConfig != null) {
-            isSaving = true
-            val newConfig = netConfig.copy(
-                name = davName.trim().ifBlank { "WebDAV" },
-                url = davUrl.trim(),
-                path = davPath.trim(),
-                username = davUsername.trim(),
-                password = davPassword,
-            )
-            viewModel.updateNetworkSourceConfig(newConfig) { success, msg ->
-                isSaving = false
-                if (success) {
-                    Toast.makeText(context, "연결 설정이 저장되었습니다.", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(context, msg ?: "저장 실패", Toast.LENGTH_LONG).show()
-                }
+        }
+    }
+
+    fun saveWebDav() {
+        if (netConfig == null) return
+        isSaving = true
+        val newConfig = netConfig.copy(
+            name = davName.trim().ifBlank { "WebDAV" },
+            url = davUrl.trim(),
+            path = davPath.trim(),
+            username = davUsername.trim(),
+            password = davPassword,
+        )
+        viewModel.updateNetworkSourceConfig(newConfig) { success, msg ->
+            isSaving = false
+            if (success) {
+                Toast.makeText(context, "WebDAV 연결 설정이 저장되었습니다.", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, msg ?: "저장 실패", Toast.LENGTH_LONG).show()
             }
-        } else if (isJs) {
-            isSaving = true
-            viewModel.updateJsSourceScript(source.id, jsScriptCode) { success, msg ->
-                isSaving = false
-                if (success) {
-                    Toast.makeText(context, "JS 스크립트가 저장되었습니다.", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(context, msg ?: "저장 실패", Toast.LENGTH_LONG).show()
-                }
+        }
+    }
+
+    fun saveJs() {
+        isSaving = true
+        viewModel.updateJsSourceScript(source.id, jsScriptCode) { success, msg ->
+            isSaving = false
+            if (success) {
+                Toast.makeText(context, "JS 스크립트가 저장되었습니다.", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, msg ?: "저장 실패", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -206,25 +212,6 @@ fun SourceDetailSettingsPane(
                             contentDescription = "뒤로가기",
                             tint = MaterialTheme.colorScheme.onBackground,
                         )
-                    }
-                },
-                actions = {
-                    if (isSmb || isWebDav || isJs) {
-                        Button(
-                            onClick = ::doSave,
-                            enabled = !isSaving,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primary,
-                                contentColor = MaterialTheme.colorScheme.onPrimary,
-                            ),
-                            shape = RoundedCornerShape(10.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                            modifier = Modifier.padding(end = 8.dp),
-                        ) {
-                            Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("저장", fontWeight = FontWeight.Bold)
-                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -554,6 +541,22 @@ fun SourceDetailSettingsPane(
                                     },
                                     modifier = Modifier.fillMaxWidth(),
                                 )
+
+                                Spacer(Modifier.height(4.dp))
+                                Button(
+                                    onClick = ::saveSmb,
+                                    enabled = !isSaving,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                                    ),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("SMB 연결 설정 저장", fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
                     }
@@ -628,6 +631,22 @@ fun SourceDetailSettingsPane(
                                     },
                                     modifier = Modifier.fillMaxWidth(),
                                 )
+
+                                Spacer(Modifier.height(4.dp))
+                                Button(
+                                    onClick = ::saveWebDav,
+                                    enabled = !isSaving,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                                    ),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("WebDAV 연결 설정 저장", fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
                     }
@@ -637,23 +656,7 @@ fun SourceDetailSettingsPane(
             if (isJs) {
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            SectionTitle(title = "JS 확장 스크립트 코드 편집", icon = Icons.Default.Code)
-                            Button(
-                                onClick = ::doSave,
-                                enabled = !isSaving,
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                            ) {
-                                Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("적용", style = MaterialTheme.typography.labelSmall)
-                            }
-                        }
+                        SectionTitle(title = "JS 확장 스크립트 코드 편집", icon = Icons.Default.Code)
 
                         Surface(
                             shape = RoundedCornerShape(12.dp),
@@ -666,7 +669,7 @@ fun SourceDetailSettingsPane(
                         ) {
                             Column(
                                 modifier = Modifier.padding(14.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
                                 OutlinedTextField(
                                     value = jsScriptCode,
@@ -681,6 +684,21 @@ fun SourceDetailSettingsPane(
                                     maxLines = 35,
                                     modifier = Modifier.fillMaxWidth(),
                                 )
+
+                                Button(
+                                    onClick = ::saveJs,
+                                    enabled = !isSaving,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                                    ),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("JS 스크립트 저장 및 적용", fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
                     }
