@@ -1612,6 +1612,74 @@ class DesktopViewModel(
         repository.syncManager?.setUseServerProxy(enabled)
     }
 
+    fun requestPairingCode(onResult: (com.comics8.core.model.PairRequestResult) -> Unit) {
+        scope.launch {
+            val sm = repository.syncManager
+            if (sm == null) {
+                onResult(com.comics8.core.model.PairRequestResult(false, message = "동기화 매니저를 찾을 수 없습니다."))
+                return@launch
+            }
+            val res = sm.requestPairingCode()
+            onResult(res)
+        }
+    }
+
+    fun confirmPairingCode(code: String, onResult: (com.comics8.core.model.PairConfirmResult) -> Unit) {
+        scope.launch {
+            val sm = repository.syncManager
+            if (sm == null) {
+                onResult(com.comics8.core.model.PairConfirmResult(false, message = "동기화 매니저를 찾을 수 없습니다."))
+                return@launch
+            }
+            val res = sm.confirmPairingCode(code)
+            if (res.success) {
+                syncNow()
+            }
+            onResult(res)
+        }
+    }
+
+    fun exportBackup(file: java.io.File, onResult: (Boolean, String) -> Unit) {
+        scope.launch {
+            try {
+                val json = repository.exportBackupJson()
+                withContext(Dispatchers.IO) {
+                    file.writeText(json, Charsets.UTF_8)
+                }
+                val stats = repository.getBackupStats()
+                onResult(true, "백업 파일이 저장되었습니다. (즐겨찾기 ${stats.favoriteCount}개, 기록 ${stats.historyCount}개)")
+            } catch (e: Exception) {
+                onResult(false, "백업 저장 실패: ${e.localizedMessage ?: "알 수 없는 오류"}")
+            }
+        }
+    }
+
+    fun importBackup(file: java.io.File, onResult: (Boolean, String) -> Unit) {
+        scope.launch {
+            try {
+                val json = withContext(Dispatchers.IO) {
+                    file.readText(Charsets.UTF_8)
+                }
+                val result = repository.importBackupJson(json)
+                if (result.success) {
+                    if (_state.value.activeSourceId != null) {
+                        loadPage(page = _state.value.page, replace = true)
+                    }
+                    val sourceId = _state.value.activeSourceId
+                    if (sourceId != null) {
+                        val updatedHistory = repository.getHistory(sourceId)
+                        _state.update { it.copy(historyItems = updatedHistory) }
+                    }
+                    onResult(true, "복원 완료: 즐겨찾기 ${result.favoriteCount}개, 기록 ${result.historyCount}개")
+                } else {
+                    onResult(false, result.message)
+                }
+            } catch (e: Exception) {
+                onResult(false, "복원 실패: ${e.localizedMessage ?: "파일 읽기 오류"}")
+            }
+        }
+    }
+
     fun openSeriesFromHistory(item: ReadHistoryRecord) {
         openSeries(item.toToonItem())
     }

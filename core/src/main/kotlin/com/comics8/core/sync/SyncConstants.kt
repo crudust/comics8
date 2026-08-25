@@ -10,7 +10,10 @@ object SyncConstants {
 
     fun generateSyncKey(): String {
         val chars = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
-        return (1..4).map { chars.random() }.joinToString("")
+        val part1 = (1..4).map { chars.random() }.joinToString("")
+        val part2 = (1..4).map { chars.random() }.joinToString("")
+        val part3 = (1..4).map { chars.random() }.joinToString("")
+        return "C8-$part1-$part2-$part3"
     }
 
     fun apiRoot(serverUrl: String = DEFAULT_SERVER_URL): String {
@@ -20,9 +23,14 @@ object SyncConstants {
             base.endsWith("/proxy") -> base.substringBeforeLast("/proxy")
             base.endsWith("/version") -> base.substringBeforeLast("/version")
             base.endsWith("/health") -> base.substringBeforeLast("/health")
+            base.endsWith("/pair") -> base.substringBeforeLast("/pair")
             else -> base
         }.trimEnd('/')
     }
+
+    fun pairRequestUrl(serverUrl: String = DEFAULT_SERVER_URL): String = "${apiRoot(serverUrl)}/pair/request"
+
+    fun pairConfirmUrl(serverUrl: String = DEFAULT_SERVER_URL): String = "${apiRoot(serverUrl)}/pair/confirm"
 
     fun versionUrl(serverUrl: String = DEFAULT_SERVER_URL): String = "${apiRoot(serverUrl)}/version"
 

@@ -160,6 +160,77 @@ class DesktopSyncManager(
         _syncState.value = _syncState.value.copy(useServerProxy = enabled)
     }
 
+    suspend fun requestPairingCode(): com.comics8.core.model.PairRequestResult = withContext(Dispatchers.IO) {
+        val state = _syncState.value
+        val key = state.syncKey.trim()
+        if (key.isBlank()) return@withContext com.comics8.core.model.PairRequestResult(false, message = "동기화 키가 없습니다.")
+        val pairUrl = SyncConstants.pairRequestUrl(state.serverUrl)
+        try {
+            val reqBody = JSONObject().apply {
+                put("clientTime", System.currentTimeMillis())
+            }.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+            val req = Request.Builder()
+                .url(pairUrl)
+                .addComics8SyncHeaders(key)
+                .post(reqBody)
+                .build()
+            val resp = client.newCall(req).execute()
+            if (!resp.isSuccessful) {
+                return@withContext com.comics8.core.model.PairRequestResult(
+                    success = false,
+                    message = if (resp.code == 404) "서버에 페어링 기능이 지원되지 않습니다. 마스터 복구 키를 이용해주세요." else "페어링 코드 발급 실패 (${resp.code})"
+                )
+            }
+            val body = resp.body?.string().orEmpty()
+            val json = JSONObject(body)
+            val code = json.optString("code", "")
+            val expiresIn = json.optInt("expiresIn", 300)
+            if (code.isBlank()) {
+                return@withContext com.comics8.core.model.PairRequestResult(false, message = "서버 응답 오류")
+            }
+            com.comics8.core.model.PairRequestResult(true, code = code, expiresInSeconds = expiresIn)
+        } catch (e: Exception) {
+            com.comics8.core.model.PairRequestResult(false, message = e.localizedMessage ?: "서버 연결 오류")
+        }
+    }
+
+    suspend fun confirmPairingCode(code: String): com.comics8.core.model.PairConfirmResult = withContext(Dispatchers.IO) {
+        val trimmedCode = code.trim().replace(" ", "").replace("-", "")
+        if (trimmedCode.length != 6) {
+            return@withContext com.comics8.core.model.PairConfirmResult(false, message = "6자리 코드를 입력해주세요.")
+        }
+        val state = _syncState.value
+        val confirmUrl = SyncConstants.pairConfirmUrl(state.serverUrl)
+        try {
+            val reqBody = JSONObject().apply {
+                put("code", trimmedCode)
+            }.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+            val req = Request.Builder()
+                .url(confirmUrl)
+                .post(reqBody)
+                .build()
+            val resp = client.newCall(req).execute()
+            if (!resp.isSuccessful) {
+                return@withContext com.comics8.core.model.PairConfirmResult(
+                    success = false,
+                    message = if (resp.code == 404) "유효하지 않거나 만료된 코드입니다." else "인증 실패 (${resp.code})"
+                )
+            }
+            val body = resp.body?.string().orEmpty()
+            val json = JSONObject(body)
+            val syncKey = json.optString("syncKey", "")
+            if (syncKey.isBlank()) {
+                return@withContext com.comics8.core.model.PairConfirmResult(false, message = json.optString("message", "인증 실패"))
+            }
+            updateSyncKey(syncKey)
+            // Immediately perform full sync to restore existing data
+            syncPull()
+            com.comics8.core.model.PairConfirmResult(true, syncKey = syncKey, message = "기기 연결 및 데이터 가져오기 완료")
+        } catch (e: Exception) {
+            com.comics8.core.model.PairConfirmResult(false, message = e.localizedMessage ?: "서버 연결 오류")
+        }
+    }
+
     fun triggerDebouncedPush() {
         if (!_syncState.value.autoSyncEnabled) return
         debounceJob?.cancel()

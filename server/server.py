@@ -8,6 +8,8 @@ import hashlib
 import re
 import urllib.request
 import urllib.error
+import random
+import threading
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urljoin, urlparse
 
@@ -45,6 +47,42 @@ DEFAULT_PROXY_UA = (
     "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/126.0.0.0 Mobile Safari/537.36"
 )
+
+_PAIR_CODES: dict[str, tuple[str, float]] = {}
+_PAIR_LOCK = threading.Lock()
+
+
+def _clean_expired_pair_codes():
+    now = time.time()
+    expired = [c for c, (_, exp) in _PAIR_CODES.items() if exp < now]
+    for c in expired:
+        del _PAIR_CODES[c]
+
+
+def request_pair_code(sync_key: str, ttl_seconds: int = 300) -> str:
+    with _PAIR_LOCK:
+        _clean_expired_pair_codes()
+        for c in list(_PAIR_CODES.keys()):
+            if _PAIR_CODES[c][0] == sync_key:
+                del _PAIR_CODES[c]
+        while True:
+            code = f"{random.randint(100000, 999999)}"
+            if code not in _PAIR_CODES:
+                break
+        _PAIR_CODES[code] = (sync_key, time.time() + ttl_seconds)
+        return code
+
+
+def confirm_pair_code(code: str) -> str | None:
+    with _PAIR_LOCK:
+        _clean_expired_pair_codes()
+        entry = _PAIR_CODES.pop(code, None)
+        if entry is None:
+            return None
+        sync_key, exp = entry
+        if time.time() > exp:
+            return None
+        return sync_key
 
 
 def get_safe_user_id(key: str) -> str:
@@ -1209,6 +1247,43 @@ class SyncHandler(BaseHTTPRequestHandler):
                 return
             except Exception as e:
                 self._send_json(400, {"error": "SaveError", "message": str(e)})
+                return
+
+        # 3. Pairing Code Request Endpoint (/pair/request or /api/comics8/pair/request)
+        if parsed_path in ("/pair/request", "/api/comics8/pair/request"):
+            key = self._get_sync_key()
+            if not key:
+                self._send_json(401, {"success": False, "message": "Missing sync key"})
+                return
+            code = request_pair_code(key, ttl_seconds=300)
+            self._send_json(200, {
+                "success": True,
+                "code": code,
+                "expiresInSeconds": 300,
+            })
+            return
+
+        # 4. Pairing Code Confirm Endpoint (/pair/confirm or /api/comics8/pair/confirm)
+        if parsed_path in ("/pair/confirm", "/api/comics8/pair/confirm"):
+            try:
+                content_len = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_len).decode("utf-8") if content_len > 0 else "{}"
+                req_json = json.loads(body) if body.strip() else {}
+                code = str(req_json.get("code", "")).strip()
+                if not code:
+                    self._send_json(400, {"success": False, "message": "페어링 코드를 입력해주세요."})
+                    return
+                sync_key = confirm_pair_code(code)
+                if not sync_key:
+                    self._send_json(400, {"success": False, "message": "유효하지 않거나 만료된 페어링 코드입니다."})
+                    return
+                self._send_json(200, {
+                    "success": True,
+                    "syncKey": sync_key,
+                })
+                return
+            except Exception as e:
+                self._send_json(400, {"success": False, "message": str(e)})
                 return
 
         self._send_json(404, {"error": "Not Found"})

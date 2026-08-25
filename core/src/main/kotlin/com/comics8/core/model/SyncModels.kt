@@ -36,3 +36,16 @@ data class SyncTombstone(
     val entityId: String,
     val deletedAt: Long,
 )
+
+data class PairRequestResult(
+    val success: Boolean,
+    val code: String = "",
+    val expiresInSeconds: Int = 300,
+    val message: String? = null,
+)
+
+data class PairConfirmResult(
+    val success: Boolean,
+    val syncKey: String = "",
+    val message: String? = null,
+)

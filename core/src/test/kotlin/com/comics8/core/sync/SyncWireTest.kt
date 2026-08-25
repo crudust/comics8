@@ -62,4 +62,23 @@ class SyncWireTest {
         assertThat(req.header("Authorization")).isEqualTo("Bearer TEST_KEY")
         assertThat(req.header("X-Sync-Key")).isEqualTo("TEST_KEY")
     }
+
+    @Test
+    fun generateSyncKeyProducesSecureMasterFormat() {
+        val key = SyncConstants.generateSyncKey()
+        assertThat(key).matches("""^C8-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$""")
+        val anotherKey = SyncConstants.generateSyncKey()
+        assertThat(key).isNotEqualTo(anotherKey)
+    }
+
+    @Test
+    fun pairingUrlsAreConstructedCorrectly() {
+        val baseUrl = "https://sync.comics8.example.com"
+        val reqUrl = SyncConstants.pairRequestUrl(baseUrl)
+        val confUrl = SyncConstants.pairConfirmUrl(baseUrl)
+
+        assertThat(reqUrl).isEqualTo("https://sync.comics8.example.com/pair/request")
+        assertThat(confUrl).isEqualTo("https://sync.comics8.example.com/pair/confirm")
+    }
 }
+

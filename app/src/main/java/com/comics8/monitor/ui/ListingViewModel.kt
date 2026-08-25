@@ -1579,6 +1579,80 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         repository.syncManager?.setUseServerProxy(enabled)
     }
 
+    fun requestPairingCode(onResult: (com.comics8.core.model.PairRequestResult) -> Unit) {
+        viewModelScope.launch {
+            val sm = repository.syncManager
+            if (sm == null) {
+                onResult(com.comics8.core.model.PairRequestResult(false, message = "동기화 매니저를 찾을 수 없습니다."))
+                return@launch
+            }
+            val res = sm.requestPairingCode()
+            onResult(res)
+        }
+    }
+
+    fun confirmPairingCode(code: String, onResult: (com.comics8.core.model.PairConfirmResult) -> Unit) {
+        viewModelScope.launch {
+            val sm = repository.syncManager
+            if (sm == null) {
+                onResult(com.comics8.core.model.PairConfirmResult(false, message = "동기화 매니저를 찾을 수 없습니다."))
+                return@launch
+            }
+            val res = sm.confirmPairingCode(code)
+            if (res.success) {
+                syncNow()
+            }
+            onResult(res)
+        }
+    }
+
+    fun exportBackup(uri: Uri, onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            try {
+                val json = repository.exportBackupJson()
+                withContext(Dispatchers.IO) {
+                    app.contentResolver.openOutputStream(uri)?.use { os ->
+                        os.write(json.toByteArray(Charsets.UTF_8))
+                    } ?: error("파일을 열 수 없습니다.")
+                }
+                val stats = repository.getBackupStats()
+                onResult(true, "백업 파일이 저장되었습니다. (즐겨찾기 ${stats.favoriteCount}개, 기록 ${stats.historyCount}개)")
+            } catch (e: Exception) {
+                onResult(false, "백업 저장 실패: ${e.localizedMessage ?: "알 수 없는 오류"}")
+            }
+        }
+    }
+
+    fun importBackup(uri: Uri, onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            try {
+                val json = withContext(Dispatchers.IO) {
+                    app.contentResolver.openInputStream(uri)?.use { ins ->
+                        ins.bufferedReader(Charsets.UTF_8).readText()
+                    } ?: error("파일을 읽을 수 없습니다.")
+                }
+                val result = repository.importBackupJson(json)
+                if (result.success) {
+                    if (_state.value.activeSourceId != null) {
+                        loadPage(page = _state.value.page, replace = true)
+                    }
+                    val sourceId = _state.value.activeSourceId
+                    if (sourceId != null) {
+                        val updatedHistory = repository.getHistory(sourceId)
+                        _state.update { it.copy(historyItems = updatedHistory) }
+                    }
+                    onResult(true, "복원 완료: 즐겨찾기 ${result.favoriteCount}개, 기록 ${result.historyCount}개")
+                } else {
+                    onResult(false, result.message)
+                }
+            } catch (e: Exception) {
+                onResult(false, "복원 실패: ${e.localizedMessage ?: "파일 읽기 오류"}")
+            }
+        }
+    }
+
     fun reopenHistoryEpisode(item: ReadHistory, startPage: Int = 0) {
         val toon = item.toToonItem()
         if (_state.value.screen == Screen.History) {

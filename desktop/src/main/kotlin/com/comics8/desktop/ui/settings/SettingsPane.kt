@@ -22,10 +22,17 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Devices
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -35,6 +42,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -44,6 +52,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,13 +64,18 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.comics8.core.model.ReadDirection
 import com.comics8.core.model.ViewMode
 import com.comics8.desktop.DesktopVersion
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
+import kotlinx.coroutines.delay
+import java.awt.FileDialog
+import java.awt.Frame
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -74,8 +88,12 @@ fun SettingsPane(
     modifier: Modifier = Modifier,
 ) {
     val syncState = state.syncState
-    var editKeyInput by remember { mutableStateOf("") }
     var editServerUrl by remember(syncState.serverUrl) { mutableStateOf(syncState.serverUrl) }
+    var showAdvancedSyncSettings by remember { mutableStateOf(false) }
+    var showPairingCodeDialog by remember { mutableStateOf(false) }
+    var showConnectDialog by remember { mutableStateOf(false) }
+    var backupStatusMessage by remember { mutableStateOf<String?>(null) }
+    var isBackupSuccess by remember { mutableStateOf(true) }
 
     Scaffold(
         topBar = {
@@ -115,10 +133,10 @@ fun SettingsPane(
             verticalArrangement = Arrangement.spacedBy(20.dp),
             modifier = Modifier.fillMaxSize(),
         ) {
-            // 섹션 1: 서버 계정 및 실시간 동기화
+            // 섹션 1: 클라우드 동기화 및 기기 연결
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SectionTitle(title = "서버 계정 및 실시간 동기화", icon = Icons.Default.CloudSync)
+                    SectionTitle(title = "클라우드 동기화 및 기기 연결", icon = Icons.Default.CloudSync)
 
                     Surface(
                         shape = RoundedCornerShape(12.dp),
@@ -133,153 +151,115 @@ fun SettingsPane(
                             modifier = Modifier.padding(16.dp),
                             verticalArrangement = Arrangement.spacedBy(14.dp),
                         ) {
-                            // 1. 내 동기화 키 카드
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(MaterialTheme.colorScheme.background.copy(alpha = 0.6f))
-                                    .border(
-                                        width = 1.dp,
-                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
-                                        shape = RoundedCornerShape(10.dp),
-                                    )
-                                    .padding(12.dp),
+                            // 1. 동기화 상태 및 즉시 동기화 버튼
+                            val timeText = if (syncState.lastSyncedAt > 0) {
+                                val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+                                "마지막 동기화: ${sdf.format(Date(syncState.lastSyncedAt))}"
+                            } else {
+                                "동기화 이력 없음"
+                            }
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth(),
                             ) {
-                                Column {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.fillMaxWidth(),
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Key,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(18.dp),
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(8.dp)
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(
+                                                    if (syncState.isSyncing) MaterialTheme.colorScheme.primary
+                                                    else MaterialTheme.colorScheme.tertiary
+                                                )
                                         )
                                         Spacer(Modifier.width(6.dp))
                                         Text(
-                                            text = "현재 기기 동기화 키",
+                                            text = if (syncState.isSyncing) "동기화 진행 중" else "클라우드 연결됨",
                                             style = MaterialTheme.typography.labelMedium,
                                             fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            color = MaterialTheme.colorScheme.onSurface,
                                         )
-                                        Spacer(Modifier.weight(1f))
-                                        IconButton(
-                                            onClick = {
-                                                Toolkit.getDefaultToolkit().systemClipboard.setContents(
-                                                    StringSelection(syncState.syncKey),
-                                                    null,
-                                                )
-                                            },
-                                            modifier = Modifier.size(28.dp),
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.ContentCopy,
-                                                contentDescription = "복사",
-                                                modifier = Modifier.size(16.dp),
-                                            )
-                                        }
                                     }
+                                    Spacer(Modifier.height(2.dp))
                                     Text(
-                                        text = syncState.syncKey.ifBlank { "키 발급 중..." },
-                                        style = MaterialTheme.typography.headlineSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Monospace,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.padding(vertical = 4.dp),
+                                        text = timeText,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
-                                    Row(
-                                        horizontalArrangement = Arrangement.End,
-                                        modifier = Modifier.fillMaxWidth(),
-                                    ) {
-                                        TextButton(onClick = { viewModel.generateNewSyncKey() }) {
-                                            Text("새 키 발급", style = MaterialTheme.typography.labelSmall)
-                                        }
+                                }
+
+                                Button(
+                                    onClick = { viewModel.syncNow() },
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                                    ),
+                                    enabled = !syncState.isSyncing,
+                                ) {
+                                    if (syncState.isSyncing) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            strokeWidth = 2.dp,
+                                            color = MaterialTheme.colorScheme.onPrimary,
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("동기화 중...")
+                                    } else {
+                                        Icon(
+                                            imageVector = Icons.Default.Refresh,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("지금 즉시 동기화", fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
 
-                            // 2. 다른 기기 동기화 키 연결
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(
-                                    text = "다른 기기의 동기화 키 연결",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface,
+                            // 2. 기기 페어링 액션 버튼들
+                            FilledTonalButton(
+                                onClick = { showPairingCodeDialog = true },
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Devices,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
                                 )
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    OutlinedTextField(
-                                        value = editKeyInput,
-                                        onValueChange = { editKeyInput = it.uppercase() },
-                                        placeholder = { Text("예: 7821 또는 A9F2", style = MaterialTheme.typography.bodySmall) },
-                                        singleLine = true,
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                    FilledTonalButton(
-                                        onClick = {
-                                            if (editKeyInput.isNotBlank()) {
-                                                viewModel.updateSyncKey(editKeyInput)
-                                                editKeyInput = ""
-                                                viewModel.syncNow()
-                                            }
-                                        },
-                                        enabled = editKeyInput.isNotBlank() && !syncState.isSyncing,
-                                        shape = RoundedCornerShape(10.dp),
-                                    ) {
-                                        Text("연결")
-                                    }
-                                }
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = "새 기기 연결하기 (6자리 코드 발급)",
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+
+                            OutlinedButton(
+                                onClick = { showConnectDialog = true },
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Key,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = "다른 기기의 데이터 가져오기 (코드 입력)",
+                                    fontWeight = FontWeight.SemiBold,
+                                )
                             }
 
                             HorizontalDivider(
                                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
                             )
 
-                            // 3. 서버 주소 설정
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(
-                                    text = "동기화 서버 주소",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                )
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    OutlinedTextField(
-                                        value = editServerUrl,
-                                        onValueChange = { editServerUrl = it },
-                                        label = { Text("서버 URL") },
-                                        singleLine = true,
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                    Button(
-                                        onClick = {
-                                            viewModel.updateSyncServerUrl(editServerUrl)
-                                        },
-                                        shape = RoundedCornerShape(10.dp),
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                                        ),
-                                    ) {
-                                        Text("저장")
-                                    }
-                                }
-                            }
-
-                            HorizontalDivider(
-                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
-                            )
-
-                            // 4. 자동 동기화 및 프록시 스위치
+                            // 3. 백그라운드 자동 동기화 & 프록시 스위치
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.fillMaxWidth(),
@@ -326,50 +306,125 @@ fun SettingsPane(
                                 )
                             }
 
-                            // 5. 동기화 상태 및 실행 버튼
-                            val timeText = if (syncState.lastSyncedAt > 0) {
-                                val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-                                "최근 동기화: ${sdf.format(Date(syncState.lastSyncedAt))}"
-                            } else {
-                                "동기화 이력 없음"
-                            }
+                            HorizontalDivider(
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                            )
 
+                            // 4. 고급 동기화 설정 (서버 주소, 마스터 복구 키)
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { showAdvancedSyncSettings = !showAdvancedSyncSettings }
+                                    .padding(vertical = 4.dp),
                             ) {
-                                Text(
-                                    text = timeText,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.weight(1f),
+                                Icon(
+                                    imageVector = if (showAdvancedSyncSettings) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp),
                                 )
-                                Button(
-                                    onClick = { viewModel.syncNow() },
-                                    shape = RoundedCornerShape(10.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.primary,
-                                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                                    ),
-                                    enabled = !syncState.isSyncing,
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    text = if (showAdvancedSyncSettings) "고급 동기화 설정 접기" else "고급 동기화 설정 (서버 주소, 마스터 복구 키)",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+
+                            if (showAdvancedSyncSettings) {
+                                Column(
+                                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                                    modifier = Modifier.fillMaxWidth(),
                                 ) {
-                                    if (syncState.isSyncing) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(16.dp),
-                                            strokeWidth = 2.dp,
-                                            color = MaterialTheme.colorScheme.onPrimary,
+                                    // 마스터 복구 키 표시 카드
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(MaterialTheme.colorScheme.background.copy(alpha = 0.6f))
+                                            .border(
+                                                width = 1.dp,
+                                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                                                shape = RoundedCornerShape(8.dp),
+                                            )
+                                            .padding(10.dp),
+                                    ) {
+                                        Column {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier.fillMaxWidth(),
+                                            ) {
+                                                Text(
+                                                    text = "내 마스터 복구 키 (비상용)",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
+                                                Spacer(Modifier.weight(1f))
+                                                IconButton(
+                                                    onClick = {
+                                                        try {
+                                                            Toolkit.getDefaultToolkit().systemClipboard.setContents(
+                                                                StringSelection(syncState.syncKey),
+                                                                null,
+                                                            )
+                                                        } catch (_: Exception) {}
+                                                    },
+                                                    modifier = Modifier.size(24.dp),
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.ContentCopy,
+                                                        contentDescription = "복사",
+                                                        modifier = Modifier.size(14.dp),
+                                                    )
+                                                }
+                                            }
+                                            Text(
+                                                text = syncState.syncKey.ifBlank { "키 발급 중..." },
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                fontFamily = FontFamily.Monospace,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.padding(vertical = 2.dp),
+                                            )
+                                            Row(
+                                                horizontalArrangement = Arrangement.End,
+                                                modifier = Modifier.fillMaxWidth(),
+                                            ) {
+                                                TextButton(onClick = { viewModel.generateNewSyncKey() }) {
+                                                    Text("새 마스터 키 재발급", style = MaterialTheme.typography.labelSmall)
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // 서버 주소 변경
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        OutlinedTextField(
+                                            value = editServerUrl,
+                                            onValueChange = { editServerUrl = it },
+                                            label = { Text("서버 URL") },
+                                            singleLine = true,
+                                            modifier = Modifier.weight(1f),
                                         )
-                                        Spacer(Modifier.width(6.dp))
-                                        Text("동기화 중...")
-                                    } else {
-                                        Icon(
-                                            imageVector = Icons.Default.Refresh,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(16.dp),
-                                        )
-                                        Spacer(Modifier.width(6.dp))
-                                        Text("지금 즉시 동기화", fontWeight = FontWeight.Bold)
+                                        Button(
+                                            onClick = {
+                                                viewModel.updateSyncServerUrl(editServerUrl)
+                                            },
+                                            shape = RoundedCornerShape(10.dp),
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            ),
+                                        ) {
+                                            Text("저장")
+                                        }
                                     }
                                 }
                             }
@@ -399,7 +454,123 @@ fun SettingsPane(
                 }
             }
 
-            // 섹션 2: 뷰어 기본 설정
+            // 섹션 2: 로컬 파일 백업 및 복원 (오프라인/영구 보관)
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SectionTitle(title = "로컬 파일 백업 및 복원", icon = Icons.Default.Save)
+
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        border = androidx.compose.foundation.BorderStroke(
+                            width = 1.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Text(
+                                text = "서버와 무관하게 모든 즐겨찾기, 열람 기록, 뷰어 설정을 JSON 파일로 컴퓨터에 백업하거나 다른 기기로 복원합니다.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                FilledTonalButton(
+                                    onClick = {
+                                        try {
+                                            val timeTag = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())
+                                            val dialog = FileDialog(null as Frame?, "백업 파일 저장", FileDialog.SAVE)
+                                            dialog.file = "comics8_backup_$timeTag.json"
+                                            dialog.isVisible = true
+                                            val dir = dialog.directory
+                                            val file = dialog.file
+                                            if (dir != null && file != null) {
+                                                viewModel.exportBackup(File(dir, file)) { success, msg ->
+                                                    isBackupSuccess = success
+                                                    backupStatusMessage = msg
+                                                }
+                                            }
+                                        } catch (e: Exception) {
+                                            isBackupSuccess = false
+                                            backupStatusMessage = "파일 저장 다이얼로그 오류: ${e.message}"
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.FileDownload,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("백업 내보내기")
+                                }
+
+                                OutlinedButton(
+                                    onClick = {
+                                        try {
+                                            val dialog = FileDialog(null as Frame?, "백업 파일 열기", FileDialog.LOAD)
+                                            dialog.setFilenameFilter { _, name -> name.endsWith(".json", ignoreCase = true) }
+                                            dialog.isVisible = true
+                                            val dir = dialog.directory
+                                            val file = dialog.file
+                                            if (dir != null && file != null) {
+                                                viewModel.importBackup(File(dir, file)) { success, msg ->
+                                                    isBackupSuccess = success
+                                                    backupStatusMessage = msg
+                                                }
+                                            }
+                                        } catch (e: Exception) {
+                                            isBackupSuccess = false
+                                            backupStatusMessage = "파일 열기 다이얼로그 오류: ${e.message}"
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.FileUpload,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("백업 복원")
+                                }
+                            }
+
+                            if (backupStatusMessage != null) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(
+                                            if (isBackupSuccess) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                            else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
+                                        )
+                                        .padding(10.dp),
+                                ) {
+                                    Text(
+                                        text = backupStatusMessage.orEmpty(),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (isBackupSuccess) MaterialTheme.colorScheme.onPrimaryContainer
+                                        else MaterialTheme.colorScheme.onErrorContainer,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 섹션 3: 뷰어 기본 설정
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionTitle(title = "뷰어 설정", icon = Icons.AutoMirrored.Filled.MenuBook)
@@ -476,7 +647,7 @@ fun SettingsPane(
                 }
             }
 
-            // 섹션 3: 앱 정보
+            // 섹션 4: 앱 정보
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionTitle(title = "앱 정보", icon = Icons.Default.Info)
@@ -531,7 +702,7 @@ fun SettingsPane(
                                     ),
                                 ) {
                                     if (isChecking) {
-                                        androidx.compose.material3.CircularProgressIndicator(
+                                        CircularProgressIndicator(
                                             modifier = Modifier.size(16.dp),
                                             strokeWidth = 2.dp,
                                             color = MaterialTheme.colorScheme.primary,
@@ -563,6 +734,330 @@ fun SettingsPane(
             }
         }
     }
+
+    if (showPairingCodeDialog) {
+        DesktopPairingCodeDialog(
+            viewModel = viewModel,
+            onDismiss = { showPairingCodeDialog = false },
+        )
+    }
+
+    if (showConnectDialog) {
+        DesktopConnectDeviceDialog(
+            viewModel = viewModel,
+            onDismiss = { showConnectDialog = false },
+        )
+    }
+}
+
+@Composable
+private fun DesktopPairingCodeDialog(
+    viewModel: DesktopViewModel,
+    onDismiss: () -> Unit,
+) {
+    var isLoading by remember { mutableStateOf(true) }
+    var code by remember { mutableStateOf("") }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var timeLeftSeconds by remember { mutableStateOf(300) }
+
+    fun loadCode() {
+        isLoading = true
+        errorMessage = null
+        viewModel.requestPairingCode { result ->
+            isLoading = false
+            if (result.success) {
+                code = result.code
+                timeLeftSeconds = result.expiresInSeconds
+            } else {
+                errorMessage = result.message ?: "코드 발급 실패"
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        loadCode()
+    }
+
+    LaunchedEffect(code, timeLeftSeconds) {
+        if (code.isNotBlank() && timeLeftSeconds > 0) {
+            delay(1000)
+            timeLeftSeconds -= 1
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Devices,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "새 기기 연결 (페어링)",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    text = "새로 연결할 기기(스마트폰, 태블릿, PC 등)의 [데이터 가져오기] 화면에서 아래 6자리 코드를 입력하세요.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                if (isLoading) {
+                    Box(modifier = Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                } else if (errorMessage != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f))
+                            .padding(12.dp),
+                    ) {
+                        Text(text = errorMessage.orEmpty(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
+                    }
+                } else {
+                    val formattedCode = if (code.length == 6) "${code.substring(0, 3)} ${code.substring(3)}" else code
+
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.padding(16.dp),
+                        ) {
+                            Text(
+                                text = formattedCode,
+                                style = MaterialTheme.typography.headlineLarge,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.primary,
+                                letterSpacing = 4.sp,
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            val minutes = timeLeftSeconds / 60
+                            val seconds = timeLeftSeconds % 60
+                            val timerText = if (timeLeftSeconds > 0) {
+                                String.format(Locale.getDefault(), "⏱️ 남은 시간: %02d:%02d", minutes, seconds)
+                            } else {
+                                "⚠️ 코드가 만료되었습니다."
+                            }
+                            Text(
+                                text = timerText,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (timeLeftSeconds > 0) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+
+                    TextButton(
+                        onClick = {
+                            try {
+                                Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(code), null)
+                            } catch (_: Exception) {}
+                        },
+                    ) {
+                        Icon(imageVector = Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("코드 복사", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = { loadCode() }, enabled = !isLoading) {
+                Icon(imageVector = Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("새 코드 발급")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) {
+                Text("닫기")
+            }
+        },
+    )
+}
+
+@Composable
+private fun DesktopConnectDeviceDialog(
+    viewModel: DesktopViewModel,
+    onDismiss: () -> Unit,
+) {
+    var pairingCodeInput by remember { mutableStateOf("") }
+    var recoveryKeyInput by remember { mutableStateOf("") }
+    var useRecoveryKeyMode by remember { mutableStateOf(false) }
+    var isConnecting by remember { mutableStateOf(false) }
+    var statusMessage by remember { mutableStateOf<String?>(null) }
+    var isError by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.CloudSync,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = if (useRecoveryKeyMode) "마스터 복구 키로 연결" else "기존 데이터 가져오기",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                if (!useRecoveryKeyMode) {
+                    Text(
+                        text = "기존에 사용하던 기기의 [새 기기 연결하기]에 표시된 6자리 번호를 입력하세요.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    OutlinedTextField(
+                        value = pairingCodeInput,
+                        onValueChange = {
+                            val filtered = it.filter { ch -> ch.isDigit() }.take(6)
+                            pairingCodeInput = filtered
+                        },
+                        placeholder = { Text("예: 849201", style = MaterialTheme.typography.bodyMedium) },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.headlineSmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+
+                    Row(
+                        horizontalArrangement = Arrangement.End,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        TextButton(onClick = { useRecoveryKeyMode = true }) {
+                            Text("기존 기기가 없나요? 마스터 복구 키로 복원", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                } else {
+                    Text(
+                        text = "이전에 저장해 둔 마스터 복구 키(C8-XXXX-XXXX-XXXX)를 입력하여 데이터를 직접 복원합니다.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    OutlinedTextField(
+                        value = recoveryKeyInput,
+                        onValueChange = { recoveryKeyInput = it.trim().uppercase() },
+                        placeholder = { Text("예: C8-7X9K-2M4Q-99PL", style = MaterialTheme.typography.bodySmall) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+
+                    Row(
+                        horizontalArrangement = Arrangement.End,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        TextButton(onClick = { useRecoveryKeyMode = false }) {
+                            Text("6자리 페어링 코드로 입력하기", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+
+                if (statusMessage != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(
+                                if (isError) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
+                                else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                            )
+                            .padding(10.dp),
+                    ) {
+                        Text(
+                            text = statusMessage.orEmpty(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (isError) MaterialTheme.colorScheme.onErrorContainer
+                            else MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    isConnecting = true
+                    statusMessage = null
+                    isError = false
+                    if (!useRecoveryKeyMode) {
+                        viewModel.confirmPairingCode(pairingCodeInput) { result ->
+                            isConnecting = false
+                            if (result.success) {
+                                onDismiss()
+                            } else {
+                                isError = true
+                                statusMessage = result.message ?: "인증 실패"
+                            }
+                        }
+                    } else {
+                        val key = recoveryKeyInput.trim()
+                        if (key.isNotBlank()) {
+                            viewModel.updateSyncKey(key)
+                            viewModel.syncNow()
+                            onDismiss()
+                        } else {
+                            isConnecting = false
+                            isError = true
+                            statusMessage = "마스터 복구 키를 입력해주세요."
+                        }
+                    }
+                },
+                enabled = !isConnecting && (if (!useRecoveryKeyMode) pairingCodeInput.length == 6 else recoveryKeyInput.isNotBlank()),
+            ) {
+                if (isConnecting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text("연결 중...")
+                } else {
+                    Text("데이터 가져오기")
+                }
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) {
+                Text("취소")
+            }
+        },
+    )
 }
 
 @Composable
