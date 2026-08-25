@@ -155,8 +155,20 @@ class HostApiV1Test {
 
     @Test
     fun evalSiteJsGalleryInfoAndGg() {
-        val gallery = JsTestResources.read("hitomi/gallery_one_artist.js")
-        val ggJs = JsTestResources.read("hitomi/gg.js")
+        val gallery = """
+            var galleryinfo = {
+              id: 1001,
+              title: "Single Artist Gallery",
+              artists: [{ artist: "Demo Artist" }]
+            };
+        """.trimIndent()
+        val ggJs = """
+            var gg = {
+              b: "1690000000/",
+              m: function(x) { return 1; },
+              s: function(h) { return "3243"; }
+            };
+        """.trimIndent()
         val engine = JsEngine()
         val handle = engine.load(JsTestResources.read("js/hello.js"), "hello.js")
         val galleryJson = evalJsonOn(
