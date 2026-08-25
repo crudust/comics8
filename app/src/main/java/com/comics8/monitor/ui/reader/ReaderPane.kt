@@ -933,7 +933,7 @@ private fun ReaderBottomBar(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.94f))
+            .background(MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.95f))
             .navigationBarsPadding()
             .padding(horizontal = 16.dp, vertical = 10.dp),
     ) {
@@ -966,12 +966,14 @@ private fun ReaderBottomBar(
             OutlinedButton(
                 onClick = onPrevEp,
                 enabled = hasPrevEpisode,
+                shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.weight(1f),
             ) {
                 Text("이전화")
             }
             Button(
                 onClick = onClose,
+                shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.weight(1f),
             ) {
                 Text("목록")
@@ -979,6 +981,7 @@ private fun ReaderBottomBar(
             OutlinedButton(
                 onClick = onNextEp,
                 enabled = hasNextEpisode,
+                shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.weight(1f),
             ) {
                 Text("다음화")

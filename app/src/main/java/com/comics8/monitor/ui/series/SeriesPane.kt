@@ -1,6 +1,7 @@
 package com.comics8.monitor.ui.series
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -127,7 +128,7 @@ fun EpisodeRow(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(12.dp))
             .background(
                 if (highlighted) {
                     MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
@@ -135,13 +136,22 @@ fun EpisodeRow(
                     MaterialTheme.colorScheme.surface
                 },
             )
+            .border(
+                width = 1.dp,
+                color = if (highlighted) {
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+                } else {
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
+                },
+                shape = RoundedCornerShape(12.dp),
+            )
             .clickable(onClick = onClick)
             .padding(8.dp),
     ) {
         Box(
             modifier = Modifier
                 .size(width = 72.dp, height = 54.dp)
-                .clip(RoundedCornerShape(6.dp))
+                .clip(RoundedCornerShape(8.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant),
         ) {
             if (episode.thumbUrl != null) {
@@ -163,9 +173,9 @@ fun EpisodeRow(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodyMedium,
-                fontWeight = if (episode.isRead) FontWeight.Normal else FontWeight.Medium,
+                fontWeight = if (episode.isRead) FontWeight.Normal else FontWeight.SemiBold,
                 color = if (episode.isRead) {
-                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
+                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                 } else {
                     MaterialTheme.colorScheme.onSurface
                 },
@@ -175,7 +185,7 @@ fun EpisodeRow(
                 Text(
                     text = date,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                     modifier = Modifier.padding(top = 2.dp),
                 )
             }

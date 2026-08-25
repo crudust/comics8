@@ -86,7 +86,7 @@ fun TopBar(
             .then(
                 if (inOverlay) {
                     Modifier
-                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.94f))
+                        .background(MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.95f))
                         .statusBarsPadding()
                 } else {
                     Modifier
@@ -504,10 +504,13 @@ fun TopBar(
                     FilterChip(
                         selected = !state.isSearch && state.tab == tab,
                         onClick = { viewModel.selectTab(tab) },
-                        label = { Text(tab.label) },
+                        label = { Text(tab.label, fontWeight = if (!state.isSearch && state.tab == tab) FontWeight.Bold else FontWeight.Normal) },
+                        shape = RoundedCornerShape(10.dp),
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = MaterialTheme.colorScheme.primary,
                             selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                            labelColor = MaterialTheme.colorScheme.onSurface,
                         ),
                     )
                 }
@@ -540,6 +543,7 @@ fun SearchBar(
         OutlinedTextField(
             value = state.searchInput,
             onValueChange = viewModel::updateSearchInput,
+            shape = RoundedCornerShape(12.dp),
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(vertical = 4.dp)

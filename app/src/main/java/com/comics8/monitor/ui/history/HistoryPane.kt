@@ -1,6 +1,7 @@
 package com.comics8.monitor.ui.history
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -109,7 +110,13 @@ fun HistoryItemCard(
     Surface(
         shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                shape = RoundedCornerShape(12.dp),
+            ),
     ) {
         Column(
             modifier = Modifier
@@ -135,7 +142,7 @@ fun HistoryItemCard(
                 Spacer(Modifier.width(6.dp))
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
+                        .clip(RoundedCornerShape(6.dp))
                         .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f))
                         .padding(horizontal = 6.dp, vertical = 2.dp),
                 ) {

@@ -193,9 +193,9 @@ fun Badge(text: String, modifier: Modifier = Modifier) {
         fontSize = 10.sp,
         fontWeight = FontWeight.Bold,
         modifier = modifier
-            .clip(RoundedCornerShape(4.dp))
+            .clip(RoundedCornerShape(6.dp))
             .background(MaterialTheme.colorScheme.primary)
-            .padding(horizontal = 5.dp, vertical = 2.dp),
+            .padding(horizontal = 6.dp, vertical = 2.dp),
     )
 }
 
@@ -243,6 +243,7 @@ fun PageJumpDialog(
                 value = text,
                 onValueChange = { text = it.filter(Char::isDigit).take(5) },
                 label = { Text("1 ~ $last") },
+                shape = RoundedCornerShape(12.dp),
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Number,

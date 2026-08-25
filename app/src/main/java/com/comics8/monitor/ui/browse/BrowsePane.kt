@@ -38,6 +38,9 @@ import com.comics8.core.source.SourceRegistry
 import com.comics8.monitor.ui.components.Badge
 import com.comics8.monitor.ui.components.sourceChipLabel
 
+import androidx.compose.foundation.border
+import com.comics8.monitor.ui.theme.CatppuccinMocha
+
 @Composable
 fun ListingGrid(
     items: List<ToonItem>,
@@ -58,10 +61,10 @@ fun ListingGrid(
 
     LazyVerticalGrid(
         state = gridState,
-        columns = GridCells.Adaptive(minSize = 118.dp),
-        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        columns = GridCells.Adaptive(minSize = 120.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
         modifier = modifier.fillMaxSize(),
     ) {
         items(items.distinctBy { it.listingKey() }, key = { it.listingKey() }) { item ->
@@ -94,8 +97,13 @@ fun ToonCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(3f / 4f)
-                .clip(RoundedCornerShape(10.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .border(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                    shape = RoundedCornerShape(12.dp),
+                ),
         ) {
             AsyncImage(
                 model = item.thumbUrl,
@@ -124,9 +132,14 @@ fun ToonCard(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
                         .padding(6.dp)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.88f))
-                        .padding(horizontal = 5.dp, vertical = 2.dp),
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.92f))
+                        .border(
+                            width = 0.5.dp,
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                            shape = RoundedCornerShape(6.dp),
+                        )
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
                 ) {
                     Text(
                         text = progress,
@@ -144,14 +157,14 @@ fun ToonCard(
                     imageVector = if (item.isFavorite) Icons.Filled.Star else Icons.Outlined.StarBorder,
                     contentDescription = if (item.isFavorite) "즐겨찾기 해제" else "즐겨찾기",
                     tint = if (item.isFavorite) {
-                        MaterialTheme.colorScheme.primary
+                        CatppuccinMocha.Peach
                     } else {
-                        MaterialTheme.colorScheme.onBackground
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
                     },
                     modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(MaterialTheme.colorScheme.background.copy(alpha = 0.55f))
-                        .padding(2.dp),
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.82f))
+                        .padding(3.dp),
                 )
             }
         }
@@ -160,7 +173,8 @@ fun ToonCard(
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.Medium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.padding(top = 6.dp),
         )
         if (item.subtitle.isNotBlank()) {

@@ -51,23 +51,29 @@ import com.comics8.desktop.ui.reader.ReaderPane
 import com.comics8.desktop.ui.series.SeriesPane
 
 private val DarkColors = darkColorScheme(
-    primary = Color(0xFFFF8A80),
-    onPrimary = Color(0xFF3E0000),
-    primaryContainer = Color(0xFF5C0002),
-    onPrimaryContainer = Color(0xFFFFDAD6),
-    secondary = Color(0xFFFFB4AB),
-    onSecondary = Color(0xFF441914),
-    secondaryContainer = Color(0xFF2C2C2C),
-    onSecondaryContainer = Color(0xFFFFDAD6),
-    background = Color(0xFF141414),
-    onBackground = Color(0xFFE6E1E5),
-    surface = Color(0xFF1E1E1E),
-    onSurface = Color(0xFFE6E1E5),
-    surfaceVariant = Color(0xFF2B2B2B),
-    onSurfaceVariant = Color(0xFFCAC4D0),
-    outline = Color(0xFF8E8E93),
-    error = Color(0xFFFF5252),
-    onError = Color(0xFF370001),
+    primary = Color(0xFFCBA6F7), // Mauve
+    onPrimary = Color(0xFF11111B), // Crust
+    primaryContainer = Color(0xFF45475A), // Surface1
+    onPrimaryContainer = Color(0xFFCBA6F7), // Mauve
+    secondary = Color(0xFF89B4FA), // Blue
+    onSecondary = Color(0xFF11111B), // Crust
+    secondaryContainer = Color(0xFF313244), // Surface0
+    onSecondaryContainer = Color(0xFFCDD6F4), // Text
+    tertiary = Color(0xFFB4BEFE), // Lavender
+    onTertiary = Color(0xFF11111B), // Crust
+    background = Color(0xFF1E1E2E), // Base
+    onBackground = Color(0xFFCDD6F4), // Text
+    surface = Color(0xFF313244), // Surface0
+    onSurface = Color(0xFFCDD6F4), // Text
+    surfaceVariant = Color(0xFF45475A), // Surface1
+    onSurfaceVariant = Color(0xFFA6ADC8), // Subtext0
+    surfaceContainer = Color(0xFF181825), // Mantle
+    surfaceContainerHigh = Color(0xFF313244), // Surface0
+    surfaceContainerHighest = Color(0xFF45475A), // Surface1
+    outline = Color(0xFF6C7086), // Overlay0
+    outlineVariant = Color(0xFF585B70), // Surface2
+    error = Color(0xFFF38BA8), // Red
+    onError = Color(0xFF11111B), // Crust
 )
 
 fun main() {
