@@ -23,10 +23,13 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -81,11 +84,11 @@ fun SourceManagerPane(
     var folderToDelete by remember { mutableStateOf<String?>(null) }
 
     val sources = state.installedSources
-    val networkSources = sources.filter {
+    val networkStorageSources = sources.filter {
         it.id.startsWith("smb:") || it.id.startsWith("webdav:")
     }
-    val webAndJsSources = sources.filter {
-        it.id != WorkId.LOCAL_SOURCE && it !in networkSources
+    val onlineAndExtensionSources = sources.filter {
+        it.id != WorkId.LOCAL_SOURCE && it !in networkStorageSources
     }
 
     Scaffold(
@@ -150,10 +153,13 @@ fun SourceManagerPane(
             verticalArrangement = Arrangement.spacedBy(16.dp),
             modifier = Modifier.fillMaxSize(),
         ) {
-            // 섹션 1: 로컬 저장소 및 등록된 폴더 관리
+            // ==========================================
+            // 분류 1: 파일 저장소 (로컬 & 네트워크 SMB/WebDAV)
+            // ==========================================
             item {
-                SectionHeader(title = "로컬 저장소 (드라이브 / 폴더)")
+                SectionHeader(title = "파일 저장소 (로컬 / SMB / WebDAV)", icon = Icons.Default.Storage)
             }
+            // 1-1. 로컬 저장소 카드
             item {
                 val localMode = DesktopSourcePrefs.progressDisplayMode(WorkId.LOCAL_SOURCE)
                 LocalSourceCard(
@@ -167,27 +173,15 @@ fun SourceManagerPane(
                     onDeleteFolder = { rootUri -> folderToDelete = rootUri },
                 )
             }
-
-            // 섹션 2: 네트워크 드라이브 (SMB / WebDAV)
-            item {
-                Spacer(Modifier.height(4.dp))
-                SectionHeader(title = "네트워크 드라이브 (SMB / WebDAV)")
-            }
-            if (networkSources.isEmpty()) {
-                item {
-                    EmptySectionCard(
-                        text = "등록된 네트워크 드라이브가 없습니다.",
-                        actionText = "SMB / WebDAV 추가",
-                        onAction = { showAddOptions = true },
-                    )
-                }
-            } else {
-                items(networkSources, key = { it.id }) { source ->
+            // 1-2. 네트워크 드라이브 목록
+            if (networkStorageSources.isNotEmpty()) {
+                items(networkStorageSources, key = { it.id }) { source ->
+                    val isSmb = source.id.startsWith("smb:")
                     val currentMode = DesktopSourcePrefs.progressDisplayMode(source.id)
                     SourceCard(
-                        icon = Icons.Default.Cloud,
+                        icon = if (isSmb) Icons.Default.Dns else Icons.Default.Cloud,
                         title = source.displayName,
-                        subtitle = source.id,
+                        subtitle = if (isSmb) "SMB 네트워크 공유 (${source.id})" else "WebDAV 클라우드 (${source.id})",
                         modeLabel = currentMode.label,
                         canDelete = true,
                         onOpenSettings = {
@@ -199,24 +193,29 @@ fun SourceManagerPane(
                 }
             }
 
-            // 섹션 3: 웹 및 확장 스크립트 소스
+            // ==========================================
+            // 분류 2: 온라인 & 확장 스크립트 (웹 / JS 확장)
+            // ==========================================
             item {
-                Spacer(Modifier.height(4.dp))
-                SectionHeader(title = "웹 및 확장 스크립트 소스")
+                Spacer(Modifier.height(8.dp))
+                SectionHeader(title = "온라인 & 확장 소스 (웹 / JS 스크립트)", icon = Icons.Default.Public)
             }
-            if (webAndJsSources.isEmpty()) {
+            if (onlineAndExtensionSources.isEmpty()) {
                 item {
                     EmptySectionCard(
-                        text = "등록된 웹/확장 소스가 없습니다.",
+                        text = "등록된 온라인/확장 소스가 없습니다.",
                         actionText = "JS 확장 스크립트 추가",
-                        onAction = { showAddOptions = true },
+                        onAction = {
+                            showAddOptions = false
+                            viewModel.importJs()
+                        },
                     )
                 }
             } else {
-                items(webAndJsSources, key = { it.id }) { source ->
+                items(onlineAndExtensionSources, key = { it.id }) { source ->
                     val isJs = source.id.startsWith("js:")
                     val icon = if (isJs) Icons.Default.Description else Icons.Default.Language
-                    val subtitle = if (isJs) "JS 확장 스크립트" else "내장 웹 소스"
+                    val subtitle = if (isJs) "JS 확장 스크립트 소스" else "내장 웹 크롤러 소스"
                     val currentMode = DesktopSourcePrefs.progressDisplayMode(source.id)
 
                     SourceCard(
@@ -343,14 +342,25 @@ fun SourceManagerPane(
 }
 
 @Composable
-private fun SectionHeader(title: String) {
-    Text(
-        text = title,
-        style = MaterialTheme.typography.labelLarge,
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+private fun SectionHeader(title: String, icon: ImageVector) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-    )
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
 @Composable
@@ -786,27 +796,48 @@ private fun SourceAddOptionsDialog(
                 )
                 Spacer(Modifier.height(16.dp))
 
+                // 카테고리 1: 파일 저장소
+                Text(
+                    text = "파일 저장소 (스토리지)",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                )
                 AddOptionItem(
                     icon = Icons.Default.Folder,
                     title = "로컬 폴더",
-                    description = "로컬 드라이브의 만화/ZIP 폴더 추가",
+                    description = "로컬 드라이브의 만화 및 ZIP 폴더 추가",
                     onClick = onAddLocalFolder,
                 )
                 AddOptionItem(
-                    icon = Icons.Default.Cloud,
-                    title = "SMB (네트워크 공유)",
-                    description = "로컬 네트워크의 Windows 공유 / NAS 드라이브",
+                    icon = Icons.Default.Dns,
+                    title = "SMB (네트워크 드라이브)",
+                    description = "로컬 네트워크의 Windows 공유 / NAS 폴더 연결",
                     onClick = onAddSmb,
                 )
                 AddOptionItem(
                     icon = Icons.Default.Cloud,
-                    title = "WebDAV (클라우드/NAS)",
-                    description = "Synology, Nextcloud 등 WebDAV 스토리지",
+                    title = "WebDAV (클라우드 드라이브)",
+                    description = "Synology, Nextcloud 등 WebDAV 스토리지 연결",
                     onClick = onAddWebDav,
+                )
+
+                Spacer(Modifier.height(8.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                Spacer(Modifier.height(8.dp))
+
+                // 카테고리 2: 온라인 & 확장 스크립트
+                Text(
+                    text = "온라인 & 확장 스크립트",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
                 )
                 AddOptionItem(
                     icon = Icons.Default.Description,
-                    title = "JS 파일 (확장 스크립트)",
+                    title = "JS 확장 스크립트 (.js)",
                     description = "외부 사이트 파싱 확장 소스 파일 가져오기",
                     onClick = onAddJs,
                 )
@@ -838,7 +869,7 @@ private fun AddOptionItem(
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 10.dp),
+            .padding(horizontal = 8.dp, vertical = 8.dp),
     ) {
         Box(
             modifier = Modifier
