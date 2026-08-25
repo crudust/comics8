@@ -41,9 +41,9 @@ fun Badge(
 ) {
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(4.dp))
+            .clip(RoundedCornerShape(6.dp))
             .background(MaterialTheme.colorScheme.error)
-            .padding(horizontal = 5.dp, vertical = 2.dp),
+            .padding(horizontal = 6.dp, vertical = 2.dp),
     ) {
         Text(
             text = text,

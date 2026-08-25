@@ -1,7 +1,9 @@
 package com.comics8.desktop.ui.browse
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -309,7 +311,7 @@ fun ToonCard(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
             .padding(4.dp),
     ) {
@@ -317,8 +319,13 @@ fun ToonCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(0.72f)
-                .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .border(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                    shape = RoundedCornerShape(12.dp),
+                ),
         ) {
             DesktopAsyncImage(
                 url = item.thumbUrl,
@@ -347,8 +354,13 @@ fun ToonCard(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
                         .padding(6.dp)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.92f))
+                        .border(
+                            width = 0.5.dp,
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                            shape = RoundedCornerShape(6.dp),
+                        )
                         .padding(horizontal = 6.dp, vertical = 2.dp),
                 ) {
                     Text(
@@ -366,11 +378,11 @@ fun ToonCard(
                 Icon(
                     imageVector = if (item.isFavorite) Icons.Filled.Star else Icons.Outlined.StarBorder,
                     contentDescription = if (item.isFavorite) "즐겨찾기 해제" else "즐겨찾기",
-                    tint = if (item.isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
+                    tint = if (item.isFavorite) Color(0xFFFAB387) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
                     modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(MaterialTheme.colorScheme.background.copy(alpha = 0.6f))
-                        .padding(2.dp),
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.82f))
+                        .padding(3.dp),
                 )
             }
         }
@@ -380,6 +392,7 @@ fun ToonCard(
             overflow = TextOverflow.Ellipsis,
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.padding(top = 6.dp),
         )
         val updatedAt = item.updatedAt

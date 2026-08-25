@@ -2,6 +2,7 @@ package com.comics8.desktop.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,7 +20,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
@@ -418,13 +422,17 @@ fun TopBar(
                     .padding(top = 8.dp),
             ) {
                 state.browseTabs.forEach { tab ->
+                    val isSelected = state.tab == tab
                     FilterChip(
-                        selected = state.tab == tab,
+                        selected = isSelected,
                         onClick = { viewModel.selectTab(tab) },
-                        label = { Text(tab.label) },
+                        label = { Text(tab.label, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
+                        shape = RoundedCornerShape(10.dp),
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = MaterialTheme.colorScheme.primary,
                             selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                            labelColor = MaterialTheme.colorScheme.onSurface,
                         ),
                     )
                 }
@@ -539,7 +547,7 @@ private fun SourceTitleDropdown(
             modifier = Modifier
                 .clip(RoundedCornerShape(8.dp))
                 .clickable { expanded = true }
-                .padding(end = 4.dp),
+                .padding(horizontal = 4.dp, vertical = 2.dp),
         ) {
             Text(
                 text = label,
@@ -552,59 +560,131 @@ private fun SourceTitleDropdown(
             Icon(
                 imageVector = Icons.Filled.ArrowDropDown,
                 contentDescription = "소스 선택",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            orderedSources.forEach { source ->
+        MaterialTheme(
+            shapes = MaterialTheme.shapes.copy(
+                extraSmall = RoundedCornerShape(12.dp),
+                small = RoundedCornerShape(12.dp),
+                medium = RoundedCornerShape(12.dp),
+            ),
+        ) {
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+                modifier = Modifier
+                    .border(
+                        width = 1.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                        shape = RoundedCornerShape(12.dp),
+                    ),
+            ) {
+                if (orderedSources.isNotEmpty()) {
+                    orderedSources.forEach { source ->
+                        val isSelected = source.id == activeSourceId
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = source.displayName,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                )
+                            },
+                            trailingIcon = if (isSelected) {
+                                {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "선택됨",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
+                            } else null,
+                            onClick = {
+                                onSelect(source.id)
+                                expanded = false
+                            },
+                        )
+                    }
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                        modifier = Modifier.padding(vertical = 4.dp),
+                    )
+                }
                 DropdownMenuItem(
-                    text = { Text(source.displayName) },
+                    text = { Text(ADD_SOURCE_LABEL) },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    },
                     onClick = {
-                        onSelect(source.id)
                         expanded = false
+                        addExpanded = true
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(REMOVE_SOURCE_LABEL) },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Outlined.Delete,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                            modifier = Modifier.size(18.dp),
+                        )
+                    },
+                    onClick = {
+                        expanded = false
+                        onRemoveSource()
+                    },
+                    enabled = orderedSources.any { it.id != com.comics8.core.source.WorkId.LOCAL_SOURCE },
+                )
+            }
+            DropdownMenu(
+                expanded = addExpanded,
+                onDismissRequest = { addExpanded = false },
+                modifier = Modifier
+                    .border(
+                        width = 1.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                        shape = RoundedCornerShape(12.dp),
+                    ),
+            ) {
+                DropdownMenuItem(
+                    text = { Text("SMB (네트워크 공유)") },
+                    leadingIcon = {
+                        Icon(Icons.Default.Cloud, contentDescription = null, modifier = Modifier.size(18.dp))
+                    },
+                    onClick = {
+                        addExpanded = false
+                        onAddSmb()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("WebDAV (클라우드/NAS)") },
+                    leadingIcon = {
+                        Icon(Icons.Default.Cloud, contentDescription = null, modifier = Modifier.size(18.dp))
+                    },
+                    onClick = {
+                        addExpanded = false
+                        onAddWebDav()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("JS 파일 (확장 소스)") },
+                    leadingIcon = {
+                        Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(18.dp))
+                    },
+                    onClick = {
+                        addExpanded = false
+                        onAddJs()
                     },
                 )
             }
-            if (orderedSources.isNotEmpty()) {
-                HorizontalDivider()
-            }
-            DropdownMenuItem(
-                text = { Text(ADD_SOURCE_LABEL) },
-                onClick = {
-                    expanded = false
-                    addExpanded = true
-                },
-            )
-            DropdownMenuItem(
-                text = { Text(REMOVE_SOURCE_LABEL) },
-                onClick = {
-                    expanded = false
-                    onRemoveSource()
-                },
-                enabled = orderedSources.any { it.id != com.comics8.core.source.WorkId.LOCAL_SOURCE },
-            )
-        }
-        DropdownMenu(expanded = addExpanded, onDismissRequest = { addExpanded = false }) {
-            DropdownMenuItem(
-                text = { Text("SMB") },
-                onClick = {
-                    addExpanded = false
-                    onAddSmb()
-                },
-            )
-            DropdownMenuItem(
-                text = { Text("WebDAV") },
-                onClick = {
-                    addExpanded = false
-                    onAddWebDav()
-                },
-            )
-            DropdownMenuItem(
-                text = { Text("JS 파일") },
-                onClick = {
-                    addExpanded = false
-                    onAddJs()
-                },
-            )
         }
     }
 }

@@ -1,6 +1,7 @@
 package com.comics8.desktop.ui.series
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -166,12 +167,16 @@ fun EpisodeCard(
     onPickArtist: (() -> Unit)? = null,
 ) {
     Surface(
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(12.dp),
         color = when {
             highlighted -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
-            episode.isRead -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-            else -> MaterialTheme.colorScheme.surface
+            episode.isRead -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+            else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
         },
+        border = androidx.compose.foundation.BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+        ),
         modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
@@ -185,8 +190,13 @@ fun EpisodeCard(
             Box(
                 modifier = Modifier
                     .size(width = 72.dp, height = 54.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .border(
+                        width = 0.5.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                        shape = RoundedCornerShape(8.dp),
+                    ),
             ) {
                 val thumbUrl = episode.thumbUrl
                 if (thumbUrl != null) {
