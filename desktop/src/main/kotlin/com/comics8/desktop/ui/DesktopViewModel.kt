@@ -2077,11 +2077,11 @@ class DesktopViewModel(
             totalImages = totalImages,
             seenThroughPage = seenThroughPage,
         )
-        if (episode.lastReadPage == targetPage) return
+        if (episode.lastReadPage == page && pendingPageSave?.third == targetPage) return
 
         _state.update { state ->
             state.copy(
-                currentEpisode = state.currentEpisode?.copy(lastReadPage = targetPage),
+                currentEpisode = state.currentEpisode?.copy(lastReadPage = page),
             )
         }
         val workId = series.workId()

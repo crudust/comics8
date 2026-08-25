@@ -1983,10 +1983,10 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             totalImages = totalImages,
             seenThroughPage = seenThroughPage,
         )
-        if (episode.lastReadPage == targetPage) return
+        if (episode.lastReadPage == page) return
 
         _state.update { state ->
-            state.copy(currentEpisode = state.currentEpisode?.copy(lastReadPage = targetPage))
+            state.copy(currentEpisode = state.currentEpisode?.copy(lastReadPage = page))
         }
         savePageJob?.cancel()
         savePageJob = viewModelScope.launch {

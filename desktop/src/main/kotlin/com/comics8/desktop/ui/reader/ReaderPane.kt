@@ -420,6 +420,23 @@ private fun ReaderSingleView(
         }
     }
 
+    var prevSlices by remember { mutableStateOf(slices) }
+    if (slices != prevSlices) {
+        val oldSlice = prevSlices.getOrNull(currentPage)
+        if (oldSlice != null) {
+            val activeImage = oldSlice.imageIndex
+            val newIdx = slices.indexOfFirst { it.imageIndex == activeImage && it.half == oldSlice.half }
+                .takeIf { it >= 0 }
+                ?: slices.indexOfFirst { it.imageIndex == activeImage }
+            if (newIdx >= 0) {
+                currentPage = newIdx.coerceIn(0, totalPages - 1)
+            } else {
+                currentPage = currentPage.coerceIn(0, totalPages - 1)
+            }
+        }
+        prevSlices = slices
+    }
+
     LaunchedEffect(currentPage, slices) {
         if (state.readerImages.isNotEmpty() && slices.isNotEmpty()) {
             val slice = slices.getOrNull(currentPage)
@@ -673,7 +690,7 @@ private fun ReaderDualView(
     }
     val totalSpreads = spreads.size.coerceAtLeast(1)
 
-    var currentSpreadIndex by remember(state.currentEpisode?.wrId, spreads) {
+    var currentSpreadIndex by remember(state.currentEpisode?.wrId) {
         val target = state.currentEpisode?.lastReadPage ?: 0
         val found = spreads.indexOfFirst { spread ->
             when (spread) {
@@ -689,6 +706,49 @@ private fun ReaderDualView(
     var prevPromptVisible by remember { mutableStateOf(false) }
     var promptJob by remember { mutableStateOf<Job?>(null) }
     val scope = rememberCoroutineScope()
+
+    var restoredWrId by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.currentEpisode?.wrId, state.readerImages.isNotEmpty()) {
+        val wrId = state.currentEpisode?.wrId
+        if (wrId != null && wrId != restoredWrId && state.readerImages.isNotEmpty()) {
+            restoredWrId = wrId
+            val target = state.currentEpisode?.lastReadPage ?: 0
+            if (target > 0) {
+                val idx = spreads.indexOfFirst { spread ->
+                    when (spread) {
+                        is DualSpread.Single -> spread.index >= target
+                        is DualSpread.Dual -> spread.secondIndex >= target
+                    }
+                }
+                if (idx in 0 until totalSpreads && idx != currentSpreadIndex) {
+                    currentSpreadIndex = idx
+                }
+            }
+        }
+    }
+
+    var prevSpreads by remember { mutableStateOf(spreads) }
+    if (spreads != prevSpreads) {
+        val oldSpread = prevSpreads.getOrNull(currentSpreadIndex)
+        if (oldSpread != null) {
+            val activeImage = when (oldSpread) {
+                is DualSpread.Single -> oldSpread.index
+                is DualSpread.Dual -> oldSpread.firstIndex
+            }
+            val newIdx = spreads.indexOfFirst { spread ->
+                when (spread) {
+                    is DualSpread.Single -> spread.index == activeImage
+                    is DualSpread.Dual -> spread.firstIndex == activeImage || spread.secondIndex == activeImage
+                }
+            }
+            if (newIdx >= 0) {
+                currentSpreadIndex = newIdx.coerceIn(0, totalSpreads - 1)
+            } else {
+                currentSpreadIndex = currentSpreadIndex.coerceIn(0, totalSpreads - 1)
+            }
+        }
+        prevSpreads = spreads
+    }
 
     LaunchedEffect(currentSpreadIndex, spreads) {
         val spread = spreads.getOrNull(currentSpreadIndex)
