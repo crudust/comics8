@@ -41,7 +41,6 @@ import com.comics8.core.source.WorkId
 import com.comics8.monitor.data.local.PersistableOpenDocumentTree
 import com.comics8.monitor.ui.browse.EmptyLibraryPane
 import com.comics8.monitor.ui.browse.EmptyLibraryScanHint
-import com.comics8.monitor.ui.browse.LibraryRootsBar
 import com.comics8.monitor.ui.browse.ListingGrid
 import com.comics8.monitor.ui.components.ArtistPickDialog
 import com.comics8.monitor.ui.components.EmptySourcePane
@@ -354,13 +353,6 @@ private fun BrowseTabContent(
     when {
         state.loading && state.items.isEmpty() -> {
             Column(Modifier.fillMaxSize()) {
-                if (isLocal) {
-                    LibraryRootsBar(
-                        state = state,
-                        viewModel = viewModel,
-                        onAddFolder = onAddLibraryFolder,
-                    )
-                }
                 LoadingPane(Modifier.weight(1f).fillMaxWidth())
                 if (pageCatalog.paginated && state.lastPage > 1) {
                     PageBar(
@@ -389,13 +381,6 @@ private fun BrowseTabContent(
         )
         else -> {
             Column(Modifier.fillMaxSize()) {
-                if (isLocal) {
-                    LibraryRootsBar(
-                        state = state,
-                        viewModel = viewModel,
-                        onAddFolder = onAddLibraryFolder,
-                    )
-                }
                 if (isLocal && state.items.isEmpty() && !state.isSearch && pageCatalog !is BrowseTab.Favorite) {
                     EmptyLibraryScanHint(modifier = Modifier.weight(1f).fillMaxWidth())
                 } else {

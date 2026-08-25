@@ -87,9 +87,6 @@ fun BrowsePane(
         }
         state.loading && state.items.isEmpty() -> {
             Column(modifier = modifier.fillMaxSize()) {
-                if (isLocal) {
-                    LibraryRootsBar(state = state, viewModel = viewModel)
-                }
                 LoadingPane(Modifier.weight(1f).fillMaxWidth())
                 BrowsePageBar(state, viewModel)
             }
@@ -103,9 +100,6 @@ fun BrowsePane(
         }
         else -> {
             Column(modifier = modifier.fillMaxSize()) {
-                if (isLocal) {
-                    LibraryRootsBar(state = state, viewModel = viewModel)
-                }
                 if (state.tab is BrowseTab.Favorite && state.items.isEmpty() && !state.isSearch) {
                     ErrorPane(
                         message = "즐겨찾기한 작품이 없습니다.",
@@ -201,60 +195,7 @@ private fun EmptyLibraryScanHint(modifier: Modifier = Modifier) {
 private const val LOOSE_IMAGE_HINT =
     "ZIP/CBZ 파일이나 이미지가 들어 있는 하위 폴더를 넣어 주세요. 루트의 낱개 이미지 파일은 스캔하지 않습니다."
 
-@Composable
-private fun LibraryRootsBar(
-    state: DesktopUiState,
-    viewModel: DesktopViewModel,
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Row(
-            modifier = Modifier.weight(1f),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (state.libraryRoots.isEmpty()) {
-                Text(
-                    text = "폴더 없음",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                state.libraryRoots.forEach { path ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = path.substringAfterLast('/').ifBlank { path },
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        IconButton(
-                            onClick = { viewModel.removeLibraryRoot(path) },
-                            modifier = Modifier.size(24.dp),
-                        ) {
-                            Icon(
-                                Icons.Filled.Close,
-                                contentDescription = "폴더 제거",
-                                modifier = Modifier.size(14.dp),
-                            )
-                        }
-                    }
-                }
-            }
-        }
-        TextButton(onClick = viewModel::addLibraryRoot) {
-            Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(4.dp))
-            Text("폴더 추가")
-        }
-    }
-}
+
 
 @Composable
 private fun BrowsePageBar(
