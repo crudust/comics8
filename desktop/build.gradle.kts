@@ -35,7 +35,7 @@ compose.desktop {
                 "jdk.unsupported",
             )
             packageName = "Comics8"
-            packageVersion = "1.5.62"
+            packageVersion = "1.5.63"
             description = "Comics8 Monitor Desktop"
             macOS {
                 bundleID = "com.comics8.desktop"
