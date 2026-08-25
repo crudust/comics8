@@ -105,6 +105,7 @@ object DesktopImageCache {
     private const val DISK_HARD_LIMIT_BYTES = 500L * 1024 * 1024
     private const val DISK_TARGET_BYTES = 400L * 1024 * 1024
     private val previewSlots = Semaphore(8, true)
+    private val remoteSlots = Semaphore(12, true)
 
     private val memoryLock = Any()
     private val memoryCache = object : LinkedHashMap<String, ImageBitmap>(64, 0.75f, true) {
@@ -256,33 +257,38 @@ object DesktopImageCache {
     }
 
     private fun fetchRemoteBytes(url: String, cachedFile: File): ByteArray? {
-        val urlsToTry = listOf(url) + ImageFallbacks.forUrl(url, registry)
-        for (targetUrl in urlsToTry) {
-            if (LocalImageUri.toFile(targetUrl) != null) continue
-            if (ZipImageUri.parse(targetUrl) != null) continue
-            if (NetworkImageUri.parse(targetUrl) != null) continue
-            try {
-                val request = Request.Builder()
-                    .url(targetUrl)
-                    .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
-                    .header("Referer", ImageReferer.forUrl(targetUrl, registry))
-                    .get()
-                    .build()
-                val result = httpClient.newCall(request).execute().use { resp ->
-                    if (resp.isSuccessful) resp.body?.bytes() else null
-                }
-                if (result != null && result.isNotEmpty()) {
-                    try {
-                        writeAtomically(cachedFile, result)
-                        evictDiskIfNeeded(cachedFile)
-                    } catch (_: Exception) {
+        remoteSlots.acquire()
+        try {
+            val urlsToTry = listOf(url) + ImageFallbacks.forUrl(url, registry)
+            for (targetUrl in urlsToTry) {
+                if (LocalImageUri.toFile(targetUrl) != null) continue
+                if (ZipImageUri.parse(targetUrl) != null) continue
+                if (NetworkImageUri.parse(targetUrl) != null) continue
+                try {
+                    val request = Request.Builder()
+                        .url(targetUrl)
+                        .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+                        .header("Referer", ImageReferer.forUrl(targetUrl, registry))
+                        .get()
+                        .build()
+                    val result = httpClient.newCall(request).execute().use { resp ->
+                        if (resp.isSuccessful) resp.body?.bytes() else null
                     }
-                    return result
+                    if (result != null && result.isNotEmpty()) {
+                        try {
+                            writeAtomically(cachedFile, result)
+                            evictDiskIfNeeded(cachedFile)
+                        } catch (_: Exception) {
+                        }
+                        return result
+                    }
+                } catch (_: Exception) {
                 }
-            } catch (_: Exception) {
             }
+            return null
+        } finally {
+            remoteSlots.release()
         }
-        return null
     }
 
     suspend fun loadImage(url: String): ImageBitmap? {
@@ -404,6 +410,11 @@ fun DesktopAsyncImage(
     var loading by remember(url) { mutableStateOf(cachedBitmap == null) }
 
     LaunchedEffect(url) {
+        if (url.isBlank()) {
+            displayedBitmap = null
+            loading = false
+            return@LaunchedEffect
+        }
         val memoryHit = DesktopImageCache.get(url)
         if (memoryHit != null) {
             displayedBitmap = memoryHit
@@ -412,7 +423,11 @@ fun DesktopAsyncImage(
         } else {
             displayedBitmap = null
             loading = true
-            val loaded = DesktopImageCache.loadImage(url)
+            var loaded = DesktopImageCache.loadImage(url)
+            if (loaded == null) {
+                kotlinx.coroutines.delay(300L)
+                loaded = DesktopImageCache.loadImage(url)
+            }
             if (loaded != null) {
                 displayedBitmap = loaded
                 loading = false

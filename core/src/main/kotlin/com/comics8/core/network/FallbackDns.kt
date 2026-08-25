@@ -12,41 +12,55 @@ import java.util.concurrent.TimeUnit
 
 object FallbackDns : Dns {
     private val cache = ConcurrentHashMap<String, List<InetAddress>>()
+    private val inFlightLocks = ConcurrentHashMap<String, Any>()
     private val dohClient = OkHttpClient.Builder()
+        .dispatcher(okhttp3.Dispatcher().apply {
+            maxRequests = 64
+            maxRequestsPerHost = 32
+        })
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(5, TimeUnit.SECONDS)
         .build()
 
     override fun lookup(hostname: String): List<InetAddress> {
-        if (hostname.isBlank()) throw UnknownHostException("hostname is blank")
+        val host = hostname.trim()
+        if (host.isBlank()) throw UnknownHostException("hostname is blank")
 
-        // 1. Try system DNS first
-        try {
-            val addresses = Dns.SYSTEM.lookup(hostname)
-            val hasIpv4 = addresses.any { it is Inet4Address }
-            if (hasIpv4) {
-                cache[hostname] = addresses
-                return addresses
+        // 1. Fast cache check
+        cache[host]?.let { return it }
+
+        // 2. Deduplicate concurrent lookups for the same host
+        val lock = inFlightLocks.computeIfAbsent(host) { Any() }
+        val resolved = synchronized(lock) {
+            cache[host]?.let { return@synchronized it }
+
+            // Try system DNS first
+            try {
+                val addresses = Dns.SYSTEM.lookup(host)
+                val hasIpv4 = addresses.any { it is Inet4Address }
+                if (hasIpv4) {
+                    cache[host] = addresses
+                    return@synchronized addresses
+                }
+            } catch (_: Exception) {
             }
-        } catch (_: Exception) {
-        }
 
-        // 2. Cache check
-        cache[hostname]?.let { return it }
+            // Fallback to Cloudflare / Google DoH by direct IP (1.1.1.1 / 8.8.8.8)
+            val dohAddresses = resolveViaDoh(host)
+            if (dohAddresses.isNotEmpty()) {
+                cache[host] = dohAddresses
+                return@synchronized dohAddresses
+            }
 
-        // 3. Fallback to Cloudflare / Google DoH by direct IP (1.1.1.1 / 8.8.8.8)
-        val dohAddresses = resolveViaDoh(hostname)
-        if (dohAddresses.isNotEmpty()) {
-            cache[hostname] = dohAddresses
-            return dohAddresses
+            // Last fallback to system DNS or throw
+            try {
+                Dns.SYSTEM.lookup(host)
+            } catch (e: Exception) {
+                throw UnknownHostException("Unable to resolve host \"$host\": No address associated with hostname")
+            }
         }
-
-        // 4. Last fallback to system DNS or throw
-        return try {
-            Dns.SYSTEM.lookup(hostname)
-        } catch (e: Exception) {
-            throw UnknownHostException("Unable to resolve host \"$hostname\": No address associated with hostname")
-        }
+        inFlightLocks.remove(host, lock)
+        return resolved
     }
 
     private fun resolveViaDoh(hostname: String): List<InetAddress> {

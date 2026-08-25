@@ -18,4 +18,23 @@ class FallbackDnsTest {
         val addresses = FallbackDns.lookup("1.1.1.1")
         assertFalse(addresses.isEmpty())
     }
+
+    @Test
+    fun cachesResolvedAddressesForFastLookup() {
+        val first = FallbackDns.lookup("1.1.1.1")
+        val second = FallbackDns.lookup("1.1.1.1")
+        assertTrue(first === second || first == second)
+    }
+
+    @Test
+    fun resolvesConcurrentlyWithoutError() {
+        val threads = (1..10).map {
+            Thread {
+                val addresses = FallbackDns.lookup("1.1.1.1")
+                assertFalse(addresses.isEmpty())
+            }
+        }
+        threads.forEach { it.start() }
+        threads.forEach { it.join() }
+    }
 }
