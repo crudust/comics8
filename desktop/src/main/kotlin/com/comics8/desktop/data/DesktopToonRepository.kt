@@ -20,7 +20,14 @@ import com.comics8.core.source.SourceConfig
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
 import com.comics8.core.source.resolveSourceType
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
 class DesktopToonRepository(
@@ -177,6 +184,71 @@ class DesktopToonRepository(
             lastPageByWrId = readMap.mapValues { it.value.lastPage },
         )
         EpisodePage(items = items.distinctBy { it.wrId }, currentPage = 1, lastPage = 1)
+    }
+
+    private val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val activeSyncKeys = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    fun syncEpisodeCounts(
+        items: List<ToonItem>,
+        onUpdated: ((workId: WorkId, totalEpisodes: Int, progressText: String) -> Unit)? = null,
+    ) {
+        if (items.isEmpty()) return
+        syncScope.launch {
+            val workIds = items.map { it.workId() }
+            val historyMap = database.getHistoryByToonIds(workIds).associateBy { it.workId().storageKey() }
+            val existingSeen = database.getSeenByIds(workIds)
+
+            val targets = items.filter { item ->
+                val key = item.workId().storageKey()
+                val hist = historyMap[key]
+                if (hist == null) return@filter false
+                val prev = existingSeen[key]
+                val isUpdated = prev != null && !item.updatedAt.isNullOrBlank() && prev.updatedAt != item.updatedAt
+                val needsSync = item.isNew || isUpdated || hist.totalEpisodes <= 0 || hist.hasNew
+                needsSync && activeSyncKeys.add(key)
+            }
+
+            if (targets.isEmpty()) return@launch
+
+            val semaphore = Semaphore(3)
+            val jobs = targets.map { target ->
+                async {
+                    val key = target.workId().storageKey()
+                    try {
+                        semaphore.withPermit {
+                            val exactTotal = fetchTotalEpisodes(target)
+                            if (exactTotal > 0) {
+                                val existing = database.getHistory(target.workId())
+                                if (existing != null) {
+                                    val safeOrder = existing.lastReadOrder.coerceIn(0, exactTotal)
+                                    val hasNew = safeOrder < exactTotal
+                                    val updated = existing.copy(
+                                        totalEpisodes = exactTotal,
+                                        lastReadOrder = safeOrder,
+                                        hasNew = hasNew,
+                                    )
+                                    saveHistory(updated)
+                                    val readCounts = countReadEpisodesNow(listOf(target.workId()))
+                                    val readCount = readCounts[key] ?: 0
+                                    val progressText = formatReadProgress(
+                                        target.sourceId,
+                                        updated.lastReadOrder,
+                                        updated.totalEpisodes,
+                                        readCount,
+                                    )
+                                    onUpdated?.invoke(target.workId(), exactTotal, progressText)
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {
+                    } finally {
+                        activeSyncKeys.remove(key)
+                    }
+                }
+            }
+            jobs.awaitAll()
+        }
     }
 
     suspend fun fetchTotalEpisodes(item: ToonItem): Int = withContext(Dispatchers.IO) {

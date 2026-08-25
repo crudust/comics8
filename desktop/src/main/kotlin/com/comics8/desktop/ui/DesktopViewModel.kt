@@ -79,7 +79,6 @@ class DesktopViewModel(
     private var loadJob: Job? = null
     private var episodeJob: Job? = null
     private var readerJob: Job? = null
-    private var countUpdateJob: Job? = null
     private var downloadCatalogJob: Job? = null
     private var suggestJob: Job? = null
     private var pageSaveJob: Job? = null
@@ -418,6 +417,15 @@ class DesktopViewModel(
         }
         if (cached == null) {
             loadPage(cachedPage)
+        } else {
+            scope.launch {
+                val fresh = repository.refreshProgress(cached)
+                catalogCache[tab] = fresh
+                if (_state.value.tab == tab && _state.value.screen == Screen.Browse && !_state.value.isSearch) {
+                    _state.update { it.copy(items = fresh) }
+                }
+                triggerEpisodeCountSync(fresh)
+            }
         }
     }
 
@@ -799,49 +807,32 @@ class DesktopViewModel(
         }
     }
 
-    private fun updateEpisodeCountsForUpdatedItems(items: List<ToonItem>) {
-        val targets = items.filter { it.isNew && it.readProgress != null }
-        if (targets.isEmpty()) return
-
-        countUpdateJob?.cancel()
-        countUpdateJob = scope.launch(Dispatchers.IO) {
-            for (target in targets) {
-                try {
-                    val exactTotal = repository.fetchTotalEpisodes(target)
-                    if (exactTotal <= 0) continue
-
-                    toonTotalCounts[target.workId().storageKey()] = exactTotal
-                    val existing = repository.getHistory(target.workId())
-                    if (existing != null) {
-                        val safeOrder = existing.lastReadOrder.coerceIn(1, exactTotal)
-                        val hasNew = safeOrder < exactTotal
-                        val updated = existing.copy(
-                            totalEpisodes = exactTotal,
-                            lastReadOrder = safeOrder,
-                            hasNew = hasNew,
-                        )
-                        repository.saveHistory(updated)
-                        val (progressText, readCount) = listingProgress(
-                            target.sourceId,
-                            updated.lastReadOrder,
-                            updated.totalEpisodes,
-                            target.workId(),
-                        )
-                        _state.update { curr ->
-                            val updatedItems = curr.items.map { row ->
-                                if (row.workId() == target.workId()) row.copy(readProgress = progressText) else row
+    private fun triggerEpisodeCountSync(items: List<ToonItem>) {
+        repository.syncEpisodeCounts(items) { workId, totalEpisodes, progressText ->
+            toonTotalCounts[workId.storageKey()] = totalEpisodes
+            _state.update { curr ->
+                val updatedItems = curr.items.map { row ->
+                    if (row.workId() == workId) row.copy(readProgress = progressText) else row
+                }
+                if (!curr.isSearch) {
+                    curr.tab?.let { tab ->
+                        catalogCache[tab]?.let { cached ->
+                            catalogCache[tab] = cached.map { row ->
+                                if (row.workId() == workId) row.copy(readProgress = progressText) else row
                             }
-                            if (!curr.isSearch) {
-                                curr.tab?.let { catalogCache[it] = updatedItems }
-                            }
-                            curr.copy(
-                                items = updatedItems,
-                                seriesHistory = if (curr.series?.workId() == target.workId()) updated else curr.seriesHistory,
-                                readCounts = curr.readCounts.withCount(target.workId(), readCount),
-                            )
                         }
                     }
-                } catch (_: Exception) {}
+                }
+                curr.copy(
+                    items = updatedItems,
+                    seriesHistory = if (curr.series?.workId() == workId) {
+                        curr.seriesHistory?.copy(
+                            totalEpisodes = totalEpisodes,
+                            lastReadOrder = (curr.seriesHistory.lastReadOrder).coerceIn(0, totalEpisodes),
+                            hasNew = curr.seriesHistory.lastReadOrder < totalEpisodes,
+                        )
+                    } else curr.seriesHistory,
+                )
             }
         }
     }
@@ -876,7 +867,7 @@ class DesktopViewModel(
                 if (result.items.isNotEmpty() && tab !is BrowseTab.Favorite) {
                     repository.markSeen(result.items)
                 }
-                updateEpisodeCountsForUpdatedItems(result.items)
+                triggerEpisodeCountSync(result.items)
             } catch (e: Exception) {
                 if (e is CancellationException) return@launch
                 _state.update {
@@ -955,7 +946,7 @@ class DesktopViewModel(
                         error = if (results.isEmpty()) "'$q' 검색 결과가 없습니다." else null,
                     )
                 }
-                updateEpisodeCountsForUpdatedItems(results)
+                triggerEpisodeCountSync(results)
             } catch (e: Exception) {
                 if (e is CancellationException) return@launch
                 _state.update {
@@ -1340,8 +1331,19 @@ class DesktopViewModel(
                 highlightedEpisodeId = null,
             )
         }
-        if (tab is BrowseTab.Favorite && !searching && catalogCache[tab] == null) {
-            loadPage(1, replace = true)
+        if (tab != null && !searching) {
+            val cached = catalogCache[tab]
+            if (cached != null) {
+                scope.launch {
+                    val fresh = repository.refreshProgress(cached)
+                    catalogCache[tab] = fresh
+                    if (_state.value.tab == tab && _state.value.screen == Screen.Browse && !_state.value.isSearch) {
+                        _state.update { it.copy(items = fresh) }
+                    }
+                }
+            } else if (tab is BrowseTab.Favorite) {
+                loadPage(1, replace = true)
+            }
         }
     }
 

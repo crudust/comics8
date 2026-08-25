@@ -223,7 +223,6 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     private var listJob: Job? = null
     private var episodeJob: Job? = null
     private var readerJob: Job? = null
-    private var countUpdateJob: Job? = null
     private var downloadCatalogJob: Job? = null
     private var suggestJob: Job? = null
     private var savePageJob: Job? = null
@@ -573,6 +572,15 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         }
         if (cached == null) {
             loadPage(cachedPage, replace = true)
+        } else {
+            viewModelScope.launch {
+                val fresh = repository.refreshProgress(cached)
+                catalogCache[tab] = fresh
+                if (_state.value.tab == tab && _state.value.screen == Screen.Browse && !_state.value.isSearch) {
+                    _state.update { it.copy(items = fresh) }
+                }
+                triggerEpisodeCountSync(fresh)
+            }
         }
     }
 
@@ -1287,9 +1295,17 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 highlightedEpisodeId = null,
             )
         }
-        if (tab is BrowseTab.Favorite && !searching) {
+        if (tab != null && !searching) {
             val cached = catalogCache[tab]
-            if (cached == null) {
+            if (cached != null) {
+                viewModelScope.launch {
+                    val fresh = repository.refreshProgress(cached)
+                    catalogCache[tab] = fresh
+                    if (_state.value.tab == tab && _state.value.screen == Screen.Browse && !_state.value.isSearch) {
+                        _state.update { it.copy(items = fresh) }
+                    }
+                }
+            } else if (tab is BrowseTab.Favorite) {
                 loadPage(1, replace = true)
             }
         }
@@ -2132,49 +2148,32 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         loadEpisodes(series, target)
     }
 
-    private fun updateEpisodeCountsForUpdatedItems(items: List<ToonItem>) {
-        val targets = items.filter { it.isNew && it.readProgress != null }
-        if (targets.isEmpty()) return
-
-        countUpdateJob?.cancel()
-        countUpdateJob = viewModelScope.launch(Dispatchers.IO) {
-            for (target in targets) {
-                try {
-                    val exactTotal = repository.fetchTotalEpisodes(target)
-                    if (exactTotal <= 0) continue
-
-                    toonTotalCounts[target.workId().storageKey()] = exactTotal
-                    val existing = repository.getHistory(target.workId())
-                    if (existing != null) {
-                        val safeOrder = existing.lastReadOrder.coerceIn(1, exactTotal)
-                        val hasNew = safeOrder < exactTotal
-                        val updated = existing.copy(
-                            totalEpisodes = exactTotal,
-                            lastReadOrder = safeOrder,
-                            hasNew = hasNew,
-                        )
-                        repository.saveHistory(updated)
-                        val (progressText, readCount) = listingProgress(
-                            target.sourceId,
-                            updated.lastReadOrder,
-                            updated.totalEpisodes,
-                            target.workId(),
-                        )
-                        _state.update { curr ->
-                            val updatedItems = curr.items.map { row ->
-                                if (row.workId() == target.workId()) row.copy(readProgress = progressText) else row
+    private fun triggerEpisodeCountSync(items: List<ToonItem>) {
+        repository.syncEpisodeCounts(items) { workId, totalEpisodes, progressText ->
+            toonTotalCounts[workId.storageKey()] = totalEpisodes
+            _state.update { curr ->
+                val updatedItems = curr.items.map { row ->
+                    if (row.workId() == workId) row.copy(readProgress = progressText) else row
+                }
+                if (!curr.isSearch) {
+                    curr.tab?.let { tab ->
+                        catalogCache[tab]?.let { cached ->
+                            catalogCache[tab] = cached.map { row ->
+                                if (row.workId() == workId) row.copy(readProgress = progressText) else row
                             }
-                            if (!curr.isSearch) {
-                                curr.tab?.let { catalogCache[it] = updatedItems }
-                            }
-                            curr.copy(
-                                items = updatedItems,
-                                seriesHistory = if (curr.series?.workId() == target.workId()) updated else curr.seriesHistory,
-                                readCounts = curr.readCounts.withCount(target.workId(), readCount),
-                            )
                         }
                     }
-                } catch (_: Exception) {}
+                }
+                curr.copy(
+                    items = updatedItems,
+                    seriesHistory = if (curr.series?.workId() == workId) {
+                        curr.seriesHistory?.copy(
+                            totalEpisodes = totalEpisodes,
+                            lastReadOrder = (curr.seriesHistory.lastReadOrder).coerceIn(0, totalEpisodes),
+                            hasNew = curr.seriesHistory.lastReadOrder < totalEpisodes,
+                        )
+                    } else curr.seriesHistory,
+                )
             }
         }
     }
@@ -2204,7 +2203,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                         error = null,
                     )
                 }
-                updateEpisodeCountsForUpdatedItems(items)
+                triggerEpisodeCountSync(items)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -2247,7 +2246,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                         error = null,
                     )
                 }
-                updateEpisodeCountsForUpdatedItems(result.items)
+                triggerEpisodeCountSync(result.items)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
