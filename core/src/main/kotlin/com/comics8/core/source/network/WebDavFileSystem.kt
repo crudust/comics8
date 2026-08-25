@@ -163,9 +163,9 @@ class WebDavFileSystem(
         private var blockStart = -1L
         private var block = ByteArray(0)
 
-        override fun size(): Long = length
+        override fun size(): Long = synchronized(lock) { length }
 
-        override fun read(dst: ByteBuffer): Int {
+        override fun read(dst: ByteBuffer): Int = synchronized(lock) {
             check(open) { "channel closed" }
             if (cursor >= length) return -1
             var total = 0
@@ -173,17 +173,21 @@ class WebDavFileSystem(
                 val wantedStart = cursor / BLOCK_SIZE * BLOCK_SIZE
                 if (blockStart != wantedStart) loadBlock(wantedStart)
                 val offset = (cursor - blockStart).toInt()
-                if (offset !in block.indices) break
+                if (offset !in block.indices) {
+                    if (total == 0) throw IOException("WebDAV 블록 읽기 실패 (위치: $cursor, 블록시작: $blockStart)")
+                    break
+                }
                 val count = minOf(
                     dst.remaining().toLong(),
                     (block.size - offset).toLong(),
                     length - cursor,
                 ).toInt()
+                if (count <= 0) break
                 dst.put(block, offset, count)
                 cursor += count
                 total += count
             }
-            return if (total == 0) -1 else total
+            return if (total == 0 && cursor >= length) -1 else total
         }
 
         private fun loadBlock(start: Long) {
@@ -199,8 +203,10 @@ class WebDavFileSystem(
         }
 
         override fun close() {
-            open = false
-            block = ByteArray(0)
+            synchronized(lock) {
+                open = false
+                block = ByteArray(0)
+            }
         }
 
         companion object {

@@ -28,15 +28,16 @@ internal fun joinNetworkPath(parent: String, child: String): String =
     listOf(parent.trim('/'), child.trim('/')).filter { it.isNotEmpty() }.joinToString("/")
 
 internal abstract class ReadOnlySeekableChannel : SeekableByteChannel {
+    protected val lock = Any()
     protected var cursor: Long = 0L
     protected var open = true
 
-    override fun isOpen(): Boolean = open
-    override fun position(): Long = cursor
-    override fun position(newPosition: Long): SeekableByteChannel {
+    override fun isOpen(): Boolean = synchronized(lock) { open }
+    override fun position(): Long = synchronized(lock) { cursor }
+    override fun position(newPosition: Long): SeekableByteChannel = synchronized(lock) {
         require(newPosition >= 0L) { "negative position" }
         cursor = newPosition
-        return this
+        this
     }
     override fun write(src: ByteBuffer): Int = throw UnsupportedOperationException("read only")
     override fun truncate(size: Long): SeekableByteChannel = throw UnsupportedOperationException("read only")

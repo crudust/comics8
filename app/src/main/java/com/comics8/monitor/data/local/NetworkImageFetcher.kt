@@ -22,23 +22,27 @@ import okio.ByteString.Companion.encodeUtf8
 
 import com.comics8.core.source.local.PreviewImageResolver
 
+import kotlinx.coroutines.ensureActive
+
 class NetworkImageFetcher(
     private val url: String,
     private val options: Options,
     private val thumbs: CoverThumbCache,
 ) : Fetcher {
-    override suspend fun fetch(): SourceResult = runInterruptible(Dispatchers.IO) {
-        val previewSpec = PreviewImageResolver.resolve(url)
-        val ref = NetworkImageUri.parse(url)
-        if (previewSpec != null) {
-            PREVIEW_SLOTS.acquire()
-            val file = try {
-                thumbs.getOrCreate(previewSpec.key, previewSpec.thumbnailPx) {
-                    previewSpec.readSourceBytes()
+    override suspend fun fetch(): SourceResult {
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+        return runInterruptible(Dispatchers.IO) {
+            val previewSpec = PreviewImageResolver.resolve(url)
+            val ref = NetworkImageUri.parse(url)
+            if (previewSpec != null) {
+                PREVIEW_SLOTS.acquire()
+                val file = try {
+                    thumbs.getOrCreate(previewSpec.key, previewSpec.thumbnailPx) {
+                        previewSpec.readSourceBytes()
+                    }
+                } finally {
+                    PREVIEW_SLOTS.release()
                 }
-            } finally {
-                PREVIEW_SLOTS.release()
-            }
             val buffer = Buffer()
             file.source().use { buffer.writeAll(it) }
             SourceResult(
@@ -85,10 +89,9 @@ class NetworkImageFetcher(
                     dataSource = DataSource.NETWORK,
                 )
             }
-
-
         }
     }
+}
 
     class Factory(private val thumbs: CoverThumbCache) : Fetcher.Factory<Uri> {
         override fun create(data: Uri, options: Options, imageLoader: ImageLoader): Fetcher? {
@@ -102,7 +105,7 @@ class NetworkImageFetcher(
     }
 
     private companion object {
-        val PREVIEW_SLOTS = Semaphore(8, true)
+        val PREVIEW_SLOTS = Semaphore(4, true)
 
         fun getReaderCacheFile(context: android.content.Context, url: String): java.io.File {
             val dir = java.io.File(context.cacheDir, "network_reader").apply { mkdirs() }

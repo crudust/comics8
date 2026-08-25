@@ -50,6 +50,7 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 
@@ -105,7 +106,7 @@ object DesktopImageCache {
     private const val DISPLAY_LONG_EDGE = 2048
     private const val DISK_HARD_LIMIT_BYTES = 500L * 1024 * 1024
     private const val DISK_TARGET_BYTES = 400L * 1024 * 1024
-    private val previewSlots = Semaphore(8, true)
+    private val previewSlots = Semaphore(4, true)
     private val remoteSlots = Semaphore(12, true)
 
     private val memoryLock = Any()
@@ -281,6 +282,20 @@ object DesktopImageCache {
         }
     }
 
+    fun cancelPendingPreviews() {
+        synchronized(inFlightLock) {
+            val iterator = inFlightRequests.entries.iterator()
+            while (iterator.hasNext()) {
+                val entry = iterator.next()
+                val url = entry.key
+                if (PreviewImageResolver.resolve(url) != null || NetworkImageUri.parse(url)?.preview != null) {
+                    entry.value.cancel()
+                    iterator.remove()
+                }
+            }
+        }
+    }
+
     suspend fun loadImage(url: String, forceRetry: Boolean = false): ImageBitmap? {
         if (url.isBlank()) return null
         if (!forceRetry) {
@@ -301,6 +316,7 @@ object DesktopImageCache {
 
             val def = loadScope.async {
                 try {
+                    if (!isActive) return@async null
                     val bytes = readImageBytes(url, forceRetry = forceRetry)
                     if (bytes != null && bytes.isNotEmpty()) {
                         val bitmap = decodeForDisplay(bytes)
@@ -329,7 +345,11 @@ object DesktopImageCache {
             def
         }
 
-        return deferred.await()
+        return try {
+            deferred.await()
+        } catch (_: kotlinx.coroutines.CancellationException) {
+            null
+        }
     }
 
 

@@ -12,6 +12,7 @@ import com.hierynomus.smbj.auth.AuthenticationContext
 import com.hierynomus.smbj.connection.Connection
 import com.hierynomus.smbj.session.Session
 import com.hierynomus.smbj.share.DiskShare
+import java.io.IOException
 import java.io.InputStream
 import java.nio.ByteBuffer
 import java.nio.channels.SeekableByteChannel
@@ -155,19 +156,20 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
         private var blockStart = -1L
         private var block = ByteArray(0)
 
-        override fun size(): Long = length
+        override fun size(): Long = synchronized(lock) { length }
 
         private fun readFileFully(buf: ByteArray, fileOffset: Long, lengthToRead: Int): Int {
             var total = 0
             while (total < lengthToRead) {
-                val read = file.read(buf, fileOffset + total, total, lengthToRead - total)
+                val toReadNow = minOf(lengthToRead - total, 1024 * 1024)
+                val read = file.read(buf, fileOffset + total, total, toReadNow)
                 if (read <= 0) break
                 total += read
             }
             return total
         }
 
-        override fun read(dst: ByteBuffer): Int {
+        override fun read(dst: ByteBuffer): Int = synchronized(lock) {
             check(open) { "channel closed" }
             if (cursor >= length) return -1
             var total = 0
@@ -177,7 +179,10 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
                     val toRead = minOf(remaining.toLong(), length - cursor, 1024L * 1024L).toInt()
                     val bytes = ByteArray(toRead)
                     val read = readFileFully(bytes, cursor, toRead)
-                    if (read <= 0) break
+                    if (read <= 0) {
+                        if (total == 0) throw IOException("SMB 파일 읽기 실패 (위치: $cursor)")
+                        break
+                    }
                     dst.put(bytes, 0, read)
                     cursor += read
                     total += read
@@ -191,7 +196,10 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
                     loadBlock(wantedStart)
                 }
                 val offset = (cursor - blockStart).toInt()
-                if (offset !in block.indices) break
+                if (offset !in block.indices) {
+                    if (total == 0) throw IOException("SMB 블록 읽기 실패 (위치: $cursor, 블록시작: $blockStart)")
+                    break
+                }
                 val count = minOf(
                     remaining.toLong(),
                     (block.size - offset).toLong(),
@@ -223,12 +231,16 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
             }
         }
 
-
         override fun close() {
-            if (!open) return
-            open = false
-            block = ByteArray(0)
-            runCatching { file.close() }
+            synchronized(lock) {
+                if (!open) return
+                open = false
+                block = ByteArray(0)
+                try {
+                    file.close()
+                } catch (_: Exception) {
+                }
+            }
         }
 
         companion object {

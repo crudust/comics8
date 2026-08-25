@@ -55,6 +55,54 @@ class NetworkLibrarySourceTest {
     }
 
     @Test
+    fun recoversFromBrokenSessionAndMatchesFallbackZipEntries() = runBlocking {
+        val image = "page-data-2".toByteArray()
+        val zip = ByteArrayOutputStream().also { out ->
+            ZipOutputStream(out).use { archive ->
+                archive.putNextEntry(ZipEntry("sub\\002.jpg"))
+                archive.write(image)
+                archive.closeEntry()
+            }
+        }.toByteArray()
+        var shouldFailChannel = true
+        val backend = object : NetworkFileSystem {
+            var channelOpens = 0
+            override fun list(path: String): List<NetworkNode> = emptyList()
+            override fun stat(path: String): NetworkNode? = null
+            override fun open(path: String): InputStream = ByteArrayInputStream(zip)
+            override fun openChannel(path: String, knownSize: Long): SeekableByteChannel {
+                channelOpens++
+                if (shouldFailChannel) {
+                    shouldFailChannel = false
+                    throw java.io.IOException("Temporary SMB connection failure")
+                }
+                return SeekableInMemoryByteChannel(zip)
+            }
+        }
+        val config = NetworkSourceConfig(
+            id = "network-recovery-test",
+            protocol = NetworkProtocol.SMB,
+            name = "NAS",
+            host = "nas",
+            share = "comics",
+        )
+        NetworkSourceRuntime.register(config.id, backend)
+        try {
+            val url = NetworkImageUri.encode(
+                sourceId = config.id,
+                path = "Book.cbz",
+                zipEntry = "sub/002.jpg", // Normalized slash
+            )
+            // 1st channel open fails with IOException -> automatic invalidation & retry succeeds
+            val bytes = NetworkSourceRuntime.open(url).readBytes()
+            assertThat(bytes).isEqualTo(image)
+            assertThat(backend.channelOpens).isEqualTo(2)
+        } finally {
+            NetworkSourceRuntime.remove(config.id)
+        }
+    }
+
+    @Test
     fun loadsEpisodesDirectlyWithoutScanningRootAgain(): Unit = runBlocking {
         val backend = object : NetworkFileSystem {
             var listCalls = mutableListOf<String>()

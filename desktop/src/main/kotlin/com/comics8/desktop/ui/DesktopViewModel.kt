@@ -989,6 +989,7 @@ class DesktopViewModel(
             previousScreenBeforeSeries = currentScreen
         }
         lastViewedSeries = item
+        DesktopImageCache.cancelPendingPreviews()
         episodeJob?.cancel()
         _state.update {
             it.copy(
@@ -1289,6 +1290,7 @@ class DesktopViewModel(
     }
 
     fun closeSeries() {
+        DesktopImageCache.cancelPendingPreviews()
         readerJob?.cancel()
         episodeJob?.cancel()
         val current = _state.value
@@ -1743,6 +1745,7 @@ class DesktopViewModel(
     }
 
     fun openEpisode(episode: EpisodeItem) {
+        DesktopImageCache.cancelPendingPreviews()
         val current = _state.value
         val series = current.series
         if (series != null) {

@@ -35,20 +35,34 @@ object NetworkSourceRuntime {
         if (ref.preview != NetworkImageUri.PreviewKind.ZIP_FIRST && ref.zipEntry == null) {
             return backend.open(ref.path)
         }
-        val session = NetworkZipPool.getOrCreate(ref.sourceId, ref.path, ref.size, backend)
-        val entryName = if (ref.preview == NetworkImageUri.PreviewKind.ZIP_FIRST) {
-            session.firstImageEntry()
-        } else {
-            ref.zipEntry.orEmpty()
-        }
-        val bytes = session.readEntry(entryName)
+        val bytes = readZipBytesWithRetry(ref, backend)
         return java.io.ByteArrayInputStream(bytes)
+    }
+
+    private fun readZipBytesWithRetry(ref: NetworkImageUri.Ref, backend: NetworkFileSystem): ByteArray {
+        val isFirst = ref.preview == NetworkImageUri.PreviewKind.ZIP_FIRST
+        val entryName = ref.zipEntry.orEmpty()
+        return try {
+            val session = NetworkZipPool.getOrCreate(ref.sourceId, ref.path, ref.size, backend)
+            if (isFirst) session.firstImageBytes() else session.readEntry(entryName)
+        } catch (firstError: Exception) {
+            // 실패 시 캐시된 세션을 무효화하고 1회 재시도
+            NetworkZipPool.invalidate(ref.sourceId, ref.path)
+            val freshSession = NetworkZipPool.getOrCreate(ref.sourceId, ref.path, ref.size, backend)
+            if (isFirst) freshSession.firstImageBytes() else freshSession.readEntry(entryName)
+        }
     }
 
     fun zipImageEntries(sourceId: String, path: String, size: Long = -1L): List<String> {
         val backend = backends[sourceId] ?: throw IOException("등록되지 않은 네트워크 저장소입니다")
-        val session = NetworkZipPool.getOrCreate(sourceId, path, size, backend)
-        return session.listImageEntries()
+        return try {
+            val session = NetworkZipPool.getOrCreate(sourceId, path, size, backend)
+            session.listImageEntries()
+        } catch (firstError: Exception) {
+            NetworkZipPool.invalidate(sourceId, path)
+            val freshSession = NetworkZipPool.getOrCreate(sourceId, path, size, backend)
+            freshSession.listImageEntries()
+        }
     }
 }
 
@@ -62,17 +76,17 @@ internal class NetworkZipSession(
 
     fun readEntry(entryName: String): ByteArray = synchronized(lock) {
         lastAccess = System.currentTimeMillis()
-        val normalized = ZipArchive.normalizeZipEntry(entryName)
-        val entry = zip.getEntry(normalized) ?: throw IOException("ZIP 항목을 찾을 수 없습니다: $normalized")
+        val entry = findEntry(entryName) ?: throw IOException("ZIP 항목을 찾을 수 없습니다: $entryName")
         if (entry.size > ZipArchive.MAX_ENTRY_BYTES) throw IOException("ZIP 이미지가 너무 큽니다")
         zip.getInputStream(entry).use { stream ->
             stream.readBytes()
         }
     }
 
-    fun firstImageEntry(): String = synchronized(lock) {
+    fun firstImageBytes(): ByteArray = synchronized(lock) {
         lastAccess = System.currentTimeMillis()
-        listImageEntries().firstOrNull() ?: throw IOException("ZIP에 이미지가 없습니다")
+        val first = listImageEntries().firstOrNull() ?: throw IOException("ZIP에 이미지가 없습니다")
+        readEntry(first)
     }
 
     fun listImageEntries(): List<String> = synchronized(lock) {
@@ -82,13 +96,27 @@ internal class NetworkZipSession(
         while (entries.hasMoreElements()) {
             val candidate = entries.nextElement()
             if (candidate.isDirectory) continue
-            val name = runCatching { ZipArchive.normalizeZipEntry(candidate.name) }.getOrNull() ?: continue
+            val name = ZipArchive.tryNormalizeZipEntry(candidate.name) ?: continue
             if (ZipImageNames.isImageEntry(name)) {
                 imageNames += name
             }
         }
         imageNames.sortWith(NaturalSort)
         imageNames
+    }
+
+    private fun findEntry(requested: String): org.apache.commons.compress.archivers.zip.ZipArchiveEntry? {
+        val normalized = ZipArchive.tryNormalizeZipEntry(requested) ?: requested
+        zip.getEntry(requested)?.let { return it }
+        zip.getEntry(normalized)?.let { return it }
+        val entries = zip.entries
+        while (entries.hasMoreElements()) {
+            val candidate = entries.nextElement()
+            if (candidate.isDirectory) continue
+            val name = ZipArchive.tryNormalizeZipEntry(candidate.name) ?: candidate.name
+            if (name == normalized || name == requested) return candidate
+        }
+        return null
     }
 
     override fun close() {
@@ -126,6 +154,11 @@ internal object NetworkZipPool {
         val session = NetworkZipSession(key, channel, zip)
         sessions[key] = session
         return session
+    }
+
+    fun invalidate(sourceId: String, path: String) = synchronized(lock) {
+        val key = "$sourceId|$path"
+        sessions.remove(key)?.close()
     }
 
     fun removeForSource(sourceId: String) = synchronized(lock) {
