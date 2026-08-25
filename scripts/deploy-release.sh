@@ -63,10 +63,76 @@ sed_inplace "s/versionCode = [0-9]+/versionCode = ${VERSION_CODE}/" app/build.gr
 sed_inplace "s/versionName = \"[^\"]+\"/versionName = \"${VERSION_NAME}\"/" app/build.gradle.kts
 sed_inplace "s/packageVersion = \"[^\"]+\"/packageVersion = \"${VERSION_NAME}\"/" desktop/build.gradle.kts
 
-cat <<EOF > desktop/src/main/kotlin/com/comics8/desktop/DesktopVersion.kt
+cat <<VERSION_EOF > desktop/src/main/kotlin/com/comics8/desktop/DesktopVersion.kt
 package com.comics8.desktop
 
 object DesktopVersion {
     const val VERSION_NAME = "${VERSION_NAME}"
     const val VERSION_CODE = ${VERSION_CODE}
 }
+VERSION_EOF
+
+# 2. Build Android Release APK & Windows Portable Zip
+echo "📦 2/5: Building Android Release APK & Windows Portable Zip..."
+./gradlew assembleRelease :desktop:packageWindowsZip
+
+APK_PATH="app/build/outputs/apk/release/app-release.apk"
+WIN_ZIP_PATH="desktop/build/compose/binaries/main/Comics8-win.zip"
+MAC_ZIP_PATH="desktop/build/compose/binaries/main/Comics8-mac.zip"
+
+if [ ! -f "$APK_PATH" ]; then
+    echo "❌ APK file not found: $APK_PATH"
+    exit 1
+fi
+
+# 3. Commit version bump in dev repo
+echo "📝 3/5: Committing version bump to dev repo..."
+git add app/build.gradle.kts desktop/build.gradle.kts desktop/src/main/kotlin/com/comics8/desktop/DesktopVersion.kt
+if ! git diff --staged --quiet; then
+    git commit -m "chore: Bump version to ${VERSION_NAME} (code ${VERSION_CODE})"
+fi
+git push origin main
+
+# 4. Sync open-source modules to public repo
+echo "🔄 4/5: Syncing open-source repository..."
+./scripts/sync-public-repo.sh "${PUBLIC_REPO}"
+
+# 5. Publish to GitHub Releases
+echo "🐙 5/5: Publishing to GitHub Releases (crudust/comics8)..."
+RELEASE_FILES=("$APK_PATH#comics8-latest.apk")
+if [ -f "$WIN_ZIP_PATH" ]; then
+    RELEASE_FILES+=("$WIN_ZIP_PATH")
+fi
+if [ -f "$MAC_ZIP_PATH" ]; then
+    RELEASE_FILES+=("$MAC_ZIP_PATH")
+fi
+
+TAG_NAME="v${VERSION_NAME}"
+if gh release view "${TAG_NAME}" --repo crudust/comics8 >/dev/null 2>&1; then
+    echo "  ⬆️ Updating assets for release ${TAG_NAME}..."
+    gh release upload "${TAG_NAME}" "${RELEASE_FILES[@]}" --clobber --repo crudust/comics8
+else
+    echo "  🎉 Creating release ${TAG_NAME}..."
+    gh release create "${TAG_NAME}" "${RELEASE_FILES[@]}" \
+      --repo crudust/comics8 \
+      --title "Comics8 ${TAG_NAME}" \
+      --notes "${RELEASE_NOTES}"
+fi
+
+# Generate Homebrew Cask Formula if Mac zip exists
+if [ -f "$MAC_ZIP_PATH" ]; then
+    MAC_SHA256=$(sha256sum "$MAC_ZIP_PATH" | awk '{print $1}')
+    mkdir -p build/homebrew
+    sed "s/__VERSION__/${VERSION_NAME}/g; s/__SHA256__/${MAC_SHA256}/g" templates/homebrew/comics8.rb > build/homebrew/comics8.rb
+    echo "🍺 Generated Homebrew Cask: build/homebrew/comics8.rb (SHA256: ${MAC_SHA256})"
+fi
+
+echo "=================================================="
+echo "🎉 배포가 성공적으로 완료되었습니다!"
+echo "• GitHub Release: https://github.com/crudust/comics8/releases/tag/${TAG_NAME}"
+echo "• Android APK:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/comics8-latest.apk"
+echo "• Windows Zip:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/Comics8-win.zip"
+if [ -f "$MAC_ZIP_PATH" ]; then
+    echo "• Mac Desktop:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/Comics8-mac.zip"
+fi
+echo "=================================================="

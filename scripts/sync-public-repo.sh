@@ -7,7 +7,7 @@ set -euo pipefail
 # to a separate clean public repository.
 # ==========================================================
 
-TARGET_REPO="${1:-${COMICS8_PUBLIC_REPO_URL:-git@github.com:crudust/comics8-desktop.git}}"
+TARGET_REPO="${1:-${COMICS8_PUBLIC_REPO_URL:-git@github.com:crudust/comics8.git}}"
 SYNC_BRANCH="${2:-main}"
 WORK_DIR="/tmp/comics8-public-sync-$$"
 
