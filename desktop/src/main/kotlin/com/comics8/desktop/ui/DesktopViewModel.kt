@@ -631,6 +631,44 @@ class DesktopViewModel(
         }
     }
 
+    fun getJsSourceScript(sourceId: String): String? {
+        val file = jsPackStore.fileFor(sourceId)
+        return if (file.isFile) {
+            runCatching { file.readText(Charsets.UTF_8) }.getOrNull()
+        } else null
+    }
+
+    fun updateJsSourceScript(
+        sourceId: String,
+        newScript: String,
+        onResult: (Boolean, String?) -> Unit,
+    ) {
+        scope.launch {
+            try {
+                val source = withContext(Dispatchers.IO) {
+                    val bytes = newScript.toByteArray(Charsets.UTF_8)
+                    com.comics8.core.source.js.JsPackStore.checkSize(bytes.size)
+                    val s = com.comics8.core.source.js.JsComicSource.fromScript(newScript, "$sourceId.js")
+                    jsPackStore.copy(sourceId, s.hostApiLevel, bytes)
+                    s
+                }
+                val registry = repository.sourceRegistry()
+                registry.remove(sourceId)
+                registry.add(source)
+                clearCatalogCache(sourceId)
+                _state.update {
+                    it.copy(
+                        installedSources = repository.installedSources(),
+                        sourceRegistry = repository.sourceRegistry(),
+                    )
+                }
+                onResult(true, null)
+            } catch (e: Exception) {
+                onResult(false, e.message ?: "JS 스크립트 저장에 실패했습니다")
+            }
+        }
+    }
+
     fun requestRemoveSource(source: com.comics8.core.source.ComicSource) {
         uninstallSource(source.id)
     }

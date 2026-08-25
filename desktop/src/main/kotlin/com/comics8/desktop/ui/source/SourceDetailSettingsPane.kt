@@ -1,7 +1,6 @@
 package com.comics8.desktop.ui.source
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Folder
@@ -40,7 +40,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
@@ -60,12 +59,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.comics8.core.model.ProgressDisplayMode
 import com.comics8.core.source.ComicSource
 import com.comics8.core.source.WorkId
@@ -85,7 +87,6 @@ fun SourceDetailSettingsPane(
     modifier: Modifier = Modifier,
 ) {
     val isLocal = source.id == WorkId.LOCAL_SOURCE
-    val netSource = source as? NetworkLibrarySource
     val netConfig = remember(source.id) { viewModel.getNetworkSourceConfig(source.id) }
     val isSmb = netConfig?.protocol == NetworkProtocol.SMB
     val isWebDav = netConfig?.protocol == NetworkProtocol.WEBDAV
@@ -114,10 +115,54 @@ fun SourceDetailSettingsPane(
     var davPassword by remember(netConfig) { mutableStateOf(netConfig?.password.orEmpty()) }
     var davShowPassword by remember { mutableStateOf(false) }
 
+    // JS 스크립트 편집 상태
+    var jsScriptCode by remember(source.id) {
+        mutableStateOf(if (isJs) viewModel.getJsSourceScript(source.id).orEmpty() else "")
+    }
+
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var folderToDelete by remember { mutableStateOf<String?>(null) }
     var isSaving by remember { mutableStateOf(false) }
     var saveMessage by remember { mutableStateOf<String?>(null) }
+
+    fun doSave() {
+        if (isSmb && netConfig != null) {
+            isSaving = true
+            val newConfig = netConfig.copy(
+                name = smbName.trim().ifBlank { "SMB" },
+                host = smbHost.trim(),
+                port = smbPort.toIntOrNull() ?: 445,
+                share = smbShare.trim(),
+                path = smbPath.trim(),
+                username = smbUsername.trim(),
+                password = smbPassword,
+                domain = smbDomain.trim(),
+            )
+            viewModel.updateNetworkSourceConfig(newConfig) { success, msg ->
+                isSaving = false
+                saveMessage = if (success) "연결 설정이 저장되었습니다." else msg ?: "저장 실패"
+            }
+        } else if (isWebDav && netConfig != null) {
+            isSaving = true
+            val newConfig = netConfig.copy(
+                name = davName.trim().ifBlank { "WebDAV" },
+                url = davUrl.trim(),
+                path = davPath.trim(),
+                username = davUsername.trim(),
+                password = davPassword,
+            )
+            viewModel.updateNetworkSourceConfig(newConfig) { success, msg ->
+                isSaving = false
+                saveMessage = if (success) "연결 설정이 저장되었습니다." else msg ?: "저장 실패"
+            }
+        } else if (isJs) {
+            isSaving = true
+            viewModel.updateJsSourceScript(source.id, jsScriptCode) { success, msg ->
+                isSaving = false
+                saveMessage = if (success) "JS 스크립트가 저장되었습니다." else msg ?: "저장 실패"
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -142,35 +187,9 @@ fun SourceDetailSettingsPane(
                     }
                 },
                 actions = {
-                    if (netConfig != null && (isSmb || isWebDav)) {
+                    if (!isLocal) {
                         Button(
-                            onClick = {
-                                isSaving = true
-                                val newConfig = if (isSmb) {
-                                    netConfig.copy(
-                                        name = smbName.trim().ifBlank { "SMB" },
-                                        host = smbHost.trim(),
-                                        port = smbPort.toIntOrNull() ?: 445,
-                                        share = smbShare.trim(),
-                                        path = smbPath.trim(),
-                                        username = smbUsername.trim(),
-                                        password = smbPassword,
-                                        domain = smbDomain.trim(),
-                                    )
-                                } else {
-                                    netConfig.copy(
-                                        name = davName.trim().ifBlank { "WebDAV" },
-                                        url = davUrl.trim(),
-                                        path = davPath.trim(),
-                                        username = davUsername.trim(),
-                                        password = davPassword,
-                                    )
-                                }
-                                viewModel.updateNetworkSourceConfig(newConfig) { success, msg ->
-                                    isSaving = false
-                                    saveMessage = if (success) "연결 설정이 저장되었습니다." else msg ?: "저장 실패"
-                                }
-                            },
+                            onClick = ::doSave,
                             enabled = !isSaving,
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.primary,
@@ -255,19 +274,13 @@ fun SourceDetailSettingsPane(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = source.displayName,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                    )
-                                    Text(
-                                        text = "고유 ID: ${source.id}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
+                                Text(
+                                    text = source.displayName,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.weight(1f),
+                                )
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(8.dp))
@@ -348,7 +361,7 @@ fun SourceDetailSettingsPane(
             }
 
             // ==========================================
-            // 2. 소스별 세부 설정 (로컬 / SMB / WebDAV)
+            // 2. 소스별 세부 설정 (로컬 / SMB / WebDAV / JS)
             // ==========================================
             if (isLocal) {
                 item {
@@ -609,6 +622,59 @@ fun SourceDetailSettingsPane(
                                             )
                                         }
                                     },
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (isJs) {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            SectionTitle(title = "JS 확장 스크립트 코드 편집", icon = Icons.Default.Code)
+                            Button(
+                                onClick = ::doSave,
+                                enabled = !isSaving,
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            ) {
+                                Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("적용", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            border = androidx.compose.foundation.BorderStroke(
+                                width = 1.dp,
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                OutlinedTextField(
+                                    value = jsScriptCode,
+                                    onValueChange = { jsScriptCode = it },
+                                    label = { Text("JavaScript Source Code") },
+                                    textStyle = TextStyle(
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 12.sp,
+                                        lineHeight = 16.sp,
+                                    ),
+                                    minLines = 15,
+                                    maxLines = 30,
                                     modifier = Modifier.fillMaxWidth(),
                                 )
                             }
