@@ -1,10 +1,14 @@
 package com.comics8.monitor.ui.source
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -329,82 +333,66 @@ private fun <T : Any> ReorderableItemColumn(
     spacing: androidx.compose.ui.unit.Dp = 10.dp,
     itemContent: @Composable (item: T, dragHandleModifier: Modifier, isDragging: Boolean) -> Unit,
 ) {
-    var currentList by remember { mutableStateOf(items) }
-    var draggingKey by remember { mutableStateOf<Any?>(null) }
+    var draggedIndex by remember { mutableStateOf<Int?>(null) }
     var dragOffsetY by remember { mutableStateOf(0f) }
-    val itemHeights = remember { mutableMapOf<Any, Float>() }
+    var itemHeightPx by remember { mutableStateOf(0f) }
     val density = LocalDensity.current
+    val spacingPx = with(density) { spacing.toPx() }
 
-    LaunchedEffect(items) {
-        if (draggingKey == null) {
-            currentList = items
-        }
+    val currentDragged = draggedIndex
+    val totalItemHeight = if (itemHeightPx > 0f) itemHeightPx + spacingPx else with(density) { 68.dp.toPx() }
+
+    val targetIndex = if (currentDragged != null && totalItemHeight > 0f) {
+        (currentDragged + (dragOffsetY / totalItemHeight).roundToInt()).coerceIn(0, items.lastIndex)
+    } else {
+        currentDragged
     }
 
-    val latestItems by rememberUpdatedState(items)
     val latestOnReorder by rememberUpdatedState(onReorder)
 
     Column(
         verticalArrangement = Arrangement.spacedBy(spacing),
         modifier = modifier.fillMaxWidth(),
     ) {
-        currentList.forEach { item ->
-            val itemKey = key(item)
-            val isDragging = draggingKey == itemKey
-            val yOffset = if (isDragging) dragOffsetY else 0f
+        items.forEachIndexed { index, item ->
+            val isDragging = index == currentDragged
+
+            val visualOffset by animateFloatAsState(
+                targetValue = when {
+                    currentDragged == null -> 0f
+                    isDragging -> dragOffsetY
+                    targetIndex != null && currentDragged < targetIndex && index in (currentDragged + 1)..targetIndex -> -totalItemHeight
+                    targetIndex != null && currentDragged > targetIndex && index in targetIndex until currentDragged -> totalItemHeight
+                    else -> 0f
+                },
+                animationSpec = if (isDragging) spring(stiffness = Spring.StiffnessHigh) else spring(stiffness = Spring.StiffnessMediumLow),
+                label = "dnd_offset_$index",
+            )
+
             val zIndex = if (isDragging) 10f else 1f
 
-            val dragHandleModifier = Modifier.pointerInput(itemKey) {
+            val dragHandleModifier = Modifier.pointerInput(key(item)) {
                 detectDragGestures(
                     onDragStart = {
-                        draggingKey = itemKey
+                        draggedIndex = index
                         dragOffsetY = 0f
                     },
                     onDrag = { change, dragAmount ->
                         change.consume()
                         dragOffsetY += dragAmount.y
-                        val currKey = draggingKey ?: return@detectDragGestures
-                        val currIndex = currentList.indexOfFirst { key(it) == currKey }
-                        if (currIndex == -1) return@detectDragGestures
-
-                        val defaultHeight = 64f * density.density
-                        val itemHeight = itemHeights[currKey] ?: defaultHeight
-                        val threshold = itemHeight * 0.5f
-
-                        if (dragOffsetY > threshold && currIndex < currentList.lastIndex) {
-                            val targetIndex = currIndex + 1
-                            val targetHeight = itemHeights[key(currentList[targetIndex])] ?: itemHeight
-                            val nextList = currentList.toMutableList()
-                            val moved = nextList.removeAt(currIndex)
-                            nextList.add(targetIndex, moved)
-                            currentList = nextList
-                            dragOffsetY -= targetHeight
-                        } else if (dragOffsetY < -threshold && currIndex > 0) {
-                            val targetIndex = currIndex - 1
-                            val targetHeight = itemHeights[key(currentList[targetIndex])] ?: itemHeight
-                            val nextList = currentList.toMutableList()
-                            val moved = nextList.removeAt(currIndex)
-                            nextList.add(targetIndex, moved)
-                            currentList = nextList
-                            dragOffsetY += targetHeight
-                        }
                     },
                     onDragEnd = {
-                        val finalKey = draggingKey
-                        draggingKey = null
+                        val from = draggedIndex
+                        val to = targetIndex
+                        draggedIndex = null
                         dragOffsetY = 0f
-                        if (finalKey != null) {
-                            val fromIdx = latestItems.indexOfFirst { key(it) == finalKey }
-                            val toIdx = currentList.indexOfFirst { key(it) == finalKey }
-                            if (fromIdx != -1 && toIdx != -1 && fromIdx != toIdx) {
-                                latestOnReorder(fromIdx, toIdx)
-                            }
+                        if (from != null && to != null && from != to) {
+                            latestOnReorder(from, to)
                         }
                     },
                     onDragCancel = {
-                        draggingKey = null
+                        draggedIndex = null
                         dragOffsetY = 0f
-                        currentList = latestItems
                     },
                 )
             }
@@ -414,15 +402,17 @@ private fun <T : Any> ReorderableItemColumn(
                     .fillMaxWidth()
                     .zIndex(zIndex)
                     .graphicsLayer {
-                        translationY = yOffset
+                        translationY = visualOffset
                         if (isDragging) {
                             shadowElevation = 8.dp.toPx()
                             shape = RoundedCornerShape(12.dp)
                             clip = false
                         }
                     }
-                    .onGloballyPositioned { coordinates ->
-                        itemHeights[itemKey] = coordinates.size.height.toFloat()
+                    .onGloballyPositioned { coords ->
+                        if (!isDragging && coords.size.height > 0) {
+                            itemHeightPx = coords.size.height.toFloat()
+                        }
                     },
             ) {
                 itemContent(item, dragHandleModifier, isDragging)

@@ -34,7 +34,7 @@ function parseCard(container, baseUrl) {
   if (!thumbUrl) return null;
   thumbUrl = host.absUrl(thumbUrl, baseUrl || ORIGIN);
 
-  var title = container.textOf("h4") || container.textOf("h1") || container.textOf("h2") || container.textOf("h3") || container.textOf(".font-semibold") || a.attr("title");
+  var title = (img ? img.attr("alt") : "") || container.textOf("h4") || container.textOf("h1") || container.textOf("h2") || container.textOf("h3") || container.textOf(".font-semibold") || a.attr("title");
   title = decodeEntities(title.trim());
 
   var genre = container.textOf(".font-normal.text-xs") || container.textOf(".numscore");
@@ -62,7 +62,7 @@ var source = {
   displayName: "Rawkuma",
   origin: ORIGIN,
   catalogs: [
-    { id: "LATEST", label: "최신", paginated: false },
+    { id: "LATEST", label: "최신", paginated: true },
     { id: "ALL", label: "전체", paginated: true }
   ],
   searchPlaceholder: "작품 검색",
@@ -75,71 +75,40 @@ var source = {
     var cat = String(catalogId || "LATEST").toUpperCase();
     var p = page < 1 ? 1 : page;
 
-    if (cat === "LATEST") {
-      var homeHtml = host.fetchText({ url: ORIGIN + "/" });
-      var homeDoc = host.parseHtml(homeHtml, ORIGIN);
-      var items = [];
-      var seen = {};
+    var url = (cat === "LATEST")
+      ? (p === 1 ? ORIGIN + "/latest-update/" : ORIGIN + "/latest-update/page/" + p + "/")
+      : (p === 1 ? ORIGIN + "/manga/" : ORIGIN + "/manga/page/" + p + "/");
 
-      // 1. Swiper slides (Hero banner)
-      var slides = homeDoc.select(".swiper-slide");
-      for (var s = 0; s < slides.length; s++) {
-        var slide = slides[s];
-        var slideItem = parseCard(slide, ORIGIN);
-        if (slideItem && !seen[slideItem.id]) {
-          seen[slideItem.id] = true;
-          items.push(slideItem);
-        }
-      }
-
-      // 2. Popular & Latest update cards on home page
-      var cards = homeDoc.select("div.col-span-1, div.group-data-\\[direction\\=horizontal\\]\\:hidden, div.overflow-hidden.relative.flex.flex-col.min-w-0");
-      for (var i = 0; i < cards.length; i++) {
-        var card = cards[i];
-        var item = parseCard(card, ORIGIN);
-        if (item && !seen[item.id]) {
-          seen[item.id] = true;
-          items.push(item);
-        }
-      }
-
-      return {
-        items: items,
-        pageInfo: { currentPage: 1, lastPage: 1 }
-      };
-    }
-
-    // ALL (Archive /manga/page/{p}/)
-    var url = ORIGIN + "/manga/page/" + p + "/";
     var html = host.fetchText({ url: url });
     var doc = host.parseHtml(html, ORIGIN);
-    var archiveCards = doc.select("div.group-data-\\[direction\\=horizontal\\]\\:hidden, div.overflow-hidden.relative.flex.flex-col.min-w-0");
-    var archiveItems = [];
-    var seenArchive = {};
+    var cards = doc.select("div.group-data-\\[direction\\=horizontal\\]\\:hidden, div.overflow-hidden.relative.flex.flex-col.min-w-0");
+    var items = [];
+    var seen = {};
 
-    for (var k = 0; k < archiveCards.length; k++) {
-      var aCard = archiveCards[k];
-      var it = parseCard(aCard, ORIGIN);
-      if (it && !seenArchive[it.id]) {
-        seenArchive[it.id] = true;
-        archiveItems.push(it);
+    for (var i = 0; i < cards.length; i++) {
+      var card = cards[i];
+      var item = parseCard(card, ORIGIN);
+      if (item && !seen[item.id]) {
+        seen[item.id] = true;
+        items.push(item);
       }
     }
 
     var pageInfo = host.parsePageInfo(doc);
     if (pageInfo.lastPage <= 1) {
-      var pagLinks = doc.select("a[href*='/manga/page/']");
+      var pattern = (cat === "LATEST") ? "/latest-update/page/(\\d+)" : "/manga/page/(\\d+)";
+      var pagLinks = doc.select("a[href*='page/']");
       var maxP = p;
       for (var l = 0; l < pagLinks.length; l++) {
         var pHref = pagLinks[l].attr("href");
-        var pNum = parseInt(host.match(pHref, "/manga/page/(\\d+)", 1), 10);
+        var pNum = parseInt(host.match(pHref, pattern, 1), 10);
         if (!isNaN(pNum) && pNum > maxP) maxP = pNum;
       }
       pageInfo = { currentPage: p, lastPage: maxP > p ? maxP : p + 1 };
     }
 
     return {
-      items: archiveItems,
+      items: items,
       pageInfo: pageInfo
     };
   },
@@ -151,7 +120,6 @@ var source = {
     var items = [];
     var seen = {};
 
-    // 1. Primary search: WordPress REST API with embedded media
     try {
       var restUrl = ORIGIN + "/wp-json/wp/v2/manga?search=" + encodeURIComponent(q) + "&_embed=1";
       var jsonText = host.fetchText({
