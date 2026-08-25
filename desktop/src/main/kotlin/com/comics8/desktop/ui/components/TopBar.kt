@@ -116,6 +116,7 @@ fun TopBar(
                     registry = state.sourceRegistry,
                     onSelect = viewModel::setActiveSource,
                     onOpenSourceManager = viewModel::openSourceManager,
+                    onOpenSettings = viewModel::openSettings,
                     titleStyle = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.weight(1f),
                 )
@@ -151,12 +152,6 @@ fun TopBar(
                 }
             }
             if (state.screen == Screen.Browse) {
-                IconButton(onClick = viewModel::openSettings) {
-                    Icon(
-                        imageVector = Icons.Default.Settings,
-                        contentDescription = "설정",
-                    )
-                }
                 if (state.writesDownloads) {
                     IconButton(onClick = viewModel::openDownloads) {
                         Icon(
@@ -182,12 +177,6 @@ fun TopBar(
                 }
             }
             if (state.screen == Screen.History) {
-                IconButton(onClick = viewModel::openSettings) {
-                    Icon(
-                        imageVector = Icons.Outlined.CloudSync,
-                        contentDescription = "클라우드 동기화 설정",
-                    )
-                }
                 if (state.historyItems.isNotEmpty()) {
                     IconButton(onClick = viewModel::clearAllHistory) {
                         Icon(
@@ -527,6 +516,7 @@ private fun SourceTitleDropdown(
     registry: SourceRegistry,
     onSelect: (String) -> Unit,
     onOpenSourceManager: () -> Unit,
+    onOpenSettings: () -> Unit,
     titleStyle: TextStyle,
     modifier: Modifier = Modifier,
 ) {
@@ -618,6 +608,21 @@ private fun SourceTitleDropdown(
                     onClick = {
                         expanded = false
                         onOpenSourceManager()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("설정") },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    },
+                    onClick = {
+                        expanded = false
+                        onOpenSettings()
                     },
                 )
             }
