@@ -58,6 +58,7 @@ class ToonRepository(
     private val readEpisodeDao: ReadEpisodeDao,
     private val readHistoryDao: ReadHistoryDao,
     private val database: AppDatabase? = null,
+    val sourceSettings: com.comics8.core.source.SourceSettings? = null,
     val syncManager: SyncManager? = null,
     val downloadManager: DownloadManager? = null,
     private val now: () -> Long = { System.currentTimeMillis() },
@@ -419,6 +420,10 @@ class ToonRepository(
         }
     }
 
+    suspend fun refreshProgress(items: List<ToonItem>): List<ToonItem> = withContext(Dispatchers.IO) {
+        applyFlags(items)
+    }
+
     suspend fun isFavorite(workId: WorkId): Boolean = withContext(Dispatchers.IO) {
         favoriteDao.exists(workId)
     }
@@ -521,8 +526,10 @@ class ToonRepository(
         readEpisodeDao.getReadEpisode(workId, wrId)
     }
 
-    fun formatReadProgress(sourceId: String, lastReadOrder: Int, totalEpisodes: Int, readCount: Int): String =
-        sources.formatReadProgress(sourceId, lastReadOrder, totalEpisodes, readCount)
+    fun formatReadProgress(sourceId: String, lastReadOrder: Int, totalEpisodes: Int, readCount: Int): String {
+        val mode = sourceSettings?.progressDisplayMode(sourceId)
+        return sources.formatReadProgress(sourceId, lastReadOrder, totalEpisodes, readCount, mode)
+    }
 
     suspend fun countReadEpisodes(workId: WorkId): Int = withContext(Dispatchers.IO) {
         readEpisodeDao.countByToon(workId)

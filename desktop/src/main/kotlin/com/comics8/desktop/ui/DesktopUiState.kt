@@ -19,6 +19,8 @@ enum class Screen {
     Reader,
     History,
     Downloads,
+    Settings,
+    SourceManager,
 }
 
 data class ArtistPickRequest(

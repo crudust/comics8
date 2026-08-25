@@ -226,6 +226,10 @@ class DesktopToonRepository(
         database.saveAllSeen(rows)
     }
 
+    suspend fun refreshProgress(items: List<ToonItem>): List<ToonItem> = withContext(Dispatchers.IO) {
+        applyFlags(items)
+    }
+
     private suspend fun applyFlags(items: List<ToonItem>): List<ToonItem> {
         if (items.isEmpty()) return items
         val workIds = items.map { it.workId() }
@@ -359,8 +363,10 @@ class DesktopToonRepository(
         database.getReadEpisode(workId, wrId)
     }
 
-    fun formatReadProgress(sourceId: String, lastReadOrder: Int, totalEpisodes: Int, readCount: Int): String =
-        sources.formatReadProgress(sourceId, lastReadOrder, totalEpisodes, readCount)
+    fun formatReadProgress(sourceId: String, lastReadOrder: Int, totalEpisodes: Int, readCount: Int): String {
+        val mode = DesktopSourcePrefs.progressDisplayMode(sourceId)
+        return sources.formatReadProgress(sourceId, lastReadOrder, totalEpisodes, readCount, mode)
+    }
 
     suspend fun countReadEpisodes(workId: WorkId): Int = withContext(Dispatchers.IO) {
         database.countReadEpisodes(workId)

@@ -134,6 +134,10 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
     ComicsThemeScaffold(isImmersive = isReader) {
         if (isReader) {
             ReaderPane(state = state, viewModel = viewModel)
+        } else if (state.screen == Screen.Settings) {
+            com.comics8.monitor.ui.settings.SettingsPane(state = state, viewModel = viewModel)
+        } else if (state.screen == Screen.SourceManager) {
+            com.comics8.monitor.ui.source.SourceManagerPane(state = state, viewModel = viewModel)
         } else {
             val browseContent: @Composable () -> Unit = {
                 Column(Modifier.fillMaxSize()) {

@@ -141,6 +141,8 @@ sealed interface Screen {
     data object Reader : Screen
     data object History : Screen
     data object Downloads : Screen
+    data object Settings : Screen
+    data object SourceManager : Screen
 }
 
 class ListingViewModel(application: Application) : AndroidViewModel(application) {
@@ -282,6 +284,14 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 closeDownloads()
                 true
             }
+            Screen.Settings -> {
+                closeSettings()
+                true
+            }
+            Screen.SourceManager -> {
+                closeSourceManager()
+                true
+            }
             Screen.Browse -> {
                 if (current.isSearch) {
                     current.tab?.let { selectTab(it) }
@@ -325,6 +335,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                     true
                 } else false
             }
+            else -> false
         }
     }
 
@@ -740,6 +751,25 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         val id = _state.value.activeSourceId ?: return
         if (id == WorkId.LOCAL_SOURCE) return
         uninstallSource(id)
+    }
+
+    fun getSourceProgressDisplayMode(sourceId: String): com.comics8.core.model.ProgressDisplayMode =
+        sourceSettings.progressDisplayMode(sourceId)
+
+    fun requestRemoveSource(source: ComicSource) {
+        uninstallSource(source.id)
+    }
+
+    fun openAddSmb() {
+        openNetworkSourceDialog(com.comics8.core.source.network.NetworkProtocol.SMB)
+    }
+
+    fun openAddWebDav() {
+        openNetworkSourceDialog(com.comics8.core.source.network.NetworkProtocol.WEBDAV)
+    }
+
+    fun requestAddLocalFolder() {
+        _state.update { it.copy(pendingLibraryTreePick = true) }
     }
 
     fun consumeLibraryTreePick() {
@@ -1278,6 +1308,41 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
     fun closeDownloads() {
         _state.update { it.copy(screen = Screen.Browse) }
+    }
+
+    fun openSettings() {
+        readerJob?.cancel()
+        episodeJob?.cancel()
+        _state.update { it.copy(screen = Screen.Settings) }
+    }
+
+    fun closeSettings() {
+        _state.update { it.copy(screen = Screen.Browse) }
+    }
+
+    fun openSourceManager() {
+        readerJob?.cancel()
+        episodeJob?.cancel()
+        _state.update { it.copy(screen = Screen.SourceManager) }
+    }
+
+    fun closeSourceManager() {
+        _state.update { it.copy(screen = Screen.Browse) }
+    }
+
+    fun setSourceProgressDisplayMode(sourceId: String, mode: com.comics8.core.model.ProgressDisplayMode) {
+        sourceSettings.setProgressDisplayMode(sourceId, mode)
+        // 화면에 바로 반영되도록 현재 목록의 진행도를 다시 갱신
+        refreshCurrentListingProgress()
+    }
+
+    fun refreshCurrentListingProgress() {
+        val current = _state.value
+        val sourceId = current.activeSourceId ?: return
+        viewModelScope.launch {
+            val updated = repository.refreshProgress(current.items)
+            _state.update { it.copy(items = updated) }
+        }
     }
 
     fun loadDownloads() {

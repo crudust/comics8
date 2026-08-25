@@ -75,6 +75,15 @@ object DesktopSourcePrefs : SourceSettings {
         prefs.put(SourcePrefs.LIBRARY_ROOTS_KEY, SourcePrefs.formatIdList(paths))
     }
 
+    override fun progressDisplayMode(sourceId: String): com.comics8.core.model.ProgressDisplayMode {
+        val raw = rawPref(SourcePrefs.progressDisplayModeKey(sourceId))
+        return com.comics8.core.model.ProgressDisplayMode.fromName(raw, sourceId)
+    }
+
+    override fun setProgressDisplayMode(sourceId: String, mode: com.comics8.core.model.ProgressDisplayMode) {
+        prefs.put(SourcePrefs.progressDisplayModeKey(sourceId), mode.name)
+    }
+
     private fun hitomiEnabledRaw(): Boolean? {
         val key = SourcePrefs.enabledKey("hitomi")
         return if (hasKey(key)) prefs.getBoolean(key, false) else null

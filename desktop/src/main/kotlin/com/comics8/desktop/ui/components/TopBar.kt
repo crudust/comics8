@@ -30,7 +30,9 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.outlined.CloudSync
@@ -113,14 +115,8 @@ fun TopBar(
                     sources = state.installedSources,
                     registry = state.sourceRegistry,
                     onSelect = viewModel::setActiveSource,
-                    onAddSmb = {
-                        viewModel.openNetworkSourceDialog(com.comics8.core.source.network.NetworkProtocol.SMB)
-                    },
-                    onAddWebDav = {
-                        viewModel.openNetworkSourceDialog(com.comics8.core.source.network.NetworkProtocol.WEBDAV)
-                    },
-                    onAddJs = viewModel::openAddSourceSheet,
-                    onRemoveSource = viewModel::openRemoveSourceSheet,
+                    onOpenSourceManager = viewModel::openSourceManager,
+                    onOpenSettings = viewModel::openSettings,
                     titleStyle = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.weight(1f),
                 )
@@ -136,6 +132,8 @@ fun TopBar(
                             val label = state.sourceRegistry.chipLabel(state.activeSourceId.orEmpty())
                             if (label.isBlank()) "저장소" else "$label 저장소"
                         }
+                        Screen.Settings -> "설정"
+                        Screen.SourceManager -> "소스 관리"
                     },
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
@@ -154,10 +152,10 @@ fun TopBar(
                 }
             }
             if (state.screen == Screen.Browse) {
-                IconButton(onClick = viewModel::openSyncDialog) {
+                IconButton(onClick = viewModel::openSettings) {
                     Icon(
-                        imageVector = Icons.Outlined.CloudSync,
-                        contentDescription = "클라우드 동기화",
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = "설정",
                     )
                 }
                 if (state.writesDownloads) {
@@ -529,18 +527,15 @@ private fun SourceTitleDropdown(
     sources: List<com.comics8.core.source.ComicSource>,
     registry: SourceRegistry,
     onSelect: (String) -> Unit,
-    onAddSmb: () -> Unit,
-    onAddWebDav: () -> Unit,
-    onAddJs: () -> Unit,
-    onRemoveSource: () -> Unit,
+    onOpenSourceManager: () -> Unit,
+    onOpenSettings: () -> Unit,
     titleStyle: TextStyle,
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    var addExpanded by remember { mutableStateOf(false) }
     val orderedSources = sources.sortedBy { it.id != com.comics8.core.source.WorkId.LOCAL_SOURCE }
     val label = orderedSources.firstOrNull { it.id == activeSourceId }?.displayName
-        ?: registry.chipLabel(activeSourceId.orEmpty()).ifBlank { "소스 추가" }
+        ?: registry.chipLabel(activeSourceId.orEmpty()).ifBlank { "소스 선택" }
     Box(modifier = modifier) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -613,75 +608,33 @@ private fun SourceTitleDropdown(
                     )
                 }
                 DropdownMenuItem(
-                    text = { Text(ADD_SOURCE_LABEL) },
+                    text = { Text("소스 관리") },
                     leadingIcon = {
                         Icon(
-                            imageVector = Icons.Default.Add,
+                            imageVector = Icons.Default.Storage,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
+                            tint = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.size(18.dp),
                         )
                     },
                     onClick = {
                         expanded = false
-                        addExpanded = true
+                        onOpenSourceManager()
                     },
                 )
                 DropdownMenuItem(
-                    text = { Text(REMOVE_SOURCE_LABEL) },
+                    text = { Text("설정") },
                     leadingIcon = {
                         Icon(
-                            imageVector = Icons.Outlined.Delete,
+                            imageVector = Icons.Default.Settings,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                            tint = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.size(18.dp),
                         )
                     },
                     onClick = {
                         expanded = false
-                        onRemoveSource()
-                    },
-                    enabled = orderedSources.any { it.id != com.comics8.core.source.WorkId.LOCAL_SOURCE },
-                )
-            }
-            DropdownMenu(
-                expanded = addExpanded,
-                onDismissRequest = { addExpanded = false },
-                modifier = Modifier
-                    .border(
-                        width = 1.dp,
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                        shape = RoundedCornerShape(12.dp),
-                    ),
-            ) {
-                DropdownMenuItem(
-                    text = { Text("SMB (네트워크 공유)") },
-                    leadingIcon = {
-                        Icon(Icons.Default.Cloud, contentDescription = null, modifier = Modifier.size(18.dp))
-                    },
-                    onClick = {
-                        addExpanded = false
-                        onAddSmb()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text("WebDAV (클라우드/NAS)") },
-                    leadingIcon = {
-                        Icon(Icons.Default.Cloud, contentDescription = null, modifier = Modifier.size(18.dp))
-                    },
-                    onClick = {
-                        addExpanded = false
-                        onAddWebDav()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text("JS 파일 (확장 소스)") },
-                    leadingIcon = {
-                        Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(18.dp))
-                    },
-                    onClick = {
-                        addExpanded = false
-                        onAddJs()
+                        onOpenSettings()
                     },
                 )
             }

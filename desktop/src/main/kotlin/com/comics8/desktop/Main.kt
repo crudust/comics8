@@ -225,6 +225,18 @@ fun ComicsDesktopApp(
                 viewModel = viewModel,
                 modifier = Modifier.fillMaxSize(),
             )
+        } else if (state.screen == Screen.Settings) {
+            com.comics8.desktop.ui.settings.SettingsPane(
+                state = state,
+                viewModel = viewModel,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else if (state.screen == Screen.SourceManager) {
+            com.comics8.desktop.ui.source.SourceManagerPane(
+                state = state,
+                viewModel = viewModel,
+                modifier = Modifier.fillMaxSize(),
+            )
         } else {
             Column(modifier = Modifier.fillMaxSize()) {
                 TopBar(
@@ -236,7 +248,7 @@ fun ComicsDesktopApp(
                     Screen.Series -> SeriesPane(state = state, viewModel = viewModel, modifier = Modifier.weight(1f))
                     Screen.History -> HistoryPane(state = state, viewModel = viewModel, modifier = Modifier.weight(1f))
                     Screen.Downloads -> com.comics8.desktop.ui.downloads.DesktopDownloadsPane(state = state, viewModel = viewModel, modifier = Modifier.weight(1f))
-                    Screen.Reader -> {}
+                    else -> {}
                 }
             }
         }

@@ -69,6 +69,15 @@ class AndroidSourcePrefs(
         prefs.edit().putString(SourcePrefs.LIBRARY_ROOTS_KEY, SourcePrefs.formatIdList(paths)).apply()
     }
 
+    override fun progressDisplayMode(sourceId: String): com.comics8.core.model.ProgressDisplayMode {
+        val raw = rawPref(SourcePrefs.progressDisplayModeKey(sourceId))
+        return com.comics8.core.model.ProgressDisplayMode.fromName(raw, sourceId)
+    }
+
+    override fun setProgressDisplayMode(sourceId: String, mode: com.comics8.core.model.ProgressDisplayMode) {
+        prefs.edit().putString(SourcePrefs.progressDisplayModeKey(sourceId), mode.name).apply()
+    }
+
     private fun hitomiEnabledRaw(): Boolean? {
         val key = SourcePrefs.enabledKey("hitomi")
         return if (prefs.contains(key)) prefs.getBoolean(key, false) else null

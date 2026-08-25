@@ -138,6 +138,14 @@ class DesktopViewModel(
                 closeDownloads()
                 true
             }
+            Screen.Settings -> {
+                closeSettings()
+                true
+            }
+            Screen.SourceManager -> {
+                closeSourceManager()
+                true
+            }
             Screen.Browse -> {
                 if (current.isSearch) {
                     current.tab?.let { selectTab(it) }
@@ -181,6 +189,7 @@ class DesktopViewModel(
                     true
                 } else false
             }
+            else -> false
         }
     }
 
@@ -584,6 +593,22 @@ class DesktopViewModel(
         val id = _state.value.activeSourceId ?: return
         if (id == WorkId.LOCAL_SOURCE) return
         uninstallSource(id)
+    }
+
+    fun requestRemoveSource(source: com.comics8.core.source.ComicSource) {
+        uninstallSource(source.id)
+    }
+
+    fun openAddSmb() {
+        openNetworkSourceDialog(com.comics8.core.source.network.NetworkProtocol.SMB)
+    }
+
+    fun openAddWebDav() {
+        openNetworkSourceDialog(com.comics8.core.source.network.NetworkProtocol.WEBDAV)
+    }
+
+    fun importJs() {
+        openAddSourceSheet()
     }
 
     fun addLibraryRoot() {
@@ -1313,6 +1338,35 @@ class DesktopViewModel(
 
     fun closeDownloads() {
         _state.update { it.copy(screen = Screen.Browse) }
+    }
+
+    fun openSettings() {
+        readerJob?.cancel()
+        episodeJob?.cancel()
+        _state.update { it.copy(screen = Screen.Settings) }
+    }
+
+    fun closeSettings() {
+        _state.update { it.copy(screen = Screen.Browse) }
+    }
+
+    fun openSourceManager() {
+        readerJob?.cancel()
+        episodeJob?.cancel()
+        _state.update { it.copy(screen = Screen.SourceManager) }
+    }
+
+    fun closeSourceManager() {
+        _state.update { it.copy(screen = Screen.Browse) }
+    }
+
+    fun setSourceProgressDisplayMode(sourceId: String, mode: com.comics8.core.model.ProgressDisplayMode) {
+        DesktopSourcePrefs.setProgressDisplayMode(sourceId, mode)
+        val current = _state.value
+        scope.launch {
+            val updated = repository.refreshProgress(current.items)
+            _state.update { it.copy(items = updated) }
+        }
     }
 
     fun loadDownloads() {

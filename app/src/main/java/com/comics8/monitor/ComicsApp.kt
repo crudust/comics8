@@ -115,6 +115,7 @@ class ComicsApp : Application(), ImageLoaderFactory {
             readEpisodeDao = db.readEpisodeDao(),
             readHistoryDao = db.readHistoryDao(),
             database = db,
+            sourceSettings = sourcePrefs,
             syncManager = syncManager,
             downloadManager = downloadManager,
             sources = registry,

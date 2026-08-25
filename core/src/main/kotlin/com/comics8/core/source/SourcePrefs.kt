@@ -1,5 +1,6 @@
 package com.comics8.core.source
 
+import com.comics8.core.model.ProgressDisplayMode
 import org.json.JSONArray
 
 object SourcePrefs {
@@ -11,6 +12,8 @@ object SourcePrefs {
     fun enabledKey(sourceId: String): String = "sources.$sourceId.enabled"
 
     fun languageKey(sourceId: String): String = "$sourceId.language"
+
+    fun progressDisplayModeKey(sourceId: String): String = "$sourceId.progress_display_mode"
 
     /**
      * Disk value for a string pref. Null if and only if the key is absent —
@@ -94,6 +97,9 @@ interface SourceSettings {
     fun setActiveSourceId(id: String?)
     fun language(sourceId: String): String?
     fun setLanguage(sourceId: String, value: String)
+    fun progressDisplayMode(sourceId: String): ProgressDisplayMode =
+        ProgressDisplayMode.defaultFor(sourceId)
+    fun setProgressDisplayMode(sourceId: String, mode: ProgressDisplayMode) {}
     fun isEnabled(sourceId: String): Boolean = sourceId.isNotBlank() && sourceId in installedIds()
     fun setEnabled(sourceId: String, enabled: Boolean) {
         val id = sourceId.trim()
