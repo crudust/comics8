@@ -1998,12 +1998,59 @@ class DesktopViewModel(
             try {
                 val seriesWorkId = _state.value.series?.workId()
                 val images = repository.loadImages(episode, seriesWorkId)
+                if (images.isEmpty()) {
+                    _state.update {
+                        it.copy(
+                            readerImages = emptyList(),
+                            imageAspectRatios = emptyMap(),
+                            readerLoading = false,
+                            readerError = "이미지가 없습니다.",
+                        )
+                    }
+                    return@launch
+                }
+
+                val initialRatios = mutableMapOf<Int, Float>()
+                val targetPage = episode.lastReadPage.coerceIn(0, images.size - 1)
+
+                withContext(Dispatchers.IO) {
+                    for (i in images.indices) {
+                        DesktopImageCache.probeDimensions(images[i])?.let { (w, h) ->
+                            if (h > 0) initialRatios[i] = w.toFloat() / h.toFloat()
+                        }
+                    }
+                    if (!initialRatios.containsKey(targetPage)) {
+                        DesktopImageCache.loadImage(images[targetPage])?.let { bmp ->
+                            if (bmp.height > 0) initialRatios[targetPage] = bmp.width.toFloat() / bmp.height.toFloat()
+                        }
+                    }
+                }
+
                 _state.update {
                     it.copy(
                         readerImages = images,
+                        imageAspectRatios = initialRatios,
                         readerLoading = false,
                         readerError = null,
                     )
+                }
+
+                // Proactively resolve aspect ratios for remaining images in background
+                scope.launch(Dispatchers.IO) {
+                    for (i in images.indices) {
+                        if (!initialRatios.containsKey(i)) {
+                            DesktopImageCache.loadImage(images[i])?.let { bmp ->
+                                if (bmp.height > 0) {
+                                    val ratio = bmp.width.toFloat() / bmp.height.toFloat()
+                                    _state.update { curr ->
+                                        if (curr.currentEpisode?.wrId == episode.wrId) {
+                                            curr.copy(imageAspectRatios = curr.imageAspectRatios + (i to ratio))
+                                        } else curr
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 if (e is CancellationException) return@launch
