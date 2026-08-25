@@ -58,9 +58,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.comics8.core.source.ComicSource
+import com.comics8.core.source.SourceType
 import com.comics8.core.source.WorkId
 import com.comics8.core.source.network.NetworkLibrarySource
-import com.comics8.core.source.network.NetworkProtocol
+import com.comics8.core.source.resolveSourceType
 import com.comics8.desktop.data.DesktopSourcePrefs
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
@@ -75,7 +76,7 @@ fun SourceManagerPane(
     var selectedSourceForDetail by remember { mutableStateOf<ComicSource?>(null) }
     var showAddOptions by remember { mutableStateOf(false) }
 
-    // 소스 상세 설정 페이지가 열려있을 때의 렌더링
+    // 소스 상세 설정 페이지가 열려있을 때
     if (selectedSourceForDetail != null) {
         val currentSource = state.installedSources.firstOrNull { it.id == selectedSourceForDetail?.id }
             ?: selectedSourceForDetail!!
@@ -90,12 +91,8 @@ fun SourceManagerPane(
     }
 
     val sources = state.installedSources
-    val networkStorageSources = sources.filter {
-        it is NetworkLibrarySource || it.id.startsWith("network-")
-    }
-    val onlineAndExtensionSources = sources.filter {
-        it.id != WorkId.LOCAL_SOURCE && it !in networkStorageSources
-    }
+    val storageSources = sources.filter { it.resolveSourceType().isStorage }
+    val onlineSources = sources.filterNot { it.resolveSourceType().isStorage }
 
     Scaffold(
         topBar = {
@@ -165,41 +162,35 @@ fun SourceManagerPane(
             item {
                 SectionHeader(title = "파일 저장소 (로컬 / SMB / WebDAV)", icon = Icons.Default.Storage)
             }
-            // 1-1. 로컬 저장소 카드
-            val localSource = sources.firstOrNull { it.id == WorkId.LOCAL_SOURCE }
-            if (localSource != null) {
-                item {
-                    val localMode = DesktopSourcePrefs.progressDisplayMode(WorkId.LOCAL_SOURCE)
-                    SourceItemCard(
-                        icon = Icons.Default.Folder,
-                        title = "로컬 만화 보관함",
-                        subtitle = if (state.libraryRoots.isEmpty()) "등록된 만화 폴더 없음" else "${state.libraryRoots.size}개 폴더 연결됨",
-                        modeLabel = localMode.label,
-                        onClick = { selectedSourceForDetail = localSource },
-                    )
+            items(storageSources, key = { it.id }) { source ->
+                val sType = source.resolveSourceType()
+                val currentMode = DesktopSourcePrefs.progressDisplayMode(source.id)
+                val icon = when (sType) {
+                    SourceType.LOCAL -> Icons.Default.Folder
+                    SourceType.SMB -> Icons.Default.Dns
+                    SourceType.WEBDAV -> Icons.Default.Cloud
+                    else -> Icons.Default.Folder
                 }
-            }
-            // 1-2. 네트워크 드라이브 목록
-            if (networkStorageSources.isNotEmpty()) {
-                items(networkStorageSources, key = { it.id }) { source ->
-                    val netSource = source as? NetworkLibrarySource
-                    val isSmb = netSource?.config?.protocol == NetworkProtocol.SMB
-                    val subtitle = if (netSource != null) {
-                        if (isSmb) "SMB: ${netSource.config.host}/${netSource.config.share}"
-                        else "WebDAV: ${netSource.config.url.ifBlank { netSource.config.host }}"
-                    } else {
-                        "네트워크 드라이브"
+                val subtitle = when (sType) {
+                    SourceType.LOCAL -> if (state.libraryRoots.isEmpty()) "등록된 폴더 없음" else "${state.libraryRoots.size}개 폴더 연결됨"
+                    SourceType.SMB -> {
+                        val netSource = source as? NetworkLibrarySource
+                        if (netSource != null) "SMB: ${netSource.config.host}/${netSource.config.share}" else "SMB 드라이브"
                     }
-                    val currentMode = DesktopSourcePrefs.progressDisplayMode(source.id)
-
-                    SourceItemCard(
-                        icon = if (isSmb) Icons.Default.Dns else Icons.Default.Cloud,
-                        title = source.displayName,
-                        subtitle = subtitle,
-                        modeLabel = currentMode.label,
-                        onClick = { selectedSourceForDetail = source },
-                    )
+                    SourceType.WEBDAV -> {
+                        val netSource = source as? NetworkLibrarySource
+                        if (netSource != null) "WebDAV: ${netSource.config.url.ifBlank { netSource.config.host }}" else "WebDAV 드라이브"
+                    }
+                    else -> sType.label
                 }
+
+                SourceItemCard(
+                    icon = icon,
+                    title = source.displayName,
+                    subtitle = subtitle,
+                    modeLabel = currentMode.label,
+                    onClick = { selectedSourceForDetail = source },
+                )
             }
 
             // ==========================================
@@ -209,22 +200,22 @@ fun SourceManagerPane(
                 Spacer(Modifier.height(8.dp))
                 SectionHeader(title = "온라인 & 확장 소스 (웹 / JS 스크립트)", icon = Icons.Default.Public)
             }
-            if (onlineAndExtensionSources.isEmpty()) {
+            if (onlineSources.isEmpty()) {
                 item {
                     EmptySectionCard(
                         text = "등록된 온라인/확장 소스가 없습니다.",
                         actionText = "JS 확장 스크립트 추가",
                         onAction = {
                             showAddOptions = false
-                            viewModel.importJs()
+                            viewModel.openAddSourceSheet()
                         },
                     )
                 }
             } else {
-                items(onlineAndExtensionSources, key = { it.id }) { source ->
-                    val isJs = source is com.comics8.core.source.js.JsComicSource || viewModel.getJsSourceScript(source.id) != null
-                    val icon = if (isJs) Icons.Default.Description else Icons.Default.Language
-                    val subtitle = if (isJs) "JS 확장 스크립트 소스" else "내장 웹 크롤러 소스"
+                items(onlineSources, key = { it.id }) { source ->
+                    val sType = source.resolveSourceType()
+                    val icon = if (sType == SourceType.JS) Icons.Default.Description else Icons.Default.Language
+                    val subtitle = sType.label
                     val currentMode = DesktopSourcePrefs.progressDisplayMode(source.id)
 
                     SourceItemCard(
@@ -257,7 +248,7 @@ fun SourceManagerPane(
             },
             onAddJs = {
                 showAddOptions = false
-                viewModel.importJs()
+                viewModel.openAddSourceSheet()
             },
         )
     }
@@ -474,7 +465,7 @@ private fun SourceAddOptionsDialog(
                 AddOptionItem(
                     icon = Icons.Default.Folder,
                     title = "로컬 폴더",
-                    description = "로컬 드라이브의 만화 및 ZIP 폴더 추가",
+                    description = "컴퓨터의 만화 및 ZIP 폴더 추가",
                     onClick = onAddLocalFolder,
                 )
                 AddOptionItem(

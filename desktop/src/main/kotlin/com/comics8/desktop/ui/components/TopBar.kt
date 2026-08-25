@@ -26,7 +26,10 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -39,6 +42,8 @@ import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.StarBorder
+import com.comics8.core.source.SourceType
+import com.comics8.core.source.resolveSourceType
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
@@ -522,8 +527,18 @@ private fun SourceTitleDropdown(
 ) {
     var expanded by remember { mutableStateOf(false) }
     val orderedSources = sources.sortedBy { it.id != com.comics8.core.source.WorkId.LOCAL_SOURCE }
-    val label = orderedSources.firstOrNull { it.id == activeSourceId }?.displayName
+    val activeSource = orderedSources.firstOrNull { it.id == activeSourceId }
+    val label = activeSource?.displayName
         ?: registry.chipLabel(activeSourceId.orEmpty()).ifBlank { "소스 선택" }
+    val activeType = activeSource?.resolveSourceType() ?: com.comics8.core.source.SourceType.LOCAL
+    val activeIcon = when (activeType) {
+        com.comics8.core.source.SourceType.LOCAL -> Icons.Default.Folder
+        com.comics8.core.source.SourceType.SMB -> Icons.Default.Dns
+        com.comics8.core.source.SourceType.WEBDAV -> Icons.Default.Cloud
+        com.comics8.core.source.SourceType.JS -> Icons.Default.Description
+        com.comics8.core.source.SourceType.WEB -> Icons.Default.Language
+    }
+
     Box(modifier = modifier) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -532,6 +547,13 @@ private fun SourceTitleDropdown(
                 .clickable { expanded = true }
                 .padding(horizontal = 4.dp, vertical = 2.dp),
         ) {
+            Icon(
+                imageVector = activeIcon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(6.dp))
             Text(
                 text = label,
                 style = titleStyle,
@@ -566,12 +588,28 @@ private fun SourceTitleDropdown(
                 if (orderedSources.isNotEmpty()) {
                     orderedSources.forEach { source ->
                         val isSelected = source.id == activeSourceId
+                        val sType = source.resolveSourceType()
+                        val itemIcon = when (sType) {
+                            com.comics8.core.source.SourceType.LOCAL -> Icons.Default.Folder
+                            com.comics8.core.source.SourceType.SMB -> Icons.Default.Dns
+                            com.comics8.core.source.SourceType.WEBDAV -> Icons.Default.Cloud
+                            com.comics8.core.source.SourceType.JS -> Icons.Default.Description
+                            com.comics8.core.source.SourceType.WEB -> Icons.Default.Language
+                        }
                         DropdownMenuItem(
                             text = {
                                 Text(
                                     text = source.displayName,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                     color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = itemIcon,
+                                    contentDescription = null,
+                                    tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp),
                                 )
                             },
                             trailingIcon = if (isSelected) {

@@ -71,10 +71,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.comics8.core.model.ProgressDisplayMode
 import com.comics8.core.source.ComicSource
-import com.comics8.core.source.WorkId
-import com.comics8.core.source.js.JsComicSource
-import com.comics8.core.source.network.NetworkLibrarySource
-import com.comics8.core.source.network.NetworkProtocol
+import com.comics8.core.source.SourceType
+import com.comics8.core.source.resolveSourceType
 import com.comics8.desktop.data.DesktopSourcePrefs
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
@@ -88,11 +86,12 @@ fun SourceDetailSettingsPane(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val isLocal = source.id == WorkId.LOCAL_SOURCE
-    val netConfig = remember(source.id) { if (isLocal) null else viewModel.getNetworkSourceConfig(source.id) }
-    val isSmb = netConfig?.protocol == NetworkProtocol.SMB
-    val isWebDav = netConfig?.protocol == NetworkProtocol.WEBDAV
-    val isJs = source is JsComicSource || (!isLocal && !isSmb && !isWebDav && viewModel.getJsSourceScript(source.id) != null)
+    val sourceType = remember(source.id) { source.resolveSourceType() }
+    val netConfig = remember(source.id) {
+        if (sourceType == SourceType.SMB || sourceType == SourceType.WEBDAV) {
+            viewModel.getNetworkSourceConfig(source.id)
+        } else null
+    }
 
     var currentProgressMode by remember {
         mutableStateOf(DesktopSourcePrefs.progressDisplayMode(source.id))
@@ -119,11 +118,11 @@ fun SourceDetailSettingsPane(
 
     // JS 스크립트 편집 상태
     var jsScriptCode by remember(source.id) {
-        mutableStateOf(if (isJs) viewModel.getJsSourceScript(source.id).orEmpty() else "")
+        mutableStateOf(if (sourceType == SourceType.JS) viewModel.getJsSourceScript(source.id).orEmpty() else "")
     }
 
-    LaunchedEffect(source.id, isJs) {
-        if (isJs) {
+    LaunchedEffect(source.id, sourceType) {
+        if (sourceType == SourceType.JS) {
             val loaded = viewModel.getJsSourceScript(source.id)
             if (loaded != null && jsScriptCode.isEmpty()) {
                 jsScriptCode = loaded
@@ -244,12 +243,12 @@ fun SourceDetailSettingsPane(
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionTitle(
                         title = "기본 정보 & 진행도 표시",
-                        icon = when {
-                            isLocal -> Icons.Default.Folder
-                            isSmb -> Icons.Default.Dns
-                            isWebDav -> Icons.Default.Cloud
-                            isJs -> Icons.Default.Description
-                            else -> Icons.Default.Language
+                        icon = when (sourceType) {
+                            SourceType.LOCAL -> Icons.Default.Folder
+                            SourceType.SMB -> Icons.Default.Dns
+                            SourceType.WEBDAV -> Icons.Default.Cloud
+                            SourceType.JS -> Icons.Default.Description
+                            SourceType.WEB -> Icons.Default.Language
                         },
                     )
 
@@ -284,13 +283,7 @@ fun SourceDetailSettingsPane(
                                         .padding(horizontal = 8.dp, vertical = 4.dp),
                                 ) {
                                     Text(
-                                        text = when {
-                                            isLocal -> "로컬 저장소"
-                                            isSmb -> "SMB 네트워크 드라이브"
-                                            isWebDav -> "WebDAV 클라우드"
-                                            isJs -> "JS 확장 스크립트"
-                                            else -> "내장 웹 소스"
-                                        },
+                                        text = sourceType.label,
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -359,87 +352,89 @@ fun SourceDetailSettingsPane(
             // ==========================================
             // 2. 소스별 세부 설정 (로컬 / SMB / WebDAV / JS)
             // ==========================================
-            if (isLocal) {
-                item {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        SectionTitle(title = "연결된 로컬 만화 폴더", icon = Icons.Default.FolderOpen)
+            when (sourceType) {
+                SourceType.LOCAL -> {
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            SectionTitle(title = "연결된 로컬 만화 폴더", icon = Icons.Default.FolderOpen)
 
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            border = androidx.compose.foundation.BorderStroke(
-                                width = 1.dp,
-                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                            ),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                border = androidx.compose.foundation.BorderStroke(
+                                    width = 1.dp,
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                                ),
+                                modifier = Modifier.fillMaxWidth(),
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    modifier = Modifier.fillMaxWidth(),
+                                Column(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp),
                                 ) {
-                                    Text(
-                                        text = "등록된 폴더 (${state.libraryRoots.size}개)",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                    )
-                                    Button(
-                                        onClick = { viewModel.addLibraryRoot() },
-                                        shape = RoundedCornerShape(8.dp),
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        modifier = Modifier.fillMaxWidth(),
                                     ) {
-                                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(Modifier.width(4.dp))
-                                        Text("폴더 추가", style = MaterialTheme.typography.labelSmall)
-                                    }
-                                }
-
-                                if (state.libraryRoots.isEmpty()) {
-                                    Text(
-                                        text = "추가된 만화 폴더가 없습니다. 위 버튼을 눌러 만화가 있는 폴더를 선택하세요.",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                } else {
-                                    state.libraryRoots.forEach { path ->
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(MaterialTheme.colorScheme.background.copy(alpha = 0.6f))
-                                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                                        Text(
+                                            text = "등록된 폴더 (${state.libraryRoots.size}개)",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                        )
+                                        Button(
+                                            onClick = { viewModel.addLibraryRoot() },
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                                         ) {
-                                            Icon(
-                                                imageVector = Icons.Default.FolderOpen,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.size(18.dp),
-                                            )
-                                            Spacer(Modifier.width(8.dp))
-                                            Text(
-                                                text = path,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurface,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.weight(1f),
-                                            )
-                                            IconButton(
-                                                onClick = { folderToDelete = path },
-                                                modifier = Modifier.size(28.dp),
+                                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(Modifier.width(4.dp))
+                                            Text("폴더 추가", style = MaterialTheme.typography.labelSmall)
+                                        }
+                                    }
+
+                                    if (state.libraryRoots.isEmpty()) {
+                                        Text(
+                                            text = "추가된 만화 폴더가 없습니다. 위 버튼을 눌러 만화가 있는 폴더를 선택하세요.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    } else {
+                                        state.libraryRoots.forEach { path ->
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(MaterialTheme.colorScheme.background.copy(alpha = 0.6f))
+                                                    .padding(horizontal = 10.dp, vertical = 8.dp),
                                             ) {
                                                 Icon(
-                                                    imageVector = Icons.Outlined.Delete,
-                                                    contentDescription = "폴더 연결 해제",
-                                                    tint = MaterialTheme.colorScheme.error.copy(alpha = 0.85f),
+                                                    imageVector = Icons.Default.FolderOpen,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                                     modifier = Modifier.size(18.dp),
                                                 )
+                                                Spacer(Modifier.width(8.dp))
+                                                Text(
+                                                    text = path,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurface,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f),
+                                                )
+                                                IconButton(
+                                                    onClick = { folderToDelete = path },
+                                                    modifier = Modifier.size(28.dp),
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Outlined.Delete,
+                                                        contentDescription = "폴더 연결 해제",
+                                                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.85f),
+                                                        modifier = Modifier.size(18.dp),
+                                                    )
+                                                }
                                             }
                                         }
                                     }
@@ -448,272 +443,276 @@ fun SourceDetailSettingsPane(
                         }
                     }
                 }
-            }
 
-            if (isSmb) {
-                item {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        SectionTitle(title = "SMB 연결 상세 설정", icon = Icons.Default.Dns)
+                SourceType.SMB -> {
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            SectionTitle(title = "SMB 연결 상세 설정", icon = Icons.Default.Dns)
 
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            border = androidx.compose.foundation.BorderStroke(
-                                width = 1.dp,
-                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                            ),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                border = androidx.compose.foundation.BorderStroke(
+                                    width = 1.dp,
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                                ),
+                                modifier = Modifier.fillMaxWidth(),
                             ) {
-                                OutlinedTextField(
-                                    value = smbName,
-                                    onValueChange = { smbName = it },
-                                    label = { Text("표시 이름") },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
+                                Column(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    OutlinedTextField(
+                                        value = smbName,
+                                        onValueChange = { smbName = it },
+                                        label = { Text("표시 이름") },
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
 
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                        OutlinedTextField(
+                                            value = smbHost,
+                                            onValueChange = { smbHost = it },
+                                            label = { Text("서버 IP / 호스트 주소") },
+                                            placeholder = { Text("192.168.0.10 또는 nas.local") },
+                                            singleLine = true,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        OutlinedTextField(
+                                            value = smbPort,
+                                            onValueChange = { smbPort = it },
+                                            label = { Text("포트") },
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                            singleLine = true,
+                                            modifier = Modifier.width(90.dp),
+                                        )
+                                    }
+
                                     OutlinedTextField(
-                                        value = smbHost,
-                                        onValueChange = { smbHost = it },
-                                        label = { Text("서버 IP / 호스트 주소") },
-                                        placeholder = { Text("192.168.0.10 또는 nas.local") },
+                                        value = smbShare,
+                                        onValueChange = { smbShare = it },
+                                        label = { Text("공유 이름 (Share)") },
+                                        placeholder = { Text("comics 또는 manga") },
                                         singleLine = true,
-                                        modifier = Modifier.weight(1f),
+                                        modifier = Modifier.fillMaxWidth(),
                                     )
+
                                     OutlinedTextField(
-                                        value = smbPort,
-                                        onValueChange = { smbPort = it },
-                                        label = { Text("포트") },
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        value = smbPath,
+                                        onValueChange = { smbPath = it },
+                                        label = { Text("시작 경로 (선택)") },
+                                        placeholder = { Text("선택 사항 (예: books/japanese)") },
                                         singleLine = true,
-                                        modifier = Modifier.width(90.dp),
+                                        modifier = Modifier.fillMaxWidth(),
                                     )
+
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                        OutlinedTextField(
+                                            value = smbUsername,
+                                            onValueChange = { smbUsername = it },
+                                            label = { Text("사용자명 (선택)") },
+                                            singleLine = true,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        OutlinedTextField(
+                                            value = smbDomain,
+                                            onValueChange = { smbDomain = it },
+                                            label = { Text("도메인/워크그룹 (선택)") },
+                                            singleLine = true,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    }
+
+                                    OutlinedTextField(
+                                        value = smbPassword,
+                                        onValueChange = { smbPassword = it },
+                                        label = { Text("비밀번호 (선택)") },
+                                        singleLine = true,
+                                        visualTransformation = if (smbShowPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                                        trailingIcon = {
+                                            IconButton(onClick = { smbShowPassword = !smbShowPassword }) {
+                                                Icon(
+                                                    imageVector = if (smbShowPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                                    contentDescription = null,
+                                                )
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+
+                                    Spacer(Modifier.height(4.dp))
+                                    Button(
+                                        onClick = ::saveSmb,
+                                        enabled = !isSaving,
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.primary,
+                                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                                        ),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("SMB 연결 설정 저장", fontWeight = FontWeight.Bold)
+                                    }
                                 }
+                            }
+                        }
+                    }
+                }
 
-                                OutlinedTextField(
-                                    value = smbShare,
-                                    onValueChange = { smbShare = it },
-                                    label = { Text("공유 이름 (Share)") },
-                                    placeholder = { Text("comics 또는 manga") },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
+                SourceType.WEBDAV -> {
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            SectionTitle(title = "WebDAV 연결 상세 설정", icon = Icons.Default.Cloud)
 
-                                OutlinedTextField(
-                                    value = smbPath,
-                                    onValueChange = { smbPath = it },
-                                    label = { Text("시작 경로 (선택)") },
-                                    placeholder = { Text("선택 사항 (예: books/japanese)") },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                border = androidx.compose.foundation.BorderStroke(
+                                    width = 1.dp,
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                                ),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
                                     OutlinedTextField(
-                                        value = smbUsername,
-                                        onValueChange = { smbUsername = it },
+                                        value = davName,
+                                        onValueChange = { davName = it },
+                                        label = { Text("표시 이름") },
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+
+                                    OutlinedTextField(
+                                        value = davUrl,
+                                        onValueChange = { davUrl = it },
+                                        label = { Text("WebDAV 서버 URL") },
+                                        placeholder = { Text("https://nas.local:5006/dav") },
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+
+                                    OutlinedTextField(
+                                        value = davPath,
+                                        onValueChange = { davPath = it },
+                                        label = { Text("시작 경로 (선택)") },
+                                        placeholder = { Text("선택 사항 (예: comics)") },
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+
+                                    OutlinedTextField(
+                                        value = davUsername,
+                                        onValueChange = { davUsername = it },
                                         label = { Text("사용자명 (선택)") },
                                         singleLine = true,
-                                        modifier = Modifier.weight(1f),
+                                        modifier = Modifier.fillMaxWidth(),
                                     )
+
                                     OutlinedTextField(
-                                        value = smbDomain,
-                                        onValueChange = { smbDomain = it },
-                                        label = { Text("도메인/워크그룹 (선택)") },
+                                        value = davPassword,
+                                        onValueChange = { davPassword = it },
+                                        label = { Text("비밀번호 (선택)") },
                                         singleLine = true,
-                                        modifier = Modifier.weight(1f),
+                                        visualTransformation = if (davShowPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                                        trailingIcon = {
+                                            IconButton(onClick = { davShowPassword = !davShowPassword }) {
+                                                Icon(
+                                                    imageVector = if (davShowPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                                    contentDescription = null,
+                                                )
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
                                     )
-                                }
 
-                                OutlinedTextField(
-                                    value = smbPassword,
-                                    onValueChange = { smbPassword = it },
-                                    label = { Text("비밀번호 (선택)") },
-                                    singleLine = true,
-                                    visualTransformation = if (smbShowPassword) VisualTransformation.None else PasswordVisualTransformation(),
-                                    trailingIcon = {
-                                        IconButton(onClick = { smbShowPassword = !smbShowPassword }) {
-                                            Icon(
-                                                imageVector = if (smbShowPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                                contentDescription = null,
-                                            )
-                                        }
-                                    },
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-
-                                Spacer(Modifier.height(4.dp))
-                                Button(
-                                    onClick = ::saveSmb,
-                                    enabled = !isSaving,
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.primary,
-                                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                                    ),
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text("SMB 연결 설정 저장", fontWeight = FontWeight.Bold)
+                                    Spacer(Modifier.height(4.dp))
+                                    Button(
+                                        onClick = ::saveWebDav,
+                                        enabled = !isSaving,
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.primary,
+                                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                                        ),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("WebDAV 연결 설정 저장", fontWeight = FontWeight.Bold)
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
 
-            if (isWebDav) {
-                item {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        SectionTitle(title = "WebDAV 연결 상세 설정", icon = Icons.Default.Cloud)
+                SourceType.JS -> {
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            SectionTitle(title = "JS 확장 스크립트 코드 편집", icon = Icons.Default.Code)
 
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            border = androidx.compose.foundation.BorderStroke(
-                                width = 1.dp,
-                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                            ),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                border = androidx.compose.foundation.BorderStroke(
+                                    width = 1.dp,
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                                ),
+                                modifier = Modifier.fillMaxWidth(),
                             ) {
-                                OutlinedTextField(
-                                    value = davName,
-                                    onValueChange = { davName = it },
-                                    label = { Text("표시 이름") },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-
-                                OutlinedTextField(
-                                    value = davUrl,
-                                    onValueChange = { davUrl = it },
-                                    label = { Text("WebDAV 서버 URL") },
-                                    placeholder = { Text("https://nas.local:5006/dav") },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-
-                                OutlinedTextField(
-                                    value = davPath,
-                                    onValueChange = { davPath = it },
-                                    label = { Text("시작 경로 (선택)") },
-                                    placeholder = { Text("선택 사항 (예: comics)") },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-
-                                OutlinedTextField(
-                                    value = davUsername,
-                                    onValueChange = { davUsername = it },
-                                    label = { Text("사용자명 (선택)") },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-
-                                OutlinedTextField(
-                                    value = davPassword,
-                                    onValueChange = { davPassword = it },
-                                    label = { Text("비밀번호 (선택)") },
-                                    singleLine = true,
-                                    visualTransformation = if (davShowPassword) VisualTransformation.None else PasswordVisualTransformation(),
-                                    trailingIcon = {
-                                        IconButton(onClick = { davShowPassword = !davShowPassword }) {
-                                            Icon(
-                                                imageVector = if (davShowPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                                contentDescription = null,
-                                            )
-                                        }
-                                    },
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-
-                                Spacer(Modifier.height(4.dp))
-                                Button(
-                                    onClick = ::saveWebDav,
-                                    enabled = !isSaving,
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.primary,
-                                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                                    ),
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier.fillMaxWidth(),
+                                Column(
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
                                 ) {
-                                    Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text("WebDAV 연결 설정 저장", fontWeight = FontWeight.Bold)
+                                    OutlinedTextField(
+                                        value = jsScriptCode,
+                                        onValueChange = { jsScriptCode = it },
+                                        label = { Text("JavaScript Source Code") },
+                                        textStyle = TextStyle(
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 12.sp,
+                                            lineHeight = 16.sp,
+                                        ),
+                                        minLines = 15,
+                                        maxLines = 35,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+
+                                    Button(
+                                        onClick = ::saveJs,
+                                        enabled = !isSaving,
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.primary,
+                                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                                        ),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("JS 스크립트 저장 및 적용", fontWeight = FontWeight.Bold)
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
 
-            if (isJs) {
-                item {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        SectionTitle(title = "JS 확장 스크립트 코드 편집", icon = Icons.Default.Code)
-
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            border = androidx.compose.foundation.BorderStroke(
-                                width = 1.dp,
-                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                            ),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(14.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                OutlinedTextField(
-                                    value = jsScriptCode,
-                                    onValueChange = { jsScriptCode = it },
-                                    label = { Text("JavaScript Source Code") },
-                                    textStyle = TextStyle(
-                                        fontFamily = FontFamily.Monospace,
-                                        fontSize = 12.sp,
-                                        lineHeight = 16.sp,
-                                    ),
-                                    minLines = 15,
-                                    maxLines = 35,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-
-                                Button(
-                                    onClick = ::saveJs,
-                                    enabled = !isSaving,
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.primary,
-                                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                                    ),
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text("JS 스크립트 저장 및 적용", fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
-                    }
+                SourceType.WEB -> {
+                    // 내장 웹 크롤러 소스는 읽음 진행도 표시 설정만 제공
                 }
             }
 
             // ==========================================
             // 3. 위험 구역 (소스 삭제)
             // ==========================================
-            if (!isLocal) {
+            if (sourceType != SourceType.LOCAL) {
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         SectionTitle(title = "소스 관리 및 삭제", icon = Icons.Default.Warning)
