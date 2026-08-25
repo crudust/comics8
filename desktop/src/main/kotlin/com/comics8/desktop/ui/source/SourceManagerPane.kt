@@ -66,6 +66,8 @@ import androidx.compose.ui.window.Dialog
 import com.comics8.core.model.ProgressDisplayMode
 import com.comics8.core.source.ComicSource
 import com.comics8.core.source.WorkId
+import com.comics8.core.source.network.NetworkLibrarySource
+import com.comics8.core.source.network.NetworkProtocol
 import com.comics8.desktop.data.DesktopSourcePrefs
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
@@ -85,7 +87,7 @@ fun SourceManagerPane(
 
     val sources = state.installedSources
     val networkStorageSources = sources.filter {
-        it.id.startsWith("smb:") || it.id.startsWith("webdav:")
+        it is NetworkLibrarySource || it.id.startsWith("network-")
     }
     val onlineAndExtensionSources = sources.filter {
         it.id != WorkId.LOCAL_SOURCE && it !in networkStorageSources
@@ -176,12 +178,20 @@ fun SourceManagerPane(
             // 1-2. 네트워크 드라이브 목록
             if (networkStorageSources.isNotEmpty()) {
                 items(networkStorageSources, key = { it.id }) { source ->
-                    val isSmb = source.id.startsWith("smb:")
+                    val netSource = source as? NetworkLibrarySource
+                    val isSmb = netSource?.config?.protocol == NetworkProtocol.SMB
+                    val subtitle = if (netSource != null) {
+                        if (isSmb) "SMB: ${netSource.config.host}/${netSource.config.share}"
+                        else "WebDAV: ${netSource.config.url.ifBlank { netSource.config.host }}"
+                    } else {
+                        "네트워크 드라이브"
+                    }
                     val currentMode = DesktopSourcePrefs.progressDisplayMode(source.id)
+
                     SourceCard(
                         icon = if (isSmb) Icons.Default.Dns else Icons.Default.Cloud,
                         title = source.displayName,
-                        subtitle = if (isSmb) "SMB 네트워크 공유 (${source.id})" else "WebDAV 클라우드 (${source.id})",
+                        subtitle = subtitle,
                         modeLabel = currentMode.label,
                         canDelete = true,
                         onOpenSettings = {
