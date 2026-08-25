@@ -197,10 +197,10 @@ fun TopBar(
                 }
             }
             if (state.screen == Screen.History) {
-                IconButton(onClick = viewModel::openSyncDialog) {
+                IconButton(onClick = viewModel::openSettings) {
                     Icon(
                         imageVector = Icons.Outlined.CloudSync,
-                        contentDescription = "클라우드 동기화",
+                        contentDescription = "클라우드 동기화 설정",
                     )
                 }
                 if (state.historyItems.isNotEmpty()) {
