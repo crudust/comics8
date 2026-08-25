@@ -6,68 +6,55 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
 /**
- * Catppuccin Mocha Color Palette
- * Official soothing pastel dark theme palette
+ * Shadcn Zinc Monochrome Palette
+ * Pure Black, White, and Zinc Grayscale
  */
-object CatppuccinMocha {
-    val Rosewater = Color(0xFFF5E0DC)
-    val Flamingo = Color(0xFFF2CDCD)
-    val Pink = Color(0xFFF5C2E7)
-    val Mauve = Color(0xFFCBA6F7)
-    val Red = Color(0xFFF38BA8)
-    val Maroon = Color(0xFFEBA0AC)
-    val Peach = Color(0xFFFAB387)
-    val Yellow = Color(0xFFF9E2AF)
-    val Green = Color(0xFFA6E3A1)
-    val Teal = Color(0xFF94E2D5)
-    val Sky = Color(0xFF89DCEB)
-    val Sapphire = Color(0xFF74C7EC)
-    val Blue = Color(0xFF89B4FA)
-    val Lavender = Color(0xFFB4BEFE)
-    val Text = Color(0xFFCDD6F4)
-    val Subtext1 = Color(0xFFBAC2DE)
-    val Subtext0 = Color(0xFFA6ADC8)
-    val Overlay2 = Color(0xFF9399B2)
-    val Overlay1 = Color(0xFF7F849C)
-    val Overlay0 = Color(0xFF6C7086)
-    val Surface2 = Color(0xFF585B70)
-    val Surface1 = Color(0xFF45475A)
-    val Surface0 = Color(0xFF313244)
-    val Base = Color(0xFF1E1E2E)
-    val Mantle = Color(0xFF181825)
-    val Crust = Color(0xFF11111B)
+object MonochromeTheme {
+    val White = Color(0xFFFFFFFF)
+    val Zinc50 = Color(0xFFFAFAFA)
+    val Zinc100 = Color(0xFFF4F4F5)
+    val Zinc200 = Color(0xFFE4E4E7)
+    val Zinc300 = Color(0xFFD4D4D8)
+    val Zinc400 = Color(0xFFA1A1AA)
+    val Zinc500 = Color(0xFF71717A)
+    val Zinc600 = Color(0xFF52525B)
+    val Zinc700 = Color(0xFF3F3F46)
+    val Zinc800 = Color(0xFF27272A)
+    val Zinc900 = Color(0xFF18181B)
+    val Zinc950 = Color(0xFF09090B)
+    val PureBlack = Color(0xFF000000)
 }
 
-val CatppuccinMochaColorScheme = darkColorScheme(
-    primary = CatppuccinMocha.Mauve,
-    onPrimary = Color.Black,
-    primaryContainer = CatppuccinMocha.Surface0,
-    onPrimaryContainer = CatppuccinMocha.Mauve,
-    secondary = CatppuccinMocha.Blue,
-    onSecondary = Color.Black,
-    secondaryContainer = CatppuccinMocha.Mantle,
-    onSecondaryContainer = CatppuccinMocha.Text,
-    tertiary = CatppuccinMocha.Lavender,
-    onTertiary = Color.Black,
-    background = Color.Black,
-    onBackground = CatppuccinMocha.Text,
-    surface = Color.Black,
-    onSurface = CatppuccinMocha.Text,
-    surfaceVariant = CatppuccinMocha.Mantle,
-    onSurfaceVariant = CatppuccinMocha.Subtext0,
-    surfaceContainer = CatppuccinMocha.Crust,
-    surfaceContainerHigh = CatppuccinMocha.Mantle,
-    surfaceContainerHighest = CatppuccinMocha.Surface0,
-    outline = CatppuccinMocha.Surface1,
-    outlineVariant = CatppuccinMocha.Surface0,
-    error = CatppuccinMocha.Red,
-    onError = Color.Black,
+val MonochromeColorScheme = darkColorScheme(
+    primary = MonochromeTheme.White,
+    onPrimary = MonochromeTheme.PureBlack,
+    primaryContainer = MonochromeTheme.Zinc800,
+    onPrimaryContainer = MonochromeTheme.White,
+    secondary = MonochromeTheme.Zinc200,
+    onSecondary = MonochromeTheme.PureBlack,
+    secondaryContainer = MonochromeTheme.Zinc900,
+    onSecondaryContainer = MonochromeTheme.Zinc50,
+    tertiary = MonochromeTheme.Zinc300,
+    onTertiary = MonochromeTheme.PureBlack,
+    background = MonochromeTheme.PureBlack,
+    onBackground = MonochromeTheme.Zinc50,
+    surface = MonochromeTheme.PureBlack,
+    onSurface = MonochromeTheme.Zinc50,
+    surfaceVariant = MonochromeTheme.Zinc900,
+    onSurfaceVariant = MonochromeTheme.Zinc400,
+    surfaceContainer = MonochromeTheme.Zinc950,
+    surfaceContainerHigh = MonochromeTheme.Zinc900,
+    surfaceContainerHighest = MonochromeTheme.Zinc800,
+    outline = MonochromeTheme.Zinc700,
+    outlineVariant = MonochromeTheme.Zinc800,
+    error = Color(0xFFEF4444),
+    onError = MonochromeTheme.PureBlack,
 )
 
 @Composable
 fun ComicsTheme(content: @Composable () -> Unit) {
     MaterialTheme(
-        colorScheme = CatppuccinMochaColorScheme,
+        colorScheme = MonochromeColorScheme,
         content = content,
     )
 }

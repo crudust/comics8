@@ -51,29 +51,29 @@ import com.comics8.desktop.ui.reader.ReaderPane
 import com.comics8.desktop.ui.series.SeriesPane
 
 private val DarkColors = darkColorScheme(
-    primary = Color(0xFFCBA6F7), // Mauve
-    onPrimary = Color.Black,
-    primaryContainer = Color(0xFF313244), // Surface0
-    onPrimaryContainer = Color(0xFFCBA6F7), // Mauve
-    secondary = Color(0xFF89B4FA), // Blue
-    onSecondary = Color.Black,
-    secondaryContainer = Color(0xFF181825), // Mantle
-    onSecondaryContainer = Color(0xFFCDD6F4), // Text
-    tertiary = Color(0xFFB4BEFE), // Lavender
-    onTertiary = Color.Black,
-    background = Color.Black,
-    onBackground = Color(0xFFCDD6F4), // Text
-    surface = Color.Black,
-    onSurface = Color(0xFFCDD6F4), // Text
-    surfaceVariant = Color(0xFF181825), // Mantle
-    onSurfaceVariant = Color(0xFFA6ADC8), // Subtext0
-    surfaceContainer = Color(0xFF11111B), // Crust
-    surfaceContainerHigh = Color(0xFF181825), // Mantle
-    surfaceContainerHighest = Color(0xFF313244), // Surface0
-    outline = Color(0xFF45475A), // Surface1
-    outlineVariant = Color(0xFF313244), // Surface0
-    error = Color(0xFFF38BA8), // Red
-    onError = Color.Black,
+    primary = Color(0xFFFFFFFF), // White
+    onPrimary = Color(0xFF000000), // Pure Black
+    primaryContainer = Color(0xFF27272A), // Zinc 800
+    onPrimaryContainer = Color(0xFFFFFFFF), // White
+    secondary = Color(0xFFE4E4E7), // Zinc 200
+    onSecondary = Color(0xFF000000), // Pure Black
+    secondaryContainer = Color(0xFF18181B), // Zinc 900
+    onSecondaryContainer = Color(0xFFFAFAFA), // Zinc 50
+    tertiary = Color(0xFFD4D4D8), // Zinc 300
+    onTertiary = Color(0xFF000000), // Pure Black
+    background = Color(0xFF000000), // Pure Black
+    onBackground = Color(0xFFFAFAFA), // Zinc 50
+    surface = Color(0xFF000000), // Pure Black
+    onSurface = Color(0xFFFAFAFA), // Zinc 50
+    surfaceVariant = Color(0xFF18181B), // Zinc 900
+    onSurfaceVariant = Color(0xFFA1A1AA), // Zinc 400
+    surfaceContainer = Color(0xFF09090B), // Zinc 950
+    surfaceContainerHigh = Color(0xFF18181B), // Zinc 900
+    surfaceContainerHighest = Color(0xFF27272A), // Zinc 800
+    outline = Color(0xFF3F3F46), // Zinc 700
+    outlineVariant = Color(0xFF27272A), // Zinc 800
+    error = Color(0xFFEF4444), // Red
+    onError = Color(0xFF000000), // Pure Black
 )
 
 fun main() {

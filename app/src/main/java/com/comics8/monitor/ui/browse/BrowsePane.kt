@@ -39,7 +39,6 @@ import com.comics8.monitor.ui.components.Badge
 import com.comics8.monitor.ui.components.sourceChipLabel
 
 import androidx.compose.foundation.border
-import com.comics8.monitor.ui.theme.CatppuccinMocha
 
 @Composable
 fun ListingGrid(
@@ -157,7 +156,7 @@ fun ToonCard(
                     imageVector = if (item.isFavorite) Icons.Filled.Star else Icons.Outlined.StarBorder,
                     contentDescription = if (item.isFavorite) "즐겨찾기 해제" else "즐겨찾기",
                     tint = if (item.isFavorite) {
-                        CatppuccinMocha.Peach
+                        MaterialTheme.colorScheme.primary
                     } else {
                         MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
                     },

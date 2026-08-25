@@ -378,7 +378,7 @@ fun ToonCard(
                 Icon(
                     imageVector = if (item.isFavorite) Icons.Filled.Star else Icons.Outlined.StarBorder,
                     contentDescription = if (item.isFavorite) "즐겨찾기 해제" else "즐겨찾기",
-                    tint = if (item.isFavorite) Color(0xFFFAB387) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                    tint = if (item.isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))
                         .background(MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.82f))
