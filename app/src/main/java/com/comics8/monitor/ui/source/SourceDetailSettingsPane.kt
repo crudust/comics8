@@ -51,6 +51,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -73,6 +74,7 @@ import androidx.compose.ui.unit.sp
 import com.comics8.core.model.ProgressDisplayMode
 import com.comics8.core.source.ComicSource
 import com.comics8.core.source.WorkId
+import com.comics8.core.source.js.JsComicSource
 import com.comics8.core.source.network.NetworkLibrarySource
 import com.comics8.core.source.network.NetworkProtocol
 import com.comics8.monitor.ui.ListingUiState
@@ -92,7 +94,7 @@ fun SourceDetailSettingsPane(
     val netConfig = remember(source.id) { viewModel.getNetworkSourceConfig(source.id) }
     val isSmb = netConfig?.protocol == NetworkProtocol.SMB
     val isWebDav = netConfig?.protocol == NetworkProtocol.WEBDAV
-    val isJs = source.id.startsWith("js:")
+    val isJs = source is JsComicSource || viewModel.getJsSourceScript(source.id) != null
 
     var currentProgressMode by remember {
         mutableStateOf(viewModel.getSourceProgressDisplayMode(source.id))
@@ -119,7 +121,14 @@ fun SourceDetailSettingsPane(
 
     // JS 스크립트 편집 상태
     var jsScriptCode by remember(source.id) {
-        mutableStateOf(if (isJs) viewModel.getJsSourceScript(source.id).orEmpty() else "")
+        mutableStateOf(viewModel.getJsSourceScript(source.id).orEmpty())
+    }
+
+    LaunchedEffect(source.id) {
+        val loaded = viewModel.getJsSourceScript(source.id)
+        if (loaded != null && jsScriptCode.isEmpty()) {
+            jsScriptCode = loaded
+        }
     }
 
     var showDeleteConfirm by remember { mutableStateOf(false) }
@@ -200,7 +209,7 @@ fun SourceDetailSettingsPane(
                     }
                 },
                 actions = {
-                    if (!isLocal) {
+                    if (isSmb || isWebDav || isJs) {
                         Button(
                             onClick = ::doSave,
                             enabled = !isSaving,
@@ -669,7 +678,7 @@ fun SourceDetailSettingsPane(
                                         lineHeight = 16.sp,
                                     ),
                                     minLines = 15,
-                                    maxLines = 30,
+                                    maxLines = 35,
                                     modifier = Modifier.fillMaxWidth(),
                                 )
                             }

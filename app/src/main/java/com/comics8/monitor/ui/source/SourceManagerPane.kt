@@ -225,7 +225,7 @@ fun SourceManagerPane(
                 }
             } else {
                 items(onlineAndExtensionSources, key = { it.id }) { source ->
-                    val isJs = source.id.startsWith("js:")
+                    val isJs = source is com.comics8.core.source.js.JsComicSource || viewModel.getJsSourceScript(source.id) != null
                     val icon = if (isJs) Icons.Default.Description else Icons.Default.Language
                     val subtitle = if (isJs) "JS 확장 스크립트 소스" else "내장 웹 크롤러 소스"
                     val currentMode = viewModel.getSourceProgressDisplayMode(source.id)
