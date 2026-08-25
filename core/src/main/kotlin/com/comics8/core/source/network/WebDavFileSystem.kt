@@ -204,7 +204,7 @@ class WebDavFileSystem(
         }
 
         companion object {
-            private const val BLOCK_SIZE = 256 * 1024L
+            private const val BLOCK_SIZE = 512 * 1024L
         }
     }
 

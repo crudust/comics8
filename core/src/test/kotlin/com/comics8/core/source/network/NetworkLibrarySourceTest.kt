@@ -47,7 +47,52 @@ class NetworkLibrarySourceTest {
             assertThat(urls).hasSize(1)
             assertThat(backend.channelOpens).isEqualTo(1)
             assertThat(NetworkSourceRuntime.open(urls.single()).readBytes()).isEqualTo(image)
-            assertThat(backend.channelOpens).isEqualTo(2)
+            // Reuses the cached zip session, so channel is not opened again
+            assertThat(backend.channelOpens).isEqualTo(1)
+        } finally {
+            NetworkSourceRuntime.remove(config.id)
+        }
+    }
+
+    @Test
+    fun loadsEpisodesDirectlyWithoutScanningRootAgain(): Unit = runBlocking {
+        val backend = object : NetworkFileSystem {
+            var listCalls = mutableListOf<String>()
+            override fun list(path: String): List<NetworkNode> {
+                listCalls.add(path)
+                return when (path) {
+                    "MangaSeries" -> listOf(
+                        NetworkNode("MangaSeries/01.cbz", "01.cbz", false, 100L),
+                        NetworkNode("MangaSeries/02.cbz", "02.cbz", false, 100L),
+                    )
+                    else -> emptyList()
+                }
+            }
+            override fun stat(path: String): NetworkNode? = null
+            override fun open(path: String): InputStream = ByteArrayInputStream(ByteArray(0))
+            override fun openChannel(path: String, knownSize: Long): SeekableByteChannel =
+                SeekableInMemoryByteChannel(ByteArray(0))
+        }
+        val config = NetworkSourceConfig(
+            id = "network-direct-test",
+            protocol = NetworkProtocol.SMB,
+            name = "NAS",
+            host = "nas",
+            share = "comics",
+        )
+        val source = NetworkLibrarySource(config, backend)
+        try {
+            val item = com.comics8.core.model.ToonItem(
+                id = "series:MangaSeries",
+                title = "MangaSeries",
+                thumbUrl = "",
+                href = "",
+                sourceId = config.id,
+            )
+            val episodes = source.loadEpisodes(item, 1, ThrowingHttp)
+            assertThat(episodes.items.map { it.title }).containsExactly("01", "02")
+            // Verify that backend.list was called ONLY for "MangaSeries", NOT for "" (root)
+            assertThat(backend.listCalls).containsExactly("MangaSeries")
         } finally {
             NetworkSourceRuntime.remove(config.id)
         }

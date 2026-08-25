@@ -232,8 +232,8 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
         }
 
         companion object {
-            private const val BLOCK_SIZE = 256 * 1024L
-            private const val DIRECT_READ_THRESHOLD = 256 * 1024
+            private const val BLOCK_SIZE = 512 * 1024L
+            private const val DIRECT_READ_THRESHOLD = 512 * 1024
         }
     }
 
