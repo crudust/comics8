@@ -171,7 +171,10 @@ object DesktopUpdateManager {
             if (codeSource != null) {
                 val file = runCatching { File(codeSource.toURI()) }.getOrNull()
                 if (file != null) {
-                    return if (file.isFile) file.parentFile else file
+                    val dir = if (file.isFile) file.parentFile else file
+                    if (dir != null) {
+                        return if (dir.name.equals("app", ignoreCase = true)) dir.parentFile else dir
+                    }
                 }
             }
             val userDir = File(System.getProperty("user.dir"))
