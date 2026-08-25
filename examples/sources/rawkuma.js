@@ -31,10 +31,11 @@ function parseCard(container, baseUrl) {
     var bgEl = container.selectFirst("[style*='background-image']");
     if (bgEl) thumbUrl = bgEl.bgUrl() || "";
   }
+  // If there is no valid thumbnail, do NOT treat this as a valid card (skip it)
   if (!thumbUrl) return null;
   thumbUrl = host.absUrl(thumbUrl, baseUrl || ORIGIN);
 
-  var title = (img ? img.attr("alt") : "") || container.textOf("h4") || container.textOf("h1") || container.textOf("h2") || container.textOf("h3") || container.textOf(".font-semibold") || a.attr("title");
+  var title = (img ? img.attr("alt") : "") || container.textOf("h4") || container.textOf("h1") || container.textOf("h2") || container.textOf("h3") || a.attr("title") || container.textOf(".font-semibold");
   title = decodeEntities(title.trim());
 
   var genre = container.textOf(".font-normal.text-xs") || container.textOf(".numscore");
@@ -76,19 +77,68 @@ var source = {
     var p = page < 1 ? 1 : page;
 
     if (cat === "LATEST") {
-      var html = host.fetchText({ url: ORIGIN + "/latest-update/" });
-      var doc = host.parseHtml(html, ORIGIN);
-      var cards = doc.select("div.group-data-\\[direction\\=horizontal\\]\\:hidden, div.overflow-hidden.relative.flex.flex-col.min-w-0");
+      var homeHtml = host.fetchText({ url: ORIGIN + "/" });
+      var homeDoc = host.parseHtml(homeHtml, ORIGIN);
       var items = [];
       var seen = {};
 
-      for (var i = 0; i < cards.length; i++) {
-        var card = cards[i];
+      // 1. Swiper slide banners (with cover image)
+      var slides = homeDoc.select(".swiper-slide");
+      for (var s = 0; s < slides.length; s++) {
+        var slide = slides[s];
+        var sImg = slide.selectFirst("img");
+        var sLink = slide.selectFirst("a[href*='/manga/']");
+        if (sImg && sLink) {
+          var sHref = host.absUrl(sLink.attr("href"), ORIGIN);
+          var sSlug = host.match(sHref, "/manga/([^/]+)");
+          if (sSlug && sSlug !== "feed" && !seen[sSlug]) {
+            seen[sSlug] = true;
+            var sThumb = sImg.attr("src") || sImg.attr("data-src") || "";
+            var sTitle = sImg.attr("alt") || slide.textOf(".line-clamp-2") || slide.textOf("h1") || sSlug;
+            items.push({
+              id: sSlug,
+              title: decodeEntities(sTitle.trim()),
+              thumbUrl: host.absUrl(sThumb, ORIGIN),
+              href: sHref,
+              genre: "",
+              updatedAt: null
+            });
+          }
+        }
+      }
+
+      // 2. All content cards on home page (Popular Today + Latest Updates + Projects)
+      var allCards = homeDoc.select("div.col-span-1, div.group-data-\\[direction\\=horizontal\\]\\:hidden, div.overflow-hidden.relative.flex.flex-col.min-w-0, div.px-2\\.5.py-3\\.75");
+      for (var i = 0; i < allCards.length; i++) {
+        var card = allCards[i];
         var item = parseCard(card, ORIGIN);
         if (item && !seen[item.id]) {
           seen[item.id] = true;
           items.push(item);
         }
+      }
+
+      // 3. Fallback: all manga links that contain an img tag
+      var anchors = homeDoc.select("a[href*='/manga/']");
+      for (var j = 0; j < anchors.length; j++) {
+        var a = anchors[j];
+        var href = a.absUrl("href");
+        var slug = host.match(href, "/manga/([^/]+)");
+        if (!slug || slug === "feed" || seen[slug]) continue;
+        var img = a.selectFirst("img");
+        if (!img) continue; // Skip links without images!
+        var thumbUrl = img.absUrl("src") || img.absUrl("data-src") || "";
+        if (!thumbUrl) continue;
+        seen[slug] = true;
+        var title = img.attr("alt") || a.text().trim() || slug;
+        items.push({
+          id: slug,
+          title: decodeEntities(title.trim()),
+          thumbUrl: thumbUrl,
+          href: href,
+          genre: "",
+          updatedAt: null
+        });
       }
 
       return {
@@ -105,12 +155,12 @@ var source = {
     var items = [];
     var seen = {};
 
-    for (var i = 0; i < cards.length; i++) {
-      var card = cards[i];
-      var item = parseCard(card, ORIGIN);
-      if (item && !seen[item.id]) {
-        seen[item.id] = true;
-        items.push(item);
+    for (var k = 0; k < cards.length; k++) {
+      var aCard = cards[k];
+      var it = parseCard(aCard, ORIGIN);
+      if (it && !seen[it.id]) {
+        seen[it.id] = true;
+        items.push(it);
       }
     }
 

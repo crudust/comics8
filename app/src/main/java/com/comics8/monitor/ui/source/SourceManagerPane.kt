@@ -454,22 +454,33 @@ private fun SourceItemCard(
                 .fillMaxWidth()
                 .padding(horizontal = 14.dp, vertical = 12.dp),
         ) {
-            // 드래그 핸들을 가장 왼쪽에 배치
-            if (dragHandleModifier != null) {
-                Box(
-                    modifier = Modifier
-                        .then(dragHandleModifier)
-                        .clip(RoundedCornerShape(6.dp))
-                        .padding(end = 8.dp, top = 4.dp, bottom = 4.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.DragHandle,
-                        contentDescription = "순서 변경",
-                        tint = if (isDragging) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        modifier = Modifier.size(20.dp),
-                    )
+            // 드래그 핸들을 가장 왼쪽에 항상 배치 (드래그 불가 시 비활성화 스타일 적용)
+            val handleBoxModifier = if (dragHandleModifier != null) {
+                Modifier
+                    .then(dragHandleModifier)
+                    .clip(RoundedCornerShape(6.dp))
+                    .padding(end = 8.dp, top = 4.dp, bottom = 4.dp)
+            } else {
+                Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .padding(end = 8.dp, top = 4.dp, bottom = 4.dp)
+            }
+
+            Box(
+                modifier = handleBoxModifier,
+                contentAlignment = Alignment.Center,
+            ) {
+                val handleTint = when {
+                    dragHandleModifier == null -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)
+                    isDragging -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                 }
+                Icon(
+                    imageVector = Icons.Default.DragHandle,
+                    contentDescription = if (dragHandleModifier == null) "고정됨" else "순서 변경",
+                    tint = handleTint,
+                    modifier = Modifier.size(20.dp),
+                )
             }
 
             Box(
