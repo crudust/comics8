@@ -21,6 +21,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.comics8.core.source.network.NetworkProtocol
 import com.comics8.core.source.network.NetworkSourceConfig
+import com.comics8.monitor.ui.theme.LocalStrings
 
 @Composable
 fun NetworkSourceDialog(
@@ -33,17 +34,18 @@ fun NetworkSourceDialog(
     onRegister: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val strings = LocalStrings.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (draft.protocol == NetworkProtocol.SMB) "SMB 추가" else "WebDAV 추가") },
+        title = { Text(if (draft.protocol == NetworkProtocol.SMB) strings.titleAddSmb else strings.titleAddWebDav) },
         text = {
             Column(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.verticalScroll(rememberScrollState()),
             ) {
-                Field("이름", draft.name) { onChange(draft.copy(name = it)) }
+                Field(strings.labelName, draft.name) { onChange(draft.copy(name = it)) }
                 if (draft.protocol == NetworkProtocol.SMB) {
-                    Field("서버 주소", draft.host, "192.168.0.10 또는 nas.local") {
+                    Field(strings.labelServerAddress, draft.host, "192.168.0.10") {
                         onChange(draft.copy(host = it))
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -52,30 +54,30 @@ fun NetworkSourceDialog(
                             onValueChange = { value ->
                                 if (value.all(Char::isDigit)) onChange(draft.copy(port = value.toIntOrNull() ?: 0))
                             },
-                            label = { Text("포트") },
+                            label = { Text(strings.labelPort) },
                             singleLine = true,
                             modifier = Modifier.weight(0.35f),
                         )
                         OutlinedTextField(
                             value = draft.share,
                             onValueChange = { onChange(draft.copy(share = it)) },
-                            label = { Text("공유 이름") },
+                            label = { Text(strings.labelShareName) },
                             singleLine = true,
                             modifier = Modifier.weight(0.65f),
                         )
                     }
-                    Field("폴더 경로 (선택)", draft.path, "Comics/Manga") { onChange(draft.copy(path = it)) }
-                    Field("도메인 (선택)", draft.domain) { onChange(draft.copy(domain = it)) }
+                    Field(strings.labelFolderPathOptional, draft.path, strings.placeholderComicsExample) { onChange(draft.copy(path = it)) }
+                    Field(strings.labelDomainOptional, draft.domain) { onChange(draft.copy(domain = it)) }
                 } else {
-                    Field("WebDAV URL", draft.url, "https://example.com/dav/comics/") {
+                    Field(strings.labelWebDavUrl, draft.url, "https://example.com/dav/comics/") {
                         onChange(draft.copy(url = it))
                     }
                 }
-                Field("사용자 이름 (선택)", draft.username) { onChange(draft.copy(username = it)) }
+                Field(strings.labelUsernameShortOptional, draft.username) { onChange(draft.copy(username = it)) }
                 OutlinedTextField(
                     value = draft.password,
                     onValueChange = { onChange(draft.copy(password = it)) },
-                    label = { Text("암호 (선택)") },
+                    label = { Text(strings.labelPasswordOptional) },
                     visualTransformation = PasswordVisualTransformation(),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -83,7 +85,7 @@ fun NetworkSourceDialog(
                 if (testing) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         CircularProgressIndicator()
-                        Text("연결 확인 중…")
+                        Text(strings.statusCheckingConnection)
                     }
                 } else if (testMessage != null) {
                     Text(
@@ -94,12 +96,12 @@ fun NetworkSourceDialog(
             }
         },
         confirmButton = {
-            Button(onClick = onRegister, enabled = testSucceeded && !testing) { Text("등록") }
+            Button(onClick = onRegister, enabled = testSucceeded && !testing) { Text(strings.actionRegister) }
         },
         dismissButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                OutlinedButton(onClick = onTest, enabled = !testing) { Text("테스트") }
-                TextButton(onClick = onDismiss) { Text("취소") }
+                OutlinedButton(onClick = onTest, enabled = !testing) { Text(strings.actionTestConnection) }
+                TextButton(onClick = onDismiss) { Text(strings.actionCancel) }
             }
         },
     )

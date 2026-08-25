@@ -7,7 +7,7 @@ import javax.swing.JFileChooser
 import javax.swing.SwingUtilities
 
 object DesktopFolderPicker {
-    fun pickDirectory(title: String = "만화 폴더 선택"): File? {
+    fun pickDirectory(title: String = "Select Folder"): File? {
         if (!SwingUtilities.isEventDispatchThread()) {
             var picked: File? = null
             SwingUtilities.invokeAndWait { picked = pickDirectoryOnEdt(title) }

@@ -75,6 +75,7 @@ import com.comics8.core.model.ProgressDisplayMode
 import com.comics8.core.source.ComicSource
 import com.comics8.core.source.SourceType
 import com.comics8.core.source.resolveSourceType
+import com.comics8.monitor.ui.theme.LocalStrings
 import com.comics8.monitor.ui.ListingUiState
 import com.comics8.monitor.ui.ListingViewModel
 
@@ -88,6 +89,7 @@ fun SourceDetailSettingsPane(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val strings = LocalStrings.current
     val sourceType = remember(source.id) { source.resolveSourceType() }
     val netConfig = remember(source.id) {
         if (sourceType == SourceType.SMB || sourceType == SourceType.WEBDAV) {
@@ -140,7 +142,7 @@ fun SourceDetailSettingsPane(
         if (netConfig == null) return
         isSaving = true
         val newConfig = netConfig.copy(
-            name = smbName.trim().ifBlank { "SMB" },
+            name = smbName.trim().ifBlank { strings.defaultSmbName },
             host = smbHost.trim(),
             port = smbPort.toIntOrNull() ?: 445,
             share = smbShare.trim(),
@@ -152,9 +154,9 @@ fun SourceDetailSettingsPane(
         viewModel.updateNetworkSourceConfig(newConfig) { success, msg ->
             isSaving = false
             if (success) {
-                Toast.makeText(context, "SMB 연결 설정이 저장되었습니다.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, strings.msgSourceSaved, Toast.LENGTH_SHORT).show()
             } else {
-                Toast.makeText(context, msg ?: "저장 실패", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, msg ?: strings.msgErrorOccurred, Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -163,7 +165,7 @@ fun SourceDetailSettingsPane(
         if (netConfig == null) return
         isSaving = true
         val newConfig = netConfig.copy(
-            name = davName.trim().ifBlank { "WebDAV" },
+            name = davName.trim().ifBlank { strings.defaultWebDavName },
             url = davUrl.trim(),
             path = davPath.trim(),
             username = davUsername.trim(),
@@ -172,9 +174,9 @@ fun SourceDetailSettingsPane(
         viewModel.updateNetworkSourceConfig(newConfig) { success, msg ->
             isSaving = false
             if (success) {
-                Toast.makeText(context, "WebDAV 연결 설정이 저장되었습니다.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, strings.msgSourceSaved, Toast.LENGTH_SHORT).show()
             } else {
-                Toast.makeText(context, msg ?: "저장 실패", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, msg ?: strings.msgErrorOccurred, Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -184,9 +186,9 @@ fun SourceDetailSettingsPane(
         viewModel.updateJsSourceScript(source.id, jsScriptCode) { success, msg ->
             isSaving = false
             if (success) {
-                Toast.makeText(context, "JS 스크립트가 저장되었습니다.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, strings.msgSourceSaved, Toast.LENGTH_SHORT).show()
             } else {
-                Toast.makeText(context, msg ?: "저장 실패", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, msg ?: strings.msgErrorOccurred, Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -196,7 +198,7 @@ fun SourceDetailSettingsPane(
             TopAppBar(
                 title = {
                     Text(
-                        text = "${source.displayName} 설정",
+                        text = strings.titleSourceSettings(source.displayName),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onBackground,
@@ -208,7 +210,7 @@ fun SourceDetailSettingsPane(
                     IconButton(onClick = onBack) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "뒤로가기",
+                            contentDescription = strings.actionGoBack,
                             tint = MaterialTheme.colorScheme.onBackground,
                         )
                     }
@@ -237,7 +239,7 @@ fun SourceDetailSettingsPane(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionTitle(
-                        title = "기본 정보 & 진행도 표시",
+                        title = strings.sectionSourceInfoAndProgress,
                         icon = when (sourceType) {
                             SourceType.LOCAL -> Icons.Default.Folder
                             SourceType.SMB -> Icons.Default.Dns
@@ -289,7 +291,7 @@ fun SourceDetailSettingsPane(
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
 
                             Text(
-                                text = "작품 목록 읽음 진행도 표시 방식",
+                                text = strings.labelProgressDisplayMode,
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurface,
@@ -297,6 +299,12 @@ fun SourceDetailSettingsPane(
 
                             ProgressDisplayMode.entries.forEach { mode ->
                                 val isChecked = mode == currentProgressMode
+                                val (modeLabel, modeDesc) = when (mode) {
+                                    ProgressDisplayMode.LATEST_EPISODE -> strings.progressModeLatestEpisode to strings.progressModeLatestEpisodeDesc
+                                    ProgressDisplayMode.READ_COUNT -> strings.progressModeReadCount to strings.progressModeReadCountDesc
+                                    ProgressDisplayMode.PERCENTAGE -> strings.progressModePercentage to strings.progressModePercentageDesc
+                                    ProgressDisplayMode.HIDDEN -> strings.progressModeHidden to strings.progressModeHiddenDesc
+                                }
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier
@@ -326,13 +334,13 @@ fun SourceDetailSettingsPane(
                                     Spacer(Modifier.width(8.dp))
                                     Column {
                                         Text(
-                                            text = mode.label,
+                                            text = modeLabel,
                                             style = MaterialTheme.typography.bodyMedium,
                                             fontWeight = if (isChecked) FontWeight.Bold else FontWeight.Normal,
                                             color = MaterialTheme.colorScheme.onSurface,
                                         )
                                         Text(
-                                            text = mode.description,
+                                            text = modeDesc,
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
@@ -351,7 +359,7 @@ fun SourceDetailSettingsPane(
                 SourceType.LOCAL -> {
                     item {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            SectionTitle(title = "연결된 로컬 만화 폴더", icon = Icons.Default.FolderOpen)
+                            SectionTitle(title = strings.sectionConnectedLocalFolders, icon = Icons.Default.FolderOpen)
 
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
@@ -372,7 +380,7 @@ fun SourceDetailSettingsPane(
                                         modifier = Modifier.fillMaxWidth(),
                                     ) {
                                         Text(
-                                            text = "등록된 폴더 (${state.libraryRoots.size}개)",
+                                            text = strings.registeredFolderCount(state.libraryRoots.size),
                                             style = MaterialTheme.typography.bodyMedium,
                                             fontWeight = FontWeight.SemiBold,
                                             color = MaterialTheme.colorScheme.onSurface,
@@ -384,13 +392,13 @@ fun SourceDetailSettingsPane(
                                         ) {
                                             Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                                             Spacer(Modifier.width(4.dp))
-                                            Text("폴더 추가", style = MaterialTheme.typography.labelSmall)
+                                            Text(strings.actionAddFolder, style = MaterialTheme.typography.labelSmall)
                                         }
                                     }
 
                                     if (state.libraryRoots.isEmpty()) {
                                         Text(
-                                            text = "추가된 만화 폴더가 없습니다. 위 버튼을 눌러 만화가 있는 폴더를 선택하세요.",
+                                            text = strings.hintNoLocalFolders,
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
@@ -425,7 +433,7 @@ fun SourceDetailSettingsPane(
                                                 ) {
                                                     Icon(
                                                         imageVector = Icons.Outlined.Delete,
-                                                        contentDescription = "폴더 연결 해제",
+                                                        contentDescription = strings.titleDisconnectFolder,
                                                         tint = MaterialTheme.colorScheme.error.copy(alpha = 0.85f),
                                                         modifier = Modifier.size(18.dp),
                                                     )
@@ -442,7 +450,7 @@ fun SourceDetailSettingsPane(
                 SourceType.SMB -> {
                     item {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            SectionTitle(title = "SMB 연결 상세 설정", icon = Icons.Default.Dns)
+                            SectionTitle(title = strings.titleSmbDetailSettings, icon = Icons.Default.Dns)
 
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
@@ -460,7 +468,7 @@ fun SourceDetailSettingsPane(
                                     OutlinedTextField(
                                         value = smbName,
                                         onValueChange = { smbName = it },
-                                        label = { Text("표시 이름") },
+                                        label = { Text(strings.labelDisplayName) },
                                         singleLine = true,
                                         modifier = Modifier.fillMaxWidth(),
                                     )
@@ -469,15 +477,15 @@ fun SourceDetailSettingsPane(
                                         OutlinedTextField(
                                             value = smbHost,
                                             onValueChange = { smbHost = it },
-                                            label = { Text("서버 IP / 호스트 주소") },
-                                            placeholder = { Text("192.168.0.10 또는 nas.local") },
+                                            label = { Text(strings.labelServerIpHost) },
+                                            placeholder = { Text("192.168.0.10") },
                                             singleLine = true,
                                             modifier = Modifier.weight(1f),
                                         )
                                         OutlinedTextField(
                                             value = smbPort,
                                             onValueChange = { smbPort = it },
-                                            label = { Text("포트") },
+                                            label = { Text(strings.labelPort) },
                                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                             singleLine = true,
                                             modifier = Modifier.width(90.dp),
@@ -487,8 +495,8 @@ fun SourceDetailSettingsPane(
                                     OutlinedTextField(
                                         value = smbShare,
                                         onValueChange = { smbShare = it },
-                                        label = { Text("공유 이름 (Share)") },
-                                        placeholder = { Text("comics 또는 manga") },
+                                        label = { Text(strings.labelShareNameWithAlias) },
+                                        placeholder = { Text(strings.placeholderComicsExample) },
                                         singleLine = true,
                                         modifier = Modifier.fillMaxWidth(),
                                     )
@@ -496,8 +504,8 @@ fun SourceDetailSettingsPane(
                                     OutlinedTextField(
                                         value = smbPath,
                                         onValueChange = { smbPath = it },
-                                        label = { Text("시작 경로 (선택)") },
-                                        placeholder = { Text("선택 사항 (예: books/japanese)") },
+                                        label = { Text(strings.labelStartPathOptional) },
+                                        placeholder = { Text(strings.placeholderBooksExample) },
                                         singleLine = true,
                                         modifier = Modifier.fillMaxWidth(),
                                     )
@@ -506,14 +514,14 @@ fun SourceDetailSettingsPane(
                                         OutlinedTextField(
                                             value = smbUsername,
                                             onValueChange = { smbUsername = it },
-                                            label = { Text("사용자명 (선택)") },
+                                            label = { Text(strings.labelUsernameOptional) },
                                             singleLine = true,
                                             modifier = Modifier.weight(1f),
                                         )
                                         OutlinedTextField(
                                             value = smbDomain,
                                             onValueChange = { smbDomain = it },
-                                            label = { Text("도메인/워크그룹 (선택)") },
+                                            label = { Text(strings.labelDomainWorkgroupOptional) },
                                             singleLine = true,
                                             modifier = Modifier.weight(1f),
                                         )
@@ -522,7 +530,7 @@ fun SourceDetailSettingsPane(
                                     OutlinedTextField(
                                         value = smbPassword,
                                         onValueChange = { smbPassword = it },
-                                        label = { Text("비밀번호 (선택)") },
+                                        label = { Text(strings.labelPasswordOptional) },
                                         singleLine = true,
                                         visualTransformation = if (smbShowPassword) VisualTransformation.None else PasswordVisualTransformation(),
                                         trailingIcon = {
@@ -549,7 +557,7 @@ fun SourceDetailSettingsPane(
                                     ) {
                                         Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
                                         Spacer(Modifier.width(6.dp))
-                                        Text("SMB 연결 설정 저장", fontWeight = FontWeight.Bold)
+                                        Text(strings.actionSaveSmbConfig, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
@@ -560,7 +568,7 @@ fun SourceDetailSettingsPane(
                 SourceType.WEBDAV -> {
                     item {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            SectionTitle(title = "WebDAV 연결 상세 설정", icon = Icons.Default.Cloud)
+                            SectionTitle(title = strings.titleWebDavDetailSettings, icon = Icons.Default.Cloud)
 
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
@@ -578,7 +586,7 @@ fun SourceDetailSettingsPane(
                                     OutlinedTextField(
                                         value = davName,
                                         onValueChange = { davName = it },
-                                        label = { Text("표시 이름") },
+                                        label = { Text(strings.labelDisplayName) },
                                         singleLine = true,
                                         modifier = Modifier.fillMaxWidth(),
                                     )
@@ -586,7 +594,7 @@ fun SourceDetailSettingsPane(
                                     OutlinedTextField(
                                         value = davUrl,
                                         onValueChange = { davUrl = it },
-                                        label = { Text("WebDAV 서버 URL") },
+                                        label = { Text(strings.labelWebDavServerUrl) },
                                         placeholder = { Text("https://nas.local:5006/dav") },
                                         singleLine = true,
                                         modifier = Modifier.fillMaxWidth(),
@@ -595,8 +603,8 @@ fun SourceDetailSettingsPane(
                                     OutlinedTextField(
                                         value = davPath,
                                         onValueChange = { davPath = it },
-                                        label = { Text("시작 경로 (선택)") },
-                                        placeholder = { Text("선택 사항 (예: comics)") },
+                                        label = { Text(strings.labelStartPathOptional) },
+                                        placeholder = { Text(strings.placeholderComicsExample) },
                                         singleLine = true,
                                         modifier = Modifier.fillMaxWidth(),
                                     )
@@ -604,7 +612,7 @@ fun SourceDetailSettingsPane(
                                     OutlinedTextField(
                                         value = davUsername,
                                         onValueChange = { davUsername = it },
-                                        label = { Text("사용자명 (선택)") },
+                                        label = { Text(strings.labelUsernameOptional) },
                                         singleLine = true,
                                         modifier = Modifier.fillMaxWidth(),
                                     )
@@ -612,7 +620,7 @@ fun SourceDetailSettingsPane(
                                     OutlinedTextField(
                                         value = davPassword,
                                         onValueChange = { davPassword = it },
-                                        label = { Text("비밀번호 (선택)") },
+                                        label = { Text(strings.labelPasswordOptional) },
                                         singleLine = true,
                                         visualTransformation = if (davShowPassword) VisualTransformation.None else PasswordVisualTransformation(),
                                         trailingIcon = {
@@ -639,7 +647,7 @@ fun SourceDetailSettingsPane(
                                     ) {
                                         Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
                                         Spacer(Modifier.width(6.dp))
-                                        Text("WebDAV 연결 설정 저장", fontWeight = FontWeight.Bold)
+                                        Text(strings.actionSaveWebDavConfig, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
@@ -650,7 +658,7 @@ fun SourceDetailSettingsPane(
                 SourceType.JS -> {
                     item {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            SectionTitle(title = "JS 확장 스크립트 코드 편집", icon = Icons.Default.Code)
+                            SectionTitle(title = strings.titleEditJsScript, icon = Icons.Default.Code)
 
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
@@ -691,7 +699,7 @@ fun SourceDetailSettingsPane(
                                     ) {
                                         Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
                                         Spacer(Modifier.width(6.dp))
-                                        Text("JS 스크립트 저장 및 적용", fontWeight = FontWeight.Bold)
+                                        Text(strings.actionSaveJsScript, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
@@ -710,7 +718,7 @@ fun SourceDetailSettingsPane(
             if (sourceType != SourceType.LOCAL) {
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        SectionTitle(title = "소스 관리 및 삭제", icon = Icons.Default.Warning)
+                        SectionTitle(title = strings.sectionSourceManagementAndDelete, icon = Icons.Default.Warning)
 
                         Surface(
                             shape = RoundedCornerShape(12.dp),
@@ -730,13 +738,13 @@ fun SourceDetailSettingsPane(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "소스 삭제",
+                                        text = strings.titleDeleteSource,
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.error,
                                     )
                                     Text(
-                                        text = "목록에서 이 소스를 삭제하고 캐시 데이터를 정리합니다.",
+                                        text = strings.descDeleteSource,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -751,7 +759,7 @@ fun SourceDetailSettingsPane(
                                 ) {
                                     Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(4.dp))
-                                    Text("삭제", fontWeight = FontWeight.Bold)
+                                    Text(strings.actionDelete, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -766,10 +774,10 @@ fun SourceDetailSettingsPane(
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
             title = {
-                Text("소스 삭제", fontWeight = FontWeight.Bold)
+                Text(strings.titleDeleteSource, fontWeight = FontWeight.Bold)
             },
             text = {
-                Text("'${source.displayName}' 소스를 목록에서 삭제하시겠습니까?")
+                Text(strings.confirmDeleteSource(source.displayName))
             },
             confirmButton = {
                 Button(
@@ -783,12 +791,12 @@ fun SourceDetailSettingsPane(
                         contentColor = MaterialTheme.colorScheme.onError,
                     ),
                 ) {
-                    Text("삭제", fontWeight = FontWeight.Bold)
+                    Text(strings.actionDelete, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteConfirm = false }) {
-                    Text("취소")
+                    Text(strings.actionCancel)
                 }
             },
         )
@@ -801,10 +809,10 @@ fun SourceDetailSettingsPane(
         AlertDialog(
             onDismissRequest = { folderToDelete = null },
             title = {
-                Text("폴더 연결 해제", fontWeight = FontWeight.Bold)
+                Text(strings.titleDisconnectFolder, fontWeight = FontWeight.Bold)
             },
             text = {
-                Text("'$folderLabel' 폴더 연결을 해제하시겠습니까?\n(기기의 실제 파일은 삭제되지 않습니다)")
+                Text(strings.confirmDisconnectFolder(folderLabel))
             },
             confirmButton = {
                 Button(
@@ -817,12 +825,12 @@ fun SourceDetailSettingsPane(
                         contentColor = MaterialTheme.colorScheme.onError,
                     ),
                 ) {
-                    Text("해제", fontWeight = FontWeight.Bold)
+                    Text(strings.actionDisconnect, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { folderToDelete = null }) {
-                    Text("취소")
+                    Text(strings.actionCancel)
                 }
             },
         )

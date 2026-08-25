@@ -1,10 +1,7 @@
 package com.comics8.desktop.ui.components
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -20,7 +17,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.unit.dp
+import com.comics8.desktop.ui.theme.LocalStrings
 
 @Composable
 fun PageJumpDialog(
@@ -29,6 +26,7 @@ fun PageJumpDialog(
     onDismiss: () -> Unit,
     onConfirm: (Int) -> Unit,
 ) {
+    val strings = LocalStrings.current
     var text by remember { mutableStateOf(current.toString()) }
     val maxPage = last.coerceAtLeast(1)
 
@@ -36,7 +34,7 @@ fun PageJumpDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                text = "페이지 이동 (1 ~ $maxPage)",
+                text = strings.titlePageJumpRange(maxPage),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
             )
@@ -50,7 +48,7 @@ fun PageJumpDialog(
                             text = input
                         }
                     },
-                    label = { Text("이동할 페이지 번호") },
+                    label = { Text(strings.labelJumpTargetPage) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(),
@@ -65,12 +63,12 @@ fun PageJumpDialog(
                     onDismiss()
                 },
             ) {
-                Text("이동")
+                Text(strings.actionJump)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("취소")
+                Text(strings.actionCancel)
             }
         },
     )

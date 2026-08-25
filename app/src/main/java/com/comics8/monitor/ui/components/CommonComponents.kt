@@ -52,11 +52,7 @@ import androidx.compose.ui.unit.sp
 import com.comics8.core.source.ComicSource
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
-
-const val EMPTY_SOURCE_MESSAGE = "폴더를 추가하세요"
-const val IMPORT_JS_LABEL = "JS 파일 가져오기"
-const val ADD_SOURCE_LABEL = "추가"
-const val REMOVE_SOURCE_LABEL = "삭제"
+import com.comics8.monitor.ui.theme.LocalStrings
 
 @Composable
 fun EmptySourcePane(
@@ -64,6 +60,7 @@ fun EmptySourcePane(
     onAddSource: (() -> Unit)? = null,
     onImportJs: (() -> Unit)? = null,
 ) {
+    val strings = LocalStrings.current
     Column(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -72,20 +69,20 @@ fun EmptySourcePane(
             .padding(24.dp),
     ) {
         Text(
-            text = EMPTY_SOURCE_MESSAGE,
+            text = strings.promptAddFolder,
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         if (onAddSource != null) {
             Spacer(Modifier.height(16.dp))
             Button(onClick = onAddSource) {
-                Text("소스 추가")
+                Text(strings.actionAddSource)
             }
         }
         if (onImportJs != null) {
             Spacer(Modifier.height(12.dp))
             Button(onClick = onImportJs) {
-                Text(IMPORT_JS_LABEL)
+                Text(strings.actionImportJsFile)
             }
         }
     }
@@ -97,13 +94,14 @@ fun SourceRemoveDialog(
     onRemove: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val strings = LocalStrings.current
     val removableSources = sources.filterNot { it.id == WorkId.LOCAL_SOURCE }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("소스 삭제") },
+        title = { Text(strings.titleDeleteSource) },
         text = {
             if (removableSources.isEmpty()) {
-                Text(EMPTY_SOURCE_MESSAGE)
+                Text(strings.promptAddFolder)
             } else {
                 LazyColumn {
                     items(removableSources, key = { it.id }) { source ->
@@ -122,7 +120,7 @@ fun SourceRemoveDialog(
         confirmButton = {},
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("취소")
+                Text(strings.actionCancel)
             }
         },
     )
@@ -133,13 +131,14 @@ fun SourceErrorDialog(
     message: String,
     onDismiss: () -> Unit,
 ) {
+    val strings = LocalStrings.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("소스를 가져올 수 없습니다") },
+        title = { Text(strings.titleCannotImportSource) },
         text = { Text(message) },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("확인")
+                Text(strings.actionConfirm)
             }
         },
     )
@@ -159,9 +158,10 @@ fun LoadingPane(modifier: Modifier = Modifier) {
 fun ErrorPane(
     message: String,
     modifier: Modifier = Modifier,
-    actionLabel: String = "다시 시도",
+    actionLabel: String? = null,
     onRetry: () -> Unit,
 ) {
+    val strings = LocalStrings.current
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -178,7 +178,7 @@ fun ErrorPane(
             onClick = onRetry,
             modifier = Modifier.padding(top = 8.dp),
         ) {
-            Text(actionLabel)
+            Text(actionLabel ?: strings.actionRetry)
         }
     }
 }
@@ -209,19 +209,20 @@ fun PageBar(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
+    val strings = LocalStrings.current
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
         modifier = modifier.fillMaxWidth(),
     ) {
         IconButton(onClick = onPrev, enabled = enabled && page > 1) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "이전 페이지")
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = strings.actionPrev)
         }
         TextButton(onClick = onJump, enabled = enabled) {
             Text("$page / $lastPage", fontWeight = FontWeight.SemiBold)
         }
         IconButton(onClick = onNext, enabled = enabled && page < lastPage) {
-            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "다음 페이지")
+            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = strings.actionNext)
         }
     }
 }
@@ -233,11 +234,12 @@ fun PageJumpDialog(
     onDismiss: () -> Unit,
     onConfirm: (Int) -> Unit,
 ) {
+    val strings = LocalStrings.current
     var text by remember { mutableStateOf(current.toString()) }
     val focus = LocalFocusManager.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("페이지 이동") },
+        title = { Text(strings.titlePageJump) },
         text = {
             OutlinedTextField(
                 value = text,
@@ -262,12 +264,12 @@ fun PageJumpDialog(
                 onClick = { text.toIntOrNull()?.let(onConfirm) },
                 enabled = text.toIntOrNull() != null,
             ) {
-                Text("이동")
+                Text(strings.actionJump)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("취소")
+                Text(strings.actionCancel)
             }
         },
     )

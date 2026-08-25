@@ -75,6 +75,7 @@ import com.comics8.core.model.DualSpread
 import com.comics8.core.model.ImageHalf
 import com.comics8.core.model.ReadDirection
 import com.comics8.core.model.SinglePageSlice
+import com.comics8.core.model.SplitMode
 import com.comics8.core.model.ViewMode
 import com.comics8.core.model.buildDualSpreads
 import com.comics8.core.model.buildSinglePageSlices
@@ -83,6 +84,7 @@ import com.comics8.desktop.ui.DesktopViewModel
 import com.comics8.desktop.ui.components.ErrorPane
 import com.comics8.desktop.ui.components.LoadingPane
 import com.comics8.desktop.ui.components.TopBar
+import com.comics8.desktop.ui.theme.LocalStrings
 import com.comics8.desktop.ui.util.DesktopAsyncImage
 
 @OptIn(ExperimentalComposeUiApi::class)
@@ -156,6 +158,7 @@ fun ReaderPane(
     viewModel: DesktopViewModel,
     modifier: Modifier = Modifier,
 ) {
+    val strings = LocalStrings.current
     val focusRequester = remember { FocusRequester() }
     var onAdvanceAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     var onRetreatAction by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -264,7 +267,7 @@ fun ReaderPane(
         if (state.readerError != null && state.readerImages.isEmpty()) {
             ErrorPane(
                 message = state.readerError,
-                actionLabel = "다시 시도",
+                actionLabel = strings.actionRetry,
                 onRetry = { state.currentEpisode?.let { viewModel.openEpisode(it) } },
             )
         }
@@ -277,6 +280,7 @@ private fun ReaderScrollView(
     viewModel: DesktopViewModel,
     onRegisterActions: (onAdvance: () -> Unit, onRetreat: () -> Unit) -> Unit,
 ) {
+    val strings = LocalStrings.current
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     var controlsVisible by remember { mutableStateOf(false) }
@@ -333,7 +337,7 @@ private fun ReaderScrollView(
             itemsIndexed(state.readerImages, key = { idx, url -> "$idx-$url" }) { index, url ->
                 DesktopAsyncImage(
                     url = url,
-                    contentDescription = "페이지 ${index + 1}",
+                    contentDescription = strings.labelPageNumber(index + 1),
                     contentScale = ContentScale.FillWidth,
                     modifier = Modifier
                         .fillMaxWidth(0.65f)
@@ -354,13 +358,13 @@ private fun ReaderScrollView(
                         FilledTonalButton(onClick = viewModel::openPrevEpisode) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
-                            Text("이전화")
+                            Text(strings.actionPrevEpisode)
                         }
                     }
                     Spacer(Modifier.width(16.dp))
                     if (state.hasNextEpisode) {
                         Button(onClick = viewModel::openNextEpisode) {
-                            Text("다음화")
+                            Text(strings.actionNextEpisode)
                             Spacer(Modifier.width(8.dp))
                             Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null)
                         }
@@ -387,6 +391,7 @@ private fun ReaderSingleView(
     viewModel: DesktopViewModel,
     onRegisterActions: (onAdvance: () -> Unit, onRetreat: () -> Unit) -> Unit,
 ) {
+    val strings = LocalStrings.current
     val slices = remember(state.readerImages.size, state.imageAspectRatios, state.splitMode, state.readDirection) {
         buildSinglePageSlices(state.readerImages.size, state.imageAspectRatios, state.splitMode, state.readDirection)
     }
@@ -511,7 +516,7 @@ private fun ReaderSingleView(
             DesktopAsyncImage(
                 url = currentImage,
                 half = currentHalf,
-                contentDescription = "페이지 ${currentPage + 1}",
+                contentDescription = strings.labelPageNumber(currentPage + 1),
                 contentScale = ContentScale.Fit,
                 modifier = Modifier
                     .fillMaxSize()
@@ -593,8 +598,8 @@ private fun ReaderSingleView(
         // Boundary Confirmation Prompt
         EpisodeBoundaryPrompt(
             visible = nextPromptVisible,
-            title = if (state.hasNextEpisode) "마지막 페이지입니다" else "마지막 회차입니다",
-            subtitle = if (state.hasNextEpisode) "한 번 더 클릭하면 다음 회차로 이동" else "한 번 더 클릭하면 회차 목록으로 이동",
+            title = if (state.hasNextEpisode) strings.promptLastPage else strings.promptLastEpisode,
+            subtitle = if (state.hasNextEpisode) strings.promptNextEpisodeHint else strings.promptCloseReaderHint,
             onClick = {
                 nextPromptVisible = false
                 if (state.hasNextEpisode) {
@@ -607,8 +612,8 @@ private fun ReaderSingleView(
 
         EpisodeBoundaryPrompt(
             visible = prevPromptVisible,
-            title = if (state.hasPrevEpisode) "첫 페이지입니다" else "첫 번째 회차입니다",
-            subtitle = if (state.hasPrevEpisode) "한 번 더 클릭하면 이전 회차로 이동" else "한 번 더 클릭하면 회차 목록으로 이동",
+            title = if (state.hasPrevEpisode) strings.promptFirstPage else strings.promptFirstEpisode,
+            subtitle = if (state.hasPrevEpisode) strings.promptPrevEpisodeHint else strings.promptCloseReaderHint,
             onClick = {
                 prevPromptVisible = false
                 if (state.hasPrevEpisode) {
@@ -661,6 +666,7 @@ private fun ReaderDualView(
     viewModel: DesktopViewModel,
     onRegisterActions: (onAdvance: () -> Unit, onRetreat: () -> Unit) -> Unit,
 ) {
+    val strings = LocalStrings.current
     val totalImages = state.readerImages.size
     val spreads = remember(state.readerImages.size, state.imageAspectRatios) {
         buildDualSpreads(state.readerImages.size, state.imageAspectRatios)
@@ -803,7 +809,7 @@ private fun ReaderDualView(
                         ) {
                             DesktopAsyncImage(
                                 url = url,
-                                contentDescription = "페이지 ${spread.index + 1}",
+                                contentDescription = strings.labelPageNumber(spread.index + 1),
                                 contentScale = ContentScale.Fit,
                                 alignment = Alignment.Center,
                                 modifier = Modifier.fillMaxSize(),
@@ -834,7 +840,7 @@ private fun ReaderDualView(
                                 if (url != null) {
                                     DesktopAsyncImage(
                                         url = url,
-                                        contentDescription = "페이지 ${spread.index + 1}",
+                                        contentDescription = strings.labelPageNumber(spread.index + 1),
                                         contentScale = ContentScale.Fit,
                                         alignment = Alignment.CenterStart,
                                         modifier = Modifier.fillMaxSize(),
@@ -855,7 +861,7 @@ private fun ReaderDualView(
                                 if (url != null) {
                                     DesktopAsyncImage(
                                         url = url,
-                                        contentDescription = "페이지 ${spread.index + 1}",
+                                        contentDescription = strings.labelPageNumber(spread.index + 1),
                                         contentScale = ContentScale.Fit,
                                         alignment = Alignment.CenterEnd,
                                         modifier = Modifier.fillMaxSize(),
@@ -891,7 +897,7 @@ private fun ReaderDualView(
                         if (url != null) {
                             DesktopAsyncImage(
                                 url = url,
-                                contentDescription = "페이지 ${leftIndex + 1}",
+                                contentDescription = strings.labelPageNumber(leftIndex + 1),
                                 contentScale = ContentScale.Fit,
                                 alignment = Alignment.Center,
                                 modifier = Modifier.fillMaxSize(),
@@ -912,7 +918,7 @@ private fun ReaderDualView(
                         if (url != null) {
                             DesktopAsyncImage(
                                 url = url,
-                                contentDescription = "페이지 ${rightIndex + 1}",
+                                contentDescription = strings.labelPageNumber(rightIndex + 1),
                                 contentScale = ContentScale.Fit,
                                 alignment = Alignment.Center,
                                 modifier = Modifier.fillMaxSize(),
@@ -998,8 +1004,8 @@ private fun ReaderDualView(
         // Boundary Confirmation Prompt
         EpisodeBoundaryPrompt(
             visible = nextPromptVisible,
-            title = if (state.hasNextEpisode) "마지막 페이지입니다" else "마지막 회차입니다",
-            subtitle = if (state.hasNextEpisode) "한 번 더 클릭하면 다음 회차로 이동" else "한 번 더 클릭하면 회차 목록으로 이동",
+            title = if (state.hasNextEpisode) strings.promptLastPage else strings.promptLastEpisode,
+            subtitle = if (state.hasNextEpisode) strings.promptNextEpisodeHint else strings.promptCloseReaderHint,
             onClick = {
                 nextPromptVisible = false
                 if (state.hasNextEpisode) {
@@ -1012,8 +1018,8 @@ private fun ReaderDualView(
 
         EpisodeBoundaryPrompt(
             visible = prevPromptVisible,
-            title = if (state.hasPrevEpisode) "첫 페이지입니다" else "첫 번째 회차입니다",
-            subtitle = if (state.hasPrevEpisode) "한 번 더 클릭하면 이전 회차로 이동" else "한 번 더 클릭하면 회차 목록으로 이동",
+            title = if (state.hasPrevEpisode) strings.promptFirstPage else strings.promptFirstEpisode,
+            subtitle = if (state.hasPrevEpisode) strings.promptPrevEpisodeHint else strings.promptCloseReaderHint,
             onClick = {
                 prevPromptVisible = false
                 if (state.hasPrevEpisode) {
@@ -1127,6 +1133,7 @@ private fun ReaderBottomBar(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val strings = LocalStrings.current
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
@@ -1167,20 +1174,20 @@ private fun ReaderBottomBar(
             ) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("이전화")
+                Text(strings.actionPrevEpisode)
             }
             Button(
                 onClick = onClose,
                 modifier = Modifier.weight(1f),
             ) {
-                Text("목록")
+                Text(strings.actionEpisodeList)
             }
             OutlinedButton(
                 onClick = onNextEp,
                 enabled = hasNextEpisode,
                 modifier = Modifier.weight(1f),
             ) {
-                Text("다음화")
+                Text(strings.actionNextEpisode)
                 Spacer(Modifier.width(6.dp))
                 Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp))
             }

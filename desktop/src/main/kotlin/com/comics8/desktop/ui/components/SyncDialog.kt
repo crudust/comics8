@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
+import com.comics8.desktop.ui.theme.LocalStrings
 import kotlinx.coroutines.delay
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
@@ -65,6 +66,7 @@ fun SyncDialog(
     viewModel: DesktopViewModel,
     onDismiss: () -> Unit,
 ) {
+    val strings = LocalStrings.current
     val syncState = state.syncState
     var showAdvancedSettings by remember { mutableStateOf(false) }
     var showPairingDialog by remember { mutableStateOf(false) }
@@ -82,7 +84,7 @@ fun SyncDialog(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = "클라우드 자동 동기화",
+                    text = strings.titleCloudSync,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
@@ -96,7 +98,7 @@ fun SyncDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(
-                    text = "개인정보 없이 6자리 페어링 코드로 스마트폰(Android), 태블릿 등 다른 기기와 즐겨찾기 및 읽음 진행도를 실시간 동기화합니다.",
+                    text = strings.descCloudSync,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -114,7 +116,7 @@ fun SyncDialog(
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = "새 기기 연결하기 (6자리 코드 발급)",
+                        text = strings.actionOpenPairingDialog,
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
@@ -131,7 +133,7 @@ fun SyncDialog(
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = "다른 기기의 데이터 가져오기",
+                        text = strings.actionOpenConnectDialogShort,
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
@@ -145,12 +147,12 @@ fun SyncDialog(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "백그라운드 자동 동기화",
+                            text = strings.labelAutoSync,
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Medium,
                         )
                         Text(
-                            text = "만화 열람/즐겨찾기 시 서버에 자동 저장",
+                            text = strings.descAutoSync,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -168,12 +170,12 @@ fun SyncDialog(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "서버 IP 우회 요청",
+                            text = strings.labelServerProxy,
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Medium,
                         )
                         Text(
-                            text = "사이트 메타데이터 요청을 서버 IP로 중계",
+                            text = strings.descServerProxy,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -199,7 +201,7 @@ fun SyncDialog(
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        text = if (showAdvancedSettings) "고급 설정 접기" else "고급 설정 (마스터 복구 키)",
+                        text = if (showAdvancedSettings) strings.labelFoldAdvancedSync else strings.labelUnfoldAdvancedSync,
                         style = MaterialTheme.typography.labelSmall,
                     )
                 }
@@ -220,7 +222,7 @@ fun SyncDialog(
                                     modifier = Modifier.fillMaxWidth(),
                                 ) {
                                     Text(
-                                        text = "내 마스터 복구 키",
+                                        text = strings.labelMyMasterKey,
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -237,11 +239,11 @@ fun SyncDialog(
                                         },
                                         modifier = Modifier.size(24.dp),
                                     ) {
-                                        Icon(imageVector = Icons.Default.ContentCopy, contentDescription = "복사", modifier = Modifier.size(14.dp))
+                                        Icon(imageVector = Icons.Default.ContentCopy, contentDescription = strings.actionCopy, modifier = Modifier.size(14.dp))
                                     }
                                 }
                                 Text(
-                                    text = syncState.syncKey.ifBlank { "키 생성 중..." },
+                                    text = syncState.syncKey.ifBlank { strings.statusIssuingKey },
                                     style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = FontWeight.Bold,
                                     fontFamily = FontFamily.Monospace,
@@ -250,7 +252,7 @@ fun SyncDialog(
                                 )
                                 Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
                                     TextButton(onClick = { viewModel.generateNewSyncKey() }) {
-                                        Text("새 마스터 키 재발급", style = MaterialTheme.typography.labelSmall)
+                                        Text(strings.actionReissueMasterKey, style = MaterialTheme.typography.labelSmall)
                                     }
                                 }
                             }
@@ -261,9 +263,9 @@ fun SyncDialog(
                 // 5. 마지막 동기화 시간
                 val timeText = if (syncState.lastSyncedAt > 0) {
                     val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-                    "마지막 동기화: ${sdf.format(Date(syncState.lastSyncedAt))}"
+                    strings.labelLastSyncedAt(sdf.format(Date(syncState.lastSyncedAt)))
                 } else {
-                    "동기화 이력 없음"
+                    strings.labelNoSyncHistory
                 }
                 Text(
                     text = timeText,
@@ -284,7 +286,7 @@ fun SyncDialog(
                         color = MaterialTheme.colorScheme.onPrimary,
                     )
                     Spacer(Modifier.width(8.dp))
-                    Text("동기화 중...")
+                    Text(strings.statusSyncing)
                 } else {
                     Icon(
                         imageVector = Icons.Default.Refresh,
@@ -292,13 +294,13 @@ fun SyncDialog(
                         modifier = Modifier.size(16.dp),
                     )
                     Spacer(Modifier.width(6.dp))
-                    Text("지금 즉시 동기화")
+                    Text(strings.actionSyncNow)
                 }
             }
         },
         dismissButton = {
             OutlinedButton(onClick = onDismiss) {
-                Text("닫기")
+                Text(strings.actionClose)
             }
         },
     )
@@ -323,6 +325,7 @@ private fun DesktopSyncDialogPairingCode(
     viewModel: DesktopViewModel,
     onDismiss: () -> Unit,
 ) {
+    val strings = LocalStrings.current
     var isLoading by remember { mutableStateOf(true) }
     var code by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -337,7 +340,7 @@ private fun DesktopSyncDialogPairingCode(
                 code = result.code
                 timeLeftSeconds = result.expiresInSeconds
             } else {
-                errorMessage = result.message ?: "코드 발급 실패"
+                errorMessage = result.message ?: strings.msgPairingCodeIssueFailed
             }
         }
     }
@@ -365,7 +368,7 @@ private fun DesktopSyncDialogPairingCode(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = "새 기기 연결 (페어링)",
+                    text = strings.titlePairNewDevice,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
@@ -378,7 +381,7 @@ private fun DesktopSyncDialogPairingCode(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(
-                    text = "새로 연결할 기기의 [데이터 가져오기] 화면에서 아래 6자리 코드를 입력하세요.",
+                    text = strings.hintPairingCodeGuide,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -422,9 +425,9 @@ private fun DesktopSyncDialogPairingCode(
                             val minutes = timeLeftSeconds / 60
                             val seconds = timeLeftSeconds % 60
                             val timerText = if (timeLeftSeconds > 0) {
-                                String.format(Locale.getDefault(), "⏱️ 남은 시간: %02d:%02d", minutes, seconds)
+                                strings.labelPairingTimeLeft(minutes, seconds)
                             } else {
-                                "⚠️ 코드가 만료되었습니다."
+                                strings.errorPairingCodeExpired
                             }
                             Text(
                                 text = timerText,
@@ -444,7 +447,7 @@ private fun DesktopSyncDialogPairingCode(
                     ) {
                         Icon(imageVector = Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("코드 복사", style = MaterialTheme.typography.labelSmall)
+                        Text(strings.actionCopy, style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
@@ -453,12 +456,12 @@ private fun DesktopSyncDialogPairingCode(
             Button(onClick = { loadCode() }, enabled = !isLoading) {
                 Icon(imageVector = Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("새 코드 발급")
+                Text(strings.actionIssueNewCode)
             }
         },
         dismissButton = {
             OutlinedButton(onClick = onDismiss) {
-                Text("닫기")
+                Text(strings.actionClose)
             }
         },
     )
@@ -469,6 +472,7 @@ private fun DesktopSyncDialogConnectDevice(
     viewModel: DesktopViewModel,
     onDismiss: () -> Unit,
 ) {
+    val strings = LocalStrings.current
     var pairingCodeInput by remember { mutableStateOf("") }
     var recoveryKeyInput by remember { mutableStateOf("") }
     var useRecoveryKeyMode by remember { mutableStateOf(false) }
@@ -488,7 +492,7 @@ private fun DesktopSyncDialogConnectDevice(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = if (useRecoveryKeyMode) "마스터 복구 키로 연결" else "기존 데이터 가져오기",
+                    text = if (useRecoveryKeyMode) strings.titleConnectWithMasterKey else strings.titleImportExistingData,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
@@ -501,7 +505,7 @@ private fun DesktopSyncDialogConnectDevice(
             ) {
                 if (!useRecoveryKeyMode) {
                     Text(
-                        text = "기존에 사용하던 기기의 [새 기기 연결하기]에 표시된 6자리 번호를 입력하세요.",
+                        text = strings.hintInput6DigitCode,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -512,7 +516,7 @@ private fun DesktopSyncDialogConnectDevice(
                             val filtered = it.filter { ch -> ch.isDigit() }.take(6)
                             pairingCodeInput = filtered
                         },
-                        placeholder = { Text("예: 849201", style = MaterialTheme.typography.bodyMedium) },
+                        placeholder = { Text(strings.placeholder6DigitCode, style = MaterialTheme.typography.bodyMedium) },
                         singleLine = true,
                         textStyle = MaterialTheme.typography.headlineSmall.copy(
                             fontFamily = FontFamily.Monospace,
@@ -527,12 +531,12 @@ private fun DesktopSyncDialogConnectDevice(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         TextButton(onClick = { useRecoveryKeyMode = true }) {
-                            Text("기존 기기가 없나요? 마스터 복구 키로 복원", style = MaterialTheme.typography.labelSmall)
+                            Text(strings.actionSwitchToMasterKeyMode, style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 } else {
                     Text(
-                        text = "이전에 저장해 둔 마스터 복구 키(C8-XXXX-XXXX-XXXX)를 입력하여 데이터를 직접 복원합니다.",
+                        text = strings.hintMasterKeyGuide,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -540,7 +544,7 @@ private fun DesktopSyncDialogConnectDevice(
                     OutlinedTextField(
                         value = recoveryKeyInput,
                         onValueChange = { recoveryKeyInput = it.trim().uppercase() },
-                        placeholder = { Text("예: C8-7X9K-2M4Q-99PL", style = MaterialTheme.typography.bodySmall) },
+                        placeholder = { Text(strings.placeholderMasterKey, style = MaterialTheme.typography.bodySmall) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -550,7 +554,7 @@ private fun DesktopSyncDialogConnectDevice(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         TextButton(onClick = { useRecoveryKeyMode = false }) {
-                            Text("6자리 페어링 코드로 입력하기", style = MaterialTheme.typography.labelSmall)
+                            Text(strings.actionSwitchToPairingCodeMode, style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 }
@@ -589,7 +593,7 @@ private fun DesktopSyncDialogConnectDevice(
                                 onDismiss()
                             } else {
                                 isError = true
-                                statusMessage = result.message ?: "인증 실패"
+                                statusMessage = result.message ?: strings.msgDataImportFailed
                             }
                         }
                     } else {
@@ -601,7 +605,7 @@ private fun DesktopSyncDialogConnectDevice(
                         } else {
                             isConnecting = false
                             isError = true
-                            statusMessage = "마스터 복구 키를 입력해주세요."
+                            statusMessage = strings.msgInvalidMasterKey
                         }
                     }
                 },
@@ -614,15 +618,15 @@ private fun DesktopSyncDialogConnectDevice(
                         color = MaterialTheme.colorScheme.onPrimary,
                     )
                     Spacer(Modifier.width(6.dp))
-                    Text("연결 중...")
+                    Text(strings.statusConnecting)
                 } else {
-                    Text("데이터 가져오기")
+                    Text(strings.actionImportData)
                 }
             }
         },
         dismissButton = {
             OutlinedButton(onClick = onDismiss) {
-                Text("취소")
+                Text(strings.actionCancel)
             }
         },
     )

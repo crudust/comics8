@@ -13,6 +13,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.comics8.core.model.ArtistRef
+import com.comics8.monitor.ui.theme.LocalStrings
 
 @Composable
 fun ArtistPickDialog(
@@ -20,9 +21,10 @@ fun ArtistPickDialog(
     onPick: (ArtistRef) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val strings = LocalStrings.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("작가 선택") },
+        title = { Text(strings.titlePickArtist) },
         text = {
             LazyColumn {
                 items(artists.distinctBy { it.slug }, key = { it.slug }) { artist ->
@@ -40,7 +42,7 @@ fun ArtistPickDialog(
         confirmButton = {},
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("취소")
+                Text(strings.actionCancel)
             }
         },
     )

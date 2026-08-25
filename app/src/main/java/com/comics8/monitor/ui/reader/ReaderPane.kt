@@ -67,6 +67,7 @@ import com.comics8.core.model.ViewMode
 import com.comics8.core.model.buildDualSpreads
 import com.comics8.core.model.buildSinglePageSlices
 import com.comics8.core.model.computeContentCropRect
+import com.comics8.monitor.ui.theme.LocalStrings
 import com.comics8.monitor.ui.ListingUiState
 import com.comics8.monitor.ui.ListingViewModel
 import com.comics8.monitor.ui.components.EpisodeBoundaryPrompt
@@ -84,6 +85,7 @@ fun ReaderPane(
     viewModel: ListingViewModel,
     modifier: Modifier = Modifier,
 ) {
+    val strings = LocalStrings.current
     when {
         state.readerLoading && state.readerImages.isEmpty() -> LoadingPane(modifier)
         state.readerError != null && state.readerImages.isEmpty() ->
@@ -94,8 +96,8 @@ fun ReaderPane(
             )
         state.readerImages.isEmpty() ->
             ErrorPane(
-                message = "불러올 이미지가 없습니다.",
-                actionLabel = "회차 목록으로",
+                message = strings.errorNoImagesToLoad,
+                actionLabel = strings.navBackToEpisodeList,
                 modifier = modifier,
                 onRetry = viewModel::closeReader,
             )
@@ -117,6 +119,7 @@ private fun ReaderScrollPane(
     viewModel: ListingViewModel,
     modifier: Modifier = Modifier,
 ) {
+    val strings = LocalStrings.current
     val initialIndex = remember(state.currentEpisode?.wrId) {
         (state.currentEpisode?.lastReadPage ?: 0).coerceIn(0, (state.readerImages.size - 1).coerceAtLeast(0))
     }
@@ -156,7 +159,7 @@ private fun ReaderScrollPane(
             itemsIndexed(state.readerImages, key = { index, url -> "$index-$url" }) { index, imageUrl ->
                 ReaderImage(
                     model = imageUrl,
-                    contentDescription = "페이지 ${index + 1}",
+                    contentDescription = strings.labelPageNumber(index + 1),
                     contentScale = ContentScale.FillWidth,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -244,6 +247,7 @@ private fun ReaderSinglePagePane(
     viewModel: ListingViewModel,
     modifier: Modifier = Modifier,
 ) {
+    val strings = LocalStrings.current
     val isR2L = state.readDirection == ReadDirection.RIGHT_TO_LEFT
     val slices = remember(state.readerImages.size, state.imageAspectRatios, state.splitMode, state.readDirection) {
         buildSinglePageSlices(state.readerImages.size, state.imageAspectRatios, state.splitMode, state.readDirection)
@@ -399,7 +403,7 @@ private fun ReaderSinglePagePane(
                 ReaderImage(
                     model = imageUrl,
                     half = half,
-                    contentDescription = "페이지 ${page + 1}",
+                    contentDescription = strings.labelPageNumber(page + 1),
                     contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize(),
                     onSuccess = { result ->
@@ -432,8 +436,8 @@ private fun ReaderSinglePagePane(
         // Boundary Confirmation Prompt
         EpisodeBoundaryPrompt(
             visible = nextPromptVisible,
-            title = if (state.hasNextEpisode) "마지막 페이지입니다" else "마지막 회차입니다",
-            subtitle = if (state.hasNextEpisode) "한 번 더 클릭하면 다음 회차로 이동" else "한 번 더 클릭하면 회차 목록으로 이동",
+            title = if (state.hasNextEpisode) strings.promptLastPage else strings.promptLastEpisode,
+            subtitle = if (state.hasNextEpisode) strings.promptNextEpisodeHint else strings.promptCloseReaderHint,
             onClick = {
                 nextPromptVisible = false
                 if (state.hasNextEpisode) {
@@ -446,8 +450,8 @@ private fun ReaderSinglePagePane(
 
         EpisodeBoundaryPrompt(
             visible = prevPromptVisible,
-            title = if (state.hasPrevEpisode) "첫 페이지입니다" else "첫 번째 회차입니다",
-            subtitle = if (state.hasPrevEpisode) "한 번 더 클릭하면 이전 회차로 이동" else "한 번 더 클릭하면 회차 목록으로 이동",
+            title = if (state.hasPrevEpisode) strings.promptFirstPage else strings.promptFirstEpisode,
+            subtitle = if (state.hasPrevEpisode) strings.promptPrevEpisodeHint else strings.promptCloseReaderHint,
             onClick = {
                 prevPromptVisible = false
                 if (state.hasPrevEpisode) {
@@ -502,6 +506,7 @@ private fun ReaderDualPagePane(
     viewModel: ListingViewModel,
     modifier: Modifier = Modifier,
 ) {
+    val strings = LocalStrings.current
     val isR2L = state.readDirection == ReadDirection.RIGHT_TO_LEFT
     val spreads = remember(state.readerImages.size, state.imageAspectRatios) {
         buildDualSpreads(state.readerImages.size, state.imageAspectRatios)
@@ -706,7 +711,7 @@ private fun ReaderDualPagePane(
                             ) {
                                 ReaderImage(
                                     model = state.readerImages.getOrNull(spread.index),
-                                    contentDescription = "페이지 ${spread.index + 1}",
+                                    contentDescription = strings.labelPageNumber(spread.index + 1),
                                     contentScale = ContentScale.Fit,
                                     modifier = Modifier.fillMaxSize(),
                                     onSuccess = { result ->
@@ -735,7 +740,7 @@ private fun ReaderDualPagePane(
                                     ) {
                                         ReaderImage(
                                             model = state.readerImages.getOrNull(spread.index),
-                                            contentDescription = "페이지 ${spread.index + 1}",
+                                            contentDescription = strings.labelPageNumber(spread.index + 1),
                                             contentScale = ContentScale.Fit,
                                             alignment = Alignment.CenterStart,
                                             modifier = Modifier.fillMaxSize(),
@@ -757,7 +762,7 @@ private fun ReaderDualPagePane(
                                     ) {
                                         ReaderImage(
                                             model = state.readerImages.getOrNull(spread.index),
-                                            contentDescription = "페이지 ${spread.index + 1}",
+                                            contentDescription = strings.labelPageNumber(spread.index + 1),
                                             contentScale = ContentScale.Fit,
                                             alignment = Alignment.CenterEnd,
                                             modifier = Modifier.fillMaxSize(),
@@ -792,7 +797,7 @@ private fun ReaderDualPagePane(
                             ) {
                                 ReaderImage(
                                     model = state.readerImages.getOrNull(leftIndex),
-                                    contentDescription = "페이지 ${leftIndex + 1}",
+                                    contentDescription = strings.labelPageNumber(leftIndex + 1),
                                     contentScale = ContentScale.Fit,
                                     alignment = Alignment.Center,
                                     modifier = Modifier.fillMaxSize(),
@@ -813,7 +818,7 @@ private fun ReaderDualPagePane(
                             ) {
                                 ReaderImage(
                                     model = state.readerImages.getOrNull(rightIndex),
-                                    contentDescription = "페이지 ${rightIndex + 1}",
+                                    contentDescription = strings.labelPageNumber(rightIndex + 1),
                                     contentScale = ContentScale.Fit,
                                     alignment = Alignment.Center,
                                     modifier = Modifier.fillMaxSize(),
@@ -852,8 +857,8 @@ private fun ReaderDualPagePane(
         // Boundary Confirmation Prompt
         EpisodeBoundaryPrompt(
             visible = nextPromptVisible,
-            title = if (state.hasNextEpisode) "마지막 페이지입니다" else "마지막 회차입니다",
-            subtitle = if (state.hasNextEpisode) "한 번 더 클릭하면 다음 회차로 이동" else "한 번 더 클릭하면 회차 목록으로 이동",
+            title = if (state.hasNextEpisode) strings.promptLastPage else strings.promptLastEpisode,
+            subtitle = if (state.hasNextEpisode) strings.promptNextEpisodeHint else strings.promptCloseReaderHint,
             onClick = {
                 nextPromptVisible = false
                 if (state.hasNextEpisode) {
@@ -866,8 +871,8 @@ private fun ReaderDualPagePane(
 
         EpisodeBoundaryPrompt(
             visible = prevPromptVisible,
-            title = if (state.hasPrevEpisode) "첫 페이지입니다" else "첫 번째 회차입니다",
-            subtitle = if (state.hasPrevEpisode) "한 번 더 클릭하면 이전 회차로 이동" else "한 번 더 클릭하면 회차 목록으로 이동",
+            title = if (state.hasPrevEpisode) strings.promptFirstPage else strings.promptFirstEpisode,
+            subtitle = if (state.hasPrevEpisode) strings.promptPrevEpisodeHint else strings.promptCloseReaderHint,
             onClick = {
                 prevPromptVisible = false
                 if (state.hasPrevEpisode) {
@@ -929,6 +934,7 @@ private fun ReaderBottomBar(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val strings = LocalStrings.current
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
@@ -969,14 +975,14 @@ private fun ReaderBottomBar(
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.weight(1f),
             ) {
-                Text("이전화")
+                Text(strings.actionPrevEpisode)
             }
             Button(
                 onClick = onClose,
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.weight(1f),
             ) {
-                Text("목록")
+                Text(strings.actionEpisodeList)
             }
             OutlinedButton(
                 onClick = onNextEp,
@@ -984,7 +990,7 @@ private fun ReaderBottomBar(
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.weight(1f),
             ) {
-                Text("다음화")
+                Text(strings.actionNextEpisode)
             }
         }
     }
@@ -998,6 +1004,7 @@ fun ReaderFooter(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val strings = LocalStrings.current
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
@@ -1005,7 +1012,7 @@ fun ReaderFooter(
             .padding(horizontal = 16.dp, vertical = 24.dp),
     ) {
         Text(
-            text = "${state.currentEpisode?.title.orEmpty()} (총 ${state.readerImages.size}장)",
+            text = "${state.currentEpisode?.title.orEmpty()} (${strings.formatItemCount(state.readerImages.size)})",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(bottom = 12.dp),
@@ -1020,20 +1027,20 @@ fun ReaderFooter(
                 enabled = state.hasPrevEpisode,
                 modifier = Modifier.weight(1f),
             ) {
-                Text("이전화")
+                Text(strings.actionPrevEpisode)
             }
             Button(
                 onClick = onClose,
                 modifier = Modifier.weight(1f),
             ) {
-                Text("목록")
+                Text(strings.actionEpisodeList)
             }
             OutlinedButton(
                 onClick = onNext,
                 enabled = state.hasNextEpisode,
                 modifier = Modifier.weight(1f),
             ) {
-                Text("다음화")
+                Text(strings.actionNextEpisode)
             }
         }
     }
@@ -1049,6 +1056,7 @@ private fun ReaderImage(
     half: ImageHalf = ImageHalf.FULL,
     onSuccess: ((AsyncImagePainter.State.Success) -> Unit)? = null,
 ) {
+    val strings = LocalStrings.current
     val context = LocalContext.current
     val imageModel = remember(model, half) {
         if (half == ImageHalf.FULL) {
@@ -1098,13 +1106,13 @@ private fun ReaderImage(
                 ) {
                     Icon(
                         imageVector = Icons.Default.BrokenImage,
-                        contentDescription = "이미지 로딩 실패",
+                        contentDescription = strings.errorImageLoadFailed,
                         tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
                         modifier = Modifier.size(36.dp),
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        text = "이미지를 불러올 수 없습니다",
+                        text = strings.errorCannotLoadImage,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
                     )

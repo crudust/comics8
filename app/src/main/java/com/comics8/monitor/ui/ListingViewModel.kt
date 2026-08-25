@@ -37,6 +37,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import com.comics8.core.i18n.AppLanguage
+import com.comics8.core.i18n.I18n
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -50,6 +52,7 @@ data class ArtistPickRequest(
 )
 
 data class ListingUiState(
+    val appLanguage: AppLanguage = AppLanguage.AUTO,
     val tab: BrowseTab? = null,
     val browseTabs: List<BrowseTab> = emptyList(),
     val activeSourceId: String? = null,
@@ -190,8 +193,27 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         return if (isDualEligible(widthDp, heightDp)) ViewMode.DUAL else singleViewPreference
     }
 
+    val appLanguage: AppLanguage
+        get() = try {
+            val code = prefs.getString("app_language", AppLanguage.AUTO.code)
+            AppLanguage.fromCode(code)
+        } catch (_: Exception) {
+            AppLanguage.AUTO
+        }
+
+    fun setAppLanguage(language: AppLanguage) {
+        prefs.edit().putString("app_language", language.code).apply()
+        _state.update { it.copy(appLanguage = language) }
+    }
+
     private val _state = MutableStateFlow(
         ListingUiState(
+            appLanguage = try {
+                val code = prefs.getString("app_language", AppLanguage.AUTO.code)
+                AppLanguage.fromCode(code)
+            } catch (_: Exception) {
+                AppLanguage.AUTO
+            },
             viewMode = ViewMode.SCROLL,
             readDirection = ReadDirection.RIGHT_TO_LEFT,
         ),

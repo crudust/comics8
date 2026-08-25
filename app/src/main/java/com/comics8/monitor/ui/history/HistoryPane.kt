@@ -38,6 +38,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.comics8.core.i18n.AppStrings
+import com.comics8.monitor.ui.theme.LocalStrings
 import com.comics8.monitor.data.local.ReadHistory
 import com.comics8.monitor.ui.ListingUiState
 import com.comics8.monitor.ui.ListingViewModel
@@ -57,6 +59,7 @@ fun HistoryPane(
     onAddSource: (() -> Unit)? = null,
     onImportJs: (() -> Unit)? = null,
 ) {
+    val strings = LocalStrings.current
     when {
         state.activeSourceId == null -> {
             EmptySourcePane(
@@ -70,8 +73,8 @@ fun HistoryPane(
         }
         state.historyItems.isEmpty() -> {
             ErrorPane(
-                message = "최근 읽은 만화가 없습니다.",
-                actionLabel = "목록으로",
+                message = strings.emptyHistory,
+                actionLabel = strings.navBackToList,
                 onRetry = { viewModel.closeHistory() },
                 modifier = modifier,
             )
@@ -107,6 +110,7 @@ fun HistoryItemCard(
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val strings = LocalStrings.current
     Surface(
         shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
@@ -162,7 +166,7 @@ fun HistoryItemCard(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
-                    text = formatRelativeTime(item.lastReadAt),
+                    text = formatRelativeTime(item.lastReadAt, strings),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.outline,
                     modifier = Modifier.weight(1f),
@@ -185,7 +189,7 @@ fun HistoryItemCard(
                         )
                         Spacer(Modifier.width(3.dp))
                         Text(
-                            text = "목차",
+                            text = strings.actionTableOfContents,
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.SemiBold,
                         )
@@ -204,7 +208,7 @@ fun HistoryItemCard(
                         )
                         Spacer(Modifier.width(3.dp))
                         Text(
-                            text = "다시보기",
+                            text = strings.actionReopenEpisode,
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.SemiBold,
                         )
@@ -227,7 +231,7 @@ fun HistoryItemCard(
                         )
                         Spacer(Modifier.width(3.dp))
                         Text(
-                            text = "이어보기",
+                            text = strings.actionResume,
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
                         )
@@ -239,7 +243,7 @@ fun HistoryItemCard(
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Delete,
-                            contentDescription = "삭제",
+                            contentDescription = strings.actionDelete,
                             tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
                             modifier = Modifier.size(18.dp),
                         )
@@ -250,7 +254,7 @@ fun HistoryItemCard(
     }
 }
 
-private fun formatRelativeTime(timestamp: Long): String {
+private fun formatRelativeTime(timestamp: Long, strings: AppStrings): String {
     if (timestamp <= 0) return ""
     val diff = System.currentTimeMillis() - timestamp
     val seconds = diff / 1000
@@ -259,10 +263,10 @@ private fun formatRelativeTime(timestamp: Long): String {
     val days = hours / 24
 
     return when {
-        minutes < 1 -> "방금 전"
-        minutes < 60 -> "${minutes}분 전"
-        hours < 24 -> "${hours}시간 전"
-        days < 7 -> "${days}일 전"
+        minutes < 1 -> strings.timeJustNow
+        minutes < 60 -> strings.timeMinutesAgo(minutes)
+        hours < 24 -> strings.timeHoursAgo(hours)
+        days < 7 -> strings.timeDaysAgo(days)
         else -> SimpleDateFormat("yyyy.MM.dd", Locale.getDefault()).format(Date(timestamp))
     }
 }

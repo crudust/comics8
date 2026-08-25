@@ -13,6 +13,8 @@ import com.comics8.desktop.data.DesktopBackupStats
 import com.comics8.desktop.data.DesktopSyncState
 import com.comics8.desktop.data.ReadHistoryRecord
 
+import com.comics8.core.i18n.AppLanguage
+
 enum class Screen {
     Browse,
     Series,
@@ -29,6 +31,7 @@ data class ArtistPickRequest(
 )
 
 data class DesktopUiState(
+    val appLanguage: AppLanguage = AppLanguage.AUTO,
     val tab: BrowseTab? = null,
     val browseTabs: List<BrowseTab> = emptyList(),
     val activeSourceId: String? = null,

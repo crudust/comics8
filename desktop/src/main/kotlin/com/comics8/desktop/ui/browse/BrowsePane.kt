@@ -57,6 +57,7 @@ import com.comics8.desktop.ui.components.EmptySourcePane
 import com.comics8.desktop.ui.components.ErrorPane
 import com.comics8.desktop.ui.components.LoadingPane
 import com.comics8.desktop.ui.components.sourceChipLabel
+import com.comics8.desktop.ui.theme.LocalStrings
 import com.comics8.desktop.ui.util.DesktopAsyncImage
 
 @Composable
@@ -65,6 +66,7 @@ fun BrowsePane(
     viewModel: DesktopViewModel,
     modifier: Modifier = Modifier,
 ) {
+    val strings = LocalStrings.current
     val isLocal = state.activeSourceId == WorkId.LOCAL_SOURCE
     when {
         !state.packsReady -> {
@@ -102,8 +104,8 @@ fun BrowsePane(
             Column(modifier = modifier.fillMaxSize()) {
                 if (state.tab is BrowseTab.Favorite && state.items.isEmpty() && !state.isSearch) {
                     ErrorPane(
-                        message = "즐겨찾기한 작품이 없습니다.",
-                        actionLabel = "보관함으로",
+                        message = strings.emptyFavorites,
+                        actionLabel = strings.navBackToLibrary,
                         onRetry = {
                             val dest = state.browseTabs.firstOrNull { it is BrowseTab.Remote } ?: state.tab
                             dest?.let(viewModel::selectTab)
@@ -151,6 +153,7 @@ private fun EmptyLibraryPane(
     onAddFolder: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val strings = LocalStrings.current
     Column(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -159,17 +162,17 @@ private fun EmptyLibraryPane(
             .padding(24.dp),
     ) {
         Text(
-            text = "만화 폴더를 추가하세요",
+            text = strings.promptAddMangaFolder,
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(16.dp))
         Button(onClick = onAddFolder) {
-            Text("폴더 추가")
+            Text(strings.actionAddFolder)
         }
         Spacer(Modifier.height(12.dp))
         Text(
-            text = LOOSE_IMAGE_HINT,
+            text = strings.hintLibraryScan,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -179,13 +182,14 @@ private fun EmptyLibraryPane(
 
 @Composable
 private fun EmptyLibraryScanHint(modifier: Modifier = Modifier) {
+    val strings = LocalStrings.current
     Column(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier.padding(24.dp),
     ) {
         Text(
-            text = LOOSE_IMAGE_HINT,
+            text = strings.hintLibraryScan,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -193,16 +197,12 @@ private fun EmptyLibraryScanHint(modifier: Modifier = Modifier) {
     }
 }
 
-private const val LOOSE_IMAGE_HINT =
-    "ZIP/CBZ 파일이나 이미지가 들어 있는 하위 폴더를 넣어 주세요. 루트의 낱개 이미지 파일은 스캔하지 않습니다."
-
-
-
 @Composable
 private fun BrowsePageBar(
     state: DesktopUiState,
     viewModel: DesktopViewModel,
 ) {
+    val strings = LocalStrings.current
     if (state.tab?.paginated != true || state.isSearch || state.lastPage <= 1) return
     Row(
         horizontalArrangement = Arrangement.Center,
@@ -216,7 +216,7 @@ private fun BrowsePageBar(
             onClick = { viewModel.goToPage(state.page - 1) },
             enabled = !state.loading && state.page > 1,
         ) {
-            Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "이전")
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = strings.actionPrev)
         }
 
         FilledTonalButton(
@@ -236,7 +236,7 @@ private fun BrowsePageBar(
             onClick = { viewModel.goToPage(state.page + 1) },
             enabled = !state.loading && state.page < state.lastPage,
         ) {
-            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "다음")
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = strings.actionNext)
         }
     }
 }
@@ -251,6 +251,7 @@ fun ToonCard(
     sourceRegistry: SourceRegistry,
     refreshEpoch: Long = 0L,
 ) {
+    val strings = LocalStrings.current
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -321,7 +322,7 @@ fun ToonCard(
             ) {
                 Icon(
                     imageVector = if (item.isFavorite) Icons.Filled.Star else Icons.Outlined.StarBorder,
-                    contentDescription = if (item.isFavorite) "즐겨찾기 해제" else "즐겨찾기",
+                    contentDescription = if (item.isFavorite) strings.actionRemoveFavorite else strings.actionAddFavorite,
                     tint = if (item.isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))

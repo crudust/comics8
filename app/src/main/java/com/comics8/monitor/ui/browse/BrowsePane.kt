@@ -37,6 +37,7 @@ import com.comics8.core.model.ToonItem
 import com.comics8.core.source.SourceRegistry
 import com.comics8.monitor.ui.components.Badge
 import com.comics8.monitor.ui.components.sourceChipLabel
+import com.comics8.monitor.ui.theme.LocalStrings
 
 import androidx.compose.foundation.border
 
@@ -98,6 +99,7 @@ fun ToonCard(
     sourceRegistry: SourceRegistry,
     refreshEpoch: Long = 0L,
 ) {
+    val strings = LocalStrings.current
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -181,7 +183,7 @@ fun ToonCard(
             ) {
                 Icon(
                     imageVector = if (item.isFavorite) Icons.Filled.Star else Icons.Outlined.StarBorder,
-                    contentDescription = if (item.isFavorite) "즐겨찾기 해제" else "즐겨찾기",
+                    contentDescription = if (item.isFavorite) strings.actionRemoveFavorite else strings.actionAddFavorite,
                     tint = if (item.isFavorite) {
                         MaterialTheme.colorScheme.primary
                     } else {

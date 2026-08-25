@@ -57,6 +57,11 @@ import com.comics8.monitor.ui.history.HistoryPane
 import com.comics8.monitor.ui.reader.ReaderPane
 import com.comics8.monitor.ui.series.SeriesPane
 
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+import com.comics8.core.i18n.I18n
+import com.comics8.monitor.ui.theme.LocalStrings
+
 private fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.findActivity()
@@ -67,6 +72,20 @@ private fun Context.findActivity(): Activity? = when (this) {
 @Composable
 fun ComicsAppUi(viewModel: ListingViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val strings = remember(state.appLanguage) { I18n.strings(state.appLanguage) }
+
+    CompositionLocalProvider(LocalStrings provides strings) {
+        ComicsAppUiContent(state = state, viewModel = viewModel, strings = strings)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ComicsAppUiContent(
+    state: ListingUiState,
+    viewModel: ListingViewModel,
+    strings: com.comics8.core.i18n.AppStrings,
+) {
     val isReader = state.screen == Screen.Reader
     val context = LocalContext.current
     val config = LocalConfiguration.current
@@ -174,8 +193,8 @@ fun ComicsAppUi(viewModel: ListingViewModel) {
                                     onRetry = { viewModel.refresh(force = true) },
                                 )
                                 state.items.isEmpty() -> ErrorPane(
-                                    message = "\"${state.searchQuery}\" 검색 결과가 없습니다.",
-                                    actionLabel = "목록으로",
+                                    message = strings.searchResultEmpty(state.searchQuery ?: ""),
+                                    actionLabel = strings.navBackToList,
                                     onRetry = { state.tab?.let(viewModel::selectTab) },
                                 )
                                 else -> ListingGrid(
@@ -351,6 +370,7 @@ private fun BrowseTabContent(
         return
     }
     val isLocal = state.activeSourceId == WorkId.LOCAL_SOURCE
+    val strings = LocalStrings.current
     when {
         state.loading && state.items.isEmpty() -> {
             Column(Modifier.fillMaxSize()) {
@@ -373,8 +393,8 @@ private fun BrowseTabContent(
             onRetry = { viewModel.refresh(force = true) },
         )
         pageCatalog is BrowseTab.Favorite && state.items.isEmpty() -> ErrorPane(
-            message = "즐겨찾기한 작품이 없습니다.",
-            actionLabel = "최신으로",
+            message = strings.emptyFavorites,
+            actionLabel = strings.navToLatest,
             onRetry = {
                 val dest = state.browseTabs.firstOrNull { it is BrowseTab.Remote } ?: state.tab
                 dest?.let(viewModel::selectTab)

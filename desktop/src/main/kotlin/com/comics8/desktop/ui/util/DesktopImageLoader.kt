@@ -36,6 +36,7 @@ import com.comics8.core.network.ImageFallbacks
 import com.comics8.core.network.ImageReferer
 import com.comics8.core.source.LocalImageUri
 import com.comics8.core.source.SourceRegistry
+import com.comics8.desktop.ui.theme.LocalStrings
 import com.comics8.core.source.local.PreviewImageResolver
 import com.comics8.core.source.local.ThumbEncoder
 import com.comics8.core.source.local.CoverThumbCache
@@ -544,6 +545,7 @@ fun DesktopAsyncImage(
                 )
             }
         } else if (!loading) {
+            val strings = LocalStrings.current
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -557,13 +559,13 @@ fun DesktopAsyncImage(
                 ) {
                     androidx.compose.material3.Icon(
                         imageVector = androidx.compose.material.icons.Icons.Default.BrokenImage,
-                        contentDescription = "이미지 로딩 실패",
+                        contentDescription = strings.errorImageLoadFailed,
                         tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
                         modifier = Modifier.size(36.dp),
                     )
                     androidx.compose.foundation.layout.Spacer(Modifier.height(6.dp))
                     androidx.compose.material3.Text(
-                        text = "이미지를 불러올 수 없습니다",
+                        text = strings.errorCannotLoadImage,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
                     )

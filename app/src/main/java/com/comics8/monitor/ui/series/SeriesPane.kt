@@ -41,6 +41,7 @@ import coil.compose.AsyncImage
 import coil.request.CachePolicy
 import coil.request.ImageRequest
 import com.comics8.core.model.EpisodeItem
+import com.comics8.monitor.ui.theme.LocalStrings
 import com.comics8.monitor.ui.ListingUiState
 import com.comics8.monitor.ui.ListingViewModel
 import com.comics8.monitor.ui.components.ErrorPane
@@ -61,11 +62,12 @@ fun SeriesPane(
     viewModel: ListingViewModel,
     modifier: Modifier = Modifier,
 ) {
+    val strings = LocalStrings.current
     val series = state.series
     if (series == null) {
         ErrorPane(
-            message = "작품 정보가 없습니다.",
-            actionLabel = "목록으로",
+            message = strings.errorNoSeriesInfo,
+            actionLabel = strings.navBackToList,
             onRetry = viewModel::closeSeries,
             modifier = modifier,
         )
@@ -144,6 +146,7 @@ fun EpisodeRow(
     refreshEpoch: Long = 0L,
     onPickArtist: (() -> Unit)? = null,
 ) {
+    val strings = LocalStrings.current
     androidx.compose.foundation.layout.Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
@@ -233,7 +236,7 @@ fun EpisodeRow(
                 modifier = Modifier.padding(end = 6.dp),
             ) {
                 Text(
-                    text = "읽음",
+                    text = strings.badgeRead,
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -260,7 +263,7 @@ fun EpisodeRow(
             ) {
                 Icon(
                     imageVector = Icons.Filled.MoreVert,
-                    contentDescription = "다른 작가",
+                    contentDescription = strings.actionOtherArtists,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(18.dp),
                 )
@@ -279,13 +282,13 @@ fun EpisodeRow(
                     )
                     isDownloaded -> Icon(
                         imageVector = Icons.Filled.DownloadDone,
-                        contentDescription = "다운로드됨",
+                        contentDescription = strings.labelDownloaded,
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(20.dp),
                     )
                     else -> Icon(
                         imageVector = Icons.Filled.Download,
-                        contentDescription = "이 회차 다운로드",
+                        contentDescription = strings.actionDownloadThisEpisode,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(20.dp),
                     )

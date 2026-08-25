@@ -40,8 +40,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.comics8.core.i18n.AppStrings
 import com.comics8.core.model.DownloadedToonSummary
 import com.comics8.core.model.ToonItem
+import com.comics8.monitor.ui.theme.LocalStrings
 import com.comics8.monitor.ui.ListingUiState
 import com.comics8.monitor.ui.ListingViewModel
 import com.comics8.monitor.ui.components.EmptySourcePane
@@ -59,6 +61,7 @@ fun DownloadsPane(
     onAddSource: (() -> Unit)? = null,
     onImportJs: (() -> Unit)? = null,
 ) {
+    val strings = LocalStrings.current
     Column(modifier = modifier.fillMaxSize()) {
         // Download in progress banner
         if (state.downloadProgress.isRunning) {
@@ -81,8 +84,8 @@ fun DownloadsPane(
             }
             state.downloadSummaries.isEmpty() -> {
                 ErrorPane(
-                    message = "이 사이트에 저장된 만화가 없습니다.",
-                    actionLabel = "목록으로",
+                    message = strings.emptyDownloads,
+                    actionLabel = strings.navBackToList,
                     onRetry = { viewModel.closeDownloads() },
                     modifier = Modifier.weight(1f),
                 )
@@ -121,6 +124,7 @@ private fun DownloadProgressBanner(
     progress: com.comics8.monitor.data.DownloadProgressState,
     onCancel: () -> Unit,
 ) {
+    val strings = LocalStrings.current
     Surface(
         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
         shape = RoundedCornerShape(12.dp),
@@ -146,9 +150,9 @@ private fun DownloadProgressBanner(
                 Spacer(Modifier.width(8.dp))
                 Text(
                     text = if (progress.activeToonTitle.isNotBlank()) {
-                        "${progress.activeToonTitle} 다운로드 중..."
+                        strings.downloadInProgressNamed(progress.activeToonTitle)
                     } else {
-                        "다운로드 진행 중..."
+                        strings.downloadInProgress
                     },
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
@@ -162,7 +166,7 @@ private fun DownloadProgressBanner(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
-                        contentDescription = "취소",
+                        contentDescription = strings.actionCancel,
                         modifier = Modifier.size(16.dp),
                     )
                 }
@@ -196,9 +200,9 @@ private fun DownloadProgressBanner(
             ) {
                 Text(
                     text = if (progress.totalImages > 0) {
-                        "${progress.currentImage}/${progress.totalImages}장 (남은 회차: ${progress.queueSize})"
+                        strings.downloadProgressImages(progress.currentImage, progress.totalImages, progress.queueSize)
                     } else {
-                        "준비 중... (남은 회차: ${progress.queueSize})"
+                        strings.downloadProgressPreparing(progress.queueSize)
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -215,6 +219,7 @@ fun DownloadedItemCard(
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val strings = LocalStrings.current
     Surface(
         shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
@@ -252,7 +257,7 @@ fun DownloadedItemCard(
                         .padding(horizontal = 6.dp, vertical = 2.dp),
                 ) {
                     Text(
-                        text = "저장됨 ${item.episodeCount}화",
+                        text = strings.badgeDownloadedEpisodeCount(item.episodeCount),
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -267,7 +272,7 @@ fun DownloadedItemCard(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
-                    text = "${formatFileSize(item.totalBytes)} · ${formatRelativeTime(item.latestDownloadedAt)}",
+                    text = "${formatFileSize(item.totalBytes)} · ${formatRelativeTime(item.latestDownloadedAt, strings)}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.outline,
                     modifier = Modifier.weight(1f),
@@ -290,7 +295,7 @@ fun DownloadedItemCard(
                         )
                         Spacer(Modifier.width(3.dp))
                         Text(
-                            text = "회차 보기",
+                            text = strings.actionViewEpisodes,
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.SemiBold,
                         )
@@ -302,7 +307,7 @@ fun DownloadedItemCard(
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Delete,
-                            contentDescription = "삭제",
+                            contentDescription = strings.actionDelete,
                             tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
                             modifier = Modifier.size(18.dp),
                         )
@@ -326,7 +331,7 @@ fun formatFileSize(bytes: Long): String {
     }
 }
 
-private fun formatRelativeTime(timestamp: Long): String {
+private fun formatRelativeTime(timestamp: Long, strings: AppStrings): String {
     if (timestamp <= 0) return ""
     val diff = System.currentTimeMillis() - timestamp
     val seconds = diff / 1000
@@ -335,10 +340,10 @@ private fun formatRelativeTime(timestamp: Long): String {
     val days = hours / 24
 
     return when {
-        minutes < 1 -> "방금 전"
-        minutes < 60 -> "${minutes}분 전"
-        hours < 24 -> "${hours}시간 전"
-        days < 7 -> "${days}일 전"
+        minutes < 1 -> strings.timeJustNow
+        minutes < 60 -> strings.timeMinutesAgo(minutes)
+        hours < 24 -> strings.timeHoursAgo(hours)
+        days < 7 -> strings.timeDaysAgo(days)
         else -> SimpleDateFormat("yyyy.MM.dd", Locale.getDefault()).format(Date(timestamp))
     }
 }

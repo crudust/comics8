@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.comics8.core.model.AppUpdateState
+import com.comics8.monitor.ui.theme.LocalStrings
 
 @Composable
 fun UpdateDialog(
@@ -28,6 +29,7 @@ fun UpdateDialog(
     onDismiss: () -> Unit,
     onConfirmUpdate: () -> Unit,
 ) {
+    val strings = LocalStrings.current
     AlertDialog(
         onDismissRequest = {
             if (!updateState.isDownloading) onDismiss()
@@ -41,19 +43,19 @@ fun UpdateDialog(
         },
         title = {
             Text(
-                text = "새 버전 업데이트 안내",
+                text = strings.titleUpdateDialog,
                 fontWeight = FontWeight.Bold,
             )
         },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = "새로운 Comics8 버전(${updateState.latestVersion})이 출시되었습니다.",
+                    text = strings.descNewVersionAvailable(updateState.latestVersion),
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "현재 버전: v${updateState.currentVersion}  →  최신 버전: v${updateState.latestVersion}",
+                    text = strings.labelVersionComparison(updateState.currentVersion, updateState.latestVersion),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -61,7 +63,7 @@ fun UpdateDialog(
                 if (updateState.releaseNotes.isNotBlank()) {
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        text = "업데이트 내용:",
+                        text = strings.labelReleaseNotes,
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,
                     )
@@ -82,7 +84,7 @@ fun UpdateDialog(
                 if (updateState.isDownloading) {
                     Spacer(Modifier.height(16.dp))
                     Text(
-                        text = "다운로드 중... ${(updateState.downloadProgress * 100).toInt()}%",
+                        text = strings.labelDownloadAndApplying((updateState.downloadProgress * 100).toInt()),
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary,
@@ -110,13 +112,13 @@ fun UpdateDialog(
                 onClick = onConfirmUpdate,
                 enabled = !updateState.isDownloading,
             ) {
-                Text(if (updateState.isDownloading) "다운로드 중..." else "지금 업데이트")
+                Text(if (updateState.isDownloading) strings.statusUpdatingInProgress else strings.actionUpdateNow)
             }
         },
         dismissButton = {
             if (!updateState.isDownloading) {
                 OutlinedButton(onClick = onDismiss) {
-                    Text("나중에")
+                    Text(strings.actionUpdateLater)
                 }
             }
         },

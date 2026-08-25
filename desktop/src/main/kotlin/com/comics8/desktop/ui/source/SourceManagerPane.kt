@@ -78,6 +78,7 @@ import com.comics8.core.source.resolveSourceType
 import com.comics8.desktop.data.DesktopSourcePrefs
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
+import com.comics8.desktop.ui.theme.LocalStrings
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -86,6 +87,7 @@ fun SourceManagerPane(
     viewModel: DesktopViewModel,
     modifier: Modifier = Modifier,
 ) {
+    val strings = LocalStrings.current
     var selectedSourceForDetail by remember { mutableStateOf<ComicSource?>(null) }
     var showAddOptions by remember { mutableStateOf(false) }
 
@@ -114,7 +116,7 @@ fun SourceManagerPane(
             TopAppBar(
                 title = {
                     Text(
-                        text = "소스 관리",
+                        text = strings.navSourceManager,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onBackground,
@@ -124,7 +126,7 @@ fun SourceManagerPane(
                     IconButton(onClick = viewModel::closeSourceManager) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "뒤로가기",
+                            contentDescription = strings.actionGoBack,
                             tint = MaterialTheme.colorScheme.onBackground,
                         )
                     }
@@ -147,7 +149,7 @@ fun SourceManagerPane(
                         )
                         Spacer(Modifier.width(4.dp))
                         Text(
-                            text = "소스 추가",
+                            text = strings.actionAddSource,
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,
                         )
@@ -175,14 +177,14 @@ fun SourceManagerPane(
             // 분류 1: 로컬 / SMB / WebDAV
             // ==========================================
             item {
-                SectionHeader(title = "로컬 / SMB / WebDAV", icon = Icons.Default.Storage)
+                SectionHeader(title = strings.sectionStorageSources, icon = Icons.Default.Storage)
             }
 
             // 최상단 고정 로컬 저장소
             if (localSource != null) {
                 item(key = localSource.id) {
                     val currentMode = DesktopSourcePrefs.progressDisplayMode(localSource.id)
-                    val subtitle = if (state.libraryRoots.isEmpty()) "등록된 폴더 없음" else "${state.libraryRoots.size}개 폴더 연결됨"
+                    val subtitle = if (state.libraryRoots.isEmpty()) strings.noRegisteredFolders else strings.connectedFolderCount(state.libraryRoots.size)
 
                     SourceItemCard(
                         icon = Icons.Default.Folder,
@@ -208,11 +210,11 @@ fun SourceManagerPane(
                         val subtitle = when (sType) {
                             SourceType.SMB -> {
                                 val netSource = source as? NetworkLibrarySource
-                                if (netSource != null) "SMB: ${netSource.config.host}/${netSource.config.share}" else "SMB 드라이브"
+                                if (netSource != null) strings.subtitleSmbPath(netSource.config.host, netSource.config.share) else strings.subtitleSmbDefault
                             }
                             SourceType.WEBDAV -> {
                                 val netSource = source as? NetworkLibrarySource
-                                if (netSource != null) "WebDAV: ${netSource.config.url.ifBlank { netSource.config.host }}" else "WebDAV 드라이브"
+                                if (netSource != null) strings.subtitleWebDavUrl(netSource.config.url.ifBlank { netSource.config.host }) else strings.subtitleWebDavDefault
                             }
                             else -> sType.label
                         }
@@ -235,13 +237,13 @@ fun SourceManagerPane(
             // ==========================================
             item {
                 Spacer(Modifier.height(4.dp))
-                SectionHeader(title = "웹 / JS 스크립트", icon = Icons.Default.Public)
+                SectionHeader(title = strings.sectionOnlineSources, icon = Icons.Default.Public)
             }
             if (onlineSources.isEmpty()) {
                 item {
                     EmptySectionCard(
-                        text = "등록된 온라인/확장 소스가 없습니다.",
-                        actionText = "JS 확장 스크립트 추가",
+                        text = strings.emptyOnlineSources,
+                        actionText = strings.actionAddJsSource,
                         onAction = {
                             showAddOptions = false
                             viewModel.openAddSourceSheet()
@@ -433,6 +435,7 @@ private fun SourceItemCard(
     dragHandleModifier: Modifier? = null,
     isDragging: Boolean = false,
 ) {
+    val strings = LocalStrings.current
     Surface(
         shape = RoundedCornerShape(12.dp),
         color = if (isDragging) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f) else MaterialTheme.colorScheme.surfaceVariant,
@@ -474,7 +477,7 @@ private fun SourceItemCard(
                 }
                 Icon(
                     imageVector = Icons.Default.DragHandle,
-                    contentDescription = if (dragHandleModifier == null) "고정됨" else "순서 변경",
+                    contentDescription = if (dragHandleModifier == null) strings.labelFixed else strings.actionReorder,
                     tint = handleTint,
                     modifier = Modifier.size(20.dp),
                 )
@@ -548,7 +551,7 @@ private fun SourceItemCard(
 
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
-                contentDescription = "설정 이동",
+                contentDescription = strings.actionGoToSettings,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                 modifier = Modifier.size(16.dp),
             )
@@ -605,6 +608,7 @@ private fun SourceAddOptionsDialog(
     onAddWebDav: () -> Unit,
     onAddJs: () -> Unit,
 ) {
+    val strings = LocalStrings.current
     Dialog(onDismissRequest = onDismiss) {
         Surface(
             shape = RoundedCornerShape(16.dp),
@@ -619,14 +623,14 @@ private fun SourceAddOptionsDialog(
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
                 Text(
-                    text = "새 소스 추가",
+                    text = strings.titleAddSource,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "추가할 저장소 또는 확장 소스 유형을 선택하세요.",
+                    text = strings.promptSelectSourceType,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -634,7 +638,7 @@ private fun SourceAddOptionsDialog(
 
                 // 카테고리 1: 파일 저장소
                 Text(
-                    text = "파일 저장소 (스토리지)",
+                    text = strings.categoryFileStorage,
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary,
@@ -642,20 +646,20 @@ private fun SourceAddOptionsDialog(
                 )
                 AddOptionItem(
                     icon = Icons.Default.Folder,
-                    title = "로컬 폴더",
-                    description = "컴퓨터의 만화 및 ZIP 폴더 추가",
+                    title = strings.sourceLocalFolder,
+                    description = strings.sourceLocalFolderDesc,
                     onClick = onAddLocalFolder,
                 )
                 AddOptionItem(
                     icon = Icons.Default.Dns,
-                    title = "SMB (네트워크 드라이브)",
-                    description = "로컬 네트워크의 Windows 공유 / NAS 폴더 연결",
+                    title = strings.sourceSmb,
+                    description = strings.sourceSmbDesc,
                     onClick = onAddSmb,
                 )
                 AddOptionItem(
                     icon = Icons.Default.Cloud,
-                    title = "WebDAV (클라우드 드라이브)",
-                    description = "Synology, Nextcloud 등 WebDAV 스토리지 연결",
+                    title = strings.sourceWebDav,
+                    description = strings.sourceWebDavDesc,
                     onClick = onAddWebDav,
                 )
 
@@ -665,7 +669,7 @@ private fun SourceAddOptionsDialog(
 
                 // 카테고리 2: 온라인 & 확장 스크립트
                 Text(
-                    text = "온라인 & 확장 스크립트",
+                    text = strings.categoryOnlineExtensions,
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary,
@@ -673,8 +677,8 @@ private fun SourceAddOptionsDialog(
                 )
                 AddOptionItem(
                     icon = Icons.Default.Description,
-                    title = "JS 확장 스크립트 (.js)",
-                    description = "외부 사이트 파싱 확장 소스 파일 가져오기",
+                    title = strings.sourceJsExtension,
+                    description = strings.sourceJsExtensionDesc,
                     onClick = onAddJs,
                 )
 
@@ -684,7 +688,7 @@ private fun SourceAddOptionsDialog(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     TextButton(onClick = onDismiss) {
-                        Text("닫기", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(strings.actionClose, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }

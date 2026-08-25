@@ -25,17 +25,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.comics8.monitor.ui.theme.LocalStrings
 import com.comics8.monitor.ui.ListingUiState
 import com.comics8.monitor.ui.ListingViewModel
-
-const val LOOSE_IMAGE_HINT =
-    "ZIP/CBZ 파일이나 이미지가 들어 있는 하위 폴더를 넣어 주세요. 루트의 낱개 이미지 파일은 스캔하지 않습니다."
 
 @Composable
 fun EmptyLibraryPane(
     onAddFolder: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val strings = LocalStrings.current
     Column(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -44,17 +43,17 @@ fun EmptyLibraryPane(
             .padding(24.dp),
     ) {
         Text(
-            text = "만화 폴더를 추가하세요",
+            text = strings.promptAddMangaFolder,
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(16.dp))
         Button(onClick = onAddFolder) {
-            Text("폴더 추가")
+            Text(strings.actionAddFolder)
         }
         Spacer(Modifier.height(12.dp))
         Text(
-            text = LOOSE_IMAGE_HINT,
+            text = strings.hintLibraryScan,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -64,13 +63,14 @@ fun EmptyLibraryPane(
 
 @Composable
 fun EmptyLibraryScanHint(modifier: Modifier = Modifier) {
+    val strings = LocalStrings.current
     Column(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier.padding(24.dp),
     ) {
         Text(
-            text = LOOSE_IMAGE_HINT,
+            text = strings.hintLibraryScan,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -84,6 +84,7 @@ fun LibraryRootsBar(
     viewModel: ListingViewModel,
     onAddFolder: () -> Unit,
 ) {
+    val strings = LocalStrings.current
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -98,7 +99,7 @@ fun LibraryRootsBar(
         ) {
             if (state.libraryRoots.isEmpty()) {
                 Text(
-                    text = "폴더 없음",
+                    text = strings.noRegisteredFolders,
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -118,7 +119,7 @@ fun LibraryRootsBar(
                         ) {
                             Icon(
                                 Icons.Filled.Close,
-                                contentDescription = "폴더 제거",
+                                contentDescription = strings.actionRemove,
                                 modifier = Modifier.size(14.dp),
                             )
                         }
@@ -129,7 +130,7 @@ fun LibraryRootsBar(
         TextButton(onClick = onAddFolder) {
             Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(4.dp))
-            Text("폴더 추가")
+            Text(strings.actionAddFolder)
         }
     }
 }

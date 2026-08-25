@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import com.comics8.core.source.ComicSource
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
+import com.comics8.desktop.ui.theme.LocalStrings
 import java.awt.FileDialog
 import java.awt.Frame
 import java.io.File
@@ -54,13 +55,13 @@ fun Badge(
     }
 }
 
-const val EMPTY_SOURCE_MESSAGE = "폴더를 추가하세요"
-const val IMPORT_JS_LABEL = "JS 파일 가져오기"
-const val ADD_SOURCE_LABEL = "추가"
-const val REMOVE_SOURCE_LABEL = "삭제"
+const val EMPTY_SOURCE_MESSAGE = "Add Folder"
+const val IMPORT_JS_LABEL = "Import JS File"
+const val ADD_SOURCE_LABEL = "Add"
+const val REMOVE_SOURCE_LABEL = "Remove"
 
-fun pickJsFile(): File? {
-    val dialog = FileDialog(null as Frame?, IMPORT_JS_LABEL, FileDialog.LOAD)
+fun pickJsFile(dialogTitle: String = IMPORT_JS_LABEL): File? {
+    val dialog = FileDialog(null as Frame?, dialogTitle, FileDialog.LOAD)
     dialog.setFilenameFilter { _, name -> name.lowercase().endsWith(".js") }
     dialog.file = "*.js"
     dialog.isVisible = true
@@ -76,6 +77,7 @@ fun EmptySourcePane(
     onAddSource: (() -> Unit)? = null,
     onImportJs: (() -> Unit)? = null,
 ) {
+    val strings = LocalStrings.current
     Column(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -84,20 +86,20 @@ fun EmptySourcePane(
             .padding(24.dp),
     ) {
         Text(
-            text = EMPTY_SOURCE_MESSAGE,
+            text = strings.promptAddFolder,
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         if (onAddSource != null) {
             Spacer(Modifier.height(16.dp))
             Button(onClick = onAddSource) {
-                Text("소스 추가")
+                Text(strings.actionAddSource)
             }
         }
         if (onImportJs != null) {
             Spacer(Modifier.height(12.dp))
             Button(onClick = onImportJs) {
-                Text(IMPORT_JS_LABEL)
+                Text(strings.actionImportJsFile)
             }
         }
     }
@@ -109,13 +111,14 @@ fun SourceRemoveDialog(
     onRemove: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val strings = LocalStrings.current
     val removableSources = sources.filterNot { it.id == WorkId.LOCAL_SOURCE }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("소스 삭제") },
+        title = { Text(strings.titleDeleteSource) },
         text = {
             if (removableSources.isEmpty()) {
-                Text(EMPTY_SOURCE_MESSAGE)
+                Text(strings.promptAddFolder)
             } else {
                 LazyColumn {
                     items(removableSources, key = { it.id }) { source ->
@@ -134,7 +137,7 @@ fun SourceRemoveDialog(
         confirmButton = {},
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("취소")
+                Text(strings.actionCancel)
             }
         },
     )
@@ -145,13 +148,14 @@ fun SourceErrorDialog(
     message: String,
     onDismiss: () -> Unit,
 ) {
+    val strings = LocalStrings.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("소스를 가져올 수 없습니다") },
+        title = { Text(strings.titleCannotImportSource) },
         text = { Text(message) },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("확인")
+                Text(strings.actionConfirm)
             }
         },
     )
@@ -170,10 +174,11 @@ fun LoadingPane(modifier: Modifier = Modifier) {
 @Composable
 fun ErrorPane(
     message: String,
-    actionLabel: String = "다시 시도",
+    actionLabel: String? = null,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val strings = LocalStrings.current
     Column(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -188,7 +193,7 @@ fun ErrorPane(
         )
         Spacer(Modifier.height(16.dp))
         Button(onClick = onRetry) {
-            Text(actionLabel)
+            Text(actionLabel ?: strings.actionRetry)
         }
     }
 }

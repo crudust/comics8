@@ -39,6 +39,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
+import com.comics8.core.i18n.AppLanguage
+import java.util.prefs.Preferences
+
 class DesktopViewModel(
     val repository: DesktopToonRepository,
     private val jsPackStore: JsPackStore,
@@ -46,8 +49,31 @@ class DesktopViewModel(
     private val pickLibraryFolder: () -> File? = { DesktopFolderPicker.pickDirectory() },
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val prefs: Preferences = Preferences.userRoot().node("com.comics8.desktop")
 
-    private val _state = MutableStateFlow(DesktopUiState())
+    val appLanguage: AppLanguage
+        get() = try {
+            val code = prefs.get("app_language", AppLanguage.AUTO.code)
+            AppLanguage.fromCode(code)
+        } catch (_: Exception) {
+            AppLanguage.AUTO
+        }
+
+    fun setAppLanguage(language: AppLanguage) {
+        prefs.put("app_language", language.code)
+        _state.update { it.copy(appLanguage = language) }
+    }
+
+    private val _state = MutableStateFlow(
+        DesktopUiState(
+            appLanguage = try {
+                val code = prefs.get("app_language", AppLanguage.AUTO.code)
+                AppLanguage.fromCode(code)
+            } catch (_: Exception) {
+                AppLanguage.AUTO
+            },
+        ),
+    )
     val state: StateFlow<DesktopUiState> = _state.asStateFlow()
 
     private var loadJob: Job? = null

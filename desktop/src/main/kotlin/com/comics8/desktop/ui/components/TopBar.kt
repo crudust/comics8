@@ -76,6 +76,7 @@ import com.comics8.core.model.ViewMode
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
 import com.comics8.desktop.ui.Screen
+import com.comics8.desktop.ui.theme.LocalStrings
 
 @Composable
 fun TopBar(
@@ -84,6 +85,7 @@ fun TopBar(
     modifier: Modifier = Modifier,
     inOverlay: Boolean = false,
 ) {
+    val strings = LocalStrings.current
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -99,19 +101,19 @@ fun TopBar(
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (state.screen == Screen.Reader) {
                 IconButton(onClick = viewModel::closeReader) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "뒤로")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = strings.actionBack)
                 }
             } else if (state.screen == Screen.Series) {
                 IconButton(onClick = viewModel::closeSeries) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "뒤로")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = strings.actionBack)
                 }
             } else if (state.screen == Screen.History) {
                 IconButton(onClick = viewModel::closeHistory) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "뒤로")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = strings.actionBack)
                 }
             } else if (state.screen == Screen.Downloads) {
                 IconButton(onClick = viewModel::closeDownloads) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "뒤로")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = strings.actionBack)
                 }
             }
             if (state.screen == Screen.Browse) {
@@ -128,17 +130,17 @@ fun TopBar(
             } else {
                 Text(
                     text = when (state.screen) {
-                        Screen.Reader -> state.currentEpisode?.title.orEmpty().ifBlank { "만화 보기" }
+                        Screen.Reader -> state.currentEpisode?.title.orEmpty().ifBlank { strings.navReader }
                         Screen.Series -> state.series?.title.orEmpty()
                         Screen.Browse -> state.sourceRegistry.chipLabel(state.activeSourceId.orEmpty())
-                            .ifBlank { EMPTY_SOURCE_MESSAGE }
-                        Screen.History -> "히스토리"
+                            .ifBlank { strings.promptAddFolder }
+                        Screen.History -> strings.navHistory
                         Screen.Downloads -> {
                             val label = state.sourceRegistry.chipLabel(state.activeSourceId.orEmpty())
-                            if (label.isBlank()) "저장소" else "$label 저장소"
+                            if (label.isBlank()) strings.navStorage else strings.navStorageNamed(label)
                         }
-                        Screen.Settings -> "설정"
-                        Screen.SourceManager -> "소스 관리"
+                        Screen.Settings -> strings.navSettings
+                        Screen.SourceManager -> strings.navSourceManager
                     },
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
@@ -151,7 +153,7 @@ fun TopBar(
                 IconButton(onClick = viewModel::openUpdateDialog) {
                     Icon(
                         imageVector = Icons.Filled.SystemUpdate,
-                        contentDescription = "업데이트 알림",
+                        contentDescription = strings.labelUpdateNotification,
                         tint = MaterialTheme.colorScheme.primary,
                     )
                 }
@@ -161,14 +163,14 @@ fun TopBar(
                     IconButton(onClick = viewModel::openDownloads) {
                         Icon(
                             imageVector = Icons.Default.Download,
-                            contentDescription = "다운로드 보관함",
+                            contentDescription = strings.navDownloads,
                         )
                     }
                 }
                 IconButton(onClick = viewModel::openHistory) {
                     Icon(
                         imageVector = Icons.Outlined.History,
-                        contentDescription = "히스토리",
+                        contentDescription = strings.navHistory,
                     )
                 }
                 IconButton(
@@ -177,7 +179,7 @@ fun TopBar(
                 ) {
                     Icon(
                         imageVector = if (state.searchExpanded) Icons.Default.Close else Icons.Default.Search,
-                        contentDescription = if (state.searchExpanded) "검색 닫기" else "검색",
+                        contentDescription = if (state.searchExpanded) strings.actionSearchClose else strings.actionSearch,
                     )
                 }
             }
@@ -186,7 +188,7 @@ fun TopBar(
                     IconButton(onClick = viewModel::clearAllHistory) {
                         Icon(
                             imageVector = Icons.Outlined.Delete,
-                            contentDescription = "기록 전체 삭제",
+                            contentDescription = strings.actionClearAllHistory,
                         )
                     }
                 }
@@ -206,7 +208,7 @@ fun TopBar(
                         )
                         Spacer(Modifier.width(4.dp))
                         Text(
-                            text = "이어보기 (${state.progressLabel(hist)})",
+                            text = strings.actionResumeSeriesWithProgress(state.progressLabel(hist)),
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,
                         )
@@ -224,7 +226,7 @@ fun TopBar(
                         )
                         Spacer(Modifier.width(4.dp))
                         Text(
-                            text = "처음부터",
+                            text = strings.actionStartFromBeginning,
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,
                         )
@@ -234,7 +236,7 @@ fun TopBar(
                     IconButton(onClick = viewModel::openDownloadOptions) {
                         Icon(
                             imageVector = Icons.Default.Download,
-                            contentDescription = "오프라인 다운로드",
+                            contentDescription = strings.titleOfflineDownload,
                             tint = MaterialTheme.colorScheme.primary,
                         )
                     }
@@ -242,7 +244,7 @@ fun TopBar(
                 IconButton(onClick = viewModel::toggleFavorite) {
                     Icon(
                         imageVector = if (state.seriesFavorited) Icons.Filled.Star else Icons.Outlined.StarBorder,
-                        contentDescription = if (state.seriesFavorited) "즐겨찾기 해제" else "즐겨찾기",
+                        contentDescription = if (state.seriesFavorited) strings.actionRemoveFavorite else strings.actionAddFavorite,
                         tint = if (state.seriesFavorited) {
                             MaterialTheme.colorScheme.primary
                         } else {
@@ -255,7 +257,7 @@ fun TopBar(
                 onClick = viewModel::refresh,
                 enabled = state.activeSourceId != null,
             ) {
-                Icon(Icons.Default.Refresh, contentDescription = "새로고침")
+                Icon(Icons.Default.Refresh, contentDescription = strings.actionRefresh)
             }
         }
 
@@ -281,19 +283,19 @@ fun TopBar(
                         selected = state.viewMode == ViewMode.SCROLL,
                         onClick = { viewModel.setViewMode(ViewMode.SCROLL) },
                         icon = Icons.Default.SwapVert,
-                        label = "스크롤",
+                        label = strings.viewModeScrollShort,
                     )
                     ViewModeChip(
                         selected = state.viewMode == ViewMode.PAGE,
                         onClick = { viewModel.setViewMode(ViewMode.PAGE) },
                         icon = Icons.Default.Description,
-                        label = "단면",
+                        label = strings.viewModeSingleShort,
                     )
                     ViewModeChip(
                         selected = state.viewMode == ViewMode.DUAL,
                         onClick = { viewModel.setViewMode(ViewMode.DUAL) },
                         icon = Icons.AutoMirrored.Filled.MenuBook,
-                        label = "양면",
+                        label = strings.viewModeDualShort,
                     )
                 }
 
@@ -310,12 +312,12 @@ fun TopBar(
                         DirectionChip(
                             selected = state.readDirection == ReadDirection.RIGHT_TO_LEFT,
                             onClick = { viewModel.setReadDirection(ReadDirection.RIGHT_TO_LEFT) },
-                            label = "우→좌",
+                            label = strings.readDirectionRTLShort,
                         )
                         DirectionChip(
                             selected = state.readDirection == ReadDirection.LEFT_TO_RIGHT,
                             onClick = { viewModel.setReadDirection(ReadDirection.LEFT_TO_RIGHT) },
-                            label = "좌→우",
+                            label = strings.readDirectionLTRShort,
                         )
                     }
                 }
@@ -369,7 +371,7 @@ fun TopBar(
                                     viewModel.updateSearchInput("")
                                     if (state.isSearch) state.tab?.let(viewModel::selectTab)
                                 }) {
-                                    Icon(Icons.Default.Close, contentDescription = "검색어 지우기")
+                                    Icon(Icons.Default.Close, contentDescription = strings.actionSearchClear)
                                 }
                             }
                         },
@@ -398,7 +400,7 @@ fun TopBar(
                 }
                 Spacer(Modifier.width(8.dp))
                 IconButton(onClick = { viewModel.search(state.searchInput) }) {
-                    Icon(Icons.Default.Search, contentDescription = "검색 실행")
+                    Icon(Icons.Default.Search, contentDescription = strings.actionSearchExecute)
                 }
             }
         }
@@ -525,11 +527,12 @@ private fun SourceTitleDropdown(
     titleStyle: TextStyle,
     modifier: Modifier = Modifier,
 ) {
+    val strings = LocalStrings.current
     var expanded by remember { mutableStateOf(false) }
     val orderedSources = sources
     val activeSource = orderedSources.firstOrNull { it.id == activeSourceId }
     val label = activeSource?.displayName
-        ?: registry.chipLabel(activeSourceId.orEmpty()).ifBlank { "소스 선택" }
+        ?: registry.chipLabel(activeSourceId.orEmpty()).ifBlank { strings.promptSelectSource }
     val activeType = activeSource?.resolveSourceType() ?: com.comics8.core.source.SourceType.LOCAL
     val activeIcon = when (activeType) {
         com.comics8.core.source.SourceType.LOCAL -> Icons.Default.Folder
@@ -564,7 +567,7 @@ private fun SourceTitleDropdown(
             )
             Icon(
                 imageVector = Icons.Filled.ArrowDropDown,
-                contentDescription = "소스 선택",
+                contentDescription = strings.promptSelectSource,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -616,7 +619,7 @@ private fun SourceTitleDropdown(
                                 {
                                     Icon(
                                         imageVector = Icons.Default.Check,
-                                        contentDescription = "선택됨",
+                                        contentDescription = strings.labelSelected,
                                         tint = MaterialTheme.colorScheme.primary,
                                         modifier = Modifier.size(18.dp),
                                     )
@@ -634,7 +637,7 @@ private fun SourceTitleDropdown(
                     )
                 }
                 DropdownMenuItem(
-                    text = { Text("소스 관리") },
+                    text = { Text(strings.navSourceManager) },
                     leadingIcon = {
                         Icon(
                             imageVector = Icons.Default.Storage,
@@ -649,7 +652,7 @@ private fun SourceTitleDropdown(
                     },
                 )
                 DropdownMenuItem(
-                    text = { Text("설정") },
+                    text = { Text(strings.navSettings) },
                     leadingIcon = {
                         Icon(
                             imageVector = Icons.Default.Settings,

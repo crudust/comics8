@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.ToonItem
+import com.comics8.desktop.ui.theme.LocalStrings
 
 private enum class DownloadMode {
     ALL,
@@ -50,12 +51,13 @@ fun DesktopDownloadDialog(
     onDismiss: () -> Unit,
     onConfirm: (List<EpisodeItem>) -> Unit,
 ) {
+    val strings = LocalStrings.current
     var selectedMode by remember { mutableStateOf(DownloadMode.UNREAD) }
     var afterOrderInput by remember { mutableStateOf("1") }
 
     val unreadEpisodes = remember(episodes) { episodes.filter { !it.isRead } }
-    val countLabel = if (catalogLoading) "불러오는 중..." else "${episodes.size}개 회차"
-    val unreadLabel = if (catalogLoading) "불러오는 중..." else "아직 읽지 않은 ${unreadEpisodes.size}개 회차"
+    val countLabel = if (catalogLoading) strings.loadingSimple else strings.downloadTotalEpisodes(episodes.size)
+    val unreadLabel = if (catalogLoading) strings.loadingSimple else strings.downloadUnreadCount(unreadEpisodes.size)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -68,7 +70,7 @@ fun DesktopDownloadDialog(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = "오프라인 다운로드",
+                    text = strings.titleOfflineDownload,
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp,
                 )
@@ -95,7 +97,7 @@ fun DesktopDownloadDialog(
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            text = "전체 회차 목록을 불러오는 중...",
+                            text = strings.loadingAllEpisodes,
                             fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -103,22 +105,22 @@ fun DesktopDownloadDialog(
                 }
 
                 OptionRow(
-                    title = "전체 다운로드",
-                    subtitle = "총 $countLabel",
+                    title = strings.downloadOptionAll,
+                    subtitle = countLabel,
                     selected = selectedMode == DownloadMode.ALL,
                     onClick = { selectedMode = DownloadMode.ALL },
                 )
 
                 OptionRow(
-                    title = "미열람 회차만 다운로드",
+                    title = strings.downloadOptionUnread,
                     subtitle = unreadLabel,
                     selected = selectedMode == DownloadMode.UNREAD,
                     onClick = { selectedMode = DownloadMode.UNREAD },
                 )
 
                 OptionRow(
-                    title = "지정 순번 이후 다운로드",
-                    subtitle = "선택한 번호부터 최신 회차까지",
+                    title = strings.downloadOptionAfterOrder,
+                    subtitle = strings.downloadOptionAfterOrderDesc,
                     selected = selectedMode == DownloadMode.AFTER_ORDER,
                     onClick = { selectedMode = DownloadMode.AFTER_ORDER },
                 )
@@ -134,7 +136,7 @@ fun DesktopDownloadDialog(
                         },
                         label = {
                             Text(
-                                if (catalogLoading) "시작 번호" else "시작 번호 (1 ~ ${episodes.size})",
+                                if (catalogLoading) strings.labelDownloadStartOrder else strings.labelDownloadStartOrderRange(episodes.size),
                             )
                         },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -147,7 +149,7 @@ fun DesktopDownloadDialog(
 
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "※ 서버 부하 방지를 위해 회차별로 안전하게 순차 다운로드됩니다.",
+                    text = strings.noticeSequentialDownload,
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.outline,
                     modifier = Modifier.padding(horizontal = 4.dp),
@@ -172,12 +174,12 @@ fun DesktopDownloadDialog(
                     onConfirm(targetList)
                 }
             ) {
-                Text("다운로드 시작", fontWeight = FontWeight.Bold)
+                Text(strings.actionStartDownload, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("취소")
+                Text(strings.actionCancel)
             }
         },
     )

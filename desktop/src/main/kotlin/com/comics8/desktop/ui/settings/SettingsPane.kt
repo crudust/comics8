@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.SystemUpdate
@@ -65,11 +66,13 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.comics8.core.i18n.AppLanguage
 import com.comics8.core.model.ReadDirection
 import com.comics8.core.model.ViewMode
 import com.comics8.desktop.DesktopVersion
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
+import com.comics8.desktop.ui.theme.LocalStrings
 import kotlinx.coroutines.delay
 import java.awt.FileDialog
 import java.awt.Frame
@@ -87,6 +90,7 @@ fun SettingsPane(
     viewModel: DesktopViewModel,
     modifier: Modifier = Modifier,
 ) {
+    val strings = LocalStrings.current
     val syncState = state.syncState
     var showAdvancedSyncSettings by remember { mutableStateOf(false) }
     var showPairingCodeDialog by remember { mutableStateOf(false) }
@@ -99,7 +103,7 @@ fun SettingsPane(
             TopAppBar(
                 title = {
                     Text(
-                        text = "설정",
+                        text = strings.navSettings,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onBackground,
@@ -109,7 +113,7 @@ fun SettingsPane(
                     IconButton(onClick = viewModel::closeSettings) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "뒤로가기",
+                            contentDescription = strings.actionGoBack,
                             tint = MaterialTheme.colorScheme.onBackground,
                         )
                     }
@@ -132,10 +136,59 @@ fun SettingsPane(
             verticalArrangement = Arrangement.spacedBy(20.dp),
             modifier = Modifier.fillMaxSize(),
         ) {
+            // 섹션 0: 언어 설정 (Language Settings)
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SectionTitle(title = strings.sectionLanguage, icon = Icons.Default.Language)
+
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        border = androidx.compose.foundation.BorderStroke(
+                            width = 1.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = strings.labelLanguage,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Spacer(Modifier.height(10.dp))
+                            val languages = AppLanguage.entries
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                languages.chunked(3).forEach { rowLangs ->
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        rowLangs.forEach { lang ->
+                                            val selected = state.appLanguage == lang
+                                            ViewModeOption(
+                                                label = if (lang == AppLanguage.AUTO) strings.langAuto else lang.nativeName,
+                                                selected = selected,
+                                                onClick = { viewModel.setAppLanguage(lang) },
+                                                modifier = Modifier.weight(1f),
+                                            )
+                                        }
+                                        repeat(3 - rowLangs.size) {
+                                            Spacer(Modifier.weight(1f))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // 섹션 1: 클라우드 동기화 및 기기 연결
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SectionTitle(title = "클라우드 동기화 및 기기 연결", icon = Icons.Default.CloudSync)
+                    SectionTitle(title = strings.sectionCloudSyncAndPairing, icon = Icons.Default.CloudSync)
 
                     Surface(
                         shape = RoundedCornerShape(12.dp),
@@ -153,9 +206,9 @@ fun SettingsPane(
                             // 1. 동기화 상태 및 즉시 동기화 버튼
                             val timeText = if (syncState.lastSyncedAt > 0) {
                                 val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-                                "마지막 동기화: ${sdf.format(Date(syncState.lastSyncedAt))}"
+                                strings.labelLastSyncedAt(sdf.format(Date(syncState.lastSyncedAt)))
                             } else {
-                                "동기화 이력 없음"
+                                strings.labelNoSyncHistory
                             }
 
                             Row(
@@ -171,12 +224,12 @@ fun SettingsPane(
                                                 .clip(RoundedCornerShape(4.dp))
                                                 .background(
                                                     if (syncState.isSyncing) MaterialTheme.colorScheme.primary
-                                                    else MaterialTheme.colorScheme.tertiary
-                                                )
+                                                    else MaterialTheme.colorScheme.tertiary,
+                                                ),
                                         )
                                         Spacer(Modifier.width(6.dp))
                                         Text(
-                                            text = if (syncState.isSyncing) "동기화 진행 중" else "클라우드 연결됨",
+                                            text = if (syncState.isSyncing) strings.statusSyncInProgress else strings.statusCloudConnected,
                                             style = MaterialTheme.typography.labelMedium,
                                             fontWeight = FontWeight.Bold,
                                             color = MaterialTheme.colorScheme.onSurface,
@@ -206,7 +259,7 @@ fun SettingsPane(
                                             color = MaterialTheme.colorScheme.onPrimary,
                                         )
                                         Spacer(Modifier.width(6.dp))
-                                        Text("동기화 중...")
+                                        Text(strings.statusSyncing)
                                     } else {
                                         Icon(
                                             imageVector = Icons.Default.Refresh,
@@ -214,7 +267,7 @@ fun SettingsPane(
                                             modifier = Modifier.size(16.dp),
                                         )
                                         Spacer(Modifier.width(6.dp))
-                                        Text("지금 즉시 동기화", fontWeight = FontWeight.Bold)
+                                        Text(strings.actionSyncNow, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
@@ -232,7 +285,7 @@ fun SettingsPane(
                                 )
                                 Spacer(Modifier.width(8.dp))
                                 Text(
-                                    text = "새 기기 연결하기 (6자리 코드 발급)",
+                                    text = strings.actionOpenPairingDialog,
                                     fontWeight = FontWeight.SemiBold,
                                 )
                             }
@@ -249,7 +302,7 @@ fun SettingsPane(
                                 )
                                 Spacer(Modifier.width(8.dp))
                                 Text(
-                                    text = "다른 기기의 데이터 가져오기 (코드 입력)",
+                                    text = strings.actionOpenConnectDialog,
                                     fontWeight = FontWeight.SemiBold,
                                 )
                             }
@@ -265,13 +318,13 @@ fun SettingsPane(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "백그라운드 자동 동기화",
+                                        text = strings.labelAutoSync,
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.SemiBold,
                                         color = MaterialTheme.colorScheme.onSurface,
                                     )
                                     Text(
-                                        text = "만화 열람/즐겨찾기 변경 시 서버에 실시간 자동 동기화",
+                                        text = strings.descAutoSync,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -288,13 +341,13 @@ fun SettingsPane(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "서버 IP 우회 요청",
+                                        text = strings.labelServerProxy,
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.SemiBold,
                                         color = MaterialTheme.colorScheme.onSurface,
                                     )
                                     Text(
-                                        text = "사이트 메타데이터 요청을 서버 IP로 중계하여 차단 회피",
+                                        text = strings.descServerProxy,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -325,7 +378,7 @@ fun SettingsPane(
                                 )
                                 Spacer(Modifier.width(6.dp))
                                 Text(
-                                    text = if (showAdvancedSyncSettings) "고급 동기화 설정 접기" else "고급 동기화 설정 (마스터 복구 키)",
+                                    text = if (showAdvancedSyncSettings) strings.labelFoldAdvancedSync else strings.labelUnfoldAdvancedSync,
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -356,7 +409,7 @@ fun SettingsPane(
                                                 modifier = Modifier.fillMaxWidth(),
                                             ) {
                                                 Text(
-                                                    text = "내 마스터 복구 키 (비상용)",
+                                                    text = strings.labelMyMasterKey,
                                                     style = MaterialTheme.typography.labelSmall,
                                                     fontWeight = FontWeight.Bold,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -365,23 +418,21 @@ fun SettingsPane(
                                                 IconButton(
                                                     onClick = {
                                                         try {
-                                                            Toolkit.getDefaultToolkit().systemClipboard.setContents(
-                                                                StringSelection(syncState.syncKey),
-                                                                null,
-                                                            )
+                                                            val sel = StringSelection(syncState.syncKey)
+                                                            Toolkit.getDefaultToolkit().systemClipboard.setContents(sel, sel)
                                                         } catch (_: Exception) {}
                                                     },
                                                     modifier = Modifier.size(24.dp),
                                                 ) {
                                                     Icon(
                                                         imageVector = Icons.Default.ContentCopy,
-                                                        contentDescription = "복사",
+                                                        contentDescription = strings.actionCopy,
                                                         modifier = Modifier.size(14.dp),
                                                     )
                                                 }
                                             }
                                             Text(
-                                                text = syncState.syncKey.ifBlank { "키 발급 중..." },
+                                                text = syncState.syncKey.ifBlank { strings.statusIssuingKey },
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 fontWeight = FontWeight.Bold,
                                                 fontFamily = FontFamily.Monospace,
@@ -393,7 +444,7 @@ fun SettingsPane(
                                                 modifier = Modifier.fillMaxWidth(),
                                             ) {
                                                 TextButton(onClick = { viewModel.generateNewSyncKey() }) {
-                                                    Text("새 마스터 키 재발급", style = MaterialTheme.typography.labelSmall)
+                                                    Text(strings.actionReissueMasterKey, style = MaterialTheme.typography.labelSmall)
                                                 }
                                             }
                                         }
@@ -408,7 +459,7 @@ fun SettingsPane(
             // 섹션 2: 로컬 파일 백업 및 복원 (오프라인/영구 보관)
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SectionTitle(title = "로컬 파일 백업 및 복원", icon = Icons.Default.Save)
+                    SectionTitle(title = strings.sectionBackupAndRestore, icon = Icons.Default.Save)
 
                     Surface(
                         shape = RoundedCornerShape(12.dp),
@@ -424,7 +475,7 @@ fun SettingsPane(
                             verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
                             Text(
-                                text = "서버와 무관하게 모든 즐겨찾기, 열람 기록, 뷰어 설정을 JSON 파일로 컴퓨터에 백업하거나 다른 기기로 복원합니다.",
+                                text = strings.descBackupAndRestore,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -437,7 +488,7 @@ fun SettingsPane(
                                     onClick = {
                                         try {
                                             val timeTag = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())
-                                            val dialog = FileDialog(null as Frame?, "백업 파일 저장", FileDialog.SAVE)
+                                            val dialog = FileDialog(null as Frame?, strings.titleSaveBackupFile, FileDialog.SAVE)
                                             dialog.file = "comics8_backup_$timeTag.json"
                                             dialog.isVisible = true
                                             val dir = dialog.directory
@@ -450,7 +501,7 @@ fun SettingsPane(
                                             }
                                         } catch (e: Exception) {
                                             isBackupSuccess = false
-                                            backupStatusMessage = "파일 저장 다이얼로그 오류: ${e.message}"
+                                            backupStatusMessage = "${strings.msgBackupExportFailed}: ${e.message}"
                                         }
                                     },
                                     shape = RoundedCornerShape(10.dp),
@@ -462,13 +513,13 @@ fun SettingsPane(
                                         modifier = Modifier.size(18.dp),
                                     )
                                     Spacer(Modifier.width(6.dp))
-                                    Text("백업 내보내기")
+                                    Text(strings.actionExportBackup)
                                 }
 
                                 OutlinedButton(
                                     onClick = {
                                         try {
-                                            val dialog = FileDialog(null as Frame?, "백업 파일 열기", FileDialog.LOAD)
+                                            val dialog = FileDialog(null as Frame?, strings.titleOpenBackupFile, FileDialog.LOAD)
                                             dialog.setFilenameFilter { _, name -> name.endsWith(".json", ignoreCase = true) }
                                             dialog.isVisible = true
                                             val dir = dialog.directory
@@ -481,7 +532,7 @@ fun SettingsPane(
                                             }
                                         } catch (e: Exception) {
                                             isBackupSuccess = false
-                                            backupStatusMessage = "파일 열기 다이얼로그 오류: ${e.message}"
+                                            backupStatusMessage = "${strings.msgBackupRestoreFailed}: ${e.message}"
                                         }
                                     },
                                     shape = RoundedCornerShape(10.dp),
@@ -493,7 +544,7 @@ fun SettingsPane(
                                         modifier = Modifier.size(18.dp),
                                     )
                                     Spacer(Modifier.width(6.dp))
-                                    Text("백업 복원")
+                                    Text(strings.actionImportBackup)
                                 }
                             }
 
@@ -504,7 +555,7 @@ fun SettingsPane(
                                         .clip(RoundedCornerShape(8.dp))
                                         .background(
                                             if (isBackupSuccess) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
-                                            else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
+                                            else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
                                         )
                                         .padding(10.dp),
                                 ) {
@@ -524,7 +575,7 @@ fun SettingsPane(
             // 섹션 3: 뷰어 기본 설정
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SectionTitle(title = "뷰어 설정", icon = Icons.AutoMirrored.Filled.MenuBook)
+                    SectionTitle(title = strings.sectionViewerSettings, icon = Icons.AutoMirrored.Filled.MenuBook)
 
                     Surface(
                         shape = RoundedCornerShape(12.dp),
@@ -537,7 +588,7 @@ fun SettingsPane(
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(
-                                text = "기본 보기 모드",
+                                text = strings.labelDefaultViewMode,
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurface,
@@ -548,19 +599,19 @@ fun SettingsPane(
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
                                 ViewModeOption(
-                                    label = "웹툰 스크롤",
+                                    label = strings.viewModeScroll,
                                     selected = state.viewMode == ViewMode.SCROLL,
                                     onClick = { viewModel.setViewMode(ViewMode.SCROLL) },
                                     modifier = Modifier.weight(1f),
                                 )
                                 ViewModeOption(
-                                    label = "단면 보기",
+                                    label = strings.viewModeSingleLong,
                                     selected = state.viewMode == ViewMode.PAGE,
                                     onClick = { viewModel.setViewMode(ViewMode.PAGE) },
                                     modifier = Modifier.weight(1f),
                                 )
                                 ViewModeOption(
-                                    label = "양면 분할",
+                                    label = strings.viewModeDualLong,
                                     selected = state.viewMode == ViewMode.DUAL,
                                     onClick = { viewModel.setViewMode(ViewMode.DUAL) },
                                     modifier = Modifier.weight(1f),
@@ -570,7 +621,7 @@ fun SettingsPane(
                             Spacer(Modifier.height(16.dp))
 
                             Text(
-                                text = "읽기 방향 (단면/양면)",
+                                text = strings.labelReadDirection,
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurface,
@@ -581,13 +632,13 @@ fun SettingsPane(
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
                                 ViewModeOption(
-                                    label = "오른쪽 → 왼쪽 (만화)",
+                                    label = strings.readDirectionRightToLeft,
                                     selected = state.readDirection == ReadDirection.RIGHT_TO_LEFT,
                                     onClick = { viewModel.setReadDirection(ReadDirection.RIGHT_TO_LEFT) },
                                     modifier = Modifier.weight(1f),
                                 )
                                 ViewModeOption(
-                                    label = "왼쪽 → 오른쪽 (일반)",
+                                    label = strings.readDirectionLeftToRight,
                                     selected = state.readDirection == ReadDirection.LEFT_TO_RIGHT,
                                     onClick = { viewModel.setReadDirection(ReadDirection.LEFT_TO_RIGHT) },
                                     modifier = Modifier.weight(1f),
@@ -601,7 +652,7 @@ fun SettingsPane(
             // 섹션 4: 앱 정보
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SectionTitle(title = "앱 정보", icon = Icons.Default.Info)
+                    SectionTitle(title = strings.sectionAppInfo, icon = Icons.Default.Info)
 
                     Surface(
                         shape = RoundedCornerShape(12.dp),
@@ -621,14 +672,14 @@ fun SettingsPane(
                         ) {
                             Column {
                                 Text(
-                                    text = "Comics8 Desktop",
+                                    text = strings.labelAppName,
                                     style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSurface,
                                 )
                                 Spacer(Modifier.height(2.dp))
                                 Text(
-                                    text = "버전 v${DesktopVersion.VERSION_NAME} (${DesktopVersion.VERSION_CODE})",
+                                    text = strings.labelAppVersion(DesktopVersion.VERSION_NAME, DesktopVersion.VERSION_CODE),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -659,7 +710,7 @@ fun SettingsPane(
                                             color = MaterialTheme.colorScheme.primary,
                                         )
                                         Spacer(Modifier.width(6.dp))
-                                        Text("확인 중...")
+                                        Text(strings.statusCheckingUpdate)
                                     } else {
                                         Icon(
                                             imageVector = Icons.Default.SystemUpdate,
@@ -667,7 +718,7 @@ fun SettingsPane(
                                             modifier = Modifier.size(16.dp),
                                         )
                                         Spacer(Modifier.width(4.dp))
-                                        Text("업데이트 확인")
+                                        Text(strings.actionCheckUpdate)
                                     }
                                 }
                                 if (updateFeedbackMessage != null) {
@@ -687,14 +738,14 @@ fun SettingsPane(
     }
 
     if (showPairingCodeDialog) {
-        DesktopPairingCodeDialog(
+        PairingCodeDialog(
             viewModel = viewModel,
             onDismiss = { showPairingCodeDialog = false },
         )
     }
 
     if (showConnectDialog) {
-        DesktopConnectDeviceDialog(
+        ConnectDeviceDialog(
             viewModel = viewModel,
             onDismiss = { showConnectDialog = false },
         )
@@ -702,25 +753,26 @@ fun SettingsPane(
 }
 
 @Composable
-private fun DesktopPairingCodeDialog(
+private fun PairingCodeDialog(
     viewModel: DesktopViewModel,
     onDismiss: () -> Unit,
 ) {
-    var isLoading by remember { mutableStateOf(true) }
+    val strings = LocalStrings.current
     var code by remember { mutableStateOf("") }
+    var timeLeftSeconds by remember { mutableStateOf(0) }
+    var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    var timeLeftSeconds by remember { mutableStateOf(300) }
 
     fun loadCode() {
         isLoading = true
         errorMessage = null
         viewModel.requestPairingCode { result ->
             isLoading = false
-            if (result.success) {
+            if (result.success && result.code.isNotEmpty()) {
                 code = result.code
                 timeLeftSeconds = result.expiresInSeconds
             } else {
-                errorMessage = result.message ?: "코드 발급 실패"
+                errorMessage = result.message ?: strings.msgPairingCodeIssueFailed
             }
         }
     }
@@ -729,10 +781,10 @@ private fun DesktopPairingCodeDialog(
         loadCode()
     }
 
-    LaunchedEffect(code, timeLeftSeconds) {
-        if (code.isNotBlank() && timeLeftSeconds > 0) {
-            delay(1000)
-            timeLeftSeconds -= 1
+    LaunchedEffect(timeLeftSeconds) {
+        if (timeLeftSeconds > 0) {
+            delay(1000L)
+            timeLeftSeconds--
         }
     }
 
@@ -748,7 +800,7 @@ private fun DesktopPairingCodeDialog(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = "새 기기 연결 (페어링)",
+                    text = strings.titlePairNewDevice,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
@@ -761,13 +813,18 @@ private fun DesktopPairingCodeDialog(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(
-                    text = "새로 연결할 기기(스마트폰, 태블릿, PC 등)의 [데이터 가져오기] 화면에서 아래 6자리 코드를 입력하세요.",
+                    text = strings.hintPairingCodeGuide,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
 
                 if (isLoading) {
-                    Box(modifier = Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(100.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
                         CircularProgressIndicator()
                     }
                 } else if (errorMessage != null) {
@@ -778,7 +835,11 @@ private fun DesktopPairingCodeDialog(
                             .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f))
                             .padding(12.dp),
                     ) {
-                        Text(text = errorMessage.orEmpty(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
+                        Text(
+                            text = errorMessage.orEmpty(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                        )
                     }
                 } else {
                     val formattedCode = if (code.length == 6) "${code.substring(0, 3)} ${code.substring(3)}" else code
@@ -786,7 +847,10 @@ private fun DesktopPairingCodeDialog(
                     Surface(
                         shape = RoundedCornerShape(12.dp),
                         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
+                        ),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Column(
@@ -805,29 +869,36 @@ private fun DesktopPairingCodeDialog(
                             val minutes = timeLeftSeconds / 60
                             val seconds = timeLeftSeconds % 60
                             val timerText = if (timeLeftSeconds > 0) {
-                                String.format(Locale.getDefault(), "⏱️ 남은 시간: %02d:%02d", minutes, seconds)
+                                strings.labelPairingTimeLeft(minutes, seconds)
                             } else {
-                                "⚠️ 코드가 만료되었습니다."
+                                strings.errorPairingCodeExpired
                             }
                             Text(
                                 text = timerText,
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.SemiBold,
-                                color = if (timeLeftSeconds > 0) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+                                color = if (timeLeftSeconds > 0) MaterialTheme.colorScheme.onSurfaceVariant
+                                else MaterialTheme.colorScheme.error,
                             )
                         }
                     }
 
-                    TextButton(
-                        onClick = {
-                            try {
-                                Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(code), null)
-                            } catch (_: Exception) {}
-                        },
+                    Row(
+                        horizontalArrangement = Arrangement.Center,
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Icon(imageVector = Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("코드 복사", style = MaterialTheme.typography.labelSmall)
+                        TextButton(
+                            onClick = {
+                                try {
+                                    val sel = StringSelection(code)
+                                    Toolkit.getDefaultToolkit().systemClipboard.setContents(sel, sel)
+                                } catch (_: Exception) {}
+                            },
+                        ) {
+                            Icon(imageVector = Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(strings.actionCopyCode, style = MaterialTheme.typography.labelSmall)
+                        }
                     }
                 }
             }
@@ -836,22 +907,23 @@ private fun DesktopPairingCodeDialog(
             Button(onClick = { loadCode() }, enabled = !isLoading) {
                 Icon(imageVector = Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("새 코드 발급")
+                Text(strings.actionIssueNewCode)
             }
         },
         dismissButton = {
             OutlinedButton(onClick = onDismiss) {
-                Text("닫기")
+                Text(strings.actionClose)
             }
         },
     )
 }
 
 @Composable
-private fun DesktopConnectDeviceDialog(
+private fun ConnectDeviceDialog(
     viewModel: DesktopViewModel,
     onDismiss: () -> Unit,
 ) {
+    val strings = LocalStrings.current
     var pairingCodeInput by remember { mutableStateOf("") }
     var recoveryKeyInput by remember { mutableStateOf("") }
     var useRecoveryKeyMode by remember { mutableStateOf(false) }
@@ -871,7 +943,7 @@ private fun DesktopConnectDeviceDialog(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = if (useRecoveryKeyMode) "마스터 복구 키로 연결" else "기존 데이터 가져오기",
+                    text = if (useRecoveryKeyMode) strings.titleConnectWithMasterKey else strings.titleImportExistingData,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
@@ -884,7 +956,7 @@ private fun DesktopConnectDeviceDialog(
             ) {
                 if (!useRecoveryKeyMode) {
                     Text(
-                        text = "기존에 사용하던 기기의 [새 기기 연결하기]에 표시된 6자리 번호를 입력하세요.",
+                        text = strings.hintInput6DigitCode,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -895,7 +967,7 @@ private fun DesktopConnectDeviceDialog(
                             val filtered = it.filter { ch -> ch.isDigit() }.take(6)
                             pairingCodeInput = filtered
                         },
-                        placeholder = { Text("예: 849201", style = MaterialTheme.typography.bodyMedium) },
+                        placeholder = { Text(strings.placeholder6DigitCode, style = MaterialTheme.typography.bodyMedium) },
                         singleLine = true,
                         textStyle = MaterialTheme.typography.headlineSmall.copy(
                             fontFamily = FontFamily.Monospace,
@@ -910,12 +982,12 @@ private fun DesktopConnectDeviceDialog(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         TextButton(onClick = { useRecoveryKeyMode = true }) {
-                            Text("기존 기기가 없나요? 마스터 복구 키로 복원", style = MaterialTheme.typography.labelSmall)
+                            Text(strings.actionSwitchToMasterKeyMode, style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 } else {
                     Text(
-                        text = "이전에 저장해 둔 마스터 복구 키(C8-XXXX-XXXX-XXXX)를 입력하여 데이터를 직접 복원합니다.",
+                        text = strings.hintMasterKeyGuide,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -923,7 +995,7 @@ private fun DesktopConnectDeviceDialog(
                     OutlinedTextField(
                         value = recoveryKeyInput,
                         onValueChange = { recoveryKeyInput = it.trim().uppercase() },
-                        placeholder = { Text("예: C8-7X9K-2M4Q-99PL", style = MaterialTheme.typography.bodySmall) },
+                        placeholder = { Text(strings.placeholderMasterKey, style = MaterialTheme.typography.bodySmall) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -933,7 +1005,7 @@ private fun DesktopConnectDeviceDialog(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         TextButton(onClick = { useRecoveryKeyMode = false }) {
-                            Text("6자리 페어링 코드로 입력하기", style = MaterialTheme.typography.labelSmall)
+                            Text(strings.actionSwitchToPairingCodeMode, style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 }
@@ -945,7 +1017,7 @@ private fun DesktopConnectDeviceDialog(
                             .clip(RoundedCornerShape(8.dp))
                             .background(
                                 if (isError) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
-                                else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
                             )
                             .padding(10.dp),
                     ) {
@@ -972,7 +1044,7 @@ private fun DesktopConnectDeviceDialog(
                                 onDismiss()
                             } else {
                                 isError = true
-                                statusMessage = result.message ?: "인증 실패"
+                                statusMessage = result.message ?: strings.msgDataImportFailed
                             }
                         }
                     } else {
@@ -984,7 +1056,7 @@ private fun DesktopConnectDeviceDialog(
                         } else {
                             isConnecting = false
                             isError = true
-                            statusMessage = "마스터 복구 키를 입력해주세요."
+                            statusMessage = strings.msgInvalidMasterKey
                         }
                     }
                 },
@@ -997,15 +1069,15 @@ private fun DesktopConnectDeviceDialog(
                         color = MaterialTheme.colorScheme.onPrimary,
                     )
                     Spacer(Modifier.width(6.dp))
-                    Text("연결 중...")
+                    Text(strings.statusConnecting)
                 } else {
-                    Text("데이터 가져오기")
+                    Text(strings.actionImportData)
                 }
             }
         },
         dismissButton = {
             OutlinedButton(onClick = onDismiss) {
-                Text("취소")
+                Text(strings.actionCancel)
             }
         },
     )

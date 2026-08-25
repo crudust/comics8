@@ -42,6 +42,7 @@ import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
 import com.comics8.desktop.ui.components.ErrorPane
 import com.comics8.desktop.ui.components.LoadingPane
+import com.comics8.desktop.ui.theme.LocalStrings
 import com.comics8.desktop.ui.util.DesktopAsyncImage
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -58,11 +59,12 @@ fun SeriesPane(
     viewModel: DesktopViewModel,
     modifier: Modifier = Modifier,
 ) {
+    val strings = LocalStrings.current
     val series = state.series
     if (series == null) {
         ErrorPane(
-            message = "작품 정보가 없습니다.",
-            actionLabel = "목록으로",
+            message = strings.errorNoSeriesInfo,
+            actionLabel = strings.navBackToList,
             onRetry = viewModel::closeSeries,
             modifier = modifier,
         )
@@ -128,7 +130,7 @@ fun SeriesPane(
                             onClick = { viewModel.goToEpisodePage(state.episodePage - 1) },
                             enabled = state.episodePage > 1,
                         ) {
-                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "이전")
+                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = strings.actionPrev)
                         }
 
                         FilledTonalButton(
@@ -147,7 +149,7 @@ fun SeriesPane(
                             onClick = { viewModel.goToEpisodePage(state.episodePage + 1) },
                             enabled = state.episodePage < state.episodeLastPage,
                         ) {
-                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "다음")
+                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = strings.actionNext)
                         }
                     }
                 }
@@ -168,6 +170,7 @@ fun EpisodeCard(
     refreshEpoch: Long = 0L,
     onPickArtist: (() -> Unit)? = null,
 ) {
+    val strings = LocalStrings.current
     Surface(
         shape = RoundedCornerShape(12.dp),
         color = when {
@@ -244,7 +247,7 @@ fun EpisodeCard(
                     modifier = Modifier.padding(end = 6.dp),
                 ) {
                     Text(
-                        text = "읽음",
+                        text = strings.badgeRead,
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -271,7 +274,7 @@ fun EpisodeCard(
                 ) {
                     Icon(
                         imageVector = Icons.Filled.MoreVert,
-                        contentDescription = "다른 작가",
+                        contentDescription = strings.actionOtherArtists,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(18.dp),
                     )
@@ -290,13 +293,13 @@ fun EpisodeCard(
                         )
                         isDownloaded -> Icon(
                             imageVector = Icons.Filled.DownloadDone,
-                            contentDescription = "다운로드됨",
+                            contentDescription = strings.labelDownloaded,
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(20.dp),
                         )
                         else -> Icon(
                             imageVector = Icons.Filled.Download,
-                            contentDescription = "이 회차 다운로드",
+                            contentDescription = strings.actionDownloadThisEpisode,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(20.dp),
                         )

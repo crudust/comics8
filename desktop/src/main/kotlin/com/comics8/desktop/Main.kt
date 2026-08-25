@@ -7,10 +7,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import com.comics8.core.i18n.I18n
+import com.comics8.desktop.ui.theme.LocalStrings
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
@@ -209,6 +212,18 @@ fun main() {
 
 @Composable
 fun ComicsDesktopApp(
+    state: DesktopUiState,
+    viewModel: DesktopViewModel,
+) {
+    val strings = remember(state.appLanguage) { I18n.strings(state.appLanguage) }
+
+    CompositionLocalProvider(LocalStrings provides strings) {
+        ComicsDesktopAppContent(state = state, viewModel = viewModel)
+    }
+}
+
+@Composable
+private fun ComicsDesktopAppContent(
     state: DesktopUiState,
     viewModel: DesktopViewModel,
 ) {
