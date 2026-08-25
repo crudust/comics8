@@ -2,8 +2,9 @@
 set -euo pipefail
 
 # ==========================================================
-# Comics8 Release Deploy Script
-# Linux: APK here, .app via SSH to the Mac builder, upload both.
+# Comics8 Universal Release & Cloud Deploy Script
+# Builds APK & Windows Zip on Linux, syncs open source to
+# crudust/comics8, pushes release tags, and publishes to GitHub.
 # ==========================================================
 
 if [[ -f "${HOME}/.comics8-deploy.env" ]]; then
@@ -27,7 +28,7 @@ if [[ -z "${ANDROID_SDK_ROOT:-}" ]]; then
     fi
 fi
 export ANDROID_HOME="${ANDROID_SDK_ROOT:-}"
-export PATH="${JAVA_HOME:+$JAVA_HOME/bin:}${ANDROID_SDK_ROOT:+$ANDROID_SDK_ROOT/platform-tools:}$PATH"
+export PATH="${JAVA_HOME:+$JAVA_HOME/bin:}${ANDROID_SDK_ROOT:+$ANDROID_SDK_ROOT/platform-tools:}$HOME/.local/bin:$PATH"
 
 if [[ -z "${JAVA_HOME:-}" || ! -x "${JAVA_HOME}/bin/java" ]]; then
     echo "❌ JAVA_HOME is not set to a JDK 17 install"
@@ -38,20 +39,13 @@ if [[ -z "${ANDROID_SDK_ROOT:-}" || ! -d "${ANDROID_SDK_ROOT}" ]]; then
     exit 1
 fi
 
-SERVER_HOST="192.168.0.136"
-SERVER_USER="crudust"
-SERVER_DOWNLOAD_DIR="/home/crudust/comics8-sync/data/downloads"
-SERVER_VERSION_FILE="/home/crudust/comics8-sync/data/version.json"
-SSH=(ssh -o StrictHostKeyChecking=no "${SERVER_USER}@${SERVER_HOST}")
-
 VERSION_NAME="${1:-1.0.0}"
 VERSION_CODE="${2:-1}"
 RELEASE_NOTES="${3:-버그 수정 및 성능 개선}"
-export COMICS8_VERSION_NAME="${VERSION_NAME}"
-export COMICS8_VERSION_CODE="${VERSION_CODE}"
+PUBLIC_REPO="${COMICS8_PUBLIC_REPO_URL:-git@github.com:crudust/comics8.git}"
 
 echo "=================================================="
-echo "Comics8 Deploying Release v${VERSION_NAME} (code ${VERSION_CODE})"
+echo "🚀 Comics8 Deploying Release v${VERSION_NAME} (code ${VERSION_CODE})"
 echo "Notes: ${RELEASE_NOTES}"
 echo "=================================================="
 
@@ -63,8 +57,8 @@ sed_inplace() {
     fi
 }
 
-# 0. Sync version across modules
-echo "🔧 Syncing codebase version..."
+# 1. Sync version across modules
+echo "🔧 1/5: Syncing codebase version..."
 sed_inplace "s/versionCode = [0-9]+/versionCode = ${VERSION_CODE}/" app/build.gradle.kts
 sed_inplace "s/versionName = \"[^\"]+\"/versionName = \"${VERSION_NAME}\"/" app/build.gradle.kts
 sed_inplace "s/packageVersion = \"[^\"]+\"/packageVersion = \"${VERSION_NAME}\"/" desktop/build.gradle.kts
@@ -76,153 +70,3 @@ object DesktopVersion {
     const val VERSION_NAME = "${VERSION_NAME}"
     const val VERSION_CODE = ${VERSION_CODE}
 }
-EOF
-
-# 1. Build Android Release APK & Windows Portable Zip
-echo "📦 1/5: Building Android Release APK & Windows Portable Zip..."
-./gradlew assembleRelease :desktop:packageWindowsZip
-
-APK_PATH="app/build/outputs/apk/release/app-release.apk"
-WIN_ZIP_PATH="desktop/build/compose/binaries/main/Comics8-win.zip"
-
-if [ ! -f "$APK_PATH" ]; then
-    echo "❌ APK file not found: $APK_PATH"
-    exit 1
-fi
-if [ ! -f "$WIN_ZIP_PATH" ]; then
-    echo "⚠️  Windows ZIP not found: $WIN_ZIP_PATH"
-fi
-
-# 2. Build macOS Desktop App on the Mac builder
-MAC_ZIP_PATH="desktop/build/compose/binaries/main/Comics8-mac.zip"
-HAVE_MAC_ZIP=0
-if [[ -z "${COMICS8_MAC_SSH:-}" ]]; then
-    echo "COMICS8_MAC_SSH is not set. See scripts/deploy.env.example"
-    exit 1
-fi
-echo "📦 2/5: Building macOS Desktop App via ${COMICS8_MAC_SSH}..."
-if ./scripts/update-mac-app-remote.sh origin/main "${MAC_ZIP_PATH}"; then
-    HAVE_MAC_ZIP=1
-else
-    echo "⚠️  Mac .app build failed. Continuing with Android & Windows."
-fi
-
-# 3. Upload binaries and server code to Server
-echo "🚀 3/5: Uploading server code and binaries to server ($SERVER_HOST)..."
-"${SSH[@]}" "mkdir -p ${SERVER_DOWNLOAD_DIR}"
-if [[ "$HAVE_MAC_ZIP" -eq 1 ]]; then
-    "${SSH[@]}" "rm -rf ${SERVER_DOWNLOAD_DIR}/*"
-else
-    "${SSH[@]}" "rm -f ${SERVER_DOWNLOAD_DIR}/comics8-latest.apk ${SERVER_DOWNLOAD_DIR}/Comics8-win.zip"
-fi
-
-if [ -f "server/server.py" ]; then
-    SERVER_MD5=$("${SSH[@]}" "md5sum /home/crudust/comics8-sync/server.py 2>/dev/null | awk '{print \$1}'" || true)
-    LOCAL_MD5=$(md5sum server/server.py | awk '{print $1}')
-    if [ "$SERVER_MD5" != "$LOCAL_MD5" ]; then
-        echo "🐍 server.py has changed. Updating and restarting comics8-podman service..."
-        scp server/server.py "${SERVER_USER}@${SERVER_HOST}:/home/crudust/comics8-sync/server.py"
-        "${SSH[@]}" "sudo -n systemctl restart comics8-podman"
-    else
-        echo "⚡ server.py unchanged, skipping service restart."
-    fi
-fi
-
-
-scp "$APK_PATH" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/comics8-latest.apk"
-if [ -f "$WIN_ZIP_PATH" ]; then
-    scp "$WIN_ZIP_PATH" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/Comics8-win.zip"
-fi
-if [[ "$HAVE_MAC_ZIP" -eq 1 ]]; then
-    scp "$MAC_ZIP_PATH" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/Comics8-mac.zip"
-fi
-
-# 4. Update version.json on Server
-echo "📝 4/5: Updating version.json on server..."
-"${SSH[@]}" "cat ${SERVER_VERSION_FILE}" > /tmp/comics8-version-current.json || echo '{}' > /tmp/comics8-version-current.json
-COMICS8_VERSION_NAME="$VERSION_NAME" \
-COMICS8_VERSION_CODE="$VERSION_CODE" \
-COMICS8_RELEASE_NOTES="$RELEASE_NOTES" \
-COMICS8_BUILD_MAC="$HAVE_MAC_ZIP" \
-python3 - <<'PY' >/tmp/comics8-version.json
-import json, os, sys
-
-with open("/tmp/comics8-version-current.json", encoding="utf-8") as f:
-    raw = f.read().strip() or "{}"
-try:
-    current = json.loads(raw)
-except json.JSONDecodeError:
-    current = {}
-
-android = {
-    "versionCode": int(os.environ["COMICS8_VERSION_CODE"]),
-    "versionName": os.environ["COMICS8_VERSION_NAME"],
-    "downloadUrl": "/api/comics8/download/comics8-latest.apk",
-    "releaseNotes": os.environ["COMICS8_RELEASE_NOTES"],
-}
-desktop = dict(current.get("desktop") or {})
-desktop["versionCode"] = int(os.environ["COMICS8_VERSION_CODE"])
-desktop["versionName"] = os.environ["COMICS8_VERSION_NAME"]
-desktop["releaseNotes"] = os.environ["COMICS8_RELEASE_NOTES"]
-desktop["windowsDownloadUrl"] = "/api/comics8/download/Comics8-win.zip"
-
-if os.environ["COMICS8_BUILD_MAC"] == "1":
-    desktop["downloadUrl"] = "/api/comics8/download/Comics8-mac.zip"
-else:
-    desktop.setdefault("downloadUrl", "/api/comics8/download/Comics8-mac.zip")
-
-json.dump({"android": android, "desktop": desktop}, sys.stdout, ensure_ascii=False, indent=2)
-print()
-PY
-scp /tmp/comics8-version.json "${SERVER_USER}@${SERVER_HOST}:${SERVER_VERSION_FILE}"
-rm -f /tmp/comics8-version.json /tmp/comics8-version-current.json
-
-# 5. Generate Homebrew Cask Formula
-if [[ -f "$MAC_ZIP_PATH" && -f "templates/homebrew/comics8.rb" ]]; then
-    echo "🍺 Generating Homebrew Cask..."
-    MAC_SHA256=$(sha256sum "$MAC_ZIP_PATH" | awk '{print $1}')
-    mkdir -p build/homebrew
-    sed "s/__VERSION__/${VERSION_NAME}/g; s/__SHA256__/${MAC_SHA256}/g" templates/homebrew/comics8.rb > build/homebrew/comics8.rb
-    echo "  ✅ Generated build/homebrew/comics8.rb (SHA256: ${MAC_SHA256})"
-fi
-
-# 6. Publish to GitHub Releases (if GITHUB_TOKEN is present)
-RELEASE_FILES=("$APK_PATH")
-if [ -f "$WIN_ZIP_PATH" ]; then
-    RELEASE_FILES+=("$WIN_ZIP_PATH")
-fi
-if [[ "$HAVE_MAC_ZIP" -eq 1 ]]; then
-    RELEASE_FILES+=("$MAC_ZIP_PATH")
-fi
-
-RELEASE_TAG="v${VERSION_NAME}" \
-RELEASE_TITLE="Comics8 v${VERSION_NAME}" \
-RELEASE_NOTES="${RELEASE_NOTES}" \
-python3 scripts/github-release.py "${RELEASE_FILES[@]}" || true
-
-# 7. Verify endpoint health
-echo "🔍 Verifying deployment health via Funnel..."
-if curl -s -m 6 -f "https://homeassistant.tail1946af.ts.net/api/comics8/version" >/dev/null 2>&1; then
-    echo "✅ Funnel endpoint is healthy and returning 200 OK"
-else
-    echo "⚠️  Funnel endpoint did not respond via HTTPS, checking local backend port 8905..."
-    if curl -s -m 5 -f "http://${SERVER_HOST}:8905/version" >/dev/null 2>&1; then
-        echo "✅ Local backend (8905) is healthy."
-    fi
-fi
-
-echo "=================================================="
-echo "🎉 배포가 성공적으로 완료되었습니다!"
-echo "• Version Info:  https://homeassistant.tail1946af.ts.net/api/comics8/version"
-echo "• Android APK:   https://homeassistant.tail1946af.ts.net/api/comics8/download/comics8-latest.apk"
-echo "• Mac Desktop:   https://homeassistant.tail1946af.ts.net/api/comics8/download/Comics8-mac.zip"
-echo "• Windows Zip:   https://homeassistant.tail1946af.ts.net/api/comics8/download/Comics8-win.zip"
-if [[ -f "build/homebrew/comics8.rb" ]]; then
-    echo "• Homebrew Cask: build/homebrew/comics8.rb"
-fi
-if [[ "$HAVE_MAC_ZIP" -eq 0 ]]; then
-    echo "• Mac zip was left unchanged (no Mac .app this run)"
-fi
-echo "=================================================="
-
-
