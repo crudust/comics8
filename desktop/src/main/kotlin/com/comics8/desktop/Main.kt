@@ -52,28 +52,28 @@ import com.comics8.desktop.ui.series.SeriesPane
 
 private val DarkColors = darkColorScheme(
     primary = Color(0xFFCBA6F7), // Mauve
-    onPrimary = Color(0xFF11111B), // Crust
-    primaryContainer = Color(0xFF45475A), // Surface1
+    onPrimary = Color.Black,
+    primaryContainer = Color(0xFF313244), // Surface0
     onPrimaryContainer = Color(0xFFCBA6F7), // Mauve
     secondary = Color(0xFF89B4FA), // Blue
-    onSecondary = Color(0xFF11111B), // Crust
-    secondaryContainer = Color(0xFF313244), // Surface0
+    onSecondary = Color.Black,
+    secondaryContainer = Color(0xFF181825), // Mantle
     onSecondaryContainer = Color(0xFFCDD6F4), // Text
     tertiary = Color(0xFFB4BEFE), // Lavender
-    onTertiary = Color(0xFF11111B), // Crust
-    background = Color(0xFF1E1E2E), // Base
+    onTertiary = Color.Black,
+    background = Color.Black,
     onBackground = Color(0xFFCDD6F4), // Text
-    surface = Color(0xFF313244), // Surface0
+    surface = Color.Black,
     onSurface = Color(0xFFCDD6F4), // Text
-    surfaceVariant = Color(0xFF45475A), // Surface1
+    surfaceVariant = Color(0xFF181825), // Mantle
     onSurfaceVariant = Color(0xFFA6ADC8), // Subtext0
-    surfaceContainer = Color(0xFF181825), // Mantle
-    surfaceContainerHigh = Color(0xFF313244), // Surface0
-    surfaceContainerHighest = Color(0xFF45475A), // Surface1
-    outline = Color(0xFF6C7086), // Overlay0
-    outlineVariant = Color(0xFF585B70), // Surface2
+    surfaceContainer = Color(0xFF11111B), // Crust
+    surfaceContainerHigh = Color(0xFF181825), // Mantle
+    surfaceContainerHighest = Color(0xFF313244), // Surface0
+    outline = Color(0xFF45475A), // Surface1
+    outlineVariant = Color(0xFF313244), // Surface0
     error = Color(0xFFF38BA8), // Red
-    onError = Color(0xFF11111B), // Crust
+    onError = Color.Black,
 )
 
 fun main() {
