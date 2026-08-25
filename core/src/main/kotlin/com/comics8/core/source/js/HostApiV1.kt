@@ -33,28 +33,27 @@ data class IndexPageResult(
 interface HostApiV1 {
     val apiLevel: Int get() = HostApi.LEVEL
     val language: String?
+
+    // Network & Serialization
     fun fetch(spec: HostFetchSpec): HostFetchResult
     fun fetchText(spec: HostFetchSpec): String
     fun fetchAll(specs: List<HostFetchSpec>, concurrency: Int = 6): List<HostFetchResult>
     fun isAccessible(url: String): Boolean
-    fun parseHtml(text: String, baseUrl: String?): HostHtmlDoc
     fun json(text: String): Any?
     fun jsonFromBody(body: ByteArray): Any?
     fun utf8(body: ByteArray): String
     fun evalSiteJs(kind: String, text: String): Any?
-    fun u32be(body: ByteArray, offset: Int): Long
-    fun byteLength(body: ByteArray): Int
-    fun slice(body: ByteArray, start: Int, endExclusive: Int): ByteArray
     fun log(level: String, message: String)
 
-    // 편의 헬퍼
+    // Parsing & Convenience Helpers
+    fun parseHtml(text: String, baseUrl: String? = null): HostHtmlDoc
     fun absUrl(url: String, baseUrl: String? = null): String
     fun digits(text: String?): String
     fun match(text: String?, regex: String, groupIndex: Int = 1): String?
     fun slug(text: String?): String
     fun extractImages(htmlOrText: String, baseUrl: String? = null): List<String>
     fun parsePageInfo(doc: HostHtmlDoc): PageInfoResult
-    fun fetchInt32Index(url: String, page: Int, pageSize: Int = 25): IndexPageResult
+    fun fetchInt32Index(url: String, page: Int = 1, pageSize: Int = 25): IndexPageResult
     fun intersectIndexUrls(urls: List<String>, pageSize: Int = 25): List<Long>
     fun cacheGet(key: String): Any?
     fun cachePut(key: String, value: Any?, ttlMs: Long = 600000L)
@@ -192,21 +191,6 @@ internal class HostApiV1Impl(
             "gg" -> evalGg(cx, evalScope, text)
             else -> error("evalSiteJs kind must be galleryinfo or gg")
         }
-    }
-
-    override fun u32be(body: ByteArray, offset: Int): Long {
-        require(offset >= 0 && offset + 4 <= body.size) { "u32be offset out of range" }
-        return ((body[offset].toLong() and 0xFF) shl 24) or
-            ((body[offset + 1].toLong() and 0xFF) shl 16) or
-            ((body[offset + 2].toLong() and 0xFF) shl 8) or
-            (body[offset + 3].toLong() and 0xFF)
-    }
-
-    override fun byteLength(body: ByteArray): Int = body.size
-
-    override fun slice(body: ByteArray, start: Int, endExclusive: Int): ByteArray {
-        require(start >= 0 && endExclusive >= start && endExclusive <= body.size) { "slice out of range" }
-        return body.copyOfRange(start, endExclusive)
     }
 
     override fun log(level: String, message: String) {
@@ -362,6 +346,14 @@ internal class HostApiV1Impl(
     override fun cachePut(key: String, value: Any?, ttlMs: Long) {
         val expiresAt = System.currentTimeMillis() + ttlMs.coerceAtLeast(1000L)
         lruCache[key] = CacheEntry(value, expiresAt)
+    }
+
+    private fun u32be(body: ByteArray, offset: Int): Long {
+        require(offset >= 0 && offset + 4 <= body.size) { "u32be offset out of range" }
+        return ((body[offset].toLong() and 0xFF) shl 24) or
+            ((body[offset + 1].toLong() and 0xFF) shl 16) or
+            ((body[offset + 2].toLong() and 0xFF) shl 8) or
+            (body[offset + 3].toLong() and 0xFF)
     }
 
     private fun parseIdsU32be(body: ByteArray): List<Long> {

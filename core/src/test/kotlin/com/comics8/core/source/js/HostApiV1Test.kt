@@ -35,7 +35,7 @@ class HostApiV1Test {
                 url: "https://example.test/gallery.nozomi",
                 headers: { Range: "bytes=0-3" }
               });
-              return { code: r.code, size: host.byteLength(r.body) };
+              return { code: r.code };
             })()
             """.trimIndent(),
             http,
@@ -69,26 +69,27 @@ class HostApiV1Test {
                 url: "https://example.test/gallery.nozomi",
                 headers: { Range: "bytes=0-99" }
               });
+              var indexRes = host.fetchInt32Index("https://example.test/gallery.nozomi", 1, 25);
               return {
                 code: r.code,
-                size: host.byteLength(r.body),
                 total: r.totalLength(),
                 contentRange: r.header("Content-Range"),
                 contentLength: r.header("Content-Length"),
-                u32: host.u32be(r.body, 0),
-                sliceLen: host.byteLength(host.slice(r.body, 0, 4))
+                firstId: indexRes.ids[0],
+                idCount: indexRes.ids.length,
+                lastPage: indexRes.lastPage
               };
             })()
             """.trimIndent(),
             client,
         )
         assertThat(json.getInt("code")).isEqualTo(200)
-        assertThat(json.getInt("size")).isEqualTo(100)
         assertThat(json.getLong("total")).isEqualTo(4096)
         assertThat(json.getString("contentRange")).isEqualTo("bytes 0-99/4096")
         assertThat(json.getString("contentLength")).isEqualTo("100")
-        assertThat(json.getLong("u32")).isEqualTo(0x00010203L)
-        assertThat(json.getInt("sliceLen")).isEqualTo(4)
+        assertThat(json.getLong("firstId")).isEqualTo(0x00010203L)
+        assertThat(json.getInt("idCount")).isEqualTo(25)
+        assertThat(json.getInt("lastPage")).isEqualTo(41) // 4096 / 4 = 1024 IDs, 1024 / 25 = 41 pages
     }
 
     @Test

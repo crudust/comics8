@@ -15,6 +15,8 @@ internal class HostObject(
         parentScope = scope
         prototype = getObjectPrototype(scope)
         defineProperty("apiLevel", api.apiLevel, READONLY or PERMANENT)
+
+        // Network & Serialization
         defineHostFn("fetch", 1) { cx, callScope, args ->
             wrapResult(cx, callScope, api.fetch(parseFetchSpec(JsValues.arg(args, 0))))
         }
@@ -34,15 +36,6 @@ internal class HostObject(
         defineHostFn("isAccessible", 1) { _, _, args ->
             api.isAccessible(Context.toString(JsValues.arg(args, 0)))
         }
-        defineHostFn("parseHtml", 1) { _, callScope, args ->
-            val text = Context.toString(JsValues.arg(args, 0))
-            val baseUrl = if (args.size >= 2 && !JsValues.isNullish(args[1])) {
-                Context.toString(args[1])
-            } else {
-                null
-            }
-            JsHtmlDocView(api.parseHtml(text, baseUrl)).also { it.attach(callScope) }
-        }
         defineHostFn("json", 1) { _, _, args ->
             api.json(Context.toString(JsValues.arg(args, 0)))
         }
@@ -58,23 +51,6 @@ internal class HostObject(
                 Context.toString(JsValues.arg(args, 1)),
             )
         }
-        defineHostFn("u32be", 2) { _, _, args ->
-            api.u32be(
-                unwrapBytes(JsValues.arg(args, 0)),
-                JsValues.asInt(JsValues.arg(args, 1)),
-            ).toDouble()
-        }
-        defineHostFn("byteLength", 1) { _, _, args ->
-            api.byteLength(unwrapBytes(JsValues.arg(args, 0))).toDouble()
-        }
-        defineHostFn("slice", 3) { _, callScope, args ->
-            val sliced = api.slice(
-                unwrapBytes(JsValues.arg(args, 0)),
-                JsValues.asInt(JsValues.arg(args, 1)),
-                JsValues.asInt(JsValues.arg(args, 2)),
-            )
-            JsBytes(sliced).also { it.attach(callScope) }
-        }
         defineHostFn("log", 2) { _, _, args ->
             api.log(
                 Context.toString(JsValues.arg(args, 0)),
@@ -83,7 +59,12 @@ internal class HostObject(
             Undefined.instance
         }
 
-        // --- 신규 편의 헬퍼 메서드 바인딩 ---
+        // Parsing & Convenience Helpers
+        defineHostFn("parseHtml", 1) { _, callScope, args ->
+            val text = Context.toString(JsValues.arg(args, 0))
+            val baseUrl = if (args.size >= 2 && !JsValues.isNullish(args[1])) Context.toString(args[1]) else null
+            JsHtmlDocView(api.parseHtml(text, baseUrl)).also { it.attach(callScope) }
+        }
         defineHostFn("absUrl", 1) { _, _, args ->
             val url = Context.toString(JsValues.arg(args, 0))
             val base = if (args.size >= 2 && !JsValues.isNullish(args[1])) Context.toString(args[1]) else null
@@ -98,6 +79,10 @@ internal class HostObject(
             val regex = Context.toString(JsValues.arg(args, 1))
             val group = if (args.size >= 3 && !JsValues.isNullish(args[2])) JsValues.asInt(args[2], 1) else 1
             api.match(text, regex, group)
+        }
+        defineHostFn("slug", 1) { _, _, args ->
+            val text = if (args.isNotEmpty() && !JsValues.isNullish(args[0])) Context.toString(args[0]) else null
+            api.slug(text)
         }
         defineHostFn("extractImages", 1) { cx, callScope, args ->
             val html = Context.toString(JsValues.arg(args, 0))
@@ -117,11 +102,6 @@ internal class HostObject(
             obj.put("currentPage", obj, pageInfo.currentPage)
             obj.put("lastPage", obj, pageInfo.lastPage)
             obj
-        }
-
-        defineHostFn("slug", 1) { _, _, args ->
-            val text = if (args.isNotEmpty() && !JsValues.isNullish(args[0])) Context.toString(args[0]) else null
-            api.slug(text)
         }
         defineHostFn("fetchInt32Index", 1) { cx, callScope, args ->
             val url = Context.toString(JsValues.arg(args, 0))
@@ -171,7 +151,7 @@ internal class HostObject(
     }
 }
 
-internal class JsBytes(val data: ByteArray) : ScriptableObject() {
+internal class JsBytes(val bytes: ByteArray) : ScriptableObject() {
     override fun getClassName(): String = "Bytes"
 
     fun attach(scope: Scriptable) {
@@ -187,14 +167,15 @@ private class JsFetchResultView(private val result: HostFetchResult) : Scriptabl
         parentScope = scope
         prototype = getObjectPrototype(scope)
         defineProperty("code", result.code, READONLY or PERMANENT)
-        val body = JsBytes(result.body)
-        body.attach(scope)
-        defineProperty("body", body, READONLY or PERMANENT)
+        defineProperty("body", JsBytes(result.body).also { it.attach(scope) }, READONLY or PERMANENT)
         defineHostFn("header", 1) { _, _, args ->
             result.header(Context.toString(JsValues.arg(args, 0)))
         }
         defineHostFn("totalLength", 0) { _, _, _ ->
             result.totalLength()?.toDouble()
+        }
+        defineHostFn("text", 0) { _, _, _ ->
+            String(result.body, Charsets.UTF_8)
         }
     }
 }
@@ -269,8 +250,12 @@ private class JsHtmlElView(private val el: HostHtmlEl) : ScriptableObject() {
 }
 
 internal fun unwrapBytes(value: Any?): ByteArray {
-    val bytes = value as? JsBytes ?: error("expected Bytes")
-    return bytes.data
+    return when (value) {
+        is JsBytes -> value.bytes
+        is ByteArray -> value
+        is String -> value.toByteArray(Charsets.UTF_8)
+        else -> error("expected Bytes argument, got ${value?.javaClass?.simpleName ?: "null"}")
+    }
 }
 
 internal fun parseFetchSpec(value: Any?): HostFetchSpec {

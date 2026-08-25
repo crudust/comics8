@@ -374,45 +374,33 @@ private fun catalogsFromJs(value: Any?): List<SourceCatalog> {
     }
 }
 
+private fun extractPageInfo(obj: Scriptable): PageInfoResult {
+    val pageInfo = ScriptableObject.getProperty(obj, "pageInfo") as? Scriptable
+    val target = pageInfo ?: obj
+    val current = JsValues.asInt(ScriptableObject.getProperty(target, "currentPage"), 1)
+    val last = JsValues.asInt(ScriptableObject.getProperty(target, "lastPage"), current)
+    return PageInfoResult(currentPage = current, lastPage = last)
+}
+
 private fun listingFromJs(value: Any?, sourceId: String): ListingPage {
     val obj = value as? Scriptable ?: error("expected listing page")
     val items = JsValues.asList(ScriptableObject.getProperty(obj, "items")).map { toonFromJs(it, sourceId) }
-    val pageInfo = ScriptableObject.getProperty(obj, "pageInfo") as? Scriptable
-    val currentPage = if (pageInfo != null) {
-        JsValues.asInt(ScriptableObject.getProperty(pageInfo, "currentPage"), 1)
-    } else {
-        JsValues.asInt(ScriptableObject.getProperty(obj, "currentPage"), 1)
-    }
-    val lastPage = if (pageInfo != null) {
-        JsValues.asInt(ScriptableObject.getProperty(pageInfo, "lastPage"), currentPage)
-    } else {
-        JsValues.asInt(ScriptableObject.getProperty(obj, "lastPage"), currentPage)
-    }
+    val pages = extractPageInfo(obj)
     return ListingPage(
         items = items,
-        currentPage = currentPage,
-        lastPage = lastPage,
+        currentPage = pages.currentPage,
+        lastPage = pages.lastPage,
     )
 }
 
 private fun episodePageFromJs(value: Any?): EpisodePage {
     val obj = value as? Scriptable ?: error("expected episode page")
     val items = JsValues.asList(ScriptableObject.getProperty(obj, "items")).map { episodeFromJs(it) }
-    val pageInfo = ScriptableObject.getProperty(obj, "pageInfo") as? Scriptable
-    val currentPage = if (pageInfo != null) {
-        JsValues.asInt(ScriptableObject.getProperty(pageInfo, "currentPage"), 1)
-    } else {
-        JsValues.asInt(ScriptableObject.getProperty(obj, "currentPage"), 1)
-    }
-    val lastPage = if (pageInfo != null) {
-        JsValues.asInt(ScriptableObject.getProperty(pageInfo, "lastPage"), currentPage)
-    } else {
-        JsValues.asInt(ScriptableObject.getProperty(obj, "lastPage"), currentPage)
-    }
+    val pages = extractPageInfo(obj)
     return EpisodePage(
         items = items,
-        currentPage = currentPage,
-        lastPage = lastPage,
+        currentPage = pages.currentPage,
+        lastPage = pages.lastPage,
     )
 }
 
