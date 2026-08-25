@@ -15,10 +15,17 @@ import org.mozilla.javascript.Function
 import org.mozilla.javascript.Scriptable
 import org.mozilla.javascript.ScriptableObject
 import org.mozilla.javascript.json.JsonParser
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 
 data class PageInfoResult(
+    val currentPage: Int,
+    val lastPage: Int,
+)
+
+data class IndexPageResult(
+    val ids: List<Long>,
     val currentPage: Int,
     val lastPage: Int,
 )
@@ -44,8 +51,13 @@ interface HostApiV1 {
     fun absUrl(url: String, baseUrl: String? = null): String
     fun digits(text: String?): String
     fun match(text: String?, regex: String, groupIndex: Int = 1): String?
+    fun slug(text: String?): String
     fun extractImages(htmlOrText: String, baseUrl: String? = null): List<String>
     fun parsePageInfo(doc: HostHtmlDoc): PageInfoResult
+    fun fetchInt32Index(url: String, page: Int, pageSize: Int = 25): IndexPageResult
+    fun intersectIndexUrls(urls: List<String>, pageSize: Int = 25): List<Long>
+    fun cacheGet(key: String): Any?
+    fun cachePut(key: String, value: Any?, ttlMs: Long = 600000L)
 }
 
 data class HostFetchSpec(
@@ -111,6 +123,9 @@ internal class HostApiV1Impl(
     @Volatile var nestedHostQuery: NestedHostQuery? = null
     lateinit var scope: Scriptable
     lateinit var sourceObj: Scriptable
+
+    private data class CacheEntry(val value: Any?, val expiresAt: Long)
+    private val lruCache = ConcurrentHashMap<String, CacheEntry>()
 
     override fun fetch(spec: HostFetchSpec): HostFetchResult =
         withHostQuery(listOf(spec.url)) { fetchOnce(spec) }
@@ -219,6 +234,9 @@ internal class HostApiV1Impl(
         }.getOrNull()
     }
 
+    override fun slug(text: String?): String =
+        text?.trim()?.lowercase()?.replace(Regex("""\s+"""), "_")?.replace(Regex("""^_+|_\+$"""), "").orEmpty()
+
     override fun extractImages(htmlOrText: String, baseUrl: String?): List<String> {
         val base = baseUrl.orEmpty()
         val candidateLists = parseAllImageCandidateLists(htmlOrText, base)
@@ -260,6 +278,100 @@ internal class HostApiV1Impl(
             if (fromPage != null && fromPage > last) last = fromPage
         }
         return PageInfoResult(currentPage = current, lastPage = last)
+    }
+
+    override fun fetchInt32Index(url: String, page: Int, pageSize: Int): IndexPageResult {
+        val p = page.coerceAtLeast(1)
+        val ps = pageSize.coerceAtLeast(1)
+        val idBytes = 4
+        val start = (p - 1) * ps * idBytes
+        val end = p * ps * idBytes - 1
+        val result = fetch(HostFetchSpec(url = url, headers = mapOf("Range" to "bytes=$start-$end")))
+        if (result.code !in 200..299) {
+            error("HTTP ${result.code}")
+        }
+        val ids = parseIdsU32be(result.body)
+        val totalLength = result.totalLength()
+        val last = if (totalLength != null && totalLength > 0) {
+            val count = (totalLength / idBytes).toInt()
+            val totalPages = (count + ps - 1) / ps
+            totalPages.coerceAtLeast(1)
+        } else {
+            if (ids.size < ps) p else p + 1
+        }
+        return IndexPageResult(ids = ids, currentPage = p, lastPage = last)
+    }
+
+    override fun intersectIndexUrls(urls: List<String>, pageSize: Int): List<Long> {
+        if (urls.isEmpty()) return emptyList()
+        val limit = pageSize.coerceAtLeast(1)
+        if (urls.size == 1) {
+            return fetchInt32Index(urls[0], 1, limit).ids
+        }
+
+        class NozomiCursor(val url: String) {
+            var page = 1
+            var lastPage = Int.MAX_VALUE
+            val buffer = ArrayDeque<Long>()
+
+            fun peek(): Long? {
+                while (buffer.isEmpty() && page <= lastPage) {
+                    val res = fetchInt32Index(url, page, 25)
+                    lastPage = res.lastPage
+                    buffer.addAll(res.ids)
+                    page++
+                    if (res.ids.isEmpty()) break
+                }
+                return buffer.firstOrNull()
+            }
+
+            fun pop() {
+                if (buffer.isNotEmpty()) buffer.removeFirst()
+            }
+        }
+
+        val cursors = urls.map { NozomiCursor(it) }
+        val out = mutableListOf<Long>()
+        while (out.size < limit) {
+            val heads = cursors.map { it.peek() }
+            if (heads.any { it == null }) break
+            val target = heads.filterNotNull().minOrNull() ?: break
+            val allMatch = heads.all { it == target }
+            if (allMatch) {
+                out.add(target)
+                cursors.forEach { it.pop() }
+            } else {
+                for (cursor in cursors) {
+                    val head = cursor.peek() ?: return out
+                    if (head > target) cursor.pop()
+                }
+            }
+        }
+        return out
+    }
+
+    override fun cacheGet(key: String): Any? {
+        val entry = lruCache[key] ?: return null
+        if (System.currentTimeMillis() >= entry.expiresAt) {
+            lruCache.remove(key)
+            return null
+        }
+        return entry.value
+    }
+
+    override fun cachePut(key: String, value: Any?, ttlMs: Long) {
+        val expiresAt = System.currentTimeMillis() + ttlMs.coerceAtLeast(1000L)
+        lruCache[key] = CacheEntry(value, expiresAt)
+    }
+
+    private fun parseIdsU32be(body: ByteArray): List<Long> {
+        val list = ArrayList<Long>(body.size / 4)
+        var offset = 0
+        while (offset + 4 <= body.size) {
+            list.add(u32be(body, offset))
+            offset += 4
+        }
+        return list
     }
 
     private fun parseAllImageCandidateLists(html: String, baseUri: String): List<List<String>> {

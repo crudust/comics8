@@ -6,418 +6,57 @@ var source;
   var LTN = "https://ltn.gold-usergeneratedcontent.net";
   var CDN_HOST = "gold-usergeneratedcontent.net";
   var TAGINDEX = "https://tagindex.hitomi.la";
-  var DEFAULT_LANGUAGE = "korean";
+  var DEFAULT_LANG = "korean";
   var PAGE_SIZE = 25;
-  var ID_BYTES = 4;
   var GALLERY_CONCURRENCY = 6;
-  var GG_TTL_MS = 10 * 60 * 1000;
-  var GALLERY_TTL_MS = 10 * 60 * 1000;
-  var GALLERY_CACHE_MAX = 200;
   var ARTIST_PREFIX = "artist:";
   var GALLERY_PREFIX = "gallery:";
+  var SERIES_NS = { artist: true, series: true, character: true, group: true };
+  var NAMESPACES = { language: true, type: true, female: true, male: true, tag: true, artist: true, series: true, character: true, group: true };
 
-  var NAMESPACES = {
-    language: true,
-    type: true,
-    female: true,
-    male: true,
-    tag: true,
-    artist: true,
-    series: true,
-    character: true,
-    group: true,
-  };
-  var SERIES_NAMESPACES = {
-    artist: true,
-    series: true,
-    character: true,
-    group: true,
-  };
-  var LANG_SUFFIX = /-(all|korean|english|japanese|chinese|spanish|french|russian|indonesian|vietnamese|thai|italian|german|polish)$/i;
+  var language = DEFAULT_LANG;
 
-  var language = DEFAULT_LANGUAGE;
-  var ggCache = null;
-  var galleryCache = {};
-  var galleryCacheOrder = [];
-
-  function trim(s) {
-    return String(s == null ? "" : s).replace(/^\s+|\s+$/g, "");
+  function currentLang() {
+    return host.language || language;
   }
 
-  function lower(s) {
-    return String(s == null ? "" : s).toLowerCase();
-  }
-
-  function startsWith(s, prefix) {
-    s = String(s == null ? "" : s);
-    return s.substring(0, prefix.length) === prefix;
-  }
-
-  function endsWith(s, suffix) {
-    s = String(s == null ? "" : s);
-    suffix = String(suffix);
-    return s.length >= suffix.length && s.substring(s.length - suffix.length) === suffix;
-  }
-
-  function encodePath(value) {
-    return encodeURIComponent(value).replace(/!/g, "%21").replace(/'/g, "%27").replace(/\(/g, "%28").replace(/\)/g, "%29");
-  }
-
-  function currentLanguage() {
-    if (host.language != null && host.language !== "") return host.language;
-    return language;
-  }
-
-  function normalizeSlug(raw) {
-    return trim(raw).toLowerCase().replace(/\s+/g, "_");
-  }
-
-  function forIndexPath(raw) {
-    return normalizeSlug(raw).replace(/_/g, " ");
-  }
-
-  function searchSlug(raw) {
-    return trim(raw).toLowerCase().replace(/_/g, " ").replace(/\s+/g, "_").replace(/^_+|_+$/g, "");
-  }
-
-  function fromArtistUrl(url) {
-    if (url == null || url === "") return null;
-    var m = /\/artist\/([^/?#]+)/i.exec(String(url));
-    if (!m) return null;
-    var decoded;
-    try {
-      decoded = decodeURIComponent(m[1].replace(/\+/g, " "));
-    } catch (e) {
-      decoded = m[1];
-    }
-    decoded = decoded.replace(/\.html$/i, "");
-    decoded = decoded.replace(LANG_SUFFIX, "");
-    decoded = trim(decoded);
-    return decoded ? normalizeSlug(decoded) : null;
+  function encodePath(v) {
+    return encodeURIComponent(v).replace(/!/g, "%21").replace(/'/g, "%27").replace(/\(/g, "%28").replace(/\)/g, "%29");
   }
 
   function indexNozomi(lang) {
-    var key = trim(lang) || DEFAULT_LANGUAGE;
-    if (key.toLowerCase() === "all") return LTN + "/index-all.nozomi";
-    return LTN + "/index-" + key + ".nozomi";
+    var l = (lang || DEFAULT_LANG).toLowerCase();
+    return LTN + "/index-" + (l === "all" ? "all" : l) + ".nozomi";
   }
 
   function typeNozomi(type, lang) {
-    return LTN + "/" + type + "-" + (trim(lang) || DEFAULT_LANGUAGE) + ".nozomi";
+    return LTN + "/" + type + "-" + (lang || DEFAULT_LANG) + ".nozomi";
   }
 
   function popularNozomi(period, lang) {
-    return LTN + "/popular/" + period + "-" + (trim(lang) || DEFAULT_LANGUAGE) + ".nozomi";
+    return LTN + "/popular/" + period + "-" + (lang || DEFAULT_LANG) + ".nozomi";
   }
 
   function nsNozomi(ns, slug, lang) {
-    return LTN + "/" + ns + "/" + encodePath(forIndexPath(slug)) + "-" + (trim(lang) || DEFAULT_LANGUAGE) + ".nozomi";
+    return LTN + "/" + ns + "/" + encodePath(slug.replace(/_/g, " ")) + "-" + (lang || DEFAULT_LANG) + ".nozomi";
   }
 
   function galleryJs(id) {
     return LTN + "/galleries/" + id + ".js";
   }
 
-  function ggJsUrl() {
-    return LTN + "/gg.js";
-  }
-
-  function readerUrl(id) {
-    return ORIGIN + "/reader/" + id + ".html";
-  }
-
-  function galleryPage(id) {
-    return ORIGIN + "/galleries/" + id + ".html";
-  }
-
-  function nsPage(ns, slug) {
-    return ORIGIN + "/" + ns + "/" + encodePath(forIndexPath(slug)) + "-all.html";
-  }
-
-  function rangeHeader(page) {
-    var p = Math.max(1, page | 0);
-    var start = (p - 1) * PAGE_SIZE * ID_BYTES;
-    var end = p * PAGE_SIZE * ID_BYTES - 1;
-    return "bytes=" + start + "-" + end;
-  }
-
-  function pathFromHash(hash) {
-    var last3 = String(hash).substring(String(hash).length - 3);
-    if (last3.length < 3) return "";
-    return last3.charAt(2) + "/" + last3.charAt(0) + last3.charAt(1);
-  }
-
   function thumbUrl(hash) {
-    if (!hash || String(hash).length < 3) return "";
-    var s = pathFromHash(hash);
+    if (!hash || hash.length < 3) return "";
+    var s = hash.charAt(hash.length - 1) + "/" + hash.charAt(hash.length - 3) + hash.charAt(hash.length - 2);
     return "https://tn." + CDN_HOST + "/webpsmalltn/" + s + "/" + hash + ".webp";
   }
 
-  function sFromHash(gg, hash) {
-    if (gg && typeof gg.s === "function") return String(gg.s(hash));
-    var last3 = String(hash).substring(String(hash).length - 3);
-    if (last3.length < 3) return "0";
-    return String(parseInt(last3.charAt(2) + last3.charAt(0) + last3.charAt(1), 16) || 0);
-  }
-
   function imageUrl(hash, b, n, ext, gg) {
-    var hostPrefix = lower(ext) === "avif" ? "a" : "w";
-    var s = sFromHash(gg, hash);
-    var prefix = !b ? "" : endsWith(b, "/") ? b : b + "/";
+    var hostPrefix = (ext || "").toLowerCase() === "avif" ? "a" : "w";
+    var last3 = String(hash).substring(String(hash).length - 3);
+    var s = (gg && typeof gg.s === "function") ? String(gg.s(hash)) : String(parseInt(last3.charAt(2) + last3.charAt(0) + last3.charAt(1), 16) || 0);
+    var prefix = !b ? "" : (b.charAt(b.length - 1) === "/" ? b : b + "/");
     return "https://" + hostPrefix + n + "." + CDN_HOST + "/" + prefix + s + "/" + hash + "." + ext;
-  }
-
-  function altImageUrl(url) {
-    if (String(url).indexOf(CDN_HOST) < 0) return null;
-    if (url.indexOf("://w") >= 0 && endsWith(url, ".webp")) {
-      return url.replace(/:\/\/w(\d+)\./, "://a$1.").replace(/\.webp$/, ".avif");
-    }
-    if (url.indexOf("://a") >= 0 && endsWith(url, ".avif")) {
-      return url.replace(/:\/\/a(\d+)\./, "://w$1.").replace(/\.avif$/, ".webp");
-    }
-    return null;
-  }
-
-  function thumbFallbacks(url) {
-    if (!url) return [];
-    var out = [];
-    var seen = {};
-    function add(u) {
-      if (!u || u === url || seen[u]) return;
-      seen[u] = true;
-      out.push(u);
-    }
-    var rewritten = String(url)
-      .split("://tn.hitomi.la/").join("://tn." + CDN_HOST + "/")
-      .split("://atn.hitomi.la/").join("://atn." + CDN_HOST + "/");
-    add(rewritten);
-    var hostSwap = rewritten
-      .split("://tn." + CDN_HOST + "/").join("://atn." + CDN_HOST + "/")
-      .split("://tn.hitomi.la/").join("://atn." + CDN_HOST + "/");
-    add(hostSwap);
-    if (rewritten.indexOf("/webpsmalltn/") >= 0 && endsWith(rewritten, ".webp")) {
-      add(rewritten.split("/webpsmalltn/").join("/avifsmalltn/").replace(/\.webp$/, ".avif"));
-      add(rewritten.split("/webpsmalltn/").join("/webpbigtn/"));
-    }
-    return out;
-  }
-
-  function parseIds(body) {
-    var len = host.byteLength(body);
-    var ids = [];
-    var i = 0;
-    while (i + ID_BYTES <= len) {
-      ids.push(host.u32be(body, i));
-      i += ID_BYTES;
-    }
-    return ids;
-  }
-
-  function lastPage(page, ids, totalLength) {
-    var current = Math.max(1, page | 0);
-    if (totalLength != null && totalLength !== "" && totalLength > 0) {
-      var idCount = Math.floor(totalLength / ID_BYTES);
-      var pages = Math.floor((idCount + PAGE_SIZE - 1) / PAGE_SIZE);
-      return Math.max(1, pages);
-    }
-    return ids.length < PAGE_SIZE ? current : current + 1;
-  }
-
-  function fetchNozomiPage(url, page) {
-    var result = host.fetch({
-      url: url,
-      headers: { Range: rangeHeader(page) },
-    });
-    if (result.code < 200 || result.code > 299) {
-      throw new Error("HTTP " + result.code);
-    }
-    return result;
-  }
-
-  function listingNozomi(catalogId) {
-    var lang = currentLanguage();
-    switch (String(catalogId).toUpperCase()) {
-      case "LATEST":
-      case "INDEX":
-        return indexNozomi(lang);
-      case "POPULAR":
-        return popularNozomi("week", lang);
-      case "TODAY":
-        return popularNozomi("today", lang);
-      case "MONTH":
-        return popularNozomi("month", lang);
-      case "YEAR":
-        return popularNozomi("year", lang);
-      case "DOUJINSHI":
-        return typeNozomi("doujinshi", lang);
-      case "MANGA":
-        return typeNozomi("manga", lang);
-      case "ARTISTCG":
-        return typeNozomi("artistcg", lang);
-      case "GAMECG":
-        return typeNozomi("gamecg", lang);
-      case "IMAGESET":
-        return typeNozomi("imageset", lang);
-      default:
-        throw new Error("Unknown catalog: " + catalogId);
-    }
-  }
-
-  function parseSearch(text) {
-    var normalized = trim(text).replace(
-      /(language|type|female|male|tag|artist|series|character|group):\s+/gi,
-      function (_, ns) {
-        return ns.toLowerCase() + ":";
-      },
-    );
-    if (!normalized) return [];
-    var parts = normalized.split(/\s+/);
-    var tokens = [];
-    var bare = [];
-    function flushBare() {
-      if (!bare.length) return;
-      tokens.push({ ns: "artist", value: searchSlug(bare.join(" ")) });
-      bare = [];
-    }
-    for (var i = 0; i < parts.length; i++) {
-      var part = parts[i];
-      if (!part) continue;
-      if (part.charAt(0) === "-") continue;
-      var idx = part.indexOf(":");
-      if (idx > 0) {
-        var ns = part.substring(0, idx).toLowerCase();
-        var value = searchSlug(part.substring(idx + 1));
-        if (NAMESPACES[ns] && value) {
-          flushBare();
-          tokens.push({ ns: ns, value: value });
-          continue;
-        }
-      }
-      bare.push(part);
-    }
-    flushBare();
-    return tokens;
-  }
-
-  function nozomiUrlForToken(token, lang) {
-    var slug = normalizeSlug(token.value);
-    if (token.ns === "language") return indexNozomi(normalizeSlug(token.value));
-    if (token.ns === "type") return typeNozomi(slug, lang);
-    return nsNozomi(token.ns, slug, lang);
-  }
-
-  function NozomiCursor(url) {
-    this.url = url;
-    this.page = 1;
-    this.lastPage = 2147483647;
-    this.buffer = [];
-  }
-
-  NozomiCursor.prototype.peek = function () {
-    while (this.buffer.length === 0 && this.page <= this.lastPage) {
-      var result = fetchNozomiPage(this.url, this.page);
-      var ids = parseIds(result.body);
-      this.lastPage = lastPage(this.page, ids, result.totalLength());
-      for (var i = 0; i < ids.length; i++) this.buffer.push(ids[i]);
-      this.page += 1;
-      if (ids.length === 0) break;
-    }
-    return this.buffer.length ? this.buffer[0] : null;
-  };
-
-  NozomiCursor.prototype.pop = function () {
-    if (this.buffer.length) this.buffer.shift();
-  };
-
-  function collectSearchIds(urls) {
-    if (!urls.length) return [];
-    var cursors = [];
-    var i;
-    for (i = 0; i < urls.length; i++) cursors.push(new NozomiCursor(urls[i]));
-    var out = [];
-    while (out.length < PAGE_SIZE) {
-      var heads = [];
-      for (i = 0; i < cursors.length; i++) heads.push(cursors[i].peek());
-      var hasNull = false;
-      for (i = 0; i < heads.length; i++) {
-        if (heads[i] == null) {
-          hasNull = true;
-          break;
-        }
-      }
-      if (hasNull) break;
-      var target = heads[0];
-      for (i = 1; i < heads.length; i++) {
-        if (heads[i] < target) target = heads[i];
-      }
-      var allMatch = true;
-      for (i = 0; i < heads.length; i++) {
-        if (heads[i] !== target) {
-          allMatch = false;
-          break;
-        }
-      }
-      if (allMatch) {
-        out.push(target);
-        for (i = 0; i < cursors.length; i++) cursors[i].pop();
-      } else {
-        for (i = 0; i < cursors.length; i++) {
-          var head = cursors[i].peek();
-          if (head == null) return out;
-          if (head > target) cursors[i].pop();
-        }
-      }
-    }
-    return out;
-  }
-
-  function parseArtists(raw) {
-    if (!raw || raw.length == null) return [];
-    var out = [];
-    var seen = {};
-    for (var i = 0; i < raw.length; i++) {
-      var entry = raw[i];
-      if (entry == null) continue;
-      var name;
-      var url = null;
-      if (typeof entry === "object") {
-        name = entry.artist || entry.name || "";
-        url = entry.url || null;
-      } else {
-        name = String(entry);
-      }
-      name = trim(name);
-      if (!name) continue;
-      var slug = fromArtistUrl(url) || normalizeSlug(name);
-      if (seen[slug]) continue;
-      seen[slug] = true;
-      out.push({ slug: slug, displayName: name });
-    }
-    return out;
-  }
-
-  function parseFiles(raw) {
-    if (!raw || raw.length == null) return [];
-    var out = [];
-    for (var i = 0; i < raw.length; i++) {
-      var file = raw[i];
-      if (!file) continue;
-      var hash = trim(file.hash);
-      if (!hash) continue;
-      out.push({
-        hash: hash,
-        hasWebp: file.haswebp == null ? true : file.haswebp != 0,
-        hasAvif: file.hasavif == null ? false : file.hasavif != 0,
-      });
-    }
-    return out;
-  }
-
-  function formatDate(raw) {
-    if (raw == null || raw === "") return null;
-    var m = /(\d{4})-(\d{2})-(\d{2})/.exec(String(raw));
-    if (!m) return null;
-    return m[1].substring(m[1].length - 2) + "." + m[2] + "." + m[3];
   }
 
   function parseGalleryInfo(text) {
@@ -427,82 +66,73 @@ var source;
     } catch (e) {
       return null;
     }
-    if (!obj) return null;
-    var id = obj.id == null ? "" : trim(String(obj.id));
+    if (!obj || !obj.id) return null;
+    var id = String(obj.id).trim();
     if (!id || id === "null") return null;
-    var title = trim(obj.title) || id;
-    var type = trim(obj.type);
-    var dateRaw = obj.date ? String(obj.date) : null;
+
+    var artists = [];
+    var rawArtists = obj.artists || [];
+    var seenArt = {};
+    for (var i = 0; i < rawArtists.length; i++) {
+      var a = rawArtists[i];
+      if (!a) continue;
+      var name = typeof a === "object" ? (a.artist || a.name || "") : String(a);
+      name = name.trim();
+      if (!name) continue;
+      var slug = host.slug(name);
+      if (seenArt[slug]) continue;
+      seenArt[slug] = true;
+      artists.push({ slug: slug, displayName: name });
+    }
+
+    var files = [];
+    var rawFiles = obj.files || [];
+    for (var j = 0; j < rawFiles.length; j++) {
+      var f = rawFiles[j];
+      if (!f || !f.hash) continue;
+      files.push({
+        hash: String(f.hash).trim(),
+        hasWebp: f.haswebp == null ? true : f.haswebp != 0,
+        hasAvif: f.hasavif == null ? false : f.hasavif != 0
+      });
+    }
+
+    var date = host.match(obj.date, "(\\d{4})-(\\d{2})-(\\d{2})", 1);
+    var updatedAt = null;
+    if (obj.date) {
+      var m = /(\d{4})-(\d{2})-(\d{2})/.exec(String(obj.date));
+      if (m) updatedAt = m[1].substring(2) + "." + m[2] + "." + m[3];
+    }
+
     return {
       id: id,
-      title: title,
-      type: type,
-      dateRaw: dateRaw,
-      updatedAt: formatDate(dateRaw),
-      artists: parseArtists(obj.artists),
-      files: parseFiles(obj.files),
+      title: (obj.title || id).trim(),
+      type: (obj.type || "").trim(),
+      updatedAt: updatedAt,
+      artists: artists,
+      files: files
     };
   }
 
-  function cachedGallery(id) {
-    var cached = galleryCache[id];
-    if (!cached) return null;
-    if (Date.now() - cached.loadedAt >= GALLERY_TTL_MS) {
-      delete galleryCache[id];
-      return null;
-    }
-    return cached.info;
-  }
-
-  function rememberGallery(info) {
-    if (galleryCache[info.id]) {
-      galleryCache[info.id] = { loadedAt: Date.now(), info: info };
-      return;
-    }
-    while (galleryCacheOrder.length >= GALLERY_CACHE_MAX) {
-      var evict = galleryCacheOrder.shift();
-      delete galleryCache[evict];
-    }
-    galleryCache[info.id] = { loadedAt: Date.now(), info: info };
-    galleryCacheOrder.push(info.id);
-  }
-
-  function loadGg() {
-    var now = Date.now();
-    if (ggCache && now - ggCache.loadedAt < GG_TTL_MS && ggCache.gg && ggCache.gg.b) {
-      return ggCache.gg;
-    }
-    var result = host.fetch({ url: ggJsUrl() });
-    if (result.code < 200 || result.code > 299) {
-      throw new Error("만화 이미지를 불러오지 못했습니다.");
-    }
-    var gg = host.evalSiteJs("gg", host.utf8(result.body));
-    if (!gg || !gg.b) {
-      throw new Error("만화 이미지를 불러오지 못했습니다.");
-    }
-    ggCache = { loadedAt: Date.now(), gg: gg };
-    return gg;
-  }
-
   function fetchGalleryInfo(id) {
-    var cached = cachedGallery(id);
+    var key = "hitomi:g:" + id;
+    var cached = host.cacheGet(key);
     if (cached) return cached;
-    var result = host.fetch({ url: galleryJs(id) });
-    if (result.code < 200 || result.code > 299) return null;
-    var parsed = parseGalleryInfo(host.utf8(result.body));
-    if (parsed) rememberGallery(parsed);
+    var res = host.fetch({ url: galleryJs(id) });
+    if (res.code < 200 || res.code > 299) return null;
+    var parsed = parseGalleryInfo(host.utf8(res.body));
+    if (parsed) host.cachePut(key, parsed, 600000);
     return parsed;
   }
 
   function loadGalleryInfos(ids) {
-    if (!ids.length) return [];
+    if (!ids || !ids.length) return [];
     var slots = [];
     var missing = [];
     var missingIdx = [];
-    var i;
-    for (i = 0; i < ids.length; i++) {
+    for (var i = 0; i < ids.length; i++) {
       var sid = String(ids[i]);
-      var cached = cachedGallery(sid);
+      var cached = host.cacheGet("hitomi:g:" + sid);
       if (cached) {
         slots[i] = cached;
       } else {
@@ -511,67 +141,43 @@ var source;
       }
     }
     if (missing.length) {
-      var specs = [];
-      for (i = 0; i < missing.length; i++) {
-        specs.push({ url: galleryJs(missing[i]) });
-      }
+      var specs = missing.map(function (mid) { return { url: galleryJs(mid) }; });
       var results = host.fetchAll(specs, GALLERY_CONCURRENCY);
-      for (i = 0; i < results.length; i++) {
-        var r = results[i];
+      for (var j = 0; j < results.length; j++) {
+        var r = results[j];
         if (r.code < 200 || r.code > 299) continue;
         var info = parseGalleryInfo(host.utf8(r.body));
         if (!info) continue;
-        rememberGallery(info);
-        slots[missingIdx[i]] = info;
+        host.cachePut("hitomi:g:" + info.id, info, 600000);
+        slots[missingIdx[j]] = info;
       }
     }
     var out = [];
     var seen = {};
-    for (i = 0; i < slots.length; i++) {
-      var gallery = slots[i];
-      if (!gallery) continue;
-      if (lower(gallery.type) === "anime") continue;
-      if (seen[gallery.id]) continue;
-      seen[gallery.id] = true;
-      out.push(gallery);
+    for (var k = 0; k < slots.length; k++) {
+      var g = slots[k];
+      if (!g || (g.type || "").toLowerCase() === "anime" || seen[g.id]) continue;
+      seen[g.id] = true;
+      out.push(g);
     }
     return out;
   }
 
-  function listingKey(item) {
-    if (item.entryEpisodeId) return "hitomi:g:" + item.entryEpisodeId;
-    return "hitomi:" + item.id;
-  }
-
   function toListingItem(info) {
-    if (lower(info.type) === "anime") return null;
-    var artists = info.artists;
-    var toonId;
-    var choices;
-    var title;
-    if (!artists.length) {
-      toonId = GALLERY_PREFIX + info.id;
-      choices = [];
-      title = info.title;
-    } else if (artists.length === 1) {
-      toonId = ARTIST_PREFIX + artists[0].slug;
-      choices = [];
-      title = artists[0].displayName;
-    } else {
-      toonId = GALLERY_PREFIX + info.id;
-      choices = artists;
-      title = info.title;
-    }
+    if ((info.type || "").toLowerCase() === "anime") return null;
+    var toonId = info.artists.length === 1 ? (ARTIST_PREFIX + info.artists[0].slug) : (GALLERY_PREFIX + info.id);
+    var title = info.artists.length === 1 ? info.artists[0].displayName : info.title;
+    var choices = info.artists.length >= 2 ? info.artists : [];
     var first = info.files.length ? info.files[0] : null;
     return {
       id: toonId,
       title: title,
       thumbUrl: first ? thumbUrl(first.hash) : "",
-      href: galleryPage(info.id),
+      href: ORIGIN + "/galleries/" + info.id + ".html",
       genre: info.type,
       updatedAt: info.updatedAt,
       entryEpisodeId: info.id,
-      artistChoices: choices,
+      artistChoices: choices
     };
   }
 
@@ -582,7 +188,7 @@ var source;
     for (var i = 0; i < infos.length; i++) {
       var item = toListingItem(infos[i]);
       if (!item) continue;
-      var key = listingKey(item);
+      var key = item.entryEpisodeId ? ("hitomi:g:" + item.entryEpisodeId) : ("hitomi:" + item.id);
       if (seen[key]) continue;
       seen[key] = true;
       items.push(item);
@@ -597,117 +203,68 @@ var source;
       title: info.title,
       date: info.updatedAt,
       thumbUrl: first ? thumbUrl(first.hash) : null,
-      href: readerUrl(info.id),
-      artistChoices: info.artists.length >= 2 ? info.artists : [],
+      href: ORIGIN + "/reader/" + info.id + ".html",
+      artistChoices: info.artists.length >= 2 ? info.artists : []
     };
   }
 
-  function nsSlugOf(toonId) {
-    var idx = String(toonId).indexOf(":");
-    if (idx <= 0) return null;
-    var ns = toonId.substring(0, idx);
-    var slug = toonId.substring(idx + 1);
-    if (!SERIES_NAMESPACES[ns] || !slug) return null;
-    return { ns: ns, slug: slug };
+  function listingNozomi(catalogId) {
+    var lang = currentLang();
+    var cat = String(catalogId || "").toUpperCase();
+    if (cat === "LATEST" || cat === "INDEX") return indexNozomi(lang);
+    if (cat === "POPULAR") return popularNozomi("week", lang);
+    if (cat === "TODAY") return popularNozomi("today", lang);
+    if (cat === "MONTH") return popularNozomi("month", lang);
+    if (cat === "YEAR") return popularNozomi("year", lang);
+    if (cat === "DOUJINSHI" || cat === "MANGA" || cat === "ARTISTCG" || cat === "GAMECG" || cat === "IMAGESET") {
+      return typeNozomi(cat.toLowerCase(), lang);
+    }
+    throw new Error("Unknown catalog: " + catalogId);
   }
 
-  function galleryIdOf(item) {
-    if (item.entryEpisodeId) return item.entryEpisodeId;
-    var toonId = String(item.id || "");
-    if (startsWith(toonId, GALLERY_PREFIX)) {
-      var rest = toonId.substring(GALLERY_PREFIX.length);
-      return rest || null;
+  function parseSearch(text) {
+    var normalized = (text || "").trim().replace(
+      /(language|type|female|male|tag|artist|series|character|group):\s+/gi,
+      function (_, ns) { return ns.toLowerCase() + ":"; }
+    );
+    if (!normalized) return [];
+    var parts = normalized.split(/\s+/);
+    var tokens = [];
+    var bare = [];
+    function flushBare() {
+      if (!bare.length) return;
+      tokens.push({ ns: "artist", value: host.slug(bare.join(" ")) });
+      bare = [];
     }
-    return /^\d+$/.test(toonId) ? toonId : null;
+    for (var i = 0; i < parts.length; i++) {
+      var p = parts[i];
+      if (!p || p.charAt(0) === "-") continue;
+      var idx = p.indexOf(":");
+      if (idx > 0) {
+        var ns = p.substring(0, idx).toLowerCase();
+        var val = host.slug(p.substring(idx + 1));
+        if (NAMESPACES[ns] && val) {
+          flushBare();
+          tokens.push({ ns: ns, value: val });
+          continue;
+        }
+      }
+      bare.push(p);
+    }
+    flushBare();
+    return tokens;
   }
 
-  function nsSeriesItem(ns, slug, lang) {
-    var cover = null;
-    try {
-      var ids = parseIds(fetchNozomiPage(nsNozomi(ns, slug, lang), 1).body);
-      if (ids.length) cover = fetchGalleryInfo(String(ids[0]));
-    } catch (e) {
-      cover = null;
-    }
-    var first = cover && cover.files.length ? cover.files[0] : null;
-    return {
-      id: ns + ":" + slug,
-      title: slug.split("_").join(" "),
-      thumbUrl: first ? thumbUrl(first.hash) : "",
-      href: nsPage(ns, slug),
-      genre: cover && cover.type ? cover.type : ns,
-      updatedAt: cover ? cover.updatedAt : null,
-      entryEpisodeId: cover ? cover.id : null,
-    };
-  }
-
-  function lastTerm(query) {
-    var trimmed = String(query || "").replace(/\s+$/g, "");
-    var parts = trimmed.split(/\s+/);
-    var last = String(parts[parts.length - 1] || "");
-    if (startsWith(last, "-")) last = last.substring(1);
-    var idx = last.indexOf(":");
-    if (idx > 0) {
-      var ns = last.substring(0, idx).toLowerCase();
-      var term = last.substring(idx + 1).split("_").join(" ");
-      if (NAMESPACES[ns]) return { ns: ns, term: term };
-    }
-    return { ns: "artist", term: last.split("_").join(" ") };
-  }
-
-  function suggestUrl(query) {
-    if (!trim(query)) return null;
-    var lt = lastTerm(query);
-    if (!lt.term) return null;
-    var path = "";
-    var term = lt.term.toLowerCase();
-    for (var i = 0; i < term.length; i++) {
-      var ch = term.charAt(i);
-      var enc = ch === " " ? "_" : ch === "/" ? "slash" : ch === "." ? "dot" : ch;
-      if (i > 0) path += "/";
-      path += enc;
-    }
-    return TAGINDEX + "/" + lt.ns + "/" + path + ".json";
-  }
-
-  function parseSuggest(body) {
-    var root;
-    try {
-      root = host.json(body);
-    } catch (e) {
-      return [];
-    }
-    if (!root || root.length == null) return [];
-    var out = [];
-    for (var i = 0; i < root.length && out.length < 10; i++) {
-      var row = root[i];
-      if (!row || row.length == null) continue;
-      var tag = trim(row[0]);
-      var ns = trim(row[2]) || "artist";
-      if (!tag) continue;
-      var count = parseInt(row[1], 10);
-      if (isNaN(count)) count = 0;
-      out.push({ ns: ns, tag: tag, count: count });
-    }
-    return out;
-  }
-
-  function subdomainIndex(gg, hash) {
-    var g;
-    if (typeof gg.s === "function") {
-      g = parseInt(gg.s(hash), 10);
-    } else {
-      var last3 = String(hash).substring(String(hash).length - 3);
-      g = parseInt(last3.charAt(2) + last3.charAt(0) + last3.charAt(1), 16);
-    }
-    if (isNaN(g)) g = 0;
-    return (typeof gg.m === "function" ? gg.m(g) : 0) + 1;
+  function nozomiUrlForToken(token, lang) {
+    var slug = host.slug(token.value);
+    if (token.ns === "language") return indexNozomi(slug);
+    if (token.ns === "type") return typeNozomi(slug, lang);
+    return nsNozomi(token.ns, slug, lang);
   }
 
   source = {
     id: "hitomi",
     displayName: "Hitomi",
-    apiLevel: 1,
     origin: ORIGIN,
     catalogs: [
       { id: "LATEST", label: "최신", paginated: true },
@@ -719,188 +276,183 @@ var source;
       { id: "MANGA", label: "망가", paginated: true },
       { id: "ARTISTCG", label: "아티스트 CG", paginated: true },
       { id: "GAMECG", label: "게임 CG", paginated: true },
-      { id: "IMAGESET", label: "이미지셋", paginated: true },
+      { id: "IMAGESET", label: "이미지셋", paginated: true }
     ],
     searchPlaceholder: "작가 검색 (artist: 이름)",
     notificationMode: "PER_FAVORITE",
     episodePageSize: PAGE_SIZE,
     emptyListingOk: true,
     emptyEpisodesOk: true,
-    defaultLanguage: DEFAULT_LANGUAGE,
+    defaultLanguage: DEFAULT_LANG,
     progressDisplay: "READ_COUNT",
-    userAgent: null,
     referer: REFERER,
-    extraHeaders: {
-      Accept: "*/*",
-      "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
-    },
 
     loadListing: function (catalogId, page) {
-      var p = Math.max(1, page | 0);
-      var result = fetchNozomiPage(listingNozomi(catalogId), p);
-      var ids = parseIds(result.body);
+      var res = host.fetchInt32Index(listingNozomi(catalogId), page, PAGE_SIZE);
       return {
-        items: loadGalleryCards(ids),
-        currentPage: p,
-        lastPage: lastPage(p, ids, result.totalLength()),
+        items: loadGalleryCards(res.ids),
+        currentPage: res.currentPage,
+        lastPage: res.lastPage
       };
     },
 
     search: function (query) {
       var tokens = parseSearch(query && query.text ? query.text : "");
-      var qLang = query && query.language ? query.language : null;
-      var qType = query && query.type ? query.type : null;
-      if (!tokens.length && !qLang && !qType) return [];
-      var lang = currentLanguage();
-      if (qLang) lang = qLang;
-      var i;
-      for (i = 0; i < tokens.length; i++) {
+      var lang = (query && query.language) || currentLang();
+      var qType = query && query.type;
+      for (var i = 0; i < tokens.length; i++) {
         if (tokens[i].ns === "language") {
-          lang = normalizeSlug(tokens[i].value);
+          lang = host.slug(tokens[i].value);
           break;
         }
       }
-      var filters = [];
-      for (i = 0; i < tokens.length; i++) {
-        if (tokens[i].ns !== "language") filters.push(tokens[i]);
+      var filters = tokens.filter(function (t) { return t.ns !== "language"; });
+      if (qType && !filters.some(function (t) { return t.ns === "type"; })) {
+        filters.push({ ns: "type", value: qType });
       }
-      if (qType) {
-        var hasType = false;
-        for (i = 0; i < filters.length; i++) {
-          if (filters[i].ns === "type") {
-            hasType = true;
-            break;
-          }
-        }
-        if (!hasType) filters.push({ ns: "type", value: qType });
+      if (filters.length === 1 && SERIES_NS[filters[0].ns]) {
+        var token = filters[0];
+        var ids = host.fetchInt32Index(nsNozomi(token.ns, token.value, lang), 1, 1).ids;
+        var cover = ids.length ? fetchGalleryInfo(String(ids[0])) : null;
+        var first = cover && cover.files.length ? cover.files[0] : null;
+        return [{
+          id: token.ns + ":" + token.value,
+          title: token.value.replace(/_/g, " "),
+          thumbUrl: first ? thumbUrl(first.hash) : "",
+          href: ORIGIN + "/" + token.ns + "/" + encodePath(token.value.replace(/_/g, " ")) + "-all.html",
+          genre: cover && cover.type ? cover.type : token.ns,
+          updatedAt: cover ? cover.updatedAt : null,
+          entryEpisodeId: cover ? cover.id : null
+        }];
       }
-      if (filters.length === 1 && SERIES_NAMESPACES[filters[0].ns]) {
-        return [nsSeriesItem(filters[0].ns, filters[0].value, lang)];
-      }
-      var urls = [];
-      if (!filters.length) {
-        urls.push(indexNozomi(lang));
-      } else {
-        for (i = 0; i < filters.length; i++) urls.push(nozomiUrlForToken(filters[i], lang));
-      }
-      return loadGalleryCards(collectSearchIds(urls));
+      var urls = filters.length ? filters.map(function (f) { return nozomiUrlForToken(f, lang); }) : [indexNozomi(lang)];
+      var matchedIds = host.intersectIndexUrls(urls, PAGE_SIZE);
+      return loadGalleryCards(matchedIds);
     },
 
     suggest: function (query) {
-      var url = suggestUrl(query && query.text ? query.text : "");
-      if (!url) return [];
-      var result = host.fetch({ url: url });
-      if (result.code < 200 || result.code > 299) return [];
-      return parseSuggest(host.utf8(result.body));
+      var text = (query && query.text || "").trim();
+      if (!text) return [];
+      var parts = text.split(/\s+/);
+      var last = parts[parts.length - 1] || "";
+      if (last.charAt(0) === "-") last = last.substring(1);
+      var ns = "artist";
+      var term = last;
+      var idx = last.indexOf(":");
+      if (idx > 0) {
+        var pre = last.substring(0, idx).toLowerCase();
+        if (NAMESPACES[pre]) {
+          ns = pre;
+          term = last.substring(idx + 1);
+        }
+      }
+      term = term.toLowerCase().replace(/_/g, " ");
+      if (!term) return [];
+      var path = term.split("").map(function (ch) {
+        return ch === " " ? "_" : ch === "/" ? "slash" : ch === "." ? "dot" : ch;
+      }).join("/");
+      var url = TAGINDEX + "/" + ns + "/" + path + ".json";
+      var res = host.fetch({ url: url });
+      if (res.code < 200 || res.code > 299) return [];
+      var root = host.json(host.utf8(res.body));
+      if (!root || !root.length) return [];
+      var out = [];
+      for (var i = 0; i < root.length && out.length < 10; i++) {
+        var row = root[i];
+        if (!row || !row[0]) continue;
+        out.push({ ns: row[2] || "artist", tag: String(row[0]).trim(), count: parseInt(row[1], 10) || 0 });
+      }
+      return out;
     },
 
     loadEpisodes: function (item, page) {
       var p = Math.max(1, page | 0);
-      var nsItem = nsSlugOf(item.id);
-      if (nsItem) {
-        var result = fetchNozomiPage(nsNozomi(nsItem.ns, nsItem.slug, currentLanguage()), p);
-        var ids = parseIds(result.body);
-        var infos = loadGalleryInfos(ids);
-        var episodes = [];
-        var seen = {};
-        for (var i = 0; i < infos.length; i++) {
-          var ep = toEpisodeItem(infos[i]);
-          if (seen[ep.wrId]) continue;
-          seen[ep.wrId] = true;
-          episodes.push(ep);
-        }
+      var id = String(item.id || "");
+      var idx = id.indexOf(":");
+      if (idx > 0 && SERIES_NS[id.substring(0, idx)]) {
+        var ns = id.substring(0, idx);
+        var slug = id.substring(idx + 1);
+        var res = host.fetchInt32Index(nsNozomi(ns, slug, currentLang()), p, PAGE_SIZE);
+        var infos = loadGalleryInfos(res.ids);
         return {
-          items: episodes,
-          currentPage: p,
-          lastPage: lastPage(p, ids, result.totalLength()),
+          items: infos.map(toEpisodeItem),
+          currentPage: res.currentPage,
+          lastPage: res.lastPage
         };
       }
-      var galleryId = galleryIdOf(item);
-      if (!galleryId) return { items: [], currentPage: p, lastPage: 1 };
+      var galleryId = item.entryEpisodeId || (id.indexOf(GALLERY_PREFIX) === 0 ? id.substring(GALLERY_PREFIX.length) : id);
       var info = fetchGalleryInfo(galleryId);
-      if (!info) return { items: [], currentPage: p, lastPage: 1 };
-      if (lower(info.type) === "anime") return { items: [], currentPage: p, lastPage: 1 };
+      if (!info || (info.type || "").toLowerCase() === "anime") return { items: [], currentPage: p, lastPage: 1 };
       return { items: [toEpisodeItem(info)], currentPage: p, lastPage: 1 };
     },
 
-    resolveImages: function (episode, item) {
+    resolveImages: function (episode) {
       var info = fetchGalleryInfo(episode.wrId);
-      if (!info) throw new Error("만화 이미지를 불러오지 못했습니다.");
-      var gg = loadGg();
-      if (!info.files.length) throw new Error("만화 이미지를 불러오지 못했습니다.");
+      if (!info || !info.files.length) throw new Error("만화 이미지를 불러오지 못했습니다.");
+      var res = host.fetch({ url: LTN + "/gg.js" });
+      if (res.code < 200 || res.code > 299) throw new Error("만화 이미지를 불러오지 못했습니다.");
+      var gg = host.evalSiteJs("gg", host.utf8(res.body));
+      if (!gg || !gg.b) throw new Error("만화 이미지를 불러오지 못했습니다.");
+
       var urls = [];
       for (var i = 0; i < info.files.length; i++) {
-        var file = info.files[i];
-        var ext = file.hasWebp ? "webp" : file.hasAvif ? "avif" : "webp";
-        urls.push(imageUrl(file.hash, gg.b, subdomainIndex(gg, file.hash), ext, gg));
+        var f = info.files[i];
+        var ext = f.hasWebp ? "webp" : f.hasAvif ? "avif" : "webp";
+        var last3 = String(f.hash).substring(String(f.hash).length - 3);
+        var g = typeof gg.s === "function" ? parseInt(gg.s(f.hash), 10) : parseInt(last3.charAt(2) + last3.charAt(0) + last3.charAt(1), 16);
+        if (isNaN(g)) g = 0;
+        var n = (typeof gg.m === "function" ? gg.m(g) : 0) + 1;
+        urls.push(imageUrl(f.hash, gg.b, n, ext, gg));
       }
       return urls;
     },
 
     imageFallbacks: function (url) {
+      if (!url) return [];
       var out = [];
-      var seen = {};
-      function add(u) {
-        if (!u || seen[u]) return;
-        seen[u] = true;
-        out.push(u);
+      if (url.indexOf(CDN_HOST) >= 0) {
+        if (url.indexOf("://w") >= 0 && url.indexOf(".webp") >= 0) {
+          out.push(url.replace(/:\/\/w(\d+)\./, "://a$1.").replace(/\.webp$/, ".avif"));
+        } else if (url.indexOf("://a") >= 0 && url.indexOf(".avif") >= 0) {
+          out.push(url.replace(/:\/\/a(\d+)\./, "://w$1.").replace(/\.avif$/, ".webp"));
+        }
       }
-      add(altImageUrl(url));
-      var thumbs = thumbFallbacks(url);
-      for (var i = 0; i < thumbs.length; i++) add(thumbs[i]);
       return out;
     },
 
-    imageReferer: function (url) {
-      return REFERER;
+    ownsHost: function (h) {
+      var hostName = (h || "").toLowerCase();
+      return hostName === "hitomi.la" || hostName.endsWith(".hitomi.la") || hostName === CDN_HOST || hostName.endsWith("." + CDN_HOST);
     },
 
-    coverUrl: function (toonId) {
-      return null;
-    },
-
-    ownsHost: function (hostName) {
-      var h = lower(hostName);
-      return h === "hitomi.la" ||
-        endsWith(h, ".hitomi.la") ||
-        h === CDN_HOST ||
-        endsWith(h, "." + CDN_HOST);
-    },
-
-    useProxy: function (url) {
+    useProxy: function () {
       return false;
     },
 
     resolveParent: function (item, choice, entryEpisodeId) {
-      var entry = entryEpisodeId != null && entryEpisodeId !== "" ? entryEpisodeId : item.entryEpisodeId;
       return {
         id: ARTIST_PREFIX + choice.slug,
         title: choice.displayName,
         thumbUrl: item.thumbUrl,
-        href: nsPage("artist", choice.slug),
+        href: ORIGIN + "/artist/" + encodePath(choice.slug.replace(/_/g, " ")) + "-all.html",
         genre: item.genre,
         updatedAt: item.updatedAt,
-        entryEpisodeId: entry,
+        entryEpisodeId: entryEpisodeId || item.entryEpisodeId
       };
     },
 
     supportsChapterNotifications: function (item) {
-      return startsWith(item.id, ARTIST_PREFIX);
+      return String(item.id || "").indexOf(ARTIST_PREFIX) === 0;
     },
 
     notificationCandidates: function (favorites) {
-      var out = [];
-      if (!favorites || favorites.length == null) return out;
-      for (var i = 0; i < favorites.length; i++) {
-        if (startsWith(favorites[i].id, ARTIST_PREFIX)) out.push(favorites[i]);
-      }
-      return out;
+      return (favorites || []).filter(function (f) {
+        return String(f.id || "").indexOf(ARTIST_PREFIX) === 0;
+      });
     },
 
     applyConfig: function (config) {
-      if (!config || config.language == null || config.language === undefined) return;
-      var next = trim(config.language);
-      language = next || DEFAULT_LANGUAGE;
-    },
+      if (config && config.language) language = config.language.trim() || DEFAULT_LANG;
+    }
   };
 })();

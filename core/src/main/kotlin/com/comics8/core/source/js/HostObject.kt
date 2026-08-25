@@ -119,6 +119,39 @@ internal class HostObject(
             obj
         }
 
+        defineHostFn("slug", 1) { _, _, args ->
+            val text = if (args.isNotEmpty() && !JsValues.isNullish(args[0])) Context.toString(args[0]) else null
+            api.slug(text)
+        }
+        defineHostFn("fetchInt32Index", 1) { cx, callScope, args ->
+            val url = Context.toString(JsValues.arg(args, 0))
+            val page = if (args.size >= 2 && !JsValues.isNullish(args[1])) JsValues.asInt(args[1], 1) else 1
+            val pageSize = if (args.size >= 3 && !JsValues.isNullish(args[2])) JsValues.asInt(args[2], 25) else 25
+            val res = api.fetchInt32Index(url, page, pageSize)
+            val obj = cx.newObject(callScope)
+            obj.put("ids", obj, cx.jsArray(callScope, res.ids.map { it.toDouble() }))
+            obj.put("currentPage", obj, res.currentPage)
+            obj.put("lastPage", obj, res.lastPage)
+            obj
+        }
+        defineHostFn("intersectIndexUrls", 1) { cx, callScope, args ->
+            val urls = JsValues.asList(JsValues.arg(args, 0)).map { Context.toString(it) }
+            val pageSize = if (args.size >= 2 && !JsValues.isNullish(args[1])) JsValues.asInt(args[1], 25) else 25
+            val ids = api.intersectIndexUrls(urls, pageSize)
+            cx.jsArray(callScope, ids.map { it.toDouble() })
+        }
+        defineHostFn("cacheGet", 1) { _, _, args ->
+            val key = Context.toString(JsValues.arg(args, 0))
+            api.cacheGet(key) ?: Undefined.instance
+        }
+        defineHostFn("cachePut", 2) { _, _, args ->
+            val key = Context.toString(JsValues.arg(args, 0))
+            val value = JsValues.arg(args, 1)
+            val ttlMs = if (args.size >= 3 && !JsValues.isNullish(args[2])) JsValues.asInt(args[2], 600000).toLong() else 600000L
+            api.cachePut(key, value, ttlMs)
+            Undefined.instance
+        }
+
         scope.defineProperty("host", this, READONLY or PERMANENT)
     }
 
