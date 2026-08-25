@@ -1,5 +1,6 @@
 package com.comics8.monitor.ui.source
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,18 +21,15 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Public
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
-import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -40,8 +38,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -56,14 +52,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import com.comics8.core.model.ProgressDisplayMode
 import com.comics8.core.source.ComicSource
 import com.comics8.core.source.WorkId
 import com.comics8.core.source.network.NetworkLibrarySource
@@ -78,11 +72,25 @@ fun SourceManagerPane(
     viewModel: ListingViewModel,
     modifier: Modifier = Modifier,
 ) {
-    var configSourceId by remember { mutableStateOf<String?>(null) }
-    var configSourceName by remember { mutableStateOf("") }
+    var selectedSourceForDetail by remember { mutableStateOf<ComicSource?>(null) }
     var showAddOptions by remember { mutableStateOf(false) }
-    var sourceToDelete by remember { mutableStateOf<ComicSource?>(null) }
-    var folderToDelete by remember { mutableStateOf<String?>(null) }
+
+    // 소스 상세 설정 페이지가 열려있을 때의 뒤로가기 처리
+    if (selectedSourceForDetail != null) {
+        val currentSource = state.installedSources.firstOrNull { it.id == selectedSourceForDetail?.id }
+            ?: selectedSourceForDetail!!
+        BackHandler {
+            selectedSourceForDetail = null
+        }
+        SourceDetailSettingsPane(
+            source = currentSource,
+            state = state,
+            viewModel = viewModel,
+            onBack = { selectedSourceForDetail = null },
+            modifier = modifier,
+        )
+        return
+    }
 
     val sources = state.installedSources
     val networkStorageSources = sources.filter {
@@ -161,19 +169,18 @@ fun SourceManagerPane(
                 SectionHeader(title = "파일 저장소 (로컬 / SMB / WebDAV)", icon = Icons.Default.Storage)
             }
             // 1-1. 로컬 저장소 카드
-            item {
-                val localMode = viewModel.getSourceProgressDisplayMode(WorkId.LOCAL_SOURCE)
-                LocalSourceCard(
-                    libraryRoots = state.libraryRoots,
-                    modeLabel = localMode.label,
-                    onOpenSettings = {
-                        configSourceId = WorkId.LOCAL_SOURCE
-                        configSourceName = "로컬 만화"
-                    },
-                    onAddFolder = { viewModel.requestAddLocalFolder() },
-                    onDeleteFolder = { rootUri -> folderToDelete = rootUri },
-                    getFolderLabel = { uri -> viewModel.libraryRootLabel(uri) },
-                )
+            val localSource = sources.firstOrNull { it.id == WorkId.LOCAL_SOURCE }
+            if (localSource != null) {
+                item {
+                    val localMode = viewModel.getSourceProgressDisplayMode(WorkId.LOCAL_SOURCE)
+                    SourceItemCard(
+                        icon = Icons.Default.Folder,
+                        title = "로컬 만화 보관함",
+                        subtitle = if (state.libraryRoots.isEmpty()) "등록된 만화 폴더 없음" else "${state.libraryRoots.size}개 폴더 연결됨",
+                        modeLabel = localMode.label,
+                        onClick = { selectedSourceForDetail = localSource },
+                    )
+                }
             }
             // 1-2. 네트워크 드라이브 목록
             if (networkStorageSources.isNotEmpty()) {
@@ -188,17 +195,12 @@ fun SourceManagerPane(
                     }
                     val currentMode = viewModel.getSourceProgressDisplayMode(source.id)
 
-                    SourceCard(
+                    SourceItemCard(
                         icon = if (isSmb) Icons.Default.Dns else Icons.Default.Cloud,
                         title = source.displayName,
                         subtitle = subtitle,
                         modeLabel = currentMode.label,
-                        canDelete = true,
-                        onOpenSettings = {
-                            configSourceId = source.id
-                            configSourceName = source.displayName
-                        },
-                        onDelete = { sourceToDelete = source },
+                        onClick = { selectedSourceForDetail = source },
                     )
                 }
             }
@@ -228,104 +230,16 @@ fun SourceManagerPane(
                     val subtitle = if (isJs) "JS 확장 스크립트 소스" else "내장 웹 크롤러 소스"
                     val currentMode = viewModel.getSourceProgressDisplayMode(source.id)
 
-                    SourceCard(
+                    SourceItemCard(
                         icon = icon,
                         title = source.displayName,
                         subtitle = subtitle,
                         modeLabel = currentMode.label,
-                        canDelete = true,
-                        onOpenSettings = {
-                            configSourceId = source.id
-                            configSourceName = source.displayName
-                        },
-                        onDelete = { sourceToDelete = source },
+                        onClick = { selectedSourceForDetail = source },
                     )
                 }
             }
         }
-    }
-
-    // 소스 세부 설정 다이얼로그 (진행도 표시 모드 설정)
-    if (configSourceId != null) {
-        val targetId = configSourceId!!
-        val currentMode = viewModel.getSourceProgressDisplayMode(targetId)
-
-        SourceConfigDialog(
-            sourceName = configSourceName,
-            currentMode = currentMode,
-            onDismiss = { configSourceId = null },
-            onSelectMode = { newMode ->
-                viewModel.setSourceProgressDisplayMode(targetId, newMode)
-                configSourceId = null
-            },
-        )
-    }
-
-    // 소스 삭제 확인 다이얼로그
-    if (sourceToDelete != null) {
-        val source = sourceToDelete!!
-        AlertDialog(
-            onDismissRequest = { sourceToDelete = null },
-            title = {
-                Text("소스 삭제", fontWeight = FontWeight.Bold)
-            },
-            text = {
-                Text("'${source.displayName}' 소스를 목록에서 삭제하시겠습니까?")
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.requestRemoveSource(source)
-                        sourceToDelete = null
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.error,
-                        contentColor = MaterialTheme.colorScheme.onError,
-                    ),
-                ) {
-                    Text("삭제", fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { sourceToDelete = null }) {
-                    Text("취소")
-                }
-            },
-        )
-    }
-
-    // 로컬 폴더 삭제 확인 다이얼로그
-    if (folderToDelete != null) {
-        val folderUri = folderToDelete!!
-        val folderLabel = viewModel.libraryRootLabel(folderUri)
-        AlertDialog(
-            onDismissRequest = { folderToDelete = null },
-            title = {
-                Text("폴더 연결 해제", fontWeight = FontWeight.Bold)
-            },
-            text = {
-                Text("'$folderLabel' 폴더 연결을 해제하시겠습니까?\n(기기의 실제 파일은 삭제되지 않습니다)")
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.removeLibraryRoot(folderUri)
-                        folderToDelete = null
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.error,
-                        contentColor = MaterialTheme.colorScheme.onError,
-                    ),
-                ) {
-                    Text("해제", fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { folderToDelete = null }) {
-                    Text("취소")
-                }
-            },
-        )
     }
 
     // 새 소스 추가 선택 다이얼로그
@@ -375,201 +289,12 @@ private fun SectionHeader(title: String, icon: ImageVector) {
 }
 
 @Composable
-private fun EmptySectionCard(
-    text: String,
-    actionText: String? = null,
-    onAction: (() -> Unit)? = null,
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                shape = RoundedCornerShape(12.dp),
-            )
-            .padding(20.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = text,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            if (actionText != null && onAction != null) {
-                Spacer(Modifier.height(8.dp))
-                OutlinedButton(
-                    onClick = onAction,
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                ) {
-                    Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text(actionText, style = MaterialTheme.typography.labelSmall)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun LocalSourceCard(
-    libraryRoots: List<String>,
-    modeLabel: String,
-    onOpenSettings: () -> Unit,
-    onAddFolder: () -> Unit,
-    onDeleteFolder: (String) -> Unit,
-    getFolderLabel: (String) -> String,
-) {
-    Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        border = androidx.compose.foundation.BorderStroke(
-            width = 1.dp,
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-        ),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            // 상단 헤더
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(MaterialTheme.colorScheme.primaryContainer)
-                        .border(
-                            width = 1.dp,
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
-                            shape = RoundedCornerShape(10.dp),
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Folder,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-                Spacer(Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "로컬 만화 보관함",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        Text(
-                            text = if (libraryRoots.isEmpty()) "등록된 폴더 없음" else "${libraryRoots.size}개 폴더 연결됨",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f))
-                                .border(
-                                    width = 0.5.dp,
-                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
-                                    shape = RoundedCornerShape(6.dp),
-                                )
-                                .padding(horizontal = 6.dp, vertical = 2.dp),
-                        ) {
-                            Text(
-                                text = modeLabel,
-                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            )
-                        }
-                    }
-                }
-                IconButton(onClick = onAddFolder) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "폴더 추가",
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                }
-                IconButton(onClick = onOpenSettings) {
-                    Icon(
-                        imageVector = Icons.Default.Settings,
-                        contentDescription = "설정",
-                        tint = MaterialTheme.colorScheme.onSurface,
-                    )
-                }
-            }
-
-            // 하위 등록된 폴더 목록
-            if (libraryRoots.isNotEmpty()) {
-                Spacer(Modifier.height(10.dp))
-                HorizontalDivider(
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
-                    modifier = Modifier.padding(bottom = 8.dp),
-                )
-                libraryRoots.forEach { uriString ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(MaterialTheme.colorScheme.background.copy(alpha = 0.6f))
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.FolderOpen,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = getFolderLabel(uriString),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                        IconButton(
-                            onClick = { onDeleteFolder(uriString) },
-                            modifier = Modifier.size(28.dp),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Delete,
-                                contentDescription = "폴더 삭제",
-                                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.85f),
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(6.dp))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SourceCard(
+private fun SourceItemCard(
     icon: ImageVector,
     title: String,
     subtitle: String,
     modeLabel: String,
-    canDelete: Boolean,
-    onOpenSettings: () -> Unit,
-    onDelete: () -> Unit,
+    onClick: () -> Unit,
 ) {
     Surface(
         shape = RoundedCornerShape(12.dp),
@@ -578,7 +303,10 @@ private fun SourceCard(
             width = 1.dp,
             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
         ),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -652,121 +380,51 @@ private fun SourceCard(
 
             Spacer(Modifier.width(8.dp))
 
-            IconButton(onClick = onOpenSettings) {
-                Icon(
-                    imageVector = Icons.Default.Settings,
-                    contentDescription = "설정",
-                    tint = MaterialTheme.colorScheme.onSurface,
-                )
-            }
-
-            if (canDelete) {
-                IconButton(onClick = onDelete) {
-                    Icon(
-                        imageVector = Icons.Outlined.Delete,
-                        contentDescription = "삭제",
-                        tint = MaterialTheme.colorScheme.error,
-                    )
-                }
-            }
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+                contentDescription = "설정 이동",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                modifier = Modifier.size(16.dp),
+            )
         }
     }
 }
 
 @Composable
-private fun SourceConfigDialog(
-    sourceName: String,
-    currentMode: ProgressDisplayMode,
-    onDismiss: () -> Unit,
-    onSelectMode: (ProgressDisplayMode) -> Unit,
+private fun EmptySectionCard(
+    text: String,
+    actionText: String? = null,
+    onAction: (() -> Unit)? = null,
 ) {
-    var selected by remember { mutableStateOf(currentMode) }
-
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surfaceContainer,
-            border = androidx.compose.foundation.BorderStroke(
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            .border(
                 width = 1.dp,
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
-            ),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-        ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                Text(
-                    text = "소스 설정: $sourceName",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = "작품 목록에서 읽음 진행도를 표시할 방식을 선택하세요.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(16.dp))
-
-                ProgressDisplayMode.entries.forEach { mode ->
-                    val isChecked = mode == selected
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { selected = mode }
-                            .background(
-                                if (isChecked) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
-                                else Color.Transparent,
-                            )
-                            .padding(horizontal = 8.dp, vertical = 10.dp),
-                    ) {
-                        RadioButton(
-                            selected = isChecked,
-                            onClick = { selected = mode },
-                            colors = RadioButtonDefaults.colors(
-                                selectedColor = MaterialTheme.colorScheme.primary,
-                                unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            ),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Column {
-                            Text(
-                                text = mode.label,
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = if (isChecked) FontWeight.Bold else FontWeight.Normal,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                            Text(
-                                text = mode.description,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(20.dp))
-                Row(
-                    horizontalArrangement = Arrangement.End,
-                    modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(12.dp),
+            )
+            .padding(20.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (actionText != null && onAction != null) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = onAction,
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                 ) {
-                    TextButton(onClick = onDismiss) {
-                        Text("취소", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    Button(
-                        onClick = { onSelectMode(selected) },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary,
-                        ),
-                        shape = RoundedCornerShape(10.dp),
-                    ) {
-                        Text("저장", fontWeight = FontWeight.Bold)
-                    }
+                    Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(actionText, style = MaterialTheme.typography.labelSmall)
                 }
             }
         }

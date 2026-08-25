@@ -595,6 +595,42 @@ class DesktopViewModel(
         uninstallSource(id)
     }
 
+    fun getNetworkSourceConfig(sourceId: String): com.comics8.core.source.network.NetworkSourceConfig? {
+        val direct = (repository.sourceRegistry().getOrNull(sourceId) as? com.comics8.core.source.network.NetworkLibrarySource)?.config
+        if (direct != null) return direct
+        return networkSourceStore.all().firstOrNull { it.id == sourceId }
+    }
+
+    fun updateNetworkSourceConfig(
+        config: com.comics8.core.source.network.NetworkSourceConfig,
+        onResult: (Boolean, String?) -> Unit,
+    ) {
+        scope.launch {
+            try {
+                val valid = withContext(Dispatchers.IO) {
+                    val v = config.validated()
+                    com.comics8.core.source.network.NetworkSourceRuntime.remove(v.id)
+                    networkSourceStore.save(v)
+                    v
+                }
+                val newSource = networkSourceStore.createSource(valid)
+                val registry = repository.sourceRegistry()
+                registry.remove(valid.id)
+                registry.add(newSource)
+                clearCatalogCache(valid.id)
+                _state.update {
+                    it.copy(
+                        installedSources = repository.installedSources(),
+                        sourceRegistry = repository.sourceRegistry(),
+                    )
+                }
+                onResult(true, null)
+            } catch (e: Exception) {
+                onResult(false, e.message ?: "네트워크 설정 저장에 실패했습니다")
+            }
+        }
+    }
+
     fun requestRemoveSource(source: com.comics8.core.source.ComicSource) {
         uninstallSource(source.id)
     }
