@@ -25,12 +25,17 @@ function parseCard(container, baseUrl) {
   var id = slugMatch ? slugMatch[1] : "";
   if (!id || id === "feed") return null;
 
-  var title = container.textOf("h1") || container.textOf("h2") || container.textOf("h3") || container.textOf(".font-semibold");
-  title = decodeEntities(title.trim());
-
   var img = container.selectFirst("img");
   var thumbUrl = img ? (img.attr("src") || img.attr("data-src") || "") : "";
-  if (thumbUrl) thumbUrl = host.absUrl(thumbUrl, baseUrl || ORIGIN);
+  if (!thumbUrl) {
+    var bgEl = container.selectFirst("[style*='background-image']");
+    if (bgEl) thumbUrl = bgEl.bgUrl() || "";
+  }
+  if (!thumbUrl) return null;
+  thumbUrl = host.absUrl(thumbUrl, baseUrl || ORIGIN);
+
+  var title = container.textOf("h4") || container.textOf("h1") || container.textOf("h2") || container.textOf("h3") || container.textOf(".font-semibold") || a.attr("title");
+  title = decodeEntities(title.trim());
 
   var genre = container.textOf(".font-normal.text-xs") || container.textOf(".numscore");
   genre = genre.replace(/\s+/g, " ").trim();
@@ -38,7 +43,7 @@ function parseCard(container, baseUrl) {
   var timeEl = container.selectFirst("time");
   var updatedAt = timeEl ? (timeEl.text() || timeEl.attr("datetime")) : null;
   if (!updatedAt) {
-    var epEl = container.selectFirst(".text-xs, .epx, .chapter");
+    var epEl = container.selectFirst(".text-xs, .epx, .chapter, span.float-end");
     if (epEl) updatedAt = epEl.text().trim();
   }
 
@@ -73,38 +78,28 @@ var source = {
     if (cat === "LATEST") {
       var homeHtml = host.fetchText({ url: ORIGIN + "/" });
       var homeDoc = host.parseHtml(homeHtml, ORIGIN);
-      var cards = homeDoc.select("div.overflow-hidden.relative.flex.flex-col.min-w-0");
       var items = [];
       var seen = {};
 
+      // 1. Swiper slides (Hero banner)
+      var slides = homeDoc.select(".swiper-slide");
+      for (var s = 0; s < slides.length; s++) {
+        var slide = slides[s];
+        var slideItem = parseCard(slide, ORIGIN);
+        if (slideItem && !seen[slideItem.id]) {
+          seen[slideItem.id] = true;
+          items.push(slideItem);
+        }
+      }
+
+      // 2. Popular & Latest update cards on home page
+      var cards = homeDoc.select("div.col-span-1, div.group-data-\\[direction\\=horizontal\\]\\:hidden, div.overflow-hidden.relative.flex.flex-col.min-w-0");
       for (var i = 0; i < cards.length; i++) {
         var card = cards[i];
         var item = parseCard(card, ORIGIN);
         if (item && !seen[item.id]) {
           seen[item.id] = true;
           items.push(item);
-        }
-      }
-
-      // Fallback: scan all /manga/ links on home if card selector was empty
-      if (items.length === 0) {
-        var anchors = homeDoc.select("a[href*='/manga/']");
-        for (var j = 0; j < anchors.length; j++) {
-          var a = anchors[j];
-          var href = a.absUrl("href");
-          var slug = host.match(href, "/manga/([^/]+)");
-          if (!slug || slug === "feed" || seen[slug]) continue;
-          seen[slug] = true;
-          var img = a.selectFirst("img");
-          var title = a.text().trim() || slug;
-          items.push({
-            id: slug,
-            title: decodeEntities(title),
-            thumbUrl: img ? img.absUrl("src") : "",
-            href: href,
-            genre: "",
-            updatedAt: null
-          });
         }
       }
 

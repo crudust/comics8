@@ -51,9 +51,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -324,23 +326,32 @@ private fun <T : Any> ReorderableItemColumn(
     spacing: androidx.compose.ui.unit.Dp = 10.dp,
     itemContent: @Composable (item: T, dragHandleModifier: Modifier, isDragging: Boolean) -> Unit,
 ) {
-    var localList by remember(items) { mutableStateOf(items) }
+    var currentList by remember { mutableStateOf(items) }
     var draggingKey by remember { mutableStateOf<Any?>(null) }
     var dragOffsetY by remember { mutableStateOf(0f) }
     val itemHeights = remember { mutableMapOf<Any, Float>() }
     val density = LocalDensity.current
 
+    LaunchedEffect(items) {
+        if (draggingKey == null) {
+            currentList = items
+        }
+    }
+
+    val latestItems by rememberUpdatedState(items)
+    val latestOnReorder by rememberUpdatedState(onReorder)
+
     Column(
         verticalArrangement = Arrangement.spacedBy(spacing),
         modifier = modifier.fillMaxWidth(),
     ) {
-        localList.forEachIndexed { index, item ->
+        currentList.forEach { item ->
             val itemKey = key(item)
             val isDragging = draggingKey == itemKey
             val yOffset = if (isDragging) dragOffsetY else 0f
             val zIndex = if (isDragging) 10f else 1f
 
-            val dragHandleModifier = Modifier.pointerInput(itemKey, localList) {
+            val dragHandleModifier = Modifier.pointerInput(itemKey) {
                 detectDragGestures(
                     onDragStart = {
                         draggingKey = itemKey
@@ -349,47 +360,48 @@ private fun <T : Any> ReorderableItemColumn(
                     onDrag = { change, dragAmount ->
                         change.consume()
                         dragOffsetY += dragAmount.y
-                        val currentK = draggingKey ?: return@detectDragGestures
-                        val currentIndex = localList.indexOfFirst { key(it) == currentK }
-                        if (currentIndex == -1) return@detectDragGestures
+                        val currKey = draggingKey ?: return@detectDragGestures
+                        val currIndex = currentList.indexOfFirst { key(it) == currKey }
+                        if (currIndex == -1) return@detectDragGestures
 
-                        val itemHeight = itemHeights[currentK] ?: (60f * density.density)
+                        val defaultHeight = 64f * density.density
+                        val itemHeight = itemHeights[currKey] ?: defaultHeight
                         val threshold = itemHeight * 0.5f
 
-                        if (dragOffsetY > threshold && currentIndex < localList.lastIndex) {
-                            val targetIndex = currentIndex + 1
-                            val targetHeight = itemHeights[key(localList[targetIndex])] ?: itemHeight
-                            localList = localList.toMutableList().apply {
-                                val elem = removeAt(currentIndex)
-                                add(targetIndex, elem)
-                            }
+                        if (dragOffsetY > threshold && currIndex < currentList.lastIndex) {
+                            val targetIndex = currIndex + 1
+                            val targetHeight = itemHeights[key(currentList[targetIndex])] ?: itemHeight
+                            val nextList = currentList.toMutableList()
+                            val moved = nextList.removeAt(currIndex)
+                            nextList.add(targetIndex, moved)
+                            currentList = nextList
                             dragOffsetY -= targetHeight
-                        } else if (dragOffsetY < -threshold && currentIndex > 0) {
-                            val targetIndex = currentIndex - 1
-                            val targetHeight = itemHeights[key(localList[targetIndex])] ?: itemHeight
-                            localList = localList.toMutableList().apply {
-                                val elem = removeAt(currentIndex)
-                                add(targetIndex, elem)
-                            }
+                        } else if (dragOffsetY < -threshold && currIndex > 0) {
+                            val targetIndex = currIndex - 1
+                            val targetHeight = itemHeights[key(currentList[targetIndex])] ?: itemHeight
+                            val nextList = currentList.toMutableList()
+                            val moved = nextList.removeAt(currIndex)
+                            nextList.add(targetIndex, moved)
+                            currentList = nextList
                             dragOffsetY += targetHeight
                         }
                     },
                     onDragEnd = {
-                        val currentK = draggingKey
+                        val finalKey = draggingKey
                         draggingKey = null
                         dragOffsetY = 0f
-                        if (currentK != null) {
-                            val originalIndex = items.indexOfFirst { key(it) == currentK }
-                            val newIndex = localList.indexOfFirst { key(it) == currentK }
-                            if (originalIndex != -1 && newIndex != -1 && originalIndex != newIndex) {
-                                onReorder(originalIndex, newIndex)
+                        if (finalKey != null) {
+                            val fromIdx = latestItems.indexOfFirst { key(it) == finalKey }
+                            val toIdx = currentList.indexOfFirst { key(it) == finalKey }
+                            if (fromIdx != -1 && toIdx != -1 && fromIdx != toIdx) {
+                                latestOnReorder(fromIdx, toIdx)
                             }
                         }
                     },
                     onDragCancel = {
                         draggingKey = null
                         dragOffsetY = 0f
-                        localList = items
+                        currentList = latestItems
                     },
                 )
             }
@@ -444,6 +456,24 @@ private fun SourceItemCard(
                 .fillMaxWidth()
                 .padding(horizontal = 14.dp, vertical = 12.dp),
         ) {
+            // 드래그 핸들을 가장 왼쪽에 배치
+            if (dragHandleModifier != null) {
+                Box(
+                    modifier = Modifier
+                        .then(dragHandleModifier)
+                        .clip(RoundedCornerShape(6.dp))
+                        .padding(end = 8.dp, top = 4.dp, bottom = 4.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.DragHandle,
+                        contentDescription = "순서 변경",
+                        tint = if (isDragging) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+
             Box(
                 modifier = Modifier
                     .size(40.dp)
@@ -516,24 +546,6 @@ private fun SourceItemCard(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                 modifier = Modifier.size(16.dp),
             )
-
-            if (dragHandleModifier != null) {
-                Spacer(Modifier.width(8.dp))
-                Box(
-                    modifier = Modifier
-                        .then(dragHandleModifier)
-                        .clip(RoundedCornerShape(6.dp))
-                        .padding(4.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.DragHandle,
-                        contentDescription = "순서 변경",
-                        tint = if (isDragging) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-            }
         }
     }
 }
