@@ -424,8 +424,10 @@ fun DesktopAsyncImage(
             displayedBitmap = null
             loading = true
             var loaded = DesktopImageCache.loadImage(url)
-            if (loaded == null) {
-                kotlinx.coroutines.delay(300L)
+            var retry = 0
+            while (loaded == null && retry < 2) {
+                retry++
+                kotlinx.coroutines.delay(retry * 400L)
                 loaded = DesktopImageCache.loadImage(url)
             }
             if (loaded != null) {

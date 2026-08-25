@@ -62,30 +62,49 @@ class JsComicSource(
             engine.callImages(handle, http, episode, item)
         }
 
-    override fun imageFallbacks(url: String): List<String> =
-        engine.callStringList(handle, "imageFallbacks", url)
+    private val ownsHostCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+    private val imageRefererCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val imageFallbacksCache = java.util.concurrent.ConcurrentHashMap<String, List<String>>()
+    private val useProxyCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
 
-    override fun imageReferer(url: String): String =
-        engine.callString(handle, "imageReferer", url) ?: (defaultPolicy.referer ?: origin)
+    override fun imageFallbacks(url: String): List<String> {
+        if (url.isBlank()) return emptyList()
+        return imageFallbacksCache.computeIfAbsent(url) {
+            engine.callStringList(handle, "imageFallbacks", it)
+        }
+    }
+
+    override fun imageReferer(url: String): String {
+        if (url.isBlank()) return defaultPolicy.referer ?: origin
+        return imageRefererCache.computeIfAbsent(url) {
+            engine.callString(handle, "imageReferer", it) ?: (defaultPolicy.referer ?: origin)
+        }
+    }
 
     override fun coverUrl(toonId: String): String? =
         engine.callString(handle, "coverUrl", toonId)
 
     override fun ownsHost(host: String): Boolean {
         val key = host.lowercase().trim().trim('.')
+        if (key.isEmpty()) return false
         val query = handle.api.nestedHostQuery
         if (query != null) {
             return query.ownsHost[key] ?: (handle.originHost == key)
         }
-        return engine.callBoolean(handle, "ownsHost", key, default = false)
+        return ownsHostCache.computeIfAbsent(key) {
+            engine.callBoolean(handle, "ownsHost", it, default = false)
+        }
     }
 
     override fun useProxy(url: String): Boolean {
+        if (url.isBlank()) return true
         val query = handle.api.nestedHostQuery
         if (query != null) {
             return query.useProxy[url] ?: true
         }
-        return engine.callBoolean(handle, "useProxy", url, default = true)
+        return useProxyCache.computeIfAbsent(url) {
+            engine.callBoolean(handle, "useProxy", it, default = true)
+        }
     }
 
     override fun resolveParent(
