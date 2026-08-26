@@ -2,11 +2,14 @@ package com.comics8.monitor.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.comics8.core.model.SyncResult
+import com.comics8.core.model.SyncState
 import com.comics8.core.network.ToonClient
 import com.comics8.core.source.WorkId
+import com.comics8.core.sync.BaseSyncManager
 import com.comics8.core.sync.SyncConstants
+import com.comics8.core.sync.SyncStorageAdapter
 import com.comics8.core.sync.SyncWire
-import com.comics8.core.sync.addComics8SyncHeaders
 import com.comics8.monitor.data.local.AppDatabase
 import com.comics8.monitor.data.local.FavoriteToon
 import com.comics8.monitor.data.local.ReadEpisode
@@ -14,637 +17,426 @@ import com.comics8.monitor.data.local.ReadHistory
 import com.comics8.monitor.data.local.ReaderSetting
 import com.comics8.monitor.data.local.delete
 import com.comics8.monitor.data.local.deleteByToonId
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
 
-data class SyncState(
-    val syncKey: String = "",
-    val serverUrl: String = SyncManager.DEFAULT_SERVER_URL,
-    val autoSyncEnabled: Boolean = true,
-    val useServerProxy: Boolean = true,
-    val isSyncing: Boolean = false,
-    val lastSyncedAt: Long = 0L,
-    val syncMessage: String? = null,
-    val isSuccess: Boolean? = null,
-)
+typealias AndroidSyncState = SyncState
+typealias AndroidSyncResult = SyncResult
 
-data class SyncResult(
-    val success: Boolean,
-    val message: String,
-    val favoritesCount: Int = 0,
-    val historyCount: Int = 0,
-)
-
-class SyncManager(
+class AndroidRoomSyncStorageAdapter(
     private val context: Context,
     private val database: AppDatabase,
-    private val toonClient: ToonClient? = null,
-    private val client: OkHttpClient = OkHttpClient.Builder()
+) : SyncStorageAdapter {
+
+    private val prefs: SharedPreferences = context.getSharedPreferences("comics8_sync", Context.MODE_PRIVATE)
+
+    override fun getPreference(key: String, defaultValue: String?): String? {
+        return prefs.getString(key, defaultValue)
+    }
+
+    override fun setPreference(key: String, value: String?) {
+        if (value == null) {
+            prefs.edit().remove(key).apply()
+        } else {
+            prefs.edit().putString(key, value).apply()
+        }
+    }
+
+    override suspend fun deleteOldTombstones(cutoff: Long) {
+        database.tombstoneDao().deleteOlderThan(cutoff)
+    }
+
+    override suspend fun getLocalChangesSince(since: Long): JSONObject {
+        val localFavs = database.favoriteDao().getSince(since).filter { SyncWire.isSyncableSource(it.sourceId) }
+        val localHist = database.readHistoryDao().getSince(since).filter { SyncWire.isSyncableSource(it.sourceId) }
+        val localEps = database.readEpisodeDao().getSince(since).filter { SyncWire.isSyncableSource(it.sourceId) }
+        val localSettings = database.readerSettingDao().getSince(since).filter { SyncWire.isSyncableSource(it.sourceId) }
+        val localTombs = database.tombstoneDao().getSince(since).filter { SyncWire.isSyncableSource(WorkId.parse(it.entityId).sourceId) }
+
+        return JSONObject().apply {
+            val favArr = JSONArray()
+            localFavs.forEach { f ->
+                favArr.put(JSONObject().apply {
+                    put("id", f.id)
+                    put("sourceId", f.sourceId)
+                    put("title", f.title)
+                    put("thumbUrl", f.thumbUrl)
+                    put("href", f.href)
+                    put("genre", f.genre)
+                    put("updatedAt", f.updatedAt ?: JSONObject.NULL)
+                    put("savedAt", f.savedAt)
+                })
+            }
+            put("favorites", favArr)
+
+            val histArr = JSONArray()
+            localHist.forEach { h ->
+                histArr.put(JSONObject().apply {
+                    put("toonId", h.toonId)
+                    put("sourceId", h.sourceId)
+                    put("toonTitle", h.toonTitle)
+                    put("toonThumbUrl", h.toonThumbUrl)
+                    put("toonHref", h.toonHref)
+                    put("lastWrId", h.lastWrId)
+                    put("lastEpisodeTitle", h.lastEpisodeTitle)
+                    put("lastEpisodeHref", h.lastEpisodeHref)
+                    put("lastReadOrder", h.lastReadOrder)
+                    put("totalEpisodes", h.totalEpisodes)
+                    put("lastReadAt", h.lastReadAt)
+                    put("nextWrId", h.nextWrId ?: JSONObject.NULL)
+                    put("nextEpisodeTitle", h.nextEpisodeTitle ?: JSONObject.NULL)
+                    put("nextEpisodeHref", h.nextEpisodeHref ?: JSONObject.NULL)
+                    put("hasNew", if (h.hasNew) 1 else 0)
+                })
+            }
+            put("history", histArr)
+
+            val epArr = JSONArray()
+            localEps.forEach { ep ->
+                epArr.put(JSONObject().apply {
+                    put("toonId", ep.toonId)
+                    put("sourceId", ep.sourceId)
+                    put("wrId", ep.wrId)
+                    put("readAt", ep.readAt)
+                    put("lastPage", ep.lastPage)
+                })
+            }
+            put("readEpisodes", epArr)
+
+            val setArr = JSONArray()
+            localSettings.forEach { s ->
+                setArr.put(JSONObject().apply {
+                    put("toonId", s.toonId)
+                    put("sourceId", s.sourceId)
+                    put("viewMode", s.viewMode)
+                    put("readDirection", s.readDirection)
+                    put("splitMode", s.splitMode)
+                    put("updatedAt", s.updatedAt)
+                })
+            }
+            put("readerSettings", setArr)
+
+            val tombArr = JSONArray()
+            localTombs.forEach { t ->
+                tombArr.put(JSONObject().apply {
+                    put("entityType", t.entityType)
+                    put("entityId", SyncWire.tombstoneEntityId(t.entityId))
+                    put("deletedAt", t.deletedAt)
+                })
+            }
+            put("tombstones", tombArr)
+        }
+    }
+
+    override suspend fun getFullSnapshot(): JSONObject {
+        val favs = database.favoriteDao().all().filter { SyncWire.isSyncableSource(it.sourceId) }
+        val hist = database.readHistoryDao().all().filter { SyncWire.isSyncableSource(it.sourceId) }
+        val eps = database.readEpisodeDao().all().filter { SyncWire.isSyncableSource(it.sourceId) }
+        val settings = database.readerSettingDao().all().filter { SyncWire.isSyncableSource(it.sourceId) }
+
+        return JSONObject().apply {
+            put("version", 2)
+            put("exportedAt", System.currentTimeMillis())
+            put("appName", "Comics8")
+
+            val favArr = JSONArray()
+            favs.forEach { f ->
+                favArr.put(JSONObject().apply {
+                    put("id", f.id)
+                    put("sourceId", f.sourceId)
+                    put("title", f.title)
+                    put("thumbUrl", f.thumbUrl)
+                    put("href", f.href)
+                    put("genre", f.genre)
+                    put("updatedAt", f.updatedAt ?: JSONObject.NULL)
+                    put("savedAt", f.savedAt)
+                })
+            }
+            put("favorites", favArr)
+
+            val histArr = JSONArray()
+            hist.forEach { h ->
+                histArr.put(JSONObject().apply {
+                    put("toonId", h.toonId)
+                    put("sourceId", h.sourceId)
+                    put("toonTitle", h.toonTitle)
+                    put("toonThumbUrl", h.toonThumbUrl)
+                    put("toonHref", h.toonHref)
+                    put("lastWrId", h.lastWrId)
+                    put("lastEpisodeTitle", h.lastEpisodeTitle)
+                    put("lastEpisodeHref", h.lastEpisodeHref)
+                    put("lastReadOrder", h.lastReadOrder)
+                    put("totalEpisodes", h.totalEpisodes)
+                    put("lastReadAt", h.lastReadAt)
+                    put("nextWrId", h.nextWrId ?: JSONObject.NULL)
+                    put("nextEpisodeTitle", h.nextEpisodeTitle ?: JSONObject.NULL)
+                    put("nextEpisodeHref", h.nextEpisodeHref ?: JSONObject.NULL)
+                    put("hasNew", if (h.hasNew) 1 else 0)
+                })
+            }
+            put("history", histArr)
+
+            val epArr = JSONArray()
+            eps.forEach { ep ->
+                epArr.put(JSONObject().apply {
+                    put("toonId", ep.toonId)
+                    put("sourceId", ep.sourceId)
+                    put("wrId", ep.wrId)
+                    put("readAt", ep.readAt)
+                    put("lastPage", ep.lastPage)
+                })
+            }
+            put("readEpisodes", epArr)
+
+            val setArr = JSONArray()
+            settings.forEach { s ->
+                setArr.put(JSONObject().apply {
+                    put("toonId", s.toonId)
+                    put("sourceId", s.sourceId)
+                    put("viewMode", s.viewMode)
+                    put("readDirection", s.readDirection)
+                    put("splitMode", s.splitMode)
+                    put("updatedAt", s.updatedAt)
+                })
+            }
+            put("readerSettings", setArr)
+        }
+    }
+
+    override suspend fun applyRemoteChanges(serverChanges: JSONObject, serverTime: Long): Pair<Int, Int> {
+        // Apply received tombstones
+        val serverTombs = serverChanges.optJSONArray("tombstones") ?: JSONArray()
+        for (i in 0 until serverTombs.length()) {
+            val t = serverTombs.getJSONObject(i)
+            val type = t.optString("entityType", "")
+            val id = t.optString("entityId", "")
+            val workId = WorkId.parse(id)
+            when (type) {
+                "FAVORITE" -> database.favoriteDao().delete(workId)
+                "HISTORY" -> database.readHistoryDao().delete(workId)
+                "EPISODE" -> database.readEpisodeDao().deleteByToonId(workId)
+            }
+        }
+
+        // Apply received favorites
+        val serverFavs = serverChanges.optJSONArray("favorites") ?: JSONArray()
+        val favList = mutableListOf<FavoriteToon>()
+        for (i in 0 until serverFavs.length()) {
+            val f = serverFavs.getJSONObject(i)
+            val workId = BackupJson.workId(f, preferId = true) ?: continue
+            favList.add(
+                FavoriteToon(
+                    sourceId = workId.sourceId,
+                    id = workId.toonId,
+                    title = f.getString("title"),
+                    thumbUrl = f.optString("thumbUrl", ""),
+                    href = f.optString("href", ""),
+                    genre = f.optString("genre", ""),
+                    updatedAt = if (f.isNull("updatedAt")) null else f.optString("updatedAt", "").ifBlank { null },
+                    savedAt = f.optLong("savedAt", serverTime),
+                )
+            )
+        }
+        if (favList.isNotEmpty()) database.favoriteDao().upsertAll(favList)
+
+        // Apply received history
+        val serverHist = serverChanges.optJSONArray("history") ?: JSONArray()
+        val histList = mutableListOf<ReadHistory>()
+        for (i in 0 until serverHist.length()) {
+            val h = serverHist.getJSONObject(i)
+            val workId = BackupJson.workId(h, preferId = false) ?: continue
+            histList.add(
+                ReadHistory(
+                    sourceId = workId.sourceId,
+                    toonId = workId.toonId,
+                    toonTitle = h.getString("toonTitle"),
+                    toonThumbUrl = h.optString("toonThumbUrl", ""),
+                    toonHref = h.optString("toonHref", ""),
+                    lastWrId = h.getString("lastWrId"),
+                    lastEpisodeTitle = h.optString("lastEpisodeTitle", ""),
+                    lastEpisodeHref = h.optString("lastEpisodeHref", ""),
+                    lastReadOrder = h.optInt("lastReadOrder", 0),
+                    totalEpisodes = h.optInt("totalEpisodes", 0),
+                    lastReadAt = h.optLong("lastReadAt", serverTime),
+                    nextWrId = if (h.isNull("nextWrId")) null else h.optString("nextWrId", "").ifBlank { null },
+                    nextEpisodeTitle = if (h.isNull("nextEpisodeTitle")) null else h.optString("nextEpisodeTitle", "").ifBlank { null },
+                    nextEpisodeHref = if (h.isNull("nextEpisodeHref")) null else h.optString("nextEpisodeHref", "").ifBlank { null },
+                    hasNew = h.optInt("hasNew", 0) == 1,
+                )
+            )
+        }
+        if (histList.isNotEmpty()) database.readHistoryDao().upsertAll(histList)
+
+        // Apply received read episodes
+        val serverEps = serverChanges.optJSONArray("readEpisodes") ?: JSONArray()
+        val epList = mutableListOf<ReadEpisode>()
+        for (i in 0 until serverEps.length()) {
+            val ep = serverEps.getJSONObject(i)
+            val workId = BackupJson.workId(ep, preferId = false) ?: continue
+            epList.add(
+                ReadEpisode(
+                    sourceId = workId.sourceId,
+                    toonId = workId.toonId,
+                    wrId = ep.getString("wrId"),
+                    readAt = ep.optLong("readAt", serverTime),
+                    lastPage = ep.optInt("lastPage", 0),
+                )
+            )
+        }
+        if (epList.isNotEmpty()) database.readEpisodeDao().markReadAll(epList)
+
+        // Apply received reader settings
+        val serverSettings = serverChanges.optJSONArray("readerSettings") ?: JSONArray()
+        val setList = mutableListOf<ReaderSetting>()
+        for (i in 0 until serverSettings.length()) {
+            val s = serverSettings.getJSONObject(i)
+            val workId = BackupJson.workId(s, preferId = false) ?: continue
+            setList.add(
+                ReaderSetting(
+                    sourceId = workId.sourceId,
+                    toonId = workId.toonId,
+                    viewMode = s.optString("viewMode", "SCROLL"),
+                    readDirection = s.optString("readDirection", "TOP_TO_BOTTOM"),
+                    splitMode = s.optString("splitMode", "NONE"),
+                    updatedAt = s.optLong("updatedAt", serverTime),
+                )
+            )
+        }
+        if (setList.isNotEmpty()) database.readerSettingDao().saveAll(setList)
+
+        return Pair(favList.size, histList.size)
+    }
+
+    override suspend fun applyFullSnapshot(snapshot: JSONObject, serverTime: Long): Pair<Int, Int> {
+        val favs = snapshot.optJSONArray("favorites") ?: JSONArray()
+        val hist = snapshot.optJSONArray("history") ?: JSONArray()
+        val eps = snapshot.optJSONArray("readEpisodes") ?: JSONArray()
+        val settings = snapshot.optJSONArray("readerSettings") ?: JSONArray()
+
+        val favList = mutableListOf<FavoriteToon>()
+        for (i in 0 until favs.length()) {
+            val f = favs.getJSONObject(i)
+            val workId = BackupJson.workId(f, preferId = true) ?: continue
+            favList.add(
+                FavoriteToon(
+                    sourceId = workId.sourceId,
+                    id = workId.toonId,
+                    title = f.getString("title"),
+                    thumbUrl = f.optString("thumbUrl", ""),
+                    href = f.optString("href", ""),
+                    genre = f.optString("genre", ""),
+                    updatedAt = if (f.isNull("updatedAt")) null else f.optString("updatedAt", "").ifBlank { null },
+                    savedAt = f.optLong("savedAt", serverTime),
+                )
+            )
+        }
+        if (favList.isNotEmpty()) database.favoriteDao().upsertAll(favList)
+
+        val histList = mutableListOf<ReadHistory>()
+        for (i in 0 until hist.length()) {
+            val h = hist.getJSONObject(i)
+            val workId = BackupJson.workId(h, preferId = false) ?: continue
+            histList.add(
+                ReadHistory(
+                    sourceId = workId.sourceId,
+                    toonId = workId.toonId,
+                    toonTitle = h.getString("toonTitle"),
+                    toonThumbUrl = h.optString("toonThumbUrl", ""),
+                    toonHref = h.optString("toonHref", ""),
+                    lastWrId = h.getString("lastWrId"),
+                    lastEpisodeTitle = h.optString("lastEpisodeTitle", ""),
+                    lastEpisodeHref = h.optString("lastEpisodeHref", ""),
+                    lastReadOrder = h.optInt("lastReadOrder", 0),
+                    totalEpisodes = h.optInt("totalEpisodes", 0),
+                    lastReadAt = h.optLong("lastReadAt", serverTime),
+                    nextWrId = if (h.isNull("nextWrId")) null else h.optString("nextWrId", "").ifBlank { null },
+                    nextEpisodeTitle = if (h.isNull("nextEpisodeTitle")) null else h.optString("nextEpisodeTitle", "").ifBlank { null },
+                    nextEpisodeHref = if (h.isNull("nextEpisodeHref")) null else h.optString("nextEpisodeHref", "").ifBlank { null },
+                    hasNew = h.optInt("hasNew", 0) == 1,
+                )
+            )
+        }
+        if (histList.isNotEmpty()) database.readHistoryDao().upsertAll(histList)
+
+        val epList = mutableListOf<ReadEpisode>()
+        for (i in 0 until eps.length()) {
+            val ep = eps.getJSONObject(i)
+            val workId = BackupJson.workId(ep, preferId = false) ?: continue
+            epList.add(
+                ReadEpisode(
+                    sourceId = workId.sourceId,
+                    toonId = workId.toonId,
+                    wrId = ep.getString("wrId"),
+                    readAt = ep.optLong("readAt", serverTime),
+                    lastPage = ep.optInt("lastPage", 0),
+                )
+            )
+        }
+        if (epList.isNotEmpty()) database.readEpisodeDao().markReadAll(epList)
+
+        val setList = mutableListOf<ReaderSetting>()
+        for (i in 0 until settings.length()) {
+            val s = settings.getJSONObject(i)
+            val workId = BackupJson.workId(s, preferId = false) ?: continue
+            setList.add(
+                ReaderSetting(
+                    sourceId = workId.sourceId,
+                    toonId = workId.toonId,
+                    viewMode = s.optString("viewMode", "SCROLL"),
+                    readDirection = s.optString("readDirection", "TOP_TO_BOTTOM"),
+                    splitMode = s.optString("splitMode", "NONE"),
+                    updatedAt = s.optLong("updatedAt", serverTime),
+                )
+            )
+        }
+        if (setList.isNotEmpty()) database.readerSettingDao().saveAll(setList)
+
+        return Pair(favList.size, histList.size)
+    }
+}
+
+class SyncManager(
+    context: Context,
+    database: AppDatabase,
+    toonClient: ToonClient? = null,
+    client: OkHttpClient = OkHttpClient.Builder()
         .dns(com.comics8.core.network.FallbackDns)
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
         .build(),
+) : BaseSyncManager(
+    storage = AndroidRoomSyncStorageAdapter(context, database),
+    toonClient = toonClient,
+    client = client,
 ) {
+    companion object {
+        const val DEFAULT_SERVER_URL = SyncConstants.DEFAULT_SERVER_URL
+        const val KEY_SYNC_KEY = SyncConstants.KEY_SYNC_KEY
+        const val KEY_SERVER_URL = SyncConstants.KEY_SERVER_URL
+        const val KEY_AUTO_SYNC = SyncConstants.KEY_AUTO_SYNC
+        const val KEY_LAST_SYNCED_AT = SyncConstants.KEY_LAST_SYNCED_AT
+        const val KEY_USE_SERVER_PROXY = SyncConstants.KEY_USE_SERVER_PROXY
 
-    private val prefs: SharedPreferences = context.getSharedPreferences("comics8_sync", Context.MODE_PRIVATE)
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private var debounceJob: Job? = null
-    private val inFlight = AtomicBoolean(false)
+        fun generateSyncKey(): String = SyncConstants.generateSyncKey()
+    }
 
-    private suspend fun <T> exclusiveSync(busy: T, block: suspend () -> T): T {
-        if (!inFlight.compareAndSet(false, true)) return busy
-        return try {
-            block()
-        } finally {
-            inFlight.set(false)
+    suspend fun syncFull(): SyncResult = exclusiveSync(SyncResult(false, "이미 동기화 중입니다.")) {
+        val pullRes = syncPull()
+        if (!pullRes.success && !pullRes.message.contains("데이터가 없습니다")) {
+            return@exclusiveSync pullRes
         }
-    }
-
-    private val _syncState = MutableStateFlow(
-        SyncState(
-            syncKey = getOrGenerateSyncKey(),
-            serverUrl = DEFAULT_SERVER_URL,
-            autoSyncEnabled = prefs.getBoolean(KEY_AUTO_SYNC, true),
-            useServerProxy = prefs.getBoolean(KEY_USE_SERVER_PROXY, true),
-            lastSyncedAt = prefs.getLong(KEY_LAST_SYNCED_AT, 0L),
-        )
-    )
-    val syncState: StateFlow<SyncState> = _syncState.asStateFlow()
-
-    init {
-        val serverUrl = _syncState.value.serverUrl
-        val useProxy = _syncState.value.useServerProxy
-        toonClient?.proxyBaseUrl = com.comics8.core.sync.SyncConstants.proxyBaseUrl(serverUrl)
-        toonClient?.isProxyEnabled = useProxy
-    }
-
-    private fun getOrGenerateSyncKey(): String {
-        var key = prefs.getString(KEY_SYNC_KEY, null)
-        if (key.isNullOrBlank()) {
-            key = generateSyncKey()
-            prefs.edit().putString(KEY_SYNC_KEY, key).apply()
-        }
-        return key
-    }
-
-    fun generateNewKey(): String {
-        val newKey = generateSyncKey()
-        prefs.edit().putString(KEY_SYNC_KEY, newKey).apply()
-        _syncState.value = _syncState.value.copy(
-            syncKey = newKey,
-            syncMessage = "새 동기화 키가 발급되었습니다.",
-            isSuccess = true,
-        )
-        return newKey
-    }
-
-    fun updateSyncKey(newKey: String) {
-        val trimmed = newKey.trim()
-        if (trimmed.isNotBlank()) {
-            prefs.edit().putString(KEY_SYNC_KEY, trimmed).apply()
-            _syncState.value = _syncState.value.copy(
-                syncKey = trimmed,
-                syncMessage = "동기화 키가 설정되었습니다.",
-                isSuccess = true,
-            )
-        }
-    }
-
-    fun updateServerUrl(url: String) {
-        val trimmed = url.trim()
-        if (trimmed.isNotBlank()) {
-            prefs.edit().putString(KEY_SERVER_URL, trimmed).apply()
-            toonClient?.proxyBaseUrl = com.comics8.core.sync.SyncConstants.proxyBaseUrl(trimmed)
-            _syncState.value = _syncState.value.copy(serverUrl = trimmed)
-        }
-    }
-
-    fun setAutoSyncEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_AUTO_SYNC, enabled).apply()
-        _syncState.value = _syncState.value.copy(autoSyncEnabled = enabled)
-    }
-
-    fun setUseServerProxy(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_USE_SERVER_PROXY, enabled).apply()
-        toonClient?.isProxyEnabled = enabled
-        _syncState.value = _syncState.value.copy(useServerProxy = enabled)
-    }
-
-    suspend fun requestPairingCode(): com.comics8.core.model.PairRequestResult = withContext(Dispatchers.IO) {
-        val state = _syncState.value
-        val key = state.syncKey.trim()
-        if (key.isBlank()) return@withContext com.comics8.core.model.PairRequestResult(false, message = "동기화 키가 없습니다.")
-        val pairUrl = com.comics8.core.sync.SyncConstants.pairRequestUrl(state.serverUrl)
-        try {
-            val reqBody = JSONObject().apply {
-                put("clientTime", System.currentTimeMillis())
-            }.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
-            val req = Request.Builder()
-                .url(pairUrl)
-                .addComics8SyncHeaders(key)
-                .post(reqBody)
-                .build()
-            val resp = client.newCall(req).execute()
-            if (!resp.isSuccessful) {
-                return@withContext com.comics8.core.model.PairRequestResult(
-                    success = false,
-                    message = if (resp.code == 404) "서버에 페어링 기능이 지원되지 않습니다. 마스터 복구 키를 이용해주세요." else "페어링 코드 발급 실패 (${resp.code})"
-                )
-            }
-            val body = resp.body?.string().orEmpty()
-            val json = JSONObject(body)
-            val code = json.optString("code", "")
-            val expiresIn = json.optInt("expiresIn", 300)
-            if (code.isBlank()) {
-                return@withContext com.comics8.core.model.PairRequestResult(false, message = "서버 응답 오류")
-            }
-            com.comics8.core.model.PairRequestResult(true, code = code, expiresInSeconds = expiresIn)
-        } catch (e: Exception) {
-            com.comics8.core.model.PairRequestResult(false, message = e.localizedMessage ?: "서버 연결 오류")
-        }
-    }
-
-    suspend fun confirmPairingCode(code: String): com.comics8.core.model.PairConfirmResult = withContext(Dispatchers.IO) {
-        val trimmedCode = code.trim().replace(" ", "").replace("-", "")
-        if (trimmedCode.length != 6) {
-            return@withContext com.comics8.core.model.PairConfirmResult(false, message = "6자리 코드를 입력해주세요.")
-        }
-        val state = _syncState.value
-        val confirmUrl = com.comics8.core.sync.SyncConstants.pairConfirmUrl(state.serverUrl)
-        try {
-            val reqBody = JSONObject().apply {
-                put("code", trimmedCode)
-            }.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
-            val req = Request.Builder()
-                .url(confirmUrl)
-                .post(reqBody)
-                .build()
-            val resp = client.newCall(req).execute()
-            if (!resp.isSuccessful) {
-                return@withContext com.comics8.core.model.PairConfirmResult(
-                    success = false,
-                    message = if (resp.code == 404) "유효하지 않거나 만료된 코드입니다." else "인증 실패 (${resp.code})"
-                )
-            }
-            val body = resp.body?.string().orEmpty()
-            val json = JSONObject(body)
-            val syncKey = json.optString("syncKey", "")
-            if (syncKey.isBlank()) {
-                return@withContext com.comics8.core.model.PairConfirmResult(false, message = json.optString("message", "인증 실패"))
-            }
-            updateSyncKey(syncKey)
-            // Immediately perform full sync to restore existing data
-            syncPull()
-            com.comics8.core.model.PairConfirmResult(true, syncKey = syncKey, message = "기기 연결 및 데이터 가져오기 완료")
-        } catch (e: Exception) {
-            com.comics8.core.model.PairConfirmResult(false, message = e.localizedMessage ?: "서버 연결 오류")
-        }
-    }
-
-    fun triggerDebouncedPush() {
-        if (!_syncState.value.autoSyncEnabled) return
-        debounceJob?.cancel()
-        debounceJob = scope.launch {
-            delay(2500)
-            exclusiveSync(Unit) {
-                syncDeltaInternal(isSilent = true)
-                Unit
-            }
-        }
-    }
-
-    suspend fun syncPull(): SyncResult = withContext(Dispatchers.IO) {
-        exclusiveSync(SyncResult(false, "이미 동기화 중입니다.")) {
-            syncDeltaInternal(isSilent = false)
-        }
-    }
-
-    suspend fun syncPush(): SyncResult = withContext(Dispatchers.IO) {
-        exclusiveSync(SyncResult(false, "이미 동기화 중입니다.")) {
-            syncPushInternal(isSilent = false)
-        }
-    }
-
-    suspend fun syncFull(): SyncResult = withContext(Dispatchers.IO) {
-        exclusiveSync(SyncResult(false, "이미 동기화 중입니다.")) {
-            doFullSync()
-        }
+        syncPush()
     }
 
     /** Silent delta if no other sync is running; null when skipped. */
     suspend fun syncIfIdle(): SyncResult? = withContext(Dispatchers.IO) {
         exclusiveSync(null) {
-            syncDeltaInternal(isSilent = true)
+            syncDelta()
         }
-    }
-
-    private suspend fun doFullSync(): SyncResult {
-        val pullRes = syncPullInternal(isSilent = true)
-        if (!pullRes.success && !pullRes.message.contains("데이터가 없습니다")) {
-            _syncState.value = _syncState.value.copy(
-                isSyncing = false,
-                isSuccess = false,
-                syncMessage = pullRes.message,
-            )
-            return pullRes
-        }
-        return syncPushInternal(isSilent = false)
-    }
-
-    /**
-     * Incremental (Delta) Sync: Exchanges only changes since lastSyncedAt.
-     */
-    suspend fun syncDeltaInternal(isSilent: Boolean): SyncResult = withContext(Dispatchers.IO) {
-        val state = _syncState.value
-        val baseUrl = state.serverUrl.trimEnd('/')
-        val deltaUrl = if (baseUrl.endsWith("/sync")) "$baseUrl/delta" else "$baseUrl/sync/delta"
-        val key = state.syncKey.trim()
-        if (key.isBlank()) return@withContext SyncResult(false, "동기화 키가 비어있습니다.")
-
-        val since = prefs.getLong(KEY_LAST_SYNCED_AT, 0L)
-        if (since == 0L) {
-            // First time sync: perform full pull, then push local
-            return@withContext doFullSync()
-        }
-
-        if (!isSilent) {
-            _syncState.value = _syncState.value.copy(isSyncing = true, syncMessage = null)
-        }
-
-        try {
-            val localFavs = database.favoriteDao().getSince(since).filter { SyncWire.isSyncableSource(it.sourceId) }
-            val localHist = database.readHistoryDao().getSince(since).filter { SyncWire.isSyncableSource(it.sourceId) }
-            val localEps = database.readEpisodeDao().getSince(since).filter { SyncWire.isSyncableSource(it.sourceId) }
-            val localSettings = database.readerSettingDao().getSince(since).filter { SyncWire.isSyncableSource(it.sourceId) }
-            val localTombs = database.tombstoneDao().getSince(since).filter { SyncWire.isSyncableSource(WorkId.parse(it.entityId).sourceId) }
-
-            val changesObj = JSONObject().apply {
-                val favArr = JSONArray()
-                localFavs.forEach { f ->
-                    favArr.put(JSONObject().apply {
-                        put("id", f.id)
-                        put("sourceId", f.sourceId)
-                        put("title", f.title)
-                        put("thumbUrl", f.thumbUrl)
-                        put("href", f.href)
-                        put("genre", f.genre)
-                        put("updatedAt", f.updatedAt ?: JSONObject.NULL)
-                        put("savedAt", f.savedAt)
-                    })
-                }
-                put("favorites", favArr)
-
-                val histArr = JSONArray()
-                localHist.forEach { h ->
-                    histArr.put(JSONObject().apply {
-                        put("toonId", h.toonId)
-                        put("sourceId", h.sourceId)
-                        put("toonTitle", h.toonTitle)
-                        put("toonThumbUrl", h.toonThumbUrl)
-                        put("toonHref", h.toonHref)
-                        put("lastWrId", h.lastWrId)
-                        put("lastEpisodeTitle", h.lastEpisodeTitle)
-                        put("lastEpisodeHref", h.lastEpisodeHref)
-                        put("lastReadOrder", h.lastReadOrder)
-                        put("totalEpisodes", h.totalEpisodes)
-                        put("lastReadAt", h.lastReadAt)
-                        put("nextWrId", h.nextWrId ?: JSONObject.NULL)
-                        put("nextEpisodeTitle", h.nextEpisodeTitle ?: JSONObject.NULL)
-                        put("nextEpisodeHref", h.nextEpisodeHref ?: JSONObject.NULL)
-                        put("hasNew", h.hasNew)
-                    })
-                }
-                put("history", histArr)
-
-                val epArr = JSONArray()
-                localEps.forEach { ep ->
-                    epArr.put(JSONObject().apply {
-                        put("toonId", ep.toonId)
-                        put("sourceId", ep.sourceId)
-                        put("wrId", ep.wrId)
-                        put("readAt", ep.readAt)
-                        put("lastPage", ep.lastPage)
-                    })
-                }
-                put("readEpisodes", epArr)
-
-                val setArr = JSONArray()
-                localSettings.forEach { s ->
-                    setArr.put(JSONObject().apply {
-                        put("toonId", s.toonId)
-                        put("sourceId", s.sourceId)
-                        put("viewMode", s.viewMode)
-                        put("readDirection", s.readDirection)
-                        put("splitMode", s.splitMode)
-                        put("updatedAt", s.updatedAt)
-                    })
-                }
-                put("readerSettings", setArr)
-
-                val tombArr = JSONArray()
-                localTombs.forEach { t ->
-                    tombArr.put(JSONObject().apply {
-                        put("entityType", t.entityType)
-                        put("entityId", SyncWire.tombstoneEntityId(t.entityId))
-                        put("deletedAt", t.deletedAt)
-                    })
-                }
-                put("tombstones", tombArr)
-            }
-
-            val reqObj = JSONObject().apply {
-                put("since", since)
-                put("clientTime", System.currentTimeMillis())
-                put("version", 2)
-                put("changes", changesObj)
-            }
-
-            val mediaType = "application/json; charset=utf-8".toMediaType()
-            val reqBody = reqObj.toString().toRequestBody(mediaType)
-            val req = Request.Builder()
-                .url(deltaUrl)
-                .addComics8SyncHeaders(key)
-                .post(reqBody)
-                .build()
-
-            val resp = client.newCall(req).execute()
-            if (!resp.isSuccessful) {
-                if (resp.code == 404) {
-                    return@withContext syncPullInternal(isSilent)
-                }
-                val err = "증분 동기화 서버 오류 (${resp.code})"
-                if (!isSilent) {
-                    _syncState.value = _syncState.value.copy(isSyncing = false, isSuccess = false, syncMessage = err)
-                }
-                return@withContext SyncResult(false, err)
-            }
-
-            val body = resp.body?.string().orEmpty()
-            val json = JSONObject(body)
-            val serverTime = json.optLong("serverTime", System.currentTimeMillis())
-            val serverChanges = json.optJSONObject("changes") ?: JSONObject()
-
-            // Apply received tombstones
-            val serverTombs = serverChanges.optJSONArray("tombstones") ?: JSONArray()
-            for (i in 0 until serverTombs.length()) {
-                val t = serverTombs.getJSONObject(i)
-                val type = t.optString("entityType", "")
-                val id = t.optString("entityId", "")
-                val workId = WorkId.parse(id)
-                if (type == "FAVORITE") database.favoriteDao().delete(workId)
-                else if (type == "HISTORY") database.readHistoryDao().delete(workId)
-                else if (type == "EPISODE") database.readEpisodeDao().deleteByToonId(workId)
-            }
-
-            // Apply received favorites
-            val serverFavs = serverChanges.optJSONArray("favorites") ?: JSONArray()
-            val favList = mutableListOf<FavoriteToon>()
-            for (i in 0 until serverFavs.length()) {
-                val f = serverFavs.getJSONObject(i)
-                val workId = BackupJson.workId(f, preferId = true) ?: continue
-                favList.add(
-                    FavoriteToon(
-                        sourceId = workId.sourceId,
-                        id = workId.toonId,
-                        title = f.getString("title"),
-                        thumbUrl = f.optString("thumbUrl", ""),
-                        href = f.optString("href", ""),
-                        genre = f.optString("genre", ""),
-                        updatedAt = if (f.isNull("updatedAt")) null else f.optString("updatedAt", "").ifBlank { null },
-                        savedAt = f.optLong("savedAt", serverTime),
-                    )
-                )
-            }
-            if (favList.isNotEmpty()) database.favoriteDao().upsertAll(favList)
-
-            // Apply received history
-            val serverHist = serverChanges.optJSONArray("history") ?: JSONArray()
-            val histList = mutableListOf<ReadHistory>()
-            for (i in 0 until serverHist.length()) {
-                val h = serverHist.getJSONObject(i)
-                val workId = BackupJson.workId(h, preferId = false) ?: continue
-                histList.add(
-                    ReadHistory(
-                        sourceId = workId.sourceId,
-                        toonId = workId.toonId,
-                        toonTitle = h.getString("toonTitle"),
-                        toonThumbUrl = h.optString("toonThumbUrl", ""),
-                        toonHref = h.optString("toonHref", ""),
-                        lastWrId = h.getString("lastWrId"),
-                        lastEpisodeTitle = h.getString("lastEpisodeTitle"),
-                        lastEpisodeHref = h.optString("lastEpisodeHref", ""),
-                        lastReadOrder = h.optInt("lastReadOrder", 1),
-                        totalEpisodes = h.optInt("totalEpisodes", 1),
-                        lastReadAt = h.optLong("lastReadAt", serverTime),
-                        nextWrId = if (h.isNull("nextWrId")) null else h.optString("nextWrId", "").ifBlank { null },
-                        nextEpisodeTitle = if (h.isNull("nextEpisodeTitle")) null else h.optString("nextEpisodeTitle", "").ifBlank { null },
-                        nextEpisodeHref = if (h.isNull("nextEpisodeHref")) null else h.optString("nextEpisodeHref", "").ifBlank { null },
-                        hasNew = h.optBoolean("hasNew", false),
-                    )
-                )
-            }
-            if (histList.isNotEmpty()) database.readHistoryDao().upsertAll(histList)
-
-            // Apply received episodes
-            val serverEps = serverChanges.optJSONArray("readEpisodes") ?: JSONArray()
-            val epList = mutableListOf<ReadEpisode>()
-            for (i in 0 until serverEps.length()) {
-                val ep = serverEps.getJSONObject(i)
-                val workId = BackupJson.workId(ep, preferId = false) ?: continue
-                epList.add(
-                    ReadEpisode(
-                        sourceId = workId.sourceId,
-                        toonId = workId.toonId,
-                        wrId = ep.getString("wrId"),
-                        readAt = ep.optLong("readAt", serverTime),
-                        lastPage = ep.optInt("lastPage", 0),
-                    )
-                )
-            }
-            if (epList.isNotEmpty()) database.readEpisodeDao().markReadAll(epList)
-
-            // Apply received settings
-            val serverSettings = serverChanges.optJSONArray("readerSettings") ?: JSONArray()
-            val settingList = mutableListOf<ReaderSetting>()
-            for (i in 0 until serverSettings.length()) {
-                val s = serverSettings.getJSONObject(i)
-                val workId = BackupJson.workId(s, preferId = false) ?: continue
-                settingList.add(
-                    ReaderSetting(
-                        sourceId = workId.sourceId,
-                        toonId = workId.toonId,
-                        viewMode = s.optString("viewMode", "SINGLE"),
-                        readDirection = s.optString("readDirection", "RIGHT_TO_LEFT"),
-                        splitMode = s.optString("splitMode", "FIT"),
-                        updatedAt = s.optLong("updatedAt", serverTime),
-                    )
-                )
-            }
-            if (settingList.isNotEmpty()) database.readerSettingDao().saveAll(settingList)
-
-            // Cleanup old tombstones
-            database.tombstoneDao().deleteOlderThan(System.currentTimeMillis() - 30L * 86400000L)
-
-            prefs.edit().putLong(KEY_LAST_SYNCED_AT, serverTime).apply()
-
-            val msg = "증분 동기화 완료: 수신 (즐겨찾기 ${favList.size}개, 기록 ${histList.size}개)"
-            _syncState.value = _syncState.value.copy(
-                isSyncing = false,
-                isSuccess = true,
-                lastSyncedAt = serverTime,
-                syncMessage = msg,
-            )
-            return@withContext SyncResult(true, msg, favList.size, histList.size)
-        } catch (e: Exception) {
-            val err = "증분 동기화 실패: ${e.localizedMessage ?: "서버 연결 오류"}"
-            if (!isSilent) {
-                _syncState.value = _syncState.value.copy(isSyncing = false, isSuccess = false, syncMessage = err)
-            }
-            return@withContext SyncResult(false, err)
-        }
-    }
-
-    private suspend fun syncPullInternal(isSilent: Boolean): SyncResult {
-        val state = _syncState.value
-        val url = state.serverUrl.trimEnd('/')
-        val key = state.syncKey.trim()
-        if (key.isBlank()) return SyncResult(false, "동기화 키가 비어있습니다.")
-
-        if (!isSilent) {
-            _syncState.value = _syncState.value.copy(isSyncing = true, syncMessage = null)
-        }
-
-        try {
-            val req = Request.Builder()
-                .url(url)
-                .addComics8SyncHeaders(key)
-                .get()
-                .build()
-
-            val resp = client.newCall(req).execute()
-            if (!resp.isSuccessful) {
-                val err = "서버 응답 오류 (${resp.code})"
-                if (!isSilent) {
-                    _syncState.value = _syncState.value.copy(isSyncing = false, isSuccess = false, syncMessage = err)
-                }
-                return SyncResult(false, err)
-            }
-
-            val body = resp.body?.string().orEmpty()
-            if (body.isBlank()) {
-                val err = "빈 응답을 받았습니다."
-                if (!isSilent) {
-                    _syncState.value = _syncState.value.copy(isSyncing = false, isSuccess = false, syncMessage = err)
-                }
-                return SyncResult(false, err)
-            }
-
-            val json = JSONObject(body)
-            if (json.optBoolean("empty", false)) {
-                val msg = "서버에 저장된 데이터가 없습니다."
-                if (!isSilent) {
-                    _syncState.value = _syncState.value.copy(isSyncing = false, isSuccess = true, syncMessage = msg)
-                }
-                return SyncResult(true, msg)
-            }
-
-            val restoreResult = BackupManager.restoreBackupJson(database, body)
-            val nowMs = System.currentTimeMillis()
-            prefs.edit().putLong(KEY_LAST_SYNCED_AT, nowMs).apply()
-
-            val successMsg = "동기화 완료: 즐겨찾기 ${restoreResult.favoriteCount}개, 기록 ${restoreResult.historyCount}개"
-            _syncState.value = _syncState.value.copy(
-                isSyncing = false,
-                isSuccess = true,
-                lastSyncedAt = nowMs,
-                syncMessage = successMsg,
-            )
-            return SyncResult(true, successMsg, restoreResult.favoriteCount, restoreResult.historyCount)
-        } catch (e: Exception) {
-            val err = "동기화 실패: ${e.localizedMessage ?: "서버 연결 오류"}"
-            if (!isSilent) {
-                _syncState.value = _syncState.value.copy(isSyncing = false, isSuccess = false, syncMessage = err)
-            }
-            return SyncResult(false, err)
-        }
-    }
-
-    private suspend fun syncPushInternal(isSilent: Boolean): SyncResult {
-        val state = _syncState.value
-        val url = state.serverUrl.trimEnd('/')
-        val key = state.syncKey.trim()
-        if (key.isBlank()) return SyncResult(false, "동기화 키가 비어있습니다.")
-
-        if (!isSilent) {
-            _syncState.value = _syncState.value.copy(isSyncing = true, syncMessage = null)
-        }
-
-        try {
-            val backupJson = BackupManager.createBackupJson(database)
-            val mediaType = "application/json; charset=utf-8".toMediaType()
-            val reqBody = backupJson.toRequestBody(mediaType)
-
-            val req = Request.Builder()
-                .url(url)
-                .addComics8SyncHeaders(key)
-                .post(reqBody)
-                .build()
-
-            val resp = client.newCall(req).execute()
-            if (!resp.isSuccessful) {
-                val err = "서버 업로드 오류 (${resp.code})"
-                if (!isSilent) {
-                    _syncState.value = _syncState.value.copy(isSyncing = false, isSuccess = false, syncMessage = err)
-                }
-                return SyncResult(false, err)
-            }
-
-            val nowMs = System.currentTimeMillis()
-            prefs.edit().putLong(KEY_LAST_SYNCED_AT, nowMs).apply()
-
-            val stats = BackupManager.getStats(database)
-            val successMsg = "서버 동기화 완료: 즐겨찾기 ${stats.favoriteCount}개, 기록 ${stats.historyCount}개"
-            _syncState.value = _syncState.value.copy(
-                isSyncing = false,
-                isSuccess = true,
-                lastSyncedAt = nowMs,
-                syncMessage = successMsg,
-            )
-            return SyncResult(true, successMsg, stats.favoriteCount, stats.historyCount)
-        } catch (e: Exception) {
-            val err = "업로드 실패: ${e.localizedMessage ?: "서버 연결 오류"}"
-            if (!isSilent) {
-                _syncState.value = _syncState.value.copy(isSyncing = false, isSuccess = false, syncMessage = err)
-            }
-            return SyncResult(false, err)
-        }
-    }
-
-    companion object {
-        const val KEY_SYNC_KEY = com.comics8.core.sync.SyncConstants.KEY_SYNC_KEY
-        const val KEY_SERVER_URL = com.comics8.core.sync.SyncConstants.KEY_SERVER_URL
-        const val KEY_AUTO_SYNC = com.comics8.core.sync.SyncConstants.KEY_AUTO_SYNC
-        const val KEY_LAST_SYNCED_AT = com.comics8.core.sync.SyncConstants.KEY_LAST_SYNCED_AT
-        const val KEY_USE_SERVER_PROXY = com.comics8.core.sync.SyncConstants.KEY_USE_SERVER_PROXY
-        const val DEFAULT_SERVER_URL = com.comics8.core.sync.SyncConstants.DEFAULT_SERVER_URL
-
-        fun generateSyncKey(): String = com.comics8.core.sync.SyncConstants.generateSyncKey()
     }
 }
