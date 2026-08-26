@@ -86,18 +86,24 @@ if [ ! -f "$APK_PATH" ]; then
 fi
 
 # 3. Commit version bump in dev repo
-echo "📝 3/5: Committing version bump to dev repo..."
+echo "📝 3/6: Committing version bump to dev repo..."
 git add app/build.gradle.kts desktop/build.gradle.kts desktop/src/main/kotlin/com/comics8/desktop/DesktopVersion.kt
 if ! git diff --staged --quiet; then
     git commit -m "chore: Bump version to ${VERSION_NAME} (code ${VERSION_CODE})"
 fi
 git push origin main
 
-# 4. Sync open-source modules to public repo
-echo "🔄 4/5: Syncing open-source repository..."
+# 4. Build macOS Desktop App via SSH (if configured)
+if [[ -n "${COMICS8_MAC_SSH:-}" ]]; then
+    echo "🍏 4/6: Building macOS Desktop App via ${COMICS8_MAC_SSH}..."
+    ./scripts/update-mac-app-remote.sh origin/main "${MAC_ZIP_PATH}" || echo "⚠️ Mac build failed, continuing."
+fi
+
+# 5. Sync open-source modules to public repo
+echo "🔄 5/6: Syncing open-source repository..."
 ./scripts/sync-public-repo.sh "${PUBLIC_REPO}"
 
-# 5. Upload binaries and version.json to Sync Server (if reachable)
+# 6. Upload binaries and version.json to Sync Server (if reachable)
 SERVER_HOST="${COMICS8_SERVER_HOST:-192.168.0.136}"
 SERVER_USER="${COMICS8_SERVER_USER:-crudust}"
 SERVER_DOWNLOAD_DIR="${COMICS8_SERVER_DOWNLOAD_DIR:-/home/crudust/comics8-sync/data/downloads}"
