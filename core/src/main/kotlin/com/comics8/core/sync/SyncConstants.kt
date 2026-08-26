@@ -44,6 +44,10 @@ object SyncConstants {
         return "$proxyBase?url=$encodedTarget"
     }
 
+    fun subscriptionVerifyUrl(serverUrl: String = DEFAULT_SERVER_URL): String = "${apiRoot(serverUrl)}/subscription/verify"
+
+    fun subscriptionStatusUrl(serverUrl: String = DEFAULT_SERVER_URL): String = "${apiRoot(serverUrl)}/subscription/status"
+
     fun resolveDownloadUrl(downloadPath: String, serverUrl: String = DEFAULT_SERVER_URL): String {
         if (downloadPath.startsWith("http://") || downloadPath.startsWith("https://")) {
             return downloadPath

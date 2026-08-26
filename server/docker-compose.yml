@@ -1,0 +1,41 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: comics8-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-comics8}
+      POSTGRES_USER: ${POSTGRES_USER:-comics8}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-comics8password}
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - ${DATA_DIR:-/home/crudust/comics8-sync/data}/postgres:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-comics8} -d ${POSTGRES_DB:-comics8}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: comics8-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: ${PORT:-8905}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-comics8}:${POSTGRES_PASSWORD:-comics8password}@postgres:5432/${POSTGRES_DB:-comics8}
+      DATA_DIR: /app/data
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-/app/service-account.json}
+      GOOGLE_PLAY_PACKAGE_NAME: ${GOOGLE_PLAY_PACKAGE_NAME:-com.comics8.monitor}
+      PUBSUB_SUBSCRIPTION_ID: ${PUBSUB_SUBSCRIPTION_ID:-}
+    ports:
+      - "${PORT:-8905}:${PORT:-8905}"
+    volumes:
+      - ${DATA_DIR:-/home/crudust/comics8-sync/data}:/app/data
+      - ./service-account.json:/app/service-account.json:ro

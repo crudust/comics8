@@ -16,3 +16,7 @@ app/debug
 .aider*
 __pycache__/
 *.py[cod]
+.pytest_cache/
+server/data/
+server/service-account.json
+.env
