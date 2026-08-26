@@ -49,12 +49,12 @@ find "${WORK_DIR}" -name ".gradle" -type d -exec rm -rf {} + 2>/dev/null || true
 # Filter examples/sources to only keep official clean open-source plugins (peppercarrot.js)
 find "${WORK_DIR}/examples/sources" -type f ! -name "peppercarrot.js" -delete 2>/dev/null || true
 
-# Remove non-public test fixtures
+# Remove non-public test fixtures and internal knowledge
+rm -rf "${WORK_DIR}/knowledge" "${WORK_DIR}/core/src/test/resources/hitomi" 2>/dev/null || true
 rm -f "${WORK_DIR}/core/src/test/kotlin/source/js/ElevenJsSourceTest.kt" \
       "${WORK_DIR}/core/src/test/kotlin/source/js/HitomiJsSourceTest.kt" \
       "${WORK_DIR}/core/src/test/kotlin/source/js/RawkumaJsSourceTest.kt" \
       "${WORK_DIR}/core/src/test/kotlin/source/js/RawkumaDebugLiveTest.kt" 2>/dev/null || true
-rm -rf "${WORK_DIR}/core/src/test/resources/hitomi" 2>/dev/null || true
 
 # Generate desktop-only settings.gradle.kts
 cat << 'SETTINGS_EOF' > "${WORK_DIR}/settings.gradle.kts"

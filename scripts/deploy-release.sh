@@ -61,7 +61,8 @@ sed_inplace() {
 echo "🔧 1/5: Syncing codebase version..."
 sed_inplace "s/versionCode = [0-9]+/versionCode = ${VERSION_CODE}/" app/build.gradle.kts
 sed_inplace "s/versionName = \"[^\"]+\"/versionName = \"${VERSION_NAME}\"/" app/build.gradle.kts
-sed_inplace "s/packageVersion = \"[^\"]+\"/packageVersion = \"${VERSION_NAME}\"/" desktop/build.gradle.kts
+DESKTOP_PKG_VER="${VERSION_NAME%%-*}"
+sed_inplace "s/packageVersion = \"[^\"]+\"/packageVersion = \"${DESKTOP_PKG_VER}\"/" desktop/build.gradle.kts
 
 cat <<VERSION_EOF > desktop/src/main/kotlin/DesktopVersion.kt
 package com.comics8.desktop
