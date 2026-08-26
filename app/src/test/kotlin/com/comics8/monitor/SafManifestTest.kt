@@ -15,11 +15,11 @@ class SafManifestTest {
 
     @Test
     fun coreLocalSourcesStayFileBased() {
-        val zip = workspaceFile("core/src/main/kotlin/com/comics8/core/source/local/ZipArchive.kt").readText()
+        val zip = workspaceFile("core/src/main/kotlin/source/local/ZipArchive.kt").readText()
         assertThat(zip).doesNotContain("android.")
         assertThat(zip).doesNotContain("ParcelFileDescriptor")
         assertThat(zip).doesNotContain("DocumentFile")
-        val scanner = workspaceFile("core/src/main/kotlin/com/comics8/core/source/local/LibraryScanner.kt").readText()
+        val scanner = workspaceFile("core/src/main/kotlin/source/local/LibraryScanner.kt").readText()
         assertThat(scanner).doesNotContain("android.")
     }
 

@@ -63,7 +63,7 @@ sed_inplace "s/versionCode = [0-9]+/versionCode = ${VERSION_CODE}/" app/build.gr
 sed_inplace "s/versionName = \"[^\"]+\"/versionName = \"${VERSION_NAME}\"/" app/build.gradle.kts
 sed_inplace "s/packageVersion = \"[^\"]+\"/packageVersion = \"${VERSION_NAME}\"/" desktop/build.gradle.kts
 
-cat <<VERSION_EOF > desktop/src/main/kotlin/com/comics8/desktop/DesktopVersion.kt
+cat <<VERSION_EOF > desktop/src/main/kotlin/DesktopVersion.kt
 package com.comics8.desktop
 
 object DesktopVersion {
@@ -87,7 +87,7 @@ fi
 
 # 3. Commit version bump in dev repo
 echo "📝 3/5: Committing version bump to dev repo..."
-git add app/build.gradle.kts desktop/build.gradle.kts desktop/src/main/kotlin/com/comics8/desktop/DesktopVersion.kt
+git add app/build.gradle.kts desktop/build.gradle.kts desktop/src/main/kotlin/DesktopVersion.kt
 if ! git diff --staged --quiet; then
     git commit -m "chore: Bump version to ${VERSION_NAME} (code ${VERSION_CODE})"
 fi

@@ -57,7 +57,7 @@ internal object LocalTestZips {
 
     fun sourceFile(name: String): File =
         listOf(
-            File("src/main/kotlin/com/comics8/core/source/local/$name"),
-            File("core/src/main/kotlin/com/comics8/core/source/local/$name"),
+            File("src/main/kotlin/source/local/$name"),
+            File("core/src/main/kotlin/source/local/$name"),
         ).first { it.isFile }
 }

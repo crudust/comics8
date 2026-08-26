@@ -45,7 +45,7 @@ git fetch origin
 git reset --hard "${REF}"
 
 if [[ -n "${COMICS8_VERSION_NAME}" && -n "${COMICS8_VERSION_CODE}" ]]; then
-    cat > desktop/src/main/kotlin/com/comics8/desktop/DesktopVersion.kt <<EOF
+    cat > desktop/src/main/kotlin/DesktopVersion.kt <<EOF
 package com.comics8.desktop
 
 object DesktopVersion {

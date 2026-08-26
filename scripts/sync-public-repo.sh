@@ -50,10 +50,10 @@ find "${WORK_DIR}" -name ".gradle" -type d -exec rm -rf {} + 2>/dev/null || true
 find "${WORK_DIR}/examples/sources" -type f ! -name "peppercarrot.js" -delete 2>/dev/null || true
 
 # Remove non-public test fixtures
-rm -f "${WORK_DIR}/core/src/test/kotlin/com/comics8/core/source/js/ElevenJsSourceTest.kt" \
-      "${WORK_DIR}/core/src/test/kotlin/com/comics8/core/source/js/HitomiJsSourceTest.kt" \
-      "${WORK_DIR}/core/src/test/kotlin/com/comics8/core/source/js/RawkumaJsSourceTest.kt" \
-      "${WORK_DIR}/core/src/test/kotlin/com/comics8/core/source/js/RawkumaDebugLiveTest.kt" 2>/dev/null || true
+rm -f "${WORK_DIR}/core/src/test/kotlin/source/js/ElevenJsSourceTest.kt" \
+      "${WORK_DIR}/core/src/test/kotlin/source/js/HitomiJsSourceTest.kt" \
+      "${WORK_DIR}/core/src/test/kotlin/source/js/RawkumaJsSourceTest.kt" \
+      "${WORK_DIR}/core/src/test/kotlin/source/js/RawkumaDebugLiveTest.kt" 2>/dev/null || true
 rm -rf "${WORK_DIR}/core/src/test/resources/hitomi" 2>/dev/null || true
 
 # Generate desktop-only settings.gradle.kts
