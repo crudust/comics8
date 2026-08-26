@@ -297,7 +297,27 @@ object JaStrings : AppStrings {
     override val actionUpdateLater: String = "後で"
     override val labelUpdateNotification: String = "アップデート通知"
 
-    // 10. Dialogs & Messages / Error / Toast
+    // 10. Notification Settings
+    override val sectionNotificationSettings: String = "新着通知設定"
+    override val labelPeriodicUpdateNotification: String = "新着話の更新通知"
+    override val descPeriodicUpdateNotification: String = "お気に入り作品の新着話を定期的に確認して通知します。"
+    override val labelNotificationInterval: String = "確認間隔"
+    override val interval15m: String = "15分"
+    override val interval30m: String = "30分"
+    override val interval1h: String = "1時間"
+    override val interval3h: String = "3時間"
+    override val interval6h: String = "6時間"
+    override val interval12h: String = "12時間"
+    override val interval24h: String = "24時間"
+    override val labelNotificationSources: String = "通知対象ソース"
+    override val descNotificationSources: String = "新着通知を受信するソースを選択します。"
+    override val labelSourceUpdateNotification: String = "新着更新通知を受け取る"
+    override val descSourceUpdateNotification: String = "このソースのお気に入り作品に新着話が追加された際に通知を受け取ります。"
+    override val labelNotificationPermissionRequired: String = "通知権限が必要です"
+    override val descNotificationPermissionRequired: String = "新着通知を受け取るにはシステムの通知権限を許可してください。"
+    override val actionGrantPermission: String = "権限を許可"
+
+    // 11. Dialogs & Messages / Error / Toast
     override val msgUpdateCheckFailed: String = "アップデート確認に失敗しました"
     override fun msgLatestVersionInUse(version: String): String = "最新バージョン (v$version) を使用中です。"
     override val msgUpdateDownloadFailed: String = "アップデートのダウンロードに失敗しました"

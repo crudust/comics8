@@ -82,6 +82,15 @@ object DesktopSourcePrefs : SourceSettings {
         prefs.put(SourcePrefs.progressDisplayModeKey(sourceId), mode.name)
     }
 
+    override fun isNotificationEnabled(sourceId: String): Boolean {
+        val key = SourcePrefs.notificationKey(sourceId)
+        return if (hasKey(key)) prefs.getBoolean(key, true) else true
+    }
+
+    override fun setNotificationEnabled(sourceId: String, enabled: Boolean) {
+        prefs.putBoolean(SourcePrefs.notificationKey(sourceId), enabled)
+    }
+
     private fun rawPref(key: String): String? {
         val present = hasKey(key)
         val value = if (present) prefs.get(key, "") else null

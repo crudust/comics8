@@ -295,7 +295,27 @@ interface AppStrings {
     val actionUpdateLater: String
     val labelUpdateNotification: String
 
-    // 10. Dialogs & Messages / Error / Toast
+    // 10. Notification Settings
+    val sectionNotificationSettings: String
+    val labelPeriodicUpdateNotification: String
+    val descPeriodicUpdateNotification: String
+    val labelNotificationInterval: String
+    val interval15m: String
+    val interval30m: String
+    val interval1h: String
+    val interval3h: String
+    val interval6h: String
+    val interval12h: String
+    val interval24h: String
+    val labelNotificationSources: String
+    val descNotificationSources: String
+    val labelSourceUpdateNotification: String
+    val descSourceUpdateNotification: String
+    val labelNotificationPermissionRequired: String
+    val descNotificationPermissionRequired: String
+    val actionGrantPermission: String
+
+    // 11. Dialogs & Messages / Error / Toast
     val msgUpdateCheckFailed: String
     fun msgLatestVersionInUse(version: String): String
     val msgUpdateDownloadFailed: String

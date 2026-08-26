@@ -241,9 +241,7 @@ class DesktopViewModel(
             scope.launch {
                 val res = sm.syncPull()
                 if (res.success && (res.favoritesCount > 0 || res.historyCount > 0)) {
-                    if (_state.value.activeSourceId != null) {
-                        loadPage(_state.value.page, replace = true)
-                    }
+                    applySyncRefresh()
                 }
             }
         }
@@ -1083,28 +1081,85 @@ class DesktopViewModel(
 
                     val itemKey = item.workId().storageKey()
                     if (lastP <= 1) {
-                        toonTotalCounts[itemKey] = result.items.size
-                        toonLastPageCounts[itemKey] = result.items.size
+                        val exactTotal = result.items.size
+                        toonTotalCounts[itemKey] = exactTotal
+                        toonLastPageCounts[itemKey] = exactTotal
+                        val existing = repository.getHistory(item.workId())
+                        if (existing != null) {
+                            val safeOrder = existing.lastReadOrder.coerceIn(0, exactTotal)
+                            val hasNew = safeOrder < exactTotal
+                            if (existing.totalEpisodes != exactTotal || existing.lastReadOrder != safeOrder || existing.hasNew != hasNew) {
+                                val updated = existing.copy(
+                                    totalEpisodes = exactTotal,
+                                    lastReadOrder = safeOrder,
+                                    hasNew = hasNew,
+                                )
+                                repository.saveHistory(updated)
+                                val (progressText, readCount) = listingProgress(
+                                    item.sourceId,
+                                    updated.lastReadOrder,
+                                    updated.totalEpisodes,
+                                    item.workId(),
+                                )
+                                _state.update { curr ->
+                                    val updatedItems = curr.items.map { row ->
+                                        if (row.workId() == item.workId()) row.copy(readProgress = progressText) else row
+                                    }
+                                    curr.copy(
+                                        items = updatedItems,
+                                        seriesHistory = if (curr.series?.workId() == item.workId()) updated else curr.seriesHistory,
+                                        readCounts = curr.readCounts.withCount(item.workId(), readCount),
+                                    )
+                                }
+                            }
+                        }
                     } else if (currP == lastP) {
                         toonLastPageCounts[itemKey] = result.items.size
-                        val total = (lastP - 1) * pageSize + result.items.size
-                        toonTotalCounts[itemKey] = total
-                    } else if (!toonLastPageCounts.containsKey(itemKey)) {
-                        scope.launch(Dispatchers.IO) {
-                            try {
-                                val lastRes = repository.loadEpisodes(item, lastP)
-                                val lastCount = lastRes.items.size
-                                toonLastPageCounts[itemKey] = lastCount
-                                val exactTotal = (lastP - 1) * pageSize + lastCount
-                                toonTotalCounts[itemKey] = exactTotal
-
-                                val existing = repository.getHistory(item.workId())
-                                if (existing != null) {
-                                    val safeOrder = existing.lastReadOrder.coerceIn(1, exactTotal)
+                        val exactTotal = (lastP - 1) * pageSize + result.items.size
+                        toonTotalCounts[itemKey] = exactTotal
+                        val existing = repository.getHistory(item.workId())
+                        if (existing != null) {
+                            val safeOrder = existing.lastReadOrder.coerceIn(0, exactTotal)
+                            val hasNew = safeOrder < exactTotal
+                            if (existing.totalEpisodes != exactTotal || existing.lastReadOrder != safeOrder || existing.hasNew != hasNew) {
+                                val updated = existing.copy(
+                                    totalEpisodes = exactTotal,
+                                    lastReadOrder = safeOrder,
+                                    hasNew = hasNew,
+                                )
+                                repository.saveHistory(updated)
+                                val (progressText, readCount) = listingProgress(
+                                    item.sourceId,
+                                    updated.lastReadOrder,
+                                    updated.totalEpisodes,
+                                    item.workId(),
+                                )
+                                _state.update { curr ->
+                                    val updatedItems = curr.items.map { row ->
+                                        if (row.workId() == item.workId()) row.copy(readProgress = progressText) else row
+                                    }
+                                    curr.copy(
+                                        items = updatedItems,
+                                        seriesHistory = if (curr.series?.workId() == item.workId()) updated else curr.seriesHistory,
+                                        readCounts = curr.readCounts.withCount(item.workId(), readCount),
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        val knownLast = toonLastPageCounts[itemKey]
+                        if (knownLast != null) {
+                            val exactTotal = (lastP - 1) * pageSize + knownLast
+                            toonTotalCounts[itemKey] = exactTotal
+                            val existing = repository.getHistory(item.workId())
+                            if (existing != null) {
+                                val safeOrder = existing.lastReadOrder.coerceIn(0, exactTotal)
+                                val hasNew = safeOrder < exactTotal
+                                if (existing.totalEpisodes != exactTotal || existing.lastReadOrder != safeOrder || existing.hasNew != hasNew) {
                                     val updated = existing.copy(
                                         totalEpisodes = exactTotal,
                                         lastReadOrder = safeOrder,
-                                        hasNew = safeOrder < exactTotal,
+                                        hasNew = hasNew,
                                     )
                                     repository.saveHistory(updated)
                                     val (progressText, readCount) = listingProgress(
@@ -1124,44 +1179,46 @@ class DesktopViewModel(
                                         )
                                     }
                                 }
-                            } catch (_: Exception) {}
-                        }
-                    }
+                            }
+                        } else {
+                            scope.launch(Dispatchers.IO) {
+                                try {
+                                    val lastRes = repository.loadEpisodes(item, lastP)
+                                    val lastCount = lastRes.items.size
+                                    toonLastPageCounts[itemKey] = lastCount
+                                    val exactTotal = (lastP - 1) * pageSize + lastCount
+                                    toonTotalCounts[itemKey] = exactTotal
 
-                    val knownLast = toonLastPageCounts[itemKey]
-                    val totalCalculated = when {
-                        lastP <= 1 -> result.items.size
-                        currP == lastP -> (lastP - 1) * pageSize + result.items.size
-                        knownLast != null -> (lastP - 1) * pageSize + knownLast
-                        else -> (lastP - 1) * pageSize + result.items.size
-                    }
-
-                    val existing = repository.getHistory(item.workId())
-                    if (existing != null) {
-                        val safeOrder = existing.lastReadOrder.coerceIn(1, totalCalculated)
-                        val hasNew = safeOrder < totalCalculated
-                        if (existing.totalEpisodes != totalCalculated || existing.lastReadOrder != safeOrder) {
-                            val updated = existing.copy(
-                                totalEpisodes = totalCalculated,
-                                lastReadOrder = safeOrder,
-                                hasNew = hasNew,
-                            )
-                            repository.saveHistory(updated)
-                            val (progressText, readCount) = listingProgress(
-                                item.sourceId,
-                                updated.lastReadOrder,
-                                updated.totalEpisodes,
-                                item.workId(),
-                            )
-                            _state.update { curr ->
-                                val updatedItems = curr.items.map { row ->
-                                    if (row.workId() == item.workId()) row.copy(readProgress = progressText) else row
-                                }
-                                curr.copy(
-                                    items = updatedItems,
-                                    seriesHistory = if (curr.series?.workId() == item.workId()) updated else curr.seriesHistory,
-                                    readCounts = curr.readCounts.withCount(item.workId(), readCount),
-                                )
+                                    val existing = repository.getHistory(item.workId())
+                                    if (existing != null) {
+                                        val safeOrder = existing.lastReadOrder.coerceIn(0, exactTotal)
+                                        val hasNew = safeOrder < exactTotal
+                                        if (existing.totalEpisodes != exactTotal || existing.lastReadOrder != safeOrder || existing.hasNew != hasNew) {
+                                            val updated = existing.copy(
+                                                totalEpisodes = exactTotal,
+                                                lastReadOrder = safeOrder,
+                                                hasNew = hasNew,
+                                            )
+                                            repository.saveHistory(updated)
+                                            val (progressText, readCount) = listingProgress(
+                                                item.sourceId,
+                                                updated.lastReadOrder,
+                                                updated.totalEpisodes,
+                                                item.workId(),
+                                            )
+                                            _state.update { curr ->
+                                                val updatedItems = curr.items.map { row ->
+                                                    if (row.workId() == item.workId()) row.copy(readProgress = progressText) else row
+                                                }
+                                                curr.copy(
+                                                    items = updatedItems,
+                                                    seriesHistory = if (curr.series?.workId() == item.workId()) updated else curr.seriesHistory,
+                                                    readCounts = curr.readCounts.withCount(item.workId(), readCount),
+                                                )
+                                            }
+                                        }
+                                    }
+                                } catch (_: Exception) {}
                             }
                         }
                     }
@@ -1613,23 +1670,50 @@ class DesktopViewModel(
         _state.update { it.copy(showSyncDialog = false) }
     }
 
+    private suspend fun applySyncRefresh() {
+        catalogCache.clear()
+        catalogPages.clear()
+        if (_state.value.activeSourceId != null) {
+            loadPage(_state.value.page, replace = true)
+        }
+        val sourceId = _state.value.activeSourceId ?: return
+        val updatedHistory = repository.getHistory(sourceId)
+        val counts = countIfNeeded(updatedHistory.map { item -> item.workId() }, sourceId)
+        val seriesItem = _state.value.series
+        val seriesFav = seriesItem?.let { repository.isFavorite(it.workId()) } ?: _state.value.seriesFavorited
+        _state.update {
+            it.copy(
+                historyItems = updatedHistory,
+                readCounts = it.readCounts + counts,
+                seriesFavorited = seriesFav,
+            )
+        }
+        if (_state.value.screen == Screen.History) {
+            loadHistory()
+        }
+    }
+
     fun syncNow() {
         scope.launch {
             val res = repository.syncManager?.syncFull()
             if (res?.success == true) {
-                if (_state.value.activeSourceId != null) {
-                    loadPage(_state.value.page, replace = true)
-                }
-                val sourceId = _state.value.activeSourceId ?: return@launch
-                val updatedHistory = repository.getHistory(sourceId)
-                val counts = countIfNeeded(updatedHistory.map { item -> item.workId() }, sourceId)
-                _state.update {
-                    it.copy(
-                        historyItems = updatedHistory,
-                        readCounts = it.readCounts + counts,
-                    )
-                }
+                applySyncRefresh()
             }
+        }
+    }
+
+    fun restoreWithMasterKey(key: String, onResult: (com.comics8.core.model.SyncResult) -> Unit) {
+        scope.launch {
+            val sm = repository.syncManager
+            if (sm == null) {
+                onResult(com.comics8.core.model.SyncResult(false, "동기화 매니저를 찾을 수 없습니다."))
+                return@launch
+            }
+            val res = sm.restoreAccount(key)
+            if (res.success) {
+                applySyncRefresh()
+            }
+            onResult(res)
         }
     }
 
@@ -1674,7 +1758,7 @@ class DesktopViewModel(
             }
             val res = sm.confirmPairingCode(code)
             if (res.success) {
-                syncNow()
+                applySyncRefresh()
             }
             onResult(res)
         }

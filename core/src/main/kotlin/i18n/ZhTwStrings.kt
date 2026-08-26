@@ -297,7 +297,27 @@ object ZhTwStrings : AppStrings {
     override val actionUpdateLater: String = "稍後再說"
     override val labelUpdateNotification: String = "更新通知"
 
-    // 10. Dialogs & Messages / Error / Toast
+    // 10. Notification Settings
+    override val sectionNotificationSettings: String = "新章節通知設定"
+    override val labelPeriodicUpdateNotification: String = "新章節更新通知"
+    override val descPeriodicUpdateNotification: String = "定期檢查收藏漫畫的新章節並在有更新時發送通知。"
+    override val labelNotificationInterval: String = "檢查間隔"
+    override val interval15m: String = "15分鐘"
+    override val interval30m: String = "30分鐘"
+    override val interval1h: String = "1小時"
+    override val interval3h: String = "3小時"
+    override val interval6h: String = "6小時"
+    override val interval12h: String = "12小時"
+    override val interval24h: String = "24小時"
+    override val labelNotificationSources: String = "通知目標圖源"
+    override val descNotificationSources: String = "選擇接收更新通知的圖源。"
+    override val labelSourceUpdateNotification: String = "接收新章節更新通知"
+    override val descSourceUpdateNotification: String = "當此圖源的收藏漫畫有新章節更新時接收通知。"
+    override val labelNotificationPermissionRequired: String = "需要通知權限"
+    override val descNotificationPermissionRequired: String = "需要系統通知權限以接收新章節更新通知。"
+    override val actionGrantPermission: String = "授予權限"
+
+    // 11. Dialogs & Messages / Error / Toast
     override val msgUpdateCheckFailed: String = "檢查更新失敗"
     override fun msgLatestVersionInUse(version: String): String = "目前已是最新版本 (v$version)。"
     override val msgUpdateDownloadFailed: String = "下載更新失敗"

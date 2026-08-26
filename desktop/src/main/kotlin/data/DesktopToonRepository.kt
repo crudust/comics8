@@ -202,12 +202,7 @@ class DesktopToonRepository(
 
             val targets = items.filter { item ->
                 val key = item.workId().storageKey()
-                val hist = historyMap[key]
-                if (hist == null) return@filter false
-                val prev = existingSeen[key]
-                val isUpdated = prev != null && !item.updatedAt.isNullOrBlank() && prev.updatedAt != item.updatedAt
-                val needsSync = item.isNew || isUpdated || hist.totalEpisodes <= 0 || hist.hasNew
-                needsSync && activeSyncKeys.add(key)
+                historyMap.containsKey(key) && activeSyncKeys.add(key)
             }
 
             if (targets.isEmpty()) return@launch
@@ -224,21 +219,23 @@ class DesktopToonRepository(
                                 if (existing != null) {
                                     val safeOrder = existing.lastReadOrder.coerceIn(0, exactTotal)
                                     val hasNew = safeOrder < exactTotal
-                                    val updated = existing.copy(
-                                        totalEpisodes = exactTotal,
-                                        lastReadOrder = safeOrder,
-                                        hasNew = hasNew,
-                                    )
-                                    saveHistory(updated)
-                                    val readCounts = countReadEpisodesNow(listOf(target.workId()))
-                                    val readCount = readCounts[key] ?: 0
-                                    val progressText = formatReadProgress(
-                                        target.sourceId,
-                                        updated.lastReadOrder,
-                                        updated.totalEpisodes,
-                                        readCount,
-                                    )
-                                    onUpdated?.invoke(target.workId(), exactTotal, progressText)
+                                    if (existing.totalEpisodes != exactTotal || existing.hasNew != hasNew) {
+                                        val updated = existing.copy(
+                                            totalEpisodes = exactTotal,
+                                            lastReadOrder = safeOrder,
+                                            hasNew = hasNew,
+                                        )
+                                        saveHistory(updated)
+                                        val readCounts = countReadEpisodesNow(listOf(target.workId()))
+                                        val readCount = readCounts[key] ?: 0
+                                        val progressText = formatReadProgress(
+                                            target.sourceId,
+                                            updated.lastReadOrder,
+                                            updated.totalEpisodes,
+                                            readCount,
+                                        )
+                                        onUpdated?.invoke(target.workId(), exactTotal, progressText)
+                                    }
                                 }
                             }
                         }

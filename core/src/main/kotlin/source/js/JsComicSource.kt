@@ -87,10 +87,9 @@ class JsComicSource(
     override fun ownsHost(host: String): Boolean {
         val key = host.lowercase().trim().trim('.')
         if (key.isEmpty()) return false
-        val query = handle.api.nestedHostQuery
-        if (query != null) {
-            return query.ownsHost[key] ?: (handle.originHost == key)
-        }
+        if (key == handle.originHost) return true
+        ownsHostCache[key]?.let { return it }
+        handle.api.nestedHostQuery?.ownsHost?.get(key)?.let { return it }
         return ownsHostCache.computeIfAbsent(key) {
             engine.callBoolean(handle, "ownsHost", it, default = false)
         }
@@ -98,10 +97,8 @@ class JsComicSource(
 
     override fun useProxy(url: String): Boolean {
         if (url.isBlank()) return true
-        val query = handle.api.nestedHostQuery
-        if (query != null) {
-            return query.useProxy[url] ?: true
-        }
+        useProxyCache[url]?.let { return it }
+        handle.api.nestedHostQuery?.useProxy?.get(url)?.let { return it }
         return useProxyCache.computeIfAbsent(url) {
             engine.callBoolean(handle, "useProxy", it, default = true)
         }

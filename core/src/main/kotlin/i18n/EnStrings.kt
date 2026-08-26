@@ -297,7 +297,27 @@ object EnStrings : AppStrings {
     override val actionUpdateLater: String = "Later"
     override val labelUpdateNotification: String = "Update Notification"
 
-    // 10. Dialogs & Messages / Error / Toast
+    // 10. Notification Settings
+    override val sectionNotificationSettings: String = "Update Notification Settings"
+    override val labelPeriodicUpdateNotification: String = "New Episode Notifications"
+    override val descPeriodicUpdateNotification: String = "Periodically check and notify when new episodes are released for favorite comics."
+    override val labelNotificationInterval: String = "Check Interval"
+    override val interval15m: String = "15 min"
+    override val interval30m: String = "30 min"
+    override val interval1h: String = "1 hour"
+    override val interval3h: String = "3 hours"
+    override val interval6h: String = "6 hours"
+    override val interval12h: String = "12 hours"
+    override val interval24h: String = "24 hours"
+    override val labelNotificationSources: String = "Notification Sources"
+    override val descNotificationSources: String = "Select sources to receive update notifications from."
+    override val labelSourceUpdateNotification: String = "Receive Update Notifications"
+    override val descSourceUpdateNotification: String = "Receive notifications when new episodes are updated for favorites in this source."
+    override val labelNotificationPermissionRequired: String = "Notification Permission Required"
+    override val descNotificationPermissionRequired: String = "System notification permission is required to receive update alerts."
+    override val actionGrantPermission: String = "Grant Permission"
+
+    // 11. Dialogs & Messages / Error / Toast
     override val msgUpdateCheckFailed: String = "Failed to check for updates"
     override fun msgLatestVersionInUse(version: String): String = "You are already using the latest version (v$version)."
     override val msgUpdateDownloadFailed: String = "Failed to download update"
