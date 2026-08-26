@@ -7,6 +7,7 @@ import com.comics8.core.model.EpisodePage
 import com.comics8.core.model.FavoriteListing
 import com.comics8.core.model.ListingPage
 import com.comics8.core.model.OfflineEpisodeRef
+import com.comics8.core.model.ProgressDisplayMode
 import com.comics8.core.model.ReadDirection
 import com.comics8.core.model.SplitMode
 import com.comics8.core.model.ToonItem
@@ -733,7 +734,7 @@ class ToonRepository(
 
     private suspend fun countReadEpisodesNow(workIds: List<WorkId>): Map<String, Int> {
         val needed = workIds.filter {
-            sources.progressDisplay(it.sourceId) == ProgressDisplay.READ_COUNT
+            sources.progressDisplayMode(it.sourceId, sourceSettings).requiresReadCount
         }
         if (needed.isEmpty()) return emptyMap()
         val wanted = needed.map { it.storageKey() }.toSet()

@@ -10,6 +10,7 @@ import com.comics8.core.model.AppUpdateState
 import com.comics8.core.model.ArtistRef
 import com.comics8.core.model.BrowseTab
 import com.comics8.core.model.EpisodeItem
+import com.comics8.core.model.ProgressDisplayMode
 import com.comics8.core.model.ReadDirection
 import com.comics8.core.model.SplitMode
 import com.comics8.core.model.ToonItem
@@ -1503,6 +1504,20 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         sourceSettings.setProgressDisplayMode(sourceId, mode)
         // 화면에 바로 반영되도록 현재 목록의 진행도를 다시 갱신
         refreshCurrentListingProgress()
+        val current = _state.value
+        if (current.historyItems.isNotEmpty()) {
+            viewModelScope.launch {
+                val counts = countIfNeeded(current.historyItems.map { it.workId() }, sourceId)
+                _state.update { it.copy(readCounts = it.readCounts + counts) }
+            }
+        }
+        val series = current.series
+        if (series != null && series.sourceId == sourceId) {
+            viewModelScope.launch {
+                val count = countIfNeeded(series.workId())
+                _state.update { it.copy(readCounts = it.readCounts.withCount(series.workId(), count)) }
+            }
+        }
     }
 
     fun refreshCurrentListingProgress() {
@@ -2463,7 +2478,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private suspend fun countIfNeeded(workId: WorkId): Int {
-        if (repository.sourceOrNull(workId.sourceId)?.progressDisplay != ProgressDisplay.READ_COUNT) {
+        if (!sourceSettings.progressDisplayMode(workId.sourceId).requiresReadCount) {
             return 0
         }
         return repository.countReadEpisodes(workId)
@@ -2471,7 +2486,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
     private suspend fun countIfNeeded(workIds: List<WorkId>, sourceId: String): Map<String, Int> {
         if (workIds.isEmpty()) return emptyMap()
-        if (repository.sourceOrNull(sourceId)?.progressDisplay != ProgressDisplay.READ_COUNT) {
+        if (!sourceSettings.progressDisplayMode(sourceId).requiresReadCount) {
             return emptyMap()
         }
         return repository.countReadEpisodes(workIds)

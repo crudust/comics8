@@ -3,6 +3,7 @@ package com.comics8.desktop.ui
 import com.comics8.core.model.ArtistRef
 import com.comics8.core.model.BrowseTab
 import com.comics8.core.model.EpisodeItem
+import com.comics8.core.model.ProgressDisplayMode
 import com.comics8.core.model.ReadDirection
 import com.comics8.core.model.SplitMode
 import com.comics8.core.model.ToonItem
@@ -1533,7 +1534,19 @@ class DesktopViewModel(
         val current = _state.value
         scope.launch {
             val updated = repository.refreshProgress(current.items)
-            _state.update { it.copy(items = updated) }
+            val historyCounts = if (current.historyItems.isNotEmpty()) {
+                countIfNeeded(current.historyItems.map { it.workId() }, sourceId)
+            } else emptyMap()
+            val targetSeries = current.series?.takeIf { it.sourceId == sourceId }
+            val seriesCount = if (targetSeries != null) countIfNeeded(targetSeries.workId()) else null
+            _state.update { state ->
+                val nextCounts = if (targetSeries != null && seriesCount != null) {
+                    (state.readCounts + historyCounts).withCount(targetSeries.workId(), seriesCount)
+                } else {
+                    state.readCounts + historyCounts
+                }
+                state.copy(items = updated, readCounts = nextCounts)
+            }
         }
     }
 
@@ -2229,7 +2242,7 @@ class DesktopViewModel(
     }
 
     private suspend fun countIfNeeded(workId: WorkId): Int {
-        if (repository.sourceOrNull(workId.sourceId)?.progressDisplay != ProgressDisplay.READ_COUNT) {
+        if (!DesktopSourcePrefs.progressDisplayMode(workId.sourceId).requiresReadCount) {
             return 0
         }
         return repository.countReadEpisodes(workId)
@@ -2237,7 +2250,7 @@ class DesktopViewModel(
 
     private suspend fun countIfNeeded(workIds: List<WorkId>, sourceId: String): Map<String, Int> {
         if (workIds.isEmpty()) return emptyMap()
-        if (repository.sourceOrNull(sourceId)?.progressDisplay != ProgressDisplay.READ_COUNT) {
+        if (!DesktopSourcePrefs.progressDisplayMode(sourceId).requiresReadCount) {
             return emptyMap()
         }
         return repository.countReadEpisodes(workIds)

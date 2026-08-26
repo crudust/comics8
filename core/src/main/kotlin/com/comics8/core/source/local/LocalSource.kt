@@ -38,6 +38,8 @@ class LocalSource(
     override val requiresHttp: Boolean = false
     override val emptyEpisodesOk: Boolean = true
     override val episodePageSize: Int = PAGE_SIZE
+    override val defaultProgressDisplayMode: com.comics8.core.model.ProgressDisplayMode =
+        com.comics8.core.model.ProgressDisplayMode.READ_COUNT
 
     override fun useProxy(url: String): Boolean = false
 

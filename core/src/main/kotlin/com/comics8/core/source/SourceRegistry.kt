@@ -53,6 +53,13 @@ class SourceRegistry(initial: List<ComicSource> = emptyList()) {
     fun searchPlaceholder(sourceId: String): String =
         getOrNull(sourceId)?.searchPlaceholder ?: "제목 검색"
 
+    fun defaultProgressDisplayMode(sourceId: String): com.comics8.core.model.ProgressDisplayMode =
+        getOrNull(sourceId)?.defaultProgressDisplayMode
+            ?: com.comics8.core.model.ProgressDisplayMode.defaultFor(sourceId)
+
+    fun progressDisplayMode(sourceId: String, settings: SourceSettings? = null): com.comics8.core.model.ProgressDisplayMode =
+        settings?.progressDisplayMode(sourceId) ?: defaultProgressDisplayMode(sourceId)
+
     fun progressDisplay(sourceId: String): ProgressDisplay =
         getOrNull(sourceId)?.progressDisplay ?: ProgressDisplay.LAST_READ_ORDER
 
@@ -62,7 +69,7 @@ class SourceRegistry(initial: List<ComicSource> = emptyList()) {
         totalEpisodes: Int,
         readCount: Int,
         mode: com.comics8.core.model.ProgressDisplayMode? = null,
-    ): String = (mode ?: com.comics8.core.model.ProgressDisplayMode.defaultFor(sourceId)).format(lastReadOrder, totalEpisodes, readCount).orEmpty()
+    ): String = (mode ?: defaultProgressDisplayMode(sourceId)).format(lastReadOrder, totalEpisodes, readCount).orEmpty()
 
     /**
      * Restore a stored active id only if it is loaded (and installed, when given).

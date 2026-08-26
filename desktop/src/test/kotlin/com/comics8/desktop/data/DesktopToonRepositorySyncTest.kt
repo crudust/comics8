@@ -149,4 +149,42 @@ class DesktopToonRepositorySyncTest {
         val refreshed = repository.refreshProgress(listOf(item))
         assertThat(refreshed.first().readProgress).contains("15")
     }
+
+    @Test
+    fun refreshProgressUsesReadCountWhenConfigured() = runBlocking {
+        val workId = WorkId("test_source", "toon2")
+        DesktopSourcePrefs.setProgressDisplayMode("test_source", com.comics8.core.model.ProgressDisplayMode.READ_COUNT)
+
+        // 3 episodes read out of 20
+        db.saveHistory(
+            ReadHistoryRecord(
+                sourceId = workId.sourceId,
+                toonId = workId.toonId,
+                toonTitle = "Test Toon 2",
+                toonThumbUrl = "thumb",
+                toonHref = "href",
+                lastWrId = "3",
+                lastEpisodeTitle = "Episode 3",
+                lastEpisodeHref = "href/3",
+                lastReadOrder = 3,
+                totalEpisodes = 20,
+                lastReadAt = 1000L,
+                hasNew = false,
+            )
+        )
+        repository.markEpisodeRead(workId, "1")
+        repository.markEpisodeRead(workId, "2")
+        repository.markEpisodeRead(workId, "3")
+
+        val item = ToonItem(
+            id = "toon2",
+            title = "Test Toon 2",
+            thumbUrl = "thumb",
+            href = "href",
+            sourceId = "test_source",
+        )
+
+        val refreshed = repository.refreshProgress(listOf(item))
+        assertThat(refreshed.first().readProgress).isEqualTo("3/20")
+    }
 }
