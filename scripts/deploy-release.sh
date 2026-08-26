@@ -181,6 +181,11 @@ if [ -f "$MAC_ZIP_PATH" ]; then
     mkdir -p build/homebrew
     sed "s/__VERSION__/${VERSION_NAME}/g; s/__SHA256__/${MAC_SHA256}/g" templates/homebrew/comics8.rb > build/homebrew/comics8.rb
     echo "🍺 Generated Homebrew Cask: build/homebrew/comics8.rb (SHA256: ${MAC_SHA256})"
+
+    if [[ -n "${COMICS8_MAC_SSH:-}" ]]; then
+        ssh -o StrictHostKeyChecking=no "${COMICS8_MAC_SSH}" "mkdir -p \$(brew --repo crudust/tap)/Casks && cat > \$(brew --repo crudust/tap)/Casks/comics8.rb" < build/homebrew/comics8.rb >/dev/null 2>&1 || true
+        echo "🍺 Synced Homebrew Cask to Mac builder tap (crudust/tap)"
+    fi
 fi
 
 echo "=================================================="
