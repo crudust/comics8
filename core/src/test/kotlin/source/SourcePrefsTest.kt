@@ -20,50 +20,10 @@ class SourcePrefsTest {
         val result = SourcePrefs.migrateInstalled(
             storedInstalled = null,
             storedActive = null,
-            hitomiEnabledPref = null,
-            hasLegacyUserData = false,
         )
         assertThat(result.installed).containsExactly(WorkId.LOCAL_SOURCE)
         assertThat(result.activeId).isEqualTo(WorkId.LOCAL_SOURCE)
         assertThat(result.wrote).isTrue()
-    }
-
-    @Test
-    fun migrateDoesNotReinstallElevenFromLegacyFavorites() {
-        val result = SourcePrefs.migrateInstalled(
-            storedInstalled = null,
-            storedActive = null,
-            hitomiEnabledPref = null,
-            hasLegacyUserData = true,
-        )
-        assertThat(result.installed).containsExactly(WorkId.LOCAL_SOURCE)
-        assertThat(result.activeId).isEqualTo(WorkId.LOCAL_SOURCE)
-        assertThat(result.wrote).isTrue()
-    }
-
-    @Test
-    fun migrateDoesNotReinstallElevenFromActiveGetterDefault() {
-        val result = SourcePrefs.migrateInstalled(
-            storedInstalled = null,
-            storedActive = "eleven",
-            hitomiEnabledPref = false,
-            hasLegacyUserData = true,
-        )
-        assertThat(result.installed).containsExactly(WorkId.LOCAL_SOURCE)
-        assertThat(result.activeId).isEqualTo(WorkId.LOCAL_SOURCE)
-        assertThat(result.wrote).isTrue()
-    }
-
-    @Test
-    fun migrateDoesNotInstallHitomiFromEnabledPref() {
-        val result = SourcePrefs.migrateInstalled(
-            storedInstalled = null,
-            storedActive = null,
-            hitomiEnabledPref = true,
-            hasLegacyUserData = false,
-        )
-        assertThat(result.installed).containsExactly(WorkId.LOCAL_SOURCE)
-        assertThat(result.activeId).isEqualTo(WorkId.LOCAL_SOURCE)
     }
 
     @Test
@@ -71,8 +31,6 @@ class SourcePrefsTest {
         val result = SourcePrefs.migrateInstalled(
             storedInstalled = """["local","custom"]""",
             storedActive = "custom",
-            hitomiEnabledPref = true,
-            hasLegacyUserData = true,
         )
         assertThat(result.installed).containsExactly("local", "custom")
         assertThat(result.activeId).isEqualTo("custom")
@@ -83,9 +41,7 @@ class SourcePrefsTest {
     fun migrateExistingInstalledFallsBackToLocalIfActiveIsNotInstalled() {
         val result = SourcePrefs.migrateInstalled(
             storedInstalled = "[]",
-            storedActive = "eleven",
-            hitomiEnabledPref = true,
-            hasLegacyUserData = true,
+            storedActive = "unknown",
         )
         assertThat(result.installed).containsExactly(WorkId.LOCAL_SOURCE)
         assertThat(result.activeId).isEqualTo(WorkId.LOCAL_SOURCE)

@@ -71,15 +71,11 @@ object SourcePrefs {
     )
 
     /**
-     * Local is always installed. Does **not** put eleven (or hitomi) into
-     * installed from legacy data, enabled prefs, or an active-source default.
+     * Local is always installed. Resolves active source against installed list.
      */
-    @Suppress("UNUSED_PARAMETER")
     fun migrateInstalled(
         storedInstalled: String?,
         storedActive: String?,
-        hitomiEnabledPref: Boolean?,
-        hasLegacyUserData: Boolean,
     ): Migration {
         val parsed = parseIdList(storedInstalled)
         val installed = withLocal(parsed)

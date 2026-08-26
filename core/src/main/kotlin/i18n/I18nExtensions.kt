@@ -62,5 +62,4 @@ fun SourceType.displayLabel(strings: AppStrings): String = when (this) {
     SourceType.SMB -> strings.labelSourceSmb
     SourceType.WEBDAV -> strings.labelSourceWebDav
     SourceType.JS -> strings.labelSourceJs
-    SourceType.WEB -> strings.labelSourceWeb
 }

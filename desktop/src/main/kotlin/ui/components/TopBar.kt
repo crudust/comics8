@@ -542,7 +542,6 @@ private fun SourceTitleDropdown(
         com.comics8.core.source.SourceType.SMB -> Icons.Default.Dns
         com.comics8.core.source.SourceType.WEBDAV -> Icons.Default.Cloud
         com.comics8.core.source.SourceType.JS -> Icons.Default.Description
-        com.comics8.core.source.SourceType.WEB -> Icons.Default.Language
     }
 
     Box(modifier = modifier) {
@@ -600,7 +599,6 @@ private fun SourceTitleDropdown(
                             com.comics8.core.source.SourceType.SMB -> Icons.Default.Dns
                             com.comics8.core.source.SourceType.WEBDAV -> Icons.Default.Cloud
                             com.comics8.core.source.SourceType.JS -> Icons.Default.Description
-                            com.comics8.core.source.SourceType.WEB -> Icons.Default.Language
                         }
                         DropdownMenuItem(
                             text = {
