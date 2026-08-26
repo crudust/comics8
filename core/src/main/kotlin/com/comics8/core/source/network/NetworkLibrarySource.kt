@@ -45,6 +45,8 @@ class NetworkLibrarySource(
     override val emptyListingOk: Boolean = true
     override val emptyEpisodesOk: Boolean = true
     override val episodePageSize: Int = PAGE_SIZE
+    override val defaultProgressDisplayMode: com.comics8.core.model.ProgressDisplayMode =
+        com.comics8.core.model.ProgressDisplayMode.READ_COUNT
 
     init {
         NetworkSourceRuntime.register(id, backend)

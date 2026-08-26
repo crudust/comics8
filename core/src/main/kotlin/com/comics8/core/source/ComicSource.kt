@@ -29,10 +29,23 @@ interface ComicSource {
     val defaultLanguage: String? get() = null
     val favoriteUsesLatestListing: Boolean
         get() = notificationMode == NotificationMode.LATEST_INTERSECTION
-    val progressDisplay: ProgressDisplay get() = ProgressDisplay.LAST_READ_ORDER
+    val defaultProgressDisplayMode: com.comics8.core.model.ProgressDisplayMode
+        get() = when (progressDisplay) {
+            ProgressDisplay.READ_COUNT -> com.comics8.core.model.ProgressDisplayMode.READ_COUNT
+            else -> com.comics8.core.model.ProgressDisplayMode.LATEST_EPISODE
+        }
 
-    fun formatReadProgress(lastReadOrder: Int, totalEpisodes: Int, readCount: Int): String =
-        progressDisplay.format(lastReadOrder, totalEpisodes, readCount)
+    val progressDisplay: ProgressDisplay get() = when (defaultProgressDisplayMode) {
+        com.comics8.core.model.ProgressDisplayMode.READ_COUNT -> ProgressDisplay.READ_COUNT
+        else -> ProgressDisplay.LAST_READ_ORDER
+    }
+
+    fun formatReadProgress(
+        lastReadOrder: Int,
+        totalEpisodes: Int,
+        readCount: Int,
+        mode: com.comics8.core.model.ProgressDisplayMode = defaultProgressDisplayMode,
+    ): String = mode.format(lastReadOrder, totalEpisodes, readCount).orEmpty()
 
     suspend fun loadListing(catalogId: String, page: Int, http: SourceHttp): ListingPage
     suspend fun search(query: SearchQuery, http: SourceHttp): List<ToonItem>

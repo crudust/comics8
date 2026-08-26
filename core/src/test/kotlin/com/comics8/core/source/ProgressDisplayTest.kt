@@ -34,4 +34,52 @@ class ProgressDisplayTest {
         assertThat(registry.formatReadProgress("hitomi", 52, 64, 3)).isEqualTo("3/64")
         assertThat(registry.formatReadProgress("unknown", 52, 64, 3)).isEqualTo("52/64")
     }
+
+    @Test
+    fun progressDisplayModeDefaultForNetworkSourcesIsReadCount() {
+        assertThat(com.comics8.core.model.ProgressDisplayMode.defaultFor("network-1234")).isEqualTo(com.comics8.core.model.ProgressDisplayMode.READ_COUNT)
+        assertThat(com.comics8.core.model.ProgressDisplayMode.defaultFor("local")).isEqualTo(com.comics8.core.model.ProgressDisplayMode.READ_COUNT)
+        assertThat(com.comics8.core.model.ProgressDisplayMode.defaultFor("hitomi")).isEqualTo(com.comics8.core.model.ProgressDisplayMode.READ_COUNT)
+        assertThat(com.comics8.core.model.ProgressDisplayMode.defaultFor("eleven")).isEqualTo(com.comics8.core.model.ProgressDisplayMode.LATEST_EPISODE)
+    }
+
+    @Test
+    fun registryFormatsWithExplicitProgressDisplayMode() {
+        val registry = SourceRegistry(emptyList())
+        assertThat(
+            registry.formatReadProgress("network-smb", 5, 20, 3, com.comics8.core.model.ProgressDisplayMode.READ_COUNT),
+        ).isEqualTo("3/20")
+        assertThat(
+            registry.formatReadProgress("network-smb", 5, 20, 3, com.comics8.core.model.ProgressDisplayMode.LATEST_EPISODE),
+        ).isEqualTo("5/20")
+        assertThat(
+            registry.formatReadProgress("network-smb", 5, 20, 3, com.comics8.core.model.ProgressDisplayMode.PERCENTAGE),
+        ).isEqualTo("25%")
+        assertThat(
+            registry.formatReadProgress("network-smb", 5, 20, 3, com.comics8.core.model.ProgressDisplayMode.HIDDEN),
+        ).isEqualTo("")
+    }
+
+    @Test
+    fun sourceContractProvidesDefaultProgressDisplayMode() {
+        val registry = SourceRegistry(
+            listOf(
+                StubComicSource(
+                    id = "remote_webtoon",
+                    progressDisplay = ProgressDisplay.LAST_READ_ORDER,
+                ),
+                StubComicSource(
+                    id = "storage_source",
+                    progressDisplay = ProgressDisplay.READ_COUNT,
+                ),
+            ),
+        )
+        assertThat(registry.defaultProgressDisplayMode("remote_webtoon"))
+            .isEqualTo(com.comics8.core.model.ProgressDisplayMode.LATEST_EPISODE)
+        assertThat(registry.defaultProgressDisplayMode("storage_source"))
+            .isEqualTo(com.comics8.core.model.ProgressDisplayMode.READ_COUNT)
+
+        assertThat(registry.defaultProgressDisplayMode("storage_source").requiresReadCount).isTrue()
+        assertThat(registry.defaultProgressDisplayMode("remote_webtoon").requiresReadCount).isFalse()
+    }
 }

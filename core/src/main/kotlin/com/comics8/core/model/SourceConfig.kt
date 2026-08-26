@@ -6,6 +6,8 @@ enum class ProgressDisplayMode(val label: String, val description: String) {
     PERCENTAGE("진행률(%)", "전체 회차 대비 진행률 표시 (예: 75%)"),
     HIDDEN("표시 안 함", "진행도 뱃지를 표시하지 않음");
 
+    val requiresReadCount: Boolean get() = this == READ_COUNT
+
     fun format(lastReadOrder: Int, totalEpisodes: Int, readCount: Int): String? = when (this) {
         LATEST_EPISODE -> if (totalEpisodes > 0) "$lastReadOrder/$totalEpisodes" else if (lastReadOrder > 0) "${lastReadOrder}화" else null
         READ_COUNT -> if (totalEpisodes > 0) "$readCount/$totalEpisodes" else if (readCount > 0) "${readCount}개" else null
@@ -15,16 +17,19 @@ enum class ProgressDisplayMode(val label: String, val description: String) {
 
     companion object {
         fun defaultFor(sourceId: String): ProgressDisplayMode {
-            return when (sourceId) {
-                "hitomi", "local" -> READ_COUNT
+            return when {
+                sourceId == "hitomi" || sourceId == "local" || sourceId.startsWith("network-") -> READ_COUNT
                 else -> LATEST_EPISODE
             }
         }
 
+        fun fromName(name: String?, defaultMode: ProgressDisplayMode): ProgressDisplayMode {
+            if (name.isNullOrBlank()) return defaultMode
+            return entries.firstOrNull { it.name.equals(name, ignoreCase = true) } ?: defaultMode
+        }
+
         fun fromName(name: String?, defaultSourceId: String = ""): ProgressDisplayMode {
-            if (name.isNullOrBlank()) return defaultFor(defaultSourceId)
-            return entries.firstOrNull { it.name.equals(name, ignoreCase = true) }
-                ?: defaultFor(defaultSourceId)
+            return fromName(name, defaultFor(defaultSourceId))
         }
     }
 }
