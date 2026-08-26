@@ -283,7 +283,7 @@ object KoStrings : AppStrings {
     override val sectionViewerSettings: String = "뷰어 기본 설정"
     override val sectionAppInfo: String = "앱 정보"
     override val labelAppName: String = "Comics8"
-    override fun labelAppVersion(name: String, code: Int): String = "버전 v$name ($code)"
+    override fun labelAppVersion(name: String): String = "버전 v$name"
     override val statusCheckingUpdate: String = "확인 중..."
     override val actionCheckUpdate: String = "업데이트 확인"
     override val titleUpdateDialog: String = "새 버전 업데이트 안내"

@@ -283,7 +283,7 @@ object JaStrings : AppStrings {
     override val sectionViewerSettings: String = "ビューアー設定"
     override val sectionAppInfo: String = "アプリ情報"
     override val labelAppName: String = "Comics8"
-    override fun labelAppVersion(name: String, code: Int): String = "バージョン v$name ($code)"
+    override fun labelAppVersion(name: String): String = "バージョン v$name"
     override val statusCheckingUpdate: String = "確認中..."
     override val actionCheckUpdate: String = "アップデートを確認"
     override val titleUpdateDialog: String = "新バージョンのアップデート"

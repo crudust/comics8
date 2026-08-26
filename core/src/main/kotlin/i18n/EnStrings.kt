@@ -283,7 +283,7 @@ object EnStrings : AppStrings {
     override val sectionViewerSettings: String = "Default Viewer Settings"
     override val sectionAppInfo: String = "App Information"
     override val labelAppName: String = "Comics8"
-    override fun labelAppVersion(name: String, code: Int): String = "Version v$name ($code)"
+    override fun labelAppVersion(name: String): String = "Version v$name"
     override val statusCheckingUpdate: String = "Checking..."
     override val actionCheckUpdate: String = "Check for Updates"
     override val titleUpdateDialog: String = "Update Available"

@@ -281,7 +281,7 @@ interface AppStrings {
     val sectionViewerSettings: String
     val sectionAppInfo: String
     val labelAppName: String
-    fun labelAppVersion(name: String, code: Int): String
+    fun labelAppVersion(name: String): String
     val statusCheckingUpdate: String
     val actionCheckUpdate: String
     val titleUpdateDialog: String

@@ -283,7 +283,7 @@ object ZhTwStrings : AppStrings {
     override val sectionViewerSettings: String = "閱讀器預設設定"
     override val sectionAppInfo: String = "應用程式資訊"
     override val labelAppName: String = "Comics8"
-    override fun labelAppVersion(name: String, code: Int): String = "版本 v$name ($code)"
+    override fun labelAppVersion(name: String): String = "版本 v$name"
     override val statusCheckingUpdate: String = "檢查中..."
     override val actionCheckUpdate: String = "檢查更新"
     override val titleUpdateDialog: String = "發現新版本"

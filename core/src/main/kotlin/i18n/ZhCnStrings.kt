@@ -283,7 +283,7 @@ object ZhCnStrings : AppStrings {
     override val sectionViewerSettings: String = "阅读器默认设置"
     override val sectionAppInfo: String = "应用信息"
     override val labelAppName: String = "Comics8"
-    override fun labelAppVersion(name: String, code: Int): String = "版本 v$name ($code)"
+    override fun labelAppVersion(name: String): String = "版本 v$name"
     override val statusCheckingUpdate: String = "检查中..."
     override val actionCheckUpdate: String = "检查更新"
     override val titleUpdateDialog: String = "发现新版本"

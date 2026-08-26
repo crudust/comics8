@@ -679,7 +679,7 @@ fun SettingsPane(
                                 )
                                 Spacer(Modifier.height(2.dp))
                                 Text(
-                                    text = strings.labelAppVersion(DesktopVersion.VERSION_NAME, DesktopVersion.VERSION_CODE),
+                                    text = strings.labelAppVersion(DesktopVersion.VERSION_NAME),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
