@@ -53,7 +53,7 @@ open class BaseSyncManager(
         val initialServerUrl = storage.getPreference(SyncConstants.KEY_SERVER_URL, SyncConstants.DEFAULT_SERVER_URL)
             ?: SyncConstants.DEFAULT_SERVER_URL
         val initialAutoSync = storage.getPreference(SyncConstants.KEY_AUTO_SYNC, "true")?.toBoolean() ?: true
-        val initialProxy = storage.getPreference(SyncConstants.KEY_USE_SERVER_PROXY, "true")?.toBoolean() ?: true
+        val initialProxy = storage.getPreference(SyncConstants.KEY_USE_SERVER_PROXY, "false")?.toBoolean() ?: false
         val initialLastSyncedAt = storage.getPreference(SyncConstants.KEY_LAST_SYNCED_AT, "0")?.toLongOrNull() ?: 0L
 
         _syncState = MutableStateFlow(
