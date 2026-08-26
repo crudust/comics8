@@ -660,6 +660,7 @@ class ToonRepository(
         database?.tombstoneDao()?.delete("HISTORY", workId.storageKey())
         val nowMs = now()
         val existing = seenByWorkIds(listOf(workId))[workId.storageKey()]
+        val safeNotifiedKey = existing?.notifiedKey?.takeIf { it.isNotBlank() } ?: "${workId.storageKey()}|${stored.lastWrId}"
         seenDao.upsertAll(
             listOf(
                 SeenToon(
@@ -669,7 +670,7 @@ class ToonRepository(
                     updatedAt = existing?.updatedAt,
                     firstSeenAt = existing?.firstSeenAt ?: nowMs,
                     lastSeenAt = nowMs,
-                    notifiedKey = "${workId.storageKey()}|${stored.lastWrId}",
+                    notifiedKey = safeNotifiedKey,
                 )
             )
         )
