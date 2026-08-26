@@ -88,8 +88,10 @@ open class BaseSyncManager(
     fun generateNewKey(): String {
         val newKey = SyncConstants.generateSyncKey()
         storage.setPreference(SyncConstants.KEY_SYNC_KEY, newKey)
+        storage.setPreference(SyncConstants.KEY_LAST_SYNCED_AT, "0")
         _syncState.value = _syncState.value.copy(
             syncKey = newKey,
+            lastSyncedAt = 0L,
             syncMessage = "새 동기화 키가 발급되었습니다.",
             isSuccess = true,
         )
@@ -100,12 +102,27 @@ open class BaseSyncManager(
         val trimmed = newKey.trim()
         if (trimmed.isNotBlank()) {
             storage.setPreference(SyncConstants.KEY_SYNC_KEY, trimmed)
+            storage.setPreference(SyncConstants.KEY_LAST_SYNCED_AT, "0")
             _syncState.value = _syncState.value.copy(
                 syncKey = trimmed,
+                lastSyncedAt = 0L,
                 syncMessage = "동기화 키가 설정되었습니다.",
                 isSuccess = true,
             )
         }
+    }
+
+    suspend fun restoreAccount(key: String): SyncResult = exclusiveSync(SyncResult(false, "이미 동기화 진행 중입니다.")) {
+        val trimmed = key.trim()
+        if (trimmed.isBlank()) return@exclusiveSync SyncResult(false, "동기화 키가 올바르지 않습니다.")
+        storage.setPreference(SyncConstants.KEY_SYNC_KEY, trimmed)
+        storage.setPreference(SyncConstants.KEY_LAST_SYNCED_AT, "0")
+        _syncState.value = _syncState.value.copy(
+            syncKey = trimmed,
+            lastSyncedAt = 0L,
+            syncMessage = "계정 데이터 복구 중...",
+        )
+        syncPullInternal(isSilent = false)
     }
 
     fun updateServerUrl(url: String) {
@@ -201,9 +218,15 @@ open class BaseSyncManager(
             if (syncKey.isBlank()) {
                 return@withContext PairConfirmResult(false, message = json.optString("message", "인증 실패"))
             }
-            updateSyncKey(syncKey)
-            syncPull()
-            PairConfirmResult(true, syncKey = syncKey, message = "기기 연결 및 데이터 가져오기 완료")
+            storage.setPreference(SyncConstants.KEY_SYNC_KEY, syncKey)
+            storage.setPreference(SyncConstants.KEY_LAST_SYNCED_AT, "0")
+            _syncState.value = _syncState.value.copy(
+                syncKey = syncKey,
+                lastSyncedAt = 0L,
+                syncMessage = "기기 연결 중...",
+            )
+            val pullRes = syncPullInternal(isSilent = false)
+            PairConfirmResult(pullRes.success, syncKey = syncKey, message = if (pullRes.success) "기기 연결 및 데이터 가져오기 완료" else pullRes.message)
         } catch (e: Exception) {
             PairConfirmResult(false, message = e.localizedMessage ?: "서버 연결 오류")
         }
@@ -219,6 +242,21 @@ open class BaseSyncManager(
 
     suspend fun syncDelta(): SyncResult = exclusiveSync(SyncResult(false, "이미 동기화 진행 중입니다.")) {
         syncDeltaInternal(isSilent = false)
+    }
+
+    suspend fun syncFull(): SyncResult = exclusiveSync(SyncResult(false, "이미 동기화 진행 중입니다.")) {
+        val pullRes = syncPullInternal(isSilent = false)
+        if (!pullRes.success && !pullRes.message.contains("데이터가 없습니다")) {
+            return@exclusiveSync pullRes
+        }
+        syncPushInternal()
+    }
+
+    /** Silent delta if no other sync is running; null when skipped. */
+    suspend fun syncIfIdle(): SyncResult? = withContext(Dispatchers.IO) {
+        exclusiveSync(null) {
+            syncDeltaInternal(isSilent = true)
+        }
     }
 
     private suspend fun syncDeltaInternal(isSilent: Boolean): SyncResult = withContext(Dispatchers.IO) {

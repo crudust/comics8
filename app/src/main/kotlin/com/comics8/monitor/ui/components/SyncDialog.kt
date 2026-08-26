@@ -607,10 +607,16 @@ private fun SyncDialogConnectDevice(
                     } else {
                         val key = recoveryKeyInput.trim()
                         if (key.isNotBlank()) {
-                            viewModel.updateSyncKey(key)
-                            viewModel.syncNow()
-                            Toast.makeText(context, strings.msgMasterKeyReissued, Toast.LENGTH_SHORT).show()
-                            onDismiss()
+                            viewModel.restoreWithMasterKey(key) { result ->
+                                isConnecting = false
+                                if (result.success) {
+                                    Toast.makeText(context, strings.msgDataImportSuccess, Toast.LENGTH_SHORT).show()
+                                    onDismiss()
+                                } else {
+                                    isError = true
+                                    statusMessage = result.message.ifBlank { strings.msgDataImportFailed }
+                                }
+                            }
                         } else {
                             isConnecting = false
                             isError = true

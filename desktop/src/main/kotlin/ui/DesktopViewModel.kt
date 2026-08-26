@@ -241,9 +241,7 @@ class DesktopViewModel(
             scope.launch {
                 val res = sm.syncPull()
                 if (res.success && (res.favoritesCount > 0 || res.historyCount > 0)) {
-                    if (_state.value.activeSourceId != null) {
-                        loadPage(_state.value.page, replace = true)
-                    }
+                    applySyncRefresh()
                 }
             }
         }
@@ -1613,23 +1611,50 @@ class DesktopViewModel(
         _state.update { it.copy(showSyncDialog = false) }
     }
 
+    private suspend fun applySyncRefresh() {
+        catalogCache.clear()
+        catalogPages.clear()
+        if (_state.value.activeSourceId != null) {
+            loadPage(_state.value.page, replace = true)
+        }
+        val sourceId = _state.value.activeSourceId ?: return
+        val updatedHistory = repository.getHistory(sourceId)
+        val counts = countIfNeeded(updatedHistory.map { item -> item.workId() }, sourceId)
+        val seriesItem = _state.value.series
+        val seriesFav = seriesItem?.let { repository.isFavorite(it.workId()) } ?: _state.value.seriesFavorited
+        _state.update {
+            it.copy(
+                historyItems = updatedHistory,
+                readCounts = it.readCounts + counts,
+                seriesFavorited = seriesFav,
+            )
+        }
+        if (_state.value.screen == Screen.History) {
+            loadHistory()
+        }
+    }
+
     fun syncNow() {
         scope.launch {
             val res = repository.syncManager?.syncFull()
             if (res?.success == true) {
-                if (_state.value.activeSourceId != null) {
-                    loadPage(_state.value.page, replace = true)
-                }
-                val sourceId = _state.value.activeSourceId ?: return@launch
-                val updatedHistory = repository.getHistory(sourceId)
-                val counts = countIfNeeded(updatedHistory.map { item -> item.workId() }, sourceId)
-                _state.update {
-                    it.copy(
-                        historyItems = updatedHistory,
-                        readCounts = it.readCounts + counts,
-                    )
-                }
+                applySyncRefresh()
             }
+        }
+    }
+
+    fun restoreWithMasterKey(key: String, onResult: (com.comics8.core.model.SyncResult) -> Unit) {
+        scope.launch {
+            val sm = repository.syncManager
+            if (sm == null) {
+                onResult(com.comics8.core.model.SyncResult(false, "동기화 매니저를 찾을 수 없습니다."))
+                return@launch
+            }
+            val res = sm.restoreAccount(key)
+            if (res.success) {
+                applySyncRefresh()
+            }
+            onResult(res)
         }
     }
 
@@ -1674,7 +1699,7 @@ class DesktopViewModel(
             }
             val res = sm.confirmPairingCode(code)
             if (res.success) {
-                syncNow()
+                applySyncRefresh()
             }
             onResult(res)
         }

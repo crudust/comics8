@@ -599,9 +599,15 @@ private fun DesktopSyncDialogConnectDevice(
                     } else {
                         val key = recoveryKeyInput.trim()
                         if (key.isNotBlank()) {
-                            viewModel.updateSyncKey(key)
-                            viewModel.syncNow()
-                            onDismiss()
+                            viewModel.restoreWithMasterKey(key) { result ->
+                                isConnecting = false
+                                if (result.success) {
+                                    onDismiss()
+                                } else {
+                                    isError = true
+                                    statusMessage = result.message.ifBlank { strings.msgDataImportFailed }
+                                }
+                            }
                         } else {
                             isConnecting = false
                             isError = true

@@ -430,19 +430,4 @@ class DesktopSyncManager(
 
         fun generateSyncKey(): String = SyncConstants.generateSyncKey()
     }
-
-    suspend fun syncFull(): DesktopSyncResult = exclusiveSync(DesktopSyncResult(false, "이미 동기화 중입니다.")) {
-        val pullRes = syncPull()
-        if (!pullRes.success && !pullRes.message.contains("데이터가 없습니다")) {
-            return@exclusiveSync pullRes
-        }
-        syncPush()
-    }
-
-    /** Silent delta if no other sync is running; null when skipped. */
-    suspend fun syncIfIdle(): DesktopSyncResult? = withContext(Dispatchers.IO) {
-        exclusiveSync(null) {
-            syncDelta()
-        }
-    }
 }
