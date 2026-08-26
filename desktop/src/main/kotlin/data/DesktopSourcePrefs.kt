@@ -17,8 +17,6 @@ object DesktopSourcePrefs : SourceSettings {
         val result = SourcePrefs.migrateInstalled(
             storedInstalled = storedInstalled,
             storedActive = storedActiveRaw(),
-            hitomiEnabledPref = hitomiEnabledRaw(),
-            hasLegacyUserData = false,
         )
         if (result.wrote) {
             setInstalledIds(result.installed)
@@ -82,11 +80,6 @@ object DesktopSourcePrefs : SourceSettings {
 
     override fun setProgressDisplayMode(sourceId: String, mode: com.comics8.core.model.ProgressDisplayMode) {
         prefs.put(SourcePrefs.progressDisplayModeKey(sourceId), mode.name)
-    }
-
-    private fun hitomiEnabledRaw(): Boolean? {
-        val key = SourcePrefs.enabledKey("hitomi")
-        return if (hasKey(key)) prefs.getBoolean(key, false) else null
     }
 
     private fun rawPref(key: String): String? {

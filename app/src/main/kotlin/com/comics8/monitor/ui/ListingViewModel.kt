@@ -32,7 +32,7 @@ import com.comics8.monitor.BuildConfig
 import com.comics8.monitor.ComicsApp
 import com.comics8.monitor.data.AndroidUpdateManager
 import com.comics8.monitor.data.BackupStats
-import com.comics8.monitor.data.SyncState
+import com.comics8.core.model.SyncState
 import com.comics8.monitor.data.local.ReadHistory
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -804,6 +804,11 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
     fun getSourceProgressDisplayMode(sourceId: String): com.comics8.core.model.ProgressDisplayMode =
         sourceSettings.progressDisplayMode(sourceId)
+
+    fun requestRemoveSource(sourceId: String) {
+        if (sourceId == WorkId.LOCAL_SOURCE) return
+        uninstallSource(sourceId)
+    }
 
     fun getNetworkSourceConfig(sourceId: String): com.comics8.core.source.network.NetworkSourceConfig? {
         val direct = (repository.sourceRegistry().getOrNull(sourceId) as? com.comics8.core.source.network.NetworkLibrarySource)?.config

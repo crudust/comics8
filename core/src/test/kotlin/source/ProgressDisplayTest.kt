@@ -39,7 +39,7 @@ class ProgressDisplayTest {
     fun progressDisplayModeDefaultForNetworkSourcesIsReadCount() {
         assertThat(com.comics8.core.model.ProgressDisplayMode.defaultFor("network-1234")).isEqualTo(com.comics8.core.model.ProgressDisplayMode.READ_COUNT)
         assertThat(com.comics8.core.model.ProgressDisplayMode.defaultFor("local")).isEqualTo(com.comics8.core.model.ProgressDisplayMode.READ_COUNT)
-        assertThat(com.comics8.core.model.ProgressDisplayMode.defaultFor("hitomi")).isEqualTo(com.comics8.core.model.ProgressDisplayMode.READ_COUNT)
+        assertThat(com.comics8.core.model.ProgressDisplayMode.defaultFor("hitomi")).isEqualTo(com.comics8.core.model.ProgressDisplayMode.LATEST_EPISODE)
         assertThat(com.comics8.core.model.ProgressDisplayMode.defaultFor("eleven")).isEqualTo(com.comics8.core.model.ProgressDisplayMode.LATEST_EPISODE)
     }
 

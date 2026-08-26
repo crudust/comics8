@@ -7,8 +7,6 @@ import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
-import com.comics8.core.network.ImageFallbacks
-import com.comics8.core.network.ImageReferer
 import com.comics8.core.source.SourceLocator
 import com.comics8.core.source.SourcePrefs
 import com.comics8.core.source.SourceRegistry

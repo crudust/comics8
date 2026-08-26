@@ -76,6 +76,8 @@ import com.comics8.core.i18n.displayTitle
 import com.comics8.core.model.ProgressDisplayMode
 import com.comics8.core.source.ComicSource
 import com.comics8.core.source.SourceType
+import com.comics8.core.source.WorkId
+import com.comics8.core.source.network.NetworkSourceConfig
 import com.comics8.core.source.resolveSourceType
 import com.comics8.monitor.ui.theme.LocalStrings
 import com.comics8.monitor.ui.ListingUiState
@@ -247,7 +249,6 @@ fun SourceDetailSettingsPane(
                             SourceType.SMB -> Icons.Default.Dns
                             SourceType.WEBDAV -> Icons.Default.Cloud
                             SourceType.JS -> Icons.Default.Description
-                            SourceType.WEB -> Icons.Default.Language
                         },
                     )
 
@@ -707,10 +708,6 @@ fun SourceDetailSettingsPane(
                             }
                         }
                     }
-                }
-
-                SourceType.WEB -> {
-                    // 내장 웹 크롤러 소스는 읽음 진행도 표시 설정만 제공
                 }
             }
 

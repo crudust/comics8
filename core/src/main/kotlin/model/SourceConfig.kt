@@ -18,7 +18,7 @@ enum class ProgressDisplayMode(val label: String, val description: String) {
     companion object {
         fun defaultFor(sourceId: String): ProgressDisplayMode {
             return when {
-                sourceId == "hitomi" || sourceId == "local" || sourceId.startsWith("network-") -> READ_COUNT
+                sourceId == "local" || sourceId.startsWith("network-") -> READ_COUNT
                 else -> LATEST_EPISODE
             }
         }

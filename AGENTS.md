@@ -76,27 +76,37 @@ Linux에서 `./scripts/deploy-release.sh`를 실행하면 APK와 Windows Zip을 
 
 ```
 Comics8/
-├── core/                       # 공통 모듈 (파서, 모델, 네트워크, 동기화 상수, 업데이트 체커)
+├── core/                       # 공통 모듈 (JS 플러그인 엔진, 모델, 네트워크, 통합 동기화 엔진)
 │   ├── build.gradle.kts
-│   └── src/main/kotlin/com/comics8/core/
-│       ├── model/              # ToonItem, EpisodeItem, DualSpread, ViewMode, UpdateModels 등
-│       ├── source/             # ComicSource, eleven/, hitomi/
-│       ├── network/            # ToonClient
-│       └── sync/               # SyncConstants, AppUpdateChecker
+│   └── src/main/kotlin/
+│       ├── i18n/               # 다국어 리소스 (한/영/일/중)
+│       ├── model/              # ToonItem, EpisodeItem, SyncModels, DualSpread 등
+│       ├── network/            # ToonClient, DNS, 배치 다운로더
+│       ├── source/             # ComicSource, JS 샌드박스, 로컬/네트워크(SMB/WebDAV) 파일 시스템
+│       └── sync/               # BaseSyncManager, SyncStorageAdapter, SyncWire
 ├── app/                        # Android 모듈 (APK)
 │   ├── build.gradle.kts
-│   └── src/main/java/com/comics8/monitor/
+│   └── src/main/kotlin/com/comics8/monitor/
+│       ├── ComicsApp.kt / MainActivity.kt
+│       ├── data/               # Room DB, AndroidSyncManager, DownloadManager
+│       └── ui/                 # Jetpack Compose UI
 ├── desktop/                    # Desktop 모듈 (macOS .app / Windows 포터블 zip)
 │   ├── build.gradle.kts
-│   └── src/main/kotlin/com/comics8/desktop/
-│       ├── Main.kt
-│       ├── data/               # SQLite JDBC, 리포지토리, 동기화/업데이트 매니저
+│   └── src/main/kotlin/
+│       ├── Main.kt / DesktopVersion.kt
+│       ├── data/               # SQLite JDBC, DesktopSyncManager, ToonRepository
 │       └── ui/                 # Compose Desktop UI (Browse, Series, Reader, History)
+├── server/                     # 클라우드 동기화 & 정기구독 프록시 백엔드 (FastAPI + PostgreSQL 16)
+│   ├── app/                    # sync, billing, proxy, pubsub_worker, database, models
+│   ├── docker-compose.yml      # postgres (5433) + backend (8905) 컨테이너
+│   ├── schema.sql              # 10개 최적화 테이블 DDL
+│   └── Dockerfile
 ├── scripts/
 │   ├── build-mac-local.sh          # Mac에서 /Applications 첫 설치
 │   ├── update-mac-app-remote.sh    # Linux→Mac SSH 빌드/설치/zip
 │   ├── run-desktop.sh              # Mac에서 데스크톱 앱 직접 실행
 │   ├── deploy-release.sh           # APK + Mac zip + Win zip 서버 배포
+│   ├── sync-public-repo.sh         # 오픈소스 공개 레포지토리 동기화
 │   └── deploy.env.example          # ~/.comics8-deploy.env 예시
 ├── build.gradle.kts
 ├── settings.gradle.kts

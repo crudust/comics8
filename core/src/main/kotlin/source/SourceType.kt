@@ -12,7 +12,6 @@ enum class SourceType(
     SMB("SMB 네트워크 드라이브", isStorage = true),
     WEBDAV("WebDAV 클라우드", isStorage = true),
     JS("JS 확장 스크립트", isStorage = false),
-    WEB("내장 웹 소스", isStorage = false),
 }
 
 fun ComicSource.resolveSourceType(): SourceType {
@@ -23,7 +22,6 @@ fun ComicSource.resolveSourceType(): SourceType {
             NetworkProtocol.WEBDAV -> SourceType.WEBDAV
         }
     }
-    if (this is JsComicSource) return SourceType.JS
     if (this.id.startsWith("network-")) return SourceType.SMB
-    return SourceType.WEB
+    return SourceType.JS
 }
