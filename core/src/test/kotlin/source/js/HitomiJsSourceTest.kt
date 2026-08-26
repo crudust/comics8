@@ -356,6 +356,30 @@ class HitomiJsSourceTest {
         assertThat(times[p95Index]).isLessThan(3_000L)
     }
 
+    @Test
+    fun ownsHostAndUseProxyResolveCorrectlyDuringNestedHostQuery() {
+        val engine = JsEngine()
+        val handle = engine.load(hitomiScript(), "hitomi.js")
+        val source = JsComicSource(engine, handle)
+
+        // Simulate an active nestedHostQuery that only contains "ltn.gold-usergeneratedcontent.net"
+        handle.api.nestedHostQuery = NestedHostQuery(
+            ownsHost = mapOf("ltn.gold-usergeneratedcontent.net" to true),
+            useProxy = mapOf("https://ltn.gold-usergeneratedcontent.net/gg.js" to false),
+        )
+
+        // Unrelated image host and origin host must still resolve correctly
+        assertThat(source.ownsHost("hitomi.la")).isTrue()
+        assertThat(source.ownsHost("ltn.gold-usergeneratedcontent.net")).isTrue()
+        assertThat(source.ownsHost("tn.gold-usergeneratedcontent.net")).isTrue()
+        assertThat(source.ownsHost("w1.gold-usergeneratedcontent.net")).isTrue()
+        assertThat(source.ownsHost("example.com")).isFalse()
+
+        // Unrelated image URL must still resolve proxy setting correctly
+        assertThat(source.useProxy("https://tn.gold-usergeneratedcontent.net/thumb.webp")).isFalse()
+        assertThat(source.useProxy("https://ltn.gold-usergeneratedcontent.net/gg.js")).isFalse()
+    }
+
     private fun loadHitomi(): JsComicSource {
         val engine = JsEngine()
         val handle = engine.load(hitomiScript(), "hitomi.js")
