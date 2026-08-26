@@ -17,73 +17,7 @@ object AppUpdateChecker {
         .build()
 
     fun fetchVersionInfo(serverUrl: String = SyncConstants.DEFAULT_SERVER_URL): VersionResponse? {
-        // 1. Try GitHub Releases API first (public CDN)
-        val githubUrl = "https://api.github.com/repos/crudust/comics8/releases/latest"
-        val fromGithub = tryFetchGithubRelease(githubUrl)
-        if (fromGithub != null) return fromGithub
-
-        // 2. Fallback to custom server / legacy version.json
         val url = SyncConstants.versionUrl(serverUrl)
-        return tryFetchLegacyVersion(url)
-    }
-
-    private fun tryFetchGithubRelease(url: String): VersionResponse? {
-        return try {
-            val request = Request.Builder()
-                .url(url)
-                .header("User-Agent", "Comics8/UpdateChecker")
-                .header("Accept", "application/vnd.github+json")
-                .get()
-                .build()
-            val jsonStr = httpClient.newCall(request).execute().use { resp ->
-                if (resp.isSuccessful) resp.body?.string() else null
-            } ?: return null
-
-            val root = JSONObject(jsonStr)
-            val tagName = root.optString("tag_name", "").removePrefix("v")
-            if (tagName.isBlank()) return null
-            val releaseNotes = root.optString("body", "")
-
-            var apkUrl = ""
-            var macUrl = ""
-            var winUrl = ""
-
-            val assets = root.optJSONArray("assets")
-            if (assets != null) {
-                for (i in 0 until assets.length()) {
-                    val asset = assets.optJSONObject(i) ?: continue
-                    val name = asset.optString("name", "").lowercase()
-                    val downloadUrl = asset.optString("browser_download_url", "")
-                    if (name.endsWith(".apk")) {
-                        apkUrl = downloadUrl
-                    } else if (name.contains("mac") && name.endsWith(".zip")) {
-                        macUrl = downloadUrl
-                    } else if (name.contains("win") && name.endsWith(".zip")) {
-                        winUrl = downloadUrl
-                    }
-                }
-            }
-
-            val androidInfo = PlatformUpdateInfo(
-                versionCode = 0,
-                versionName = tagName,
-                downloadUrl = apkUrl,
-                releaseNotes = releaseNotes,
-            )
-            val desktopInfo = PlatformUpdateInfo(
-                versionCode = 0,
-                versionName = tagName,
-                downloadUrl = macUrl,
-                windowsDownloadUrl = winUrl,
-                releaseNotes = releaseNotes,
-            )
-            VersionResponse(android = androidInfo, desktop = desktopInfo)
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    private fun tryFetchLegacyVersion(url: String): VersionResponse? {
         return try {
             val request = Request.Builder()
                 .url(url)
