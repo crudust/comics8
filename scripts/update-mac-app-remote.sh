@@ -53,7 +53,11 @@ object DesktopVersion {
     const val VERSION_CODE = ${COMICS8_VERSION_CODE}
 }
 EOF
-    sed -i '' -E "s/packageVersion = \"[^\"]+\"/packageVersion = \"${COMICS8_VERSION_NAME}\"/" desktop/build.gradle.kts
+    DESKTOP_PKG_VER="${COMICS8_VERSION_NAME%%-*}"
+    if [[ "${DESKTOP_PKG_VER}" =~ ^0\. ]]; then
+        DESKTOP_PKG_VER="1.${DESKTOP_PKG_VER#0.}"
+    fi
+    sed -i '' -E "s/packageVersion = \"[^\"]+\"/packageVersion = \"${DESKTOP_PKG_VER}\"/" desktop/build.gradle.kts
 fi
 
 JAVA_HOME_FOUND=""
