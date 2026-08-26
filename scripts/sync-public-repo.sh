@@ -40,7 +40,7 @@ cp -R desktop "${WORK_DIR}/"
 cp -R examples "${WORK_DIR}/"
 cp -R docs "${WORK_DIR}/"
 cp -R gradle "${WORK_DIR}/"
-cp gradlew gradlew.bat build.gradle.kts LICENSE README.md "${WORK_DIR}/"
+cp gradlew gradlew.bat build.gradle.kts LICENSE README.md PRIVACY_POLICY.md "${WORK_DIR}/"
 
 # Clean build artifacts if any
 find "${WORK_DIR}" -name "build" -type d -exec rm -rf {} + 2>/dev/null || true
