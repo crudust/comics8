@@ -118,10 +118,9 @@ object DesktopUpdateManager {
         scriptFile.setExecutable(true)
 
         val logFile = File(updateDir, "relaunch.log")
-        ProcessBuilder("/usr/bin/nohup", "/bin/bash", scriptFile.absolutePath)
-            .redirectInput(ProcessBuilder.Redirect.from(File("/dev/null")))
-            .redirectOutput(logFile)
-            .redirectErrorStream(true)
+        ProcessBuilder("/bin/bash", scriptFile.absolutePath)
+            .redirectOutput(ProcessBuilder.Redirect.appendTo(logFile))
+            .redirectError(ProcessBuilder.Redirect.appendTo(logFile))
             .start()
     }
 
