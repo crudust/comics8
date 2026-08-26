@@ -62,6 +62,9 @@ echo "🔧 1/5: Syncing codebase version..."
 sed_inplace "s/versionCode = [0-9]+/versionCode = ${VERSION_CODE}/" app/build.gradle.kts
 sed_inplace "s/versionName = \"[^\"]+\"/versionName = \"${VERSION_NAME}\"/" app/build.gradle.kts
 DESKTOP_PKG_VER="${VERSION_NAME%%-*}"
+if [[ "${DESKTOP_PKG_VER}" =~ ^0\. ]]; then
+    DESKTOP_PKG_VER="1.${DESKTOP_PKG_VER#0.}"
+fi
 sed_inplace "s/packageVersion = \"[^\"]+\"/packageVersion = \"${DESKTOP_PKG_VER}\"/" desktop/build.gradle.kts
 
 cat <<VERSION_EOF > desktop/src/main/kotlin/DesktopVersion.kt
@@ -96,8 +99,9 @@ git push origin main
 
 if [[ -n "${COMICS8_MAC_SSH:-}" ]]; then
     echo "🍏 Building macOS app on Mac builder (${COMICS8_MAC_SSH})..."
+    rm -f "${MAC_ZIP_PATH}"
     COMICS8_VERSION_NAME="${VERSION_NAME}" COMICS8_VERSION_CODE="${VERSION_CODE}" \
-        ./scripts/update-mac-app-remote.sh "origin/main" "${MAC_ZIP_PATH}" || echo "⚠️ Mac build failed or skipped."
+        ./scripts/update-mac-app-remote.sh "origin/main" "${MAC_ZIP_PATH}"
 fi
 
 # 4. Sync open-source modules to public repo
