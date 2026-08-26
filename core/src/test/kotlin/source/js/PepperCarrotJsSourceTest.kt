@@ -252,7 +252,7 @@ class PepperCarrotJsSourceTest {
             var dir: File? = cwd
             while (dir != null) {
                 if (File(dir, "settings.gradle.kts").isFile &&
-                    File(dir, "core/src/main/kotlin/com/comics8/core").isDirectory
+                    File(dir, "core/src/main/kotlin").isDirectory
                 ) {
                     return dir
                 }

@@ -44,12 +44,12 @@ class SourcePackageIsolationTest {
         File(workspaceRoot(), "desktop/src/main"),
     ).filter { it.isDirectory }
 
-    private fun coreMain(): File = File(workspaceRoot(), "core/src/main/kotlin/com/comics8/core")
+    private fun coreMain(): File = File(workspaceRoot(), "core/src/main/kotlin")
 
     private fun workspaceRoot(): File {
         val cwd = File(System.getProperty("user.dir")).canonicalFile
         val candidates = listOf(cwd, cwd.parentFile)
-        return candidates.first { File(it, "core/src/main/kotlin/com/comics8/core").isDirectory }
+        return candidates.first { File(it, "core/src/main/kotlin").isDirectory }
     }
 
     companion object {
