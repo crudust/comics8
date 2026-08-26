@@ -7,7 +7,7 @@ data class SyncState(
     val syncKey: String = "",
     val serverUrl: String = "",
     val autoSyncEnabled: Boolean = true,
-    val useServerProxy: Boolean = true,
+    val useServerProxy: Boolean = false,
     val isPro: Boolean = false,
     val syncMessage: String? = null,
 )
