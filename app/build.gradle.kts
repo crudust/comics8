@@ -13,8 +13,8 @@ android {
         applicationId = "com.comics8.monitor"
         minSdk = 26
         targetSdk = 35
-        versionCode = 92
-        versionName = "1.5.66"
+        versionCode = 1
+        versionName = "0.1.0-beta"
     }
 
     signingConfigs {
