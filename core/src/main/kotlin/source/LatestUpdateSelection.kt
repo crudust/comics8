@@ -8,9 +8,10 @@ object LatestUpdateSelection {
         favorites: List<ToonItem>,
         latestItems: List<ToonItem>?,
         sourceEnabled: Boolean,
+        notificationEnabled: Boolean = true,
     ): List<ToonItem> {
         if (favorites.isEmpty()) return emptyList()
-        if (!sourceEnabled) return emptyList()
+        if (!sourceEnabled || !notificationEnabled) return emptyList()
         return when (source.notificationMode) {
             NotificationMode.NONE -> emptyList()
             NotificationMode.LATEST_INTERSECTION -> {

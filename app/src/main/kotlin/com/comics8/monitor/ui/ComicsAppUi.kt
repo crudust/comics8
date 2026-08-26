@@ -114,7 +114,9 @@ private fun ComicsAppUiContent(
 
     val permission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
-    ) { }
+    ) { _ ->
+        viewModel.checkNotificationPermission()
+    }
     val pickJs = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent(),
     ) { uri ->
@@ -128,9 +130,7 @@ private fun ComicsAppUiContent(
         if (state.showAddSourceSheet) onImportJs()
     }
     LaunchedEffect(Unit) {
-        if (Build.VERSION.SDK_INT >= 33) {
-            permission.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
+        viewModel.checkNotificationPermission()
     }
 
     val treePicker = rememberLauncherForActivityResult(PersistableOpenDocumentTree()) { uri ->

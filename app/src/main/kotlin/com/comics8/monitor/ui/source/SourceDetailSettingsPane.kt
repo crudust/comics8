@@ -46,6 +46,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -349,6 +350,37 @@ fun SourceDetailSettingsPane(
                                         )
                                     }
                                 }
+                            }
+
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
+
+                            var notificationEnabled by remember(source.id) {
+                                mutableStateOf(viewModel.getSourceNotificationEnabled(source.id))
+                            }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = strings.labelSourceUpdateNotification,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                    )
+                                    Text(
+                                        text = strings.descSourceUpdateNotification,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                Switch(
+                                    checked = notificationEnabled,
+                                    onCheckedChange = { checked ->
+                                        notificationEnabled = checked
+                                        viewModel.toggleSourceNotification(source.id, checked)
+                                    },
+                                )
                             }
                         }
                     }

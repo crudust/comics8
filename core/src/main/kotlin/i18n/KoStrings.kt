@@ -297,7 +297,27 @@ object KoStrings : AppStrings {
     override val actionUpdateLater: String = "나중에"
     override val labelUpdateNotification: String = "업데이트 알림"
 
-    // 10. Dialogs & Messages / Error / Toast
+    // 10. Notification Settings
+    override val sectionNotificationSettings: String = "새 회차 알림 설정"
+    override val labelPeriodicUpdateNotification: String = "새 회차 업데이트 알림"
+    override val descPeriodicUpdateNotification: String = "즐겨찾기 만화의 새로운 회차를 주기적으로 확인하여 알림을 보냅니다."
+    override val labelNotificationInterval: String = "확인 간격"
+    override val interval15m: String = "15분"
+    override val interval30m: String = "30분"
+    override val interval1h: String = "1시간"
+    override val interval3h: String = "3시간"
+    override val interval6h: String = "6시간"
+    override val interval12h: String = "12시간"
+    override val interval24h: String = "24시간"
+    override val labelNotificationSources: String = "알림 대상 소스"
+    override val descNotificationSources: String = "새 회차 알림을 수신할 소스를 선택합니다."
+    override val labelSourceUpdateNotification: String = "새 회차 업데이트 알림 받기"
+    override val descSourceUpdateNotification: String = "이 소스의 즐겨찾기 만화에 새 회차가 등록되면 알림을 받습니다."
+    override val labelNotificationPermissionRequired: String = "알림 권한 필요"
+    override val descNotificationPermissionRequired: String = "새 회차 알림을 받으려면 시스템 알림 권한을 허용해야 합니다."
+    override val actionGrantPermission: String = "권한 허용"
+
+    // 11. Dialogs & Messages / Error / Toast
     override val msgUpdateCheckFailed: String = "업데이트 확인 실패"
     override fun msgLatestVersionInUse(version: String): String = "현재 최신 버전(v$version)을 사용 중입니다."
     override val msgUpdateDownloadFailed: String = "업데이트 다운로드 실패"

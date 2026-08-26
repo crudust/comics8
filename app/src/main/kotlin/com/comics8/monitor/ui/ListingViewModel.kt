@@ -34,6 +34,7 @@ import com.comics8.monitor.data.AndroidUpdateManager
 import com.comics8.monitor.data.BackupStats
 import com.comics8.core.model.SyncState
 import com.comics8.monitor.data.local.ReadHistory
+import com.comics8.monitor.work.RefreshWorker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -114,6 +115,10 @@ data class ListingUiState(
     val networkTesting: Boolean = false,
     val networkTestMessage: String? = null,
     val networkTestSucceeded: Boolean = false,
+    val notificationEnabled: Boolean = true,
+    val notificationIntervalMinutes: Long = 60L,
+    val notificationSources: Map<String, Boolean> = emptyMap(),
+    val hasNotificationPermission: Boolean = true,
 ) {
     val isSearch: Boolean get() = searchQuery != null
 
@@ -217,6 +222,9 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             },
             viewMode = ViewMode.SCROLL,
             readDirection = ReadDirection.RIGHT_TO_LEFT,
+            notificationEnabled = sourceSettings.globalNotificationEnabled(),
+            notificationIntervalMinutes = sourceSettings.notificationIntervalMinutes(),
+            hasNotificationPermission = androidx.core.app.NotificationManagerCompat.from(application).areNotificationsEnabled(),
         ),
     )
     val state: StateFlow<ListingUiState> = _state.asStateFlow()
@@ -1450,7 +1458,57 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     fun openSettings() {
         readerJob?.cancel()
         episodeJob?.cancel()
-        _state.update { it.copy(screen = Screen.Settings) }
+        val notifEnabled = sourceSettings.globalNotificationEnabled()
+        val notifInterval = sourceSettings.notificationIntervalMinutes()
+        val notifSources = repository.installedSources().associate { it.id to sourceSettings.isNotificationEnabled(it.id) }
+        val hasPerm = androidx.core.app.NotificationManagerCompat.from(getApplication()).areNotificationsEnabled()
+        _state.update {
+            it.copy(
+                screen = Screen.Settings,
+                notificationEnabled = notifEnabled,
+                notificationIntervalMinutes = notifInterval,
+                notificationSources = notifSources,
+                hasNotificationPermission = hasPerm,
+            )
+        }
+    }
+
+    fun toggleNotificationEnabled(enabled: Boolean) {
+        sourceSettings.setGlobalNotificationEnabled(enabled)
+        RefreshWorker.updateSchedule(
+            getApplication(),
+            enabled = enabled,
+            intervalMinutes = _state.value.notificationIntervalMinutes,
+        )
+        _state.update { it.copy(notificationEnabled = enabled) }
+    }
+
+    fun setNotificationIntervalMinutes(minutes: Long) {
+        sourceSettings.setNotificationIntervalMinutes(minutes)
+        if (_state.value.notificationEnabled) {
+            RefreshWorker.updateSchedule(
+                getApplication(),
+                enabled = true,
+                intervalMinutes = minutes,
+            )
+        }
+        _state.update { it.copy(notificationIntervalMinutes = minutes) }
+    }
+
+    fun toggleSourceNotification(sourceId: String, enabled: Boolean) {
+        sourceSettings.setNotificationEnabled(sourceId, enabled)
+        _state.update {
+            it.copy(notificationSources = it.notificationSources + (sourceId to enabled))
+        }
+    }
+
+    fun getSourceNotificationEnabled(sourceId: String): Boolean {
+        return sourceSettings.isNotificationEnabled(sourceId)
+    }
+
+    fun checkNotificationPermission() {
+        val granted = androidx.core.app.NotificationManagerCompat.from(getApplication()).areNotificationsEnabled()
+        _state.update { it.copy(hasNotificationPermission = granted) }
     }
 
     fun closeSettings() {

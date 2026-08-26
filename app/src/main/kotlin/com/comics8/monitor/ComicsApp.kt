@@ -123,7 +123,11 @@ class ComicsApp : Application(), ImageLoaderFactory {
         repository.applyPreferences { id ->
             prefs.getString(SourcePrefs.languageKey(id), null)
         }
-        RefreshWorker.enqueue(this)
+        RefreshWorker.updateSchedule(
+            this,
+            enabled = sourcePrefs.globalNotificationEnabled(),
+            intervalMinutes = sourcePrefs.notificationIntervalMinutes(),
+        )
     }
 
     override fun newImageLoader(): ImageLoader {

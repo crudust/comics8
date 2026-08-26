@@ -359,6 +359,8 @@ class ToonRepository(
 
         for ((sourceId, rows) in favorites.groupBy { it.sourceId.ifBlank { WorkId.DEFAULT_SOURCE } }) {
             val source = sources.getOrNull(sourceId) ?: continue
+            val notifEnabled = sourceSettings?.isNotificationEnabled(sourceId) ?: true
+            if (!notifEnabled) continue
             val candidates = try {
                 val latest = if (source.notificationMode == NotificationMode.LATEST_INTERSECTION) {
                     fetchRemoteListing(sourceId, "LATEST", 1).items
@@ -370,6 +372,7 @@ class ToonRepository(
                     favorites = rows.map { it.toItem() },
                     latestItems = latest,
                     sourceEnabled = isSourceEnabled(sourceId),
+                    notificationEnabled = notifEnabled,
                 )
             } catch (_: Exception) {
                 emptyList()

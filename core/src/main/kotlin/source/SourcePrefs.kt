@@ -15,6 +15,8 @@ object SourcePrefs {
 
     fun progressDisplayModeKey(sourceId: String): String = "$sourceId.progress_display_mode"
 
+    fun notificationKey(sourceId: String): String = "sources.$sourceId.notification_enabled"
+
     /**
      * Disk value for a string pref. Null if and only if the key is absent —
      * never substitute a getter default such as `"eleven"`.
@@ -108,5 +110,7 @@ interface SourceSettings {
     }
     fun libraryRoots(): List<String> = emptyList()
     fun setLibraryRoots(paths: List<String>) {}
+    fun isNotificationEnabled(sourceId: String): Boolean = true
+    fun setNotificationEnabled(sourceId: String, enabled: Boolean) {}
     fun implementationOverride(sourceId: String): String? = null
 }

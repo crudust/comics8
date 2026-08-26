@@ -26,6 +26,9 @@ class RefreshWorker(
 
     override suspend fun doWork(): Result {
         val app = applicationContext as? ComicsApp ?: return Result.success()
+        if (!app.sourceSettings.globalNotificationEnabled()) {
+            return Result.success()
+        }
         return try {
             val fresh = app.repository.checkLatestUpdates()
             if (fresh.isNotEmpty()) {
@@ -95,14 +98,28 @@ class RefreshWorker(
         private const val CHANNEL_ID = "latest-updates"
         private const val NOTIFY_ID = 81
 
-        fun enqueue(context: Context) {
-            val request = PeriodicWorkRequestBuilder<RefreshWorker>(1, TimeUnit.HOURS)
+        fun updateSchedule(context: Context, enabled: Boolean, intervalMinutes: Long = 60) {
+            val workManager = WorkManager.getInstance(context)
+            if (!enabled) {
+                workManager.cancelUniqueWork(UNIQUE_NAME)
+                return
+            }
+            val validMinutes = intervalMinutes.coerceAtLeast(15L)
+            val request = PeriodicWorkRequestBuilder<RefreshWorker>(validMinutes, TimeUnit.MINUTES)
                 .build()
-            WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+            workManager.enqueueUniquePeriodicWork(
                 UNIQUE_NAME,
                 ExistingPeriodicWorkPolicy.UPDATE,
                 request,
             )
+        }
+
+        fun cancel(context: Context) {
+            WorkManager.getInstance(context).cancelUniqueWork(UNIQUE_NAME)
+        }
+
+        fun enqueue(context: Context, intervalMinutes: Long = 60) {
+            updateSchedule(context, enabled = true, intervalMinutes = intervalMinutes)
         }
     }
 }

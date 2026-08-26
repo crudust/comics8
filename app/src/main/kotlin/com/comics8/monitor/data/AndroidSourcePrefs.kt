@@ -76,6 +76,47 @@ class AndroidSourcePrefs(
         prefs.edit().putString(SourcePrefs.progressDisplayModeKey(sourceId), mode.name).apply()
     }
 
+    override fun isNotificationEnabled(sourceId: String): Boolean {
+        val key = SourcePrefs.notificationKey(sourceId)
+        return if (prefs.contains(key)) prefs.getBoolean(key, true) else true
+    }
+
+    override fun setNotificationEnabled(sourceId: String, enabled: Boolean) {
+        prefs.edit().putBoolean(SourcePrefs.notificationKey(sourceId), enabled).apply()
+    }
+
+    fun globalNotificationEnabled(): Boolean {
+        return if (prefs.contains(GLOBAL_NOTIFICATION_ENABLED_KEY)) {
+            prefs.getBoolean(GLOBAL_NOTIFICATION_ENABLED_KEY, true)
+        } else {
+            true
+        }
+    }
+
+    fun setGlobalNotificationEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(GLOBAL_NOTIFICATION_ENABLED_KEY, enabled).apply()
+    }
+
+    fun notificationIntervalMinutes(): Long {
+        return if (prefs.contains(NOTIFICATION_INTERVAL_MINUTES_KEY)) {
+            prefs.getLong(NOTIFICATION_INTERVAL_MINUTES_KEY, DEFAULT_INTERVAL_MINUTES)
+        } else {
+            DEFAULT_INTERVAL_MINUTES
+        }
+    }
+
+    fun setNotificationIntervalMinutes(minutes: Long) {
+        val valid = minutes.coerceAtLeast(MIN_INTERVAL_MINUTES)
+        prefs.edit().putLong(NOTIFICATION_INTERVAL_MINUTES_KEY, valid).apply()
+    }
+
+    companion object {
+        const val GLOBAL_NOTIFICATION_ENABLED_KEY = "pref_notification_enabled"
+        const val NOTIFICATION_INTERVAL_MINUTES_KEY = "pref_notification_interval_minutes"
+        const val DEFAULT_INTERVAL_MINUTES = 60L
+        const val MIN_INTERVAL_MINUTES = 15L
+    }
+
     private fun rawPref(key: String): String? =
         SourcePrefs.storedActiveRaw(prefs.contains(key), prefs.getString(key, null))
 }

@@ -48,6 +48,7 @@ class LatestUpdateSelectionTest {
             .containsExactly("a")
             .inOrder()
         assertThat(LatestUpdateSelection.candidates(source, favs, latest, sourceEnabled = false)).isEmpty()
+        assertThat(LatestUpdateSelection.candidates(source, favs, latest, sourceEnabled = true, notificationEnabled = false)).isEmpty()
     }
 
     private fun toon(sourceId: String, id: String) = ToonItem(
