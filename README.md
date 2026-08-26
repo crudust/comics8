@@ -1,7 +1,8 @@
 # Comics8
 
 <p align="center">
-  <strong>Modern, lightweight, cross-platform comic & webtoon reader with custom plugin support.</strong>
+  <strong>Modern, lightweight, foldable-optimized cross-platform comic & webtoon reader.</strong><br>
+  <em>Featuring dual-spread viewing, network storage (SMB/WebDAV/ZIP), cloud sync, and JavaScript plugin architecture.</em>
 </p>
 
 <p align="center">
@@ -15,35 +16,43 @@
 
 ## ✨ Features
 
-- **📖 Advanced Dual-Spread Reader**:
-  - Seamless two-page spread viewing with automatic panoramic wide-page detection.
-  - Right-to-Left (Japanese Manga) and Left-to-Right (Western Comic / Webtoon) reading direction support.
-  - Continuous vertical scroll mode with infinite preloading.
-- **🔌 Extensible JavaScript Plugin Architecture**:
-  - Add your own custom sources using standard JavaScript plugins.
-  - Multi-language catalog support, live search, and high-resolution image fallback resolution.
-- **⚡ High Performance & Zero-Flicker Rendering**:
-  - Deterministic layout pipeline with fast header probing and asynchronous pre-decoding.
-  - Native Compose Multiplatform UI hardware-accelerated with Skiko.
-- **🔄 Universal History & Progress Sync**:
-  - SQLite database sync across devices.
-- **📦 Completely Portable**:
-  - No installer needed for Windows. Clean Homebrew cask for macOS.
+### 📱 Foldable & Large-Screen Optimized Reader
+- **Advanced Dual-Spread View**: Seamless two-page spread viewing designed specifically for foldable devices (e.g. Galaxy Z Fold) and wide landscape screens on tablets & desktops.
+- **Smart Wide-Page / Panorama Detection**: Automatically detects merged two-page spreads and presents them in full-width single views, while grouping standard portrait pages in pairs.
+- **Versatile Reading Modes**:
+  - Right-to-Left (Japanese Manga), Left-to-Right (Western Comics / Books), and Continuous Vertical Scroll (Webtoons).
+  - Multiple scaling and cropping modes: Fit to Screen, Original Aspect Ratio, Split Mode, and more.
+- **Zero-Flicker & High-Performance Rendering**: Fast image pre-decoding and Skiko hardware acceleration ensure smooth, flicker-free page transitions.
+
+### 🌐 Local & Network Library (SMB / WebDAV / ZIP)
+- **Network Storage Integration**: Connect directly to **SMB** and **WebDAV** shares on your NAS or private file servers to stream comics without downloading.
+- **Direct Archive Reading (ZIP / CBZ)**: Open and read images inside compressed archives instantly without extraction.
+- **Local Directory Binding**: Mount local folders on your device into unified comic libraries.
+
+### 🔄 Real-Time Cloud Sync & Convenience
+- **Cross-Platform Progress Sync**: Real-time automatic synchronization of reading progress, current page, read status, and favorites across Android, macOS, and Windows.
+- **Effortless Device Pairing**: Instantly link devices using simple 6-digit one-time pairing codes or master recovery keys without mandatory account sign-ups.
+- **Reading History & Resumption**: Visual progress indicators, quick resumption of recently read chapters, and persistent history tracking.
+- **Dedicated Network & Proxy Controls**: Direct connection, server routing proxy, and custom HTTP / SOCKS5 proxy configurations with built-in latency testing.
+
+### 🔌 Extensible JavaScript Plugin Engine
+- **Infinite Source Expansion**: Easily add new online comic/webtoon sources using standard JavaScript (`.js`) plugins.
+- **Catalog & Live Search**: Built-in support for multi-language catalogs, keyword suggestions, live search, and automatic updates.
 
 ---
 
 ## 📥 Installation & Downloads
 
 ### macOS (Recommended: Homebrew)
-Install effortlessly via Homebrew Tap (bypasses Gatekeeper quarantine automatically):
+Install effortlessly via Homebrew Tap (automatically handles Gatekeeper quarantine):
 ```bash
 brew install crudust/tap/comics8
 ```
 
-Or download `Comics8-mac.zip` from [GitHub Releases](https://github.com/crudust/comics8/releases/latest), unzip, and drag `Comics8.app` to `/Applications`.
+Or download `Comics8-mac.zip` from [GitHub Releases](https://github.com/crudust/comics8/releases/latest), extract it, and drag `Comics8.app` to `/Applications`.
 
 ### Windows
-Download `Comics8-win.zip` from [GitHub Releases](https://github.com/crudust/comics8/releases/latest), extract anywhere, and run `Comics8.exe`. (No installation required).
+Download `Comics8-win.zip` from [GitHub Releases](https://github.com/crudust/comics8/releases/latest), extract anywhere, and run `Comics8.exe` (portable, no installation required).
 
 ### Android
 Download `comics8-latest.apk` directly from [GitHub Releases](https://github.com/crudust/comics8/releases/latest) on your mobile device.
@@ -58,9 +67,9 @@ Comics8 supports custom source plugins written in JavaScript.
 - **Reference Example**: [Pepper & Carrot Plugin](examples/sources/peppercarrot.js)
 
 To import a plugin into Comics8 Desktop:
-1. Go to **Sources** tab.
+1. Navigate to **Sources**.
 2. Click **Add Source** -> **Import JavaScript File (`.js`)**.
-3. Select your `.js` file to start reading.
+3. Select your `.js` plugin file to start reading.
 
 ---
 
@@ -68,7 +77,7 @@ To import a plugin into Comics8 Desktop:
 
 ### Prerequisites
 - JDK 17 (e.g. OpenJDK 17)
-- Kotlin / Gradle
+- Android SDK (minSdk 26, targetSdk 35)
 
 ### Run Desktop App locally (macOS / Windows / Linux)
 ```bash
@@ -76,6 +85,7 @@ To import a plugin into Comics8 Desktop:
 ```
 
 ### Build Distribution Packages
+- **Android Release APK**: `./gradlew assembleRelease`
 - **Windows Portable Zip**: `./gradlew :desktop:packageWindowsZip`
 - **macOS App Distribution**: `./gradlew :desktop:createDistributable`
 
