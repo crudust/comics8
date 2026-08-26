@@ -13,12 +13,34 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
+import com.comics8.core.model.CustomProxyConfig
+import com.comics8.core.model.NetworkSettings
+import com.comics8.core.model.ProxyType
+
 class ToonClient(
-    private val client: OkHttpClient = defaultClient(),
+    private val client: OkHttpClient,
     @Volatile var proxyBaseUrl: String? = SyncConstants.proxyBaseUrl(),
-    @Volatile var isProxyEnabled: Boolean = true,
+    @Volatile var isProxyEnabled: Boolean = false,
+    val proxySelector: DynamicProxySelector = DynamicProxySelector(),
+    val proxyAuthenticator: DynamicProxyAuthenticator = DynamicProxyAuthenticator(),
     private val sources: SourceLocator,
 ) : SourceHttp {
+
+    constructor(
+        proxyBaseUrl: String? = SyncConstants.proxyBaseUrl(),
+        isProxyEnabled: Boolean = false,
+        proxySelector: DynamicProxySelector = DynamicProxySelector(),
+        proxyAuthenticator: DynamicProxyAuthenticator = DynamicProxyAuthenticator(),
+        sources: SourceLocator,
+    ) : this(
+        client = defaultClient(proxySelector = proxySelector, proxyAuthenticator = proxyAuthenticator),
+        proxyBaseUrl = proxyBaseUrl,
+        isProxyEnabled = isProxyEnabled,
+        proxySelector = proxySelector,
+        proxyAuthenticator = proxyAuthenticator,
+        sources = sources,
+    )
+
     val httpClient: OkHttpClient get() = client
 
     internal var clock: () -> Long = { System.currentTimeMillis() }
@@ -167,6 +189,86 @@ class ToonClient(
         return source.useProxy(url)
     }
 
+    fun applyNetworkSettings(
+        settings: NetworkSettings,
+        serverUrl: String = SyncConstants.DEFAULT_SERVER_URL,
+    ) {
+        when (settings.proxyType) {
+            ProxyType.DIRECT -> {
+                isProxyEnabled = false
+                proxySelector.currentProxy = java.net.Proxy.NO_PROXY
+                proxyAuthenticator.credentials = null
+            }
+            ProxyType.SERVER -> {
+                isProxyEnabled = true
+                proxyBaseUrl = SyncConstants.proxyBaseUrl(serverUrl)
+                proxySelector.currentProxy = java.net.Proxy.NO_PROXY
+                proxyAuthenticator.credentials = null
+            }
+            ProxyType.CUSTOM_HTTP -> {
+                isProxyEnabled = false
+                val host = settings.customProxy.host.trim().ifBlank { "127.0.0.1" }
+                val port = settings.customProxy.port.coerceIn(1, 65535)
+                proxySelector.currentProxy = java.net.Proxy(java.net.Proxy.Type.HTTP, java.net.InetSocketAddress.createUnresolved(host, port))
+                proxyAuthenticator.credentials = if (settings.customProxy.username.isNotBlank()) {
+                    okhttp3.Credentials.basic(settings.customProxy.username, settings.customProxy.password)
+                } else null
+            }
+            ProxyType.CUSTOM_SOCKS -> {
+                isProxyEnabled = false
+                val host = settings.customProxy.host.trim().ifBlank { "127.0.0.1" }
+                val port = settings.customProxy.port.coerceIn(1, 65535)
+                proxySelector.currentProxy = java.net.Proxy(java.net.Proxy.Type.SOCKS, java.net.InetSocketAddress.createUnresolved(host, port))
+                proxyAuthenticator.credentials = if (settings.customProxy.username.isNotBlank()) {
+                    okhttp3.Credentials.basic(settings.customProxy.username, settings.customProxy.password)
+                } else null
+            }
+        }
+    }
+
+    suspend fun testProxyConnection(
+        type: ProxyType,
+        config: CustomProxyConfig,
+    ): Result<Long> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        runCatching {
+            val start = System.currentTimeMillis()
+            val host = config.host.trim().ifBlank { "127.0.0.1" }
+            val port = config.port.coerceIn(1, 65535)
+            val proxy = when (type) {
+                ProxyType.CUSTOM_HTTP -> java.net.Proxy(java.net.Proxy.Type.HTTP, java.net.InetSocketAddress(host, port))
+                ProxyType.CUSTOM_SOCKS -> java.net.Proxy(java.net.Proxy.Type.SOCKS, java.net.InetSocketAddress(host, port))
+                else -> java.net.Proxy.NO_PROXY
+            }
+            val testClient = OkHttpClient.Builder()
+                .proxy(proxy)
+                .apply {
+                    if (config.username.isNotBlank()) {
+                        proxyAuthenticator { _, response ->
+                            response.request.newBuilder()
+                                .header("Proxy-Authorization", okhttp3.Credentials.basic(config.username, config.password))
+                                .build()
+                        }
+                    }
+                }
+                .connectTimeout(5, TimeUnit.SECONDS)
+                .readTimeout(5, TimeUnit.SECONDS)
+                .build()
+
+            val request = Request.Builder()
+                .url("https://www.google.com/generate_204")
+                .header("User-Agent", USER_AGENT)
+                .get()
+                .build()
+
+            testClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful && response.code != 204) {
+                    error("HTTP ${response.code}")
+                }
+            }
+            System.currentTimeMillis() - start
+        }
+    }
+
     companion object {
         const val USER_AGENT =
             "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
@@ -174,8 +276,14 @@ class ToonClient(
         const val PROXY_FAILURE_THRESHOLD = 3
         const val PROXY_COOLDOWN_MS = 60_000L
 
-        fun defaultClient(cacheDirectory: File? = null): OkHttpClient {
+        fun defaultClient(
+            cacheDirectory: File? = null,
+            proxySelector: java.net.ProxySelector = DynamicProxySelector(),
+            proxyAuthenticator: okhttp3.Authenticator = DynamicProxyAuthenticator(),
+        ): OkHttpClient {
             val builder = OkHttpClient.Builder()
+                .proxySelector(proxySelector)
+                .proxyAuthenticator(proxyAuthenticator)
                 .dns(FallbackDns)
                 .connectTimeout(20, TimeUnit.SECONDS)
                 .readTimeout(40, TimeUnit.SECONDS)

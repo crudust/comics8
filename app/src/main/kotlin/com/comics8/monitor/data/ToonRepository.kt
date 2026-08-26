@@ -56,7 +56,7 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
 class ToonRepository(
-    private val client: ToonClient,
+    val client: ToonClient,
     private val seenDao: SeenDao,
     private val favoriteDao: FavoriteDao,
     private val readerSettingDao: ReaderSettingDao,

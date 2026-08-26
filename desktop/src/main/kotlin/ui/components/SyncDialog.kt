@@ -163,28 +163,6 @@ fun SyncDialog(
                     )
                 }
 
-                // 3. 서버 우회 요청 스위치
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = strings.labelServerProxy,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                        )
-                        Text(
-                            text = strings.descServerProxy,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Switch(
-                        checked = syncState.useServerProxy,
-                        onCheckedChange = { viewModel.toggleServerProxy(it) },
-                    )
-                }
 
                 // 4. 고급 동기화 설정 (접이식)
                 Row(

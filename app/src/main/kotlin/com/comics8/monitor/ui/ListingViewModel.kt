@@ -115,6 +115,10 @@ data class ListingUiState(
     val networkTesting: Boolean = false,
     val networkTestMessage: String? = null,
     val networkTestSucceeded: Boolean = false,
+    val networkSettings: com.comics8.core.model.NetworkSettings = com.comics8.core.model.NetworkSettings(),
+    val proxyTesting: Boolean = false,
+    val proxyTestResult: String? = null,
+    val proxyTestSuccess: Boolean? = null,
     val notificationEnabled: Boolean = true,
     val notificationIntervalMinutes: Long = 60L,
     val notificationSources: Map<String, Boolean> = emptyMap(),
@@ -380,11 +384,16 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             )
         }
         ensureLocalSourceLoaded()
+        val initialNet = com.comics8.core.network.NetworkSettingsStorage.load { k, def -> prefs.getString(k, def) }
+        _state.update { it.copy(networkSettings = initialNet) }
+        repository.client.applyNetworkSettings(initialNet, SyncConstants.DEFAULT_SERVER_URL)
+
         applyActiveSource(sourceSettings.activeSourceId() ?: WorkId.LOCAL_SOURCE, loadListing = false)
         repository.syncManager?.let { sm ->
             viewModelScope.launch {
                 sm.syncState.collect { s ->
                     _state.update { it.copy(syncState = s) }
+                    repository.client.applyNetworkSettings(_state.value.networkSettings, s.serverUrl)
                 }
             }
             viewModelScope.launch {
@@ -1714,6 +1723,41 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
     fun toggleAutoSync(enabled: Boolean) {
         repository.syncManager?.setAutoSyncEnabled(enabled)
+    }
+
+    fun setProxyType(type: com.comics8.core.model.ProxyType) {
+        val next = _state.value.networkSettings.copy(proxyType = type)
+        com.comics8.core.network.NetworkSettingsStorage.save(next) { k, v ->
+            if (v != null) prefs.edit().putString(k, v).apply()
+            else prefs.edit().remove(k).apply()
+        }
+        _state.update { it.copy(networkSettings = next, proxyTestResult = null, proxyTestSuccess = null) }
+        val serverUrl = repository.syncManager?.syncState?.value?.serverUrl ?: SyncConstants.DEFAULT_SERVER_URL
+        repository.client.applyNetworkSettings(next, serverUrl)
+    }
+
+    fun setCustomProxy(config: com.comics8.core.model.CustomProxyConfig) {
+        val next = _state.value.networkSettings.copy(customProxy = config)
+        com.comics8.core.network.NetworkSettingsStorage.save(next) { k, v ->
+            if (v != null) prefs.edit().putString(k, v).apply()
+            else prefs.edit().remove(k).apply()
+        }
+        _state.update { it.copy(networkSettings = next, proxyTestResult = null, proxyTestSuccess = null) }
+        val serverUrl = repository.syncManager?.syncState?.value?.serverUrl ?: SyncConstants.DEFAULT_SERVER_URL
+        repository.client.applyNetworkSettings(next, serverUrl)
+    }
+
+    fun testProxyConnection(strings: com.comics8.core.i18n.AppStrings) {
+        val current = _state.value.networkSettings
+        _state.update { it.copy(proxyTesting = true, proxyTestResult = strings.statusTestingProxy, proxyTestSuccess = null) }
+        viewModelScope.launch {
+            val result = repository.client.testProxyConnection(current.proxyType, current.customProxy)
+            result.onSuccess { latency ->
+                _state.update { it.copy(proxyTesting = false, proxyTestResult = strings.statusProxySuccess(latency), proxyTestSuccess = true) }
+            }.onFailure { err ->
+                _state.update { it.copy(proxyTesting = false, proxyTestResult = strings.statusProxyFailed(err.message ?: "Error"), proxyTestSuccess = false) }
+            }
+        }
     }
 
     fun toggleServerProxy(enabled: Boolean) {

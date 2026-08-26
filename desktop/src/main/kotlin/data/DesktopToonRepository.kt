@@ -32,7 +32,7 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
 class DesktopToonRepository(
-    private val client: ToonClient,
+    val client: ToonClient,
     private val database: DesktopDatabase,
     val syncManager: DesktopSyncManager? = null,
     val downloadManager: DesktopDownloadManager? = null,

@@ -247,6 +247,25 @@ interface AppStrings {
     val descAutoSync: String
     val labelServerProxy: String
     val descServerProxy: String
+
+    // Network Settings
+    val sectionNetwork: String
+    val labelProxyMode: String
+    val labelProxyDirect: String
+    val descProxyDirect: String
+    val labelProxyServer: String
+    val descProxyServer: String
+    val labelProxyCustom: String
+    val descProxyCustom: String
+    val labelProxyProtocol: String
+    val labelProxyHost: String
+    val labelProxyPort: String
+    val labelProxyUser: String
+    val labelProxyPassword: String
+    val actionTestProxy: String
+    val statusTestingProxy: String
+    fun statusProxySuccess(latencyMs: Long): String
+    fun statusProxyFailed(error: String): String
     val labelFoldAdvancedSync: String
     val labelUnfoldAdvancedSync: String
     val labelMyMasterKey: String
