@@ -97,8 +97,53 @@ git push origin main
 echo "🔄 4/5: Syncing open-source repository..."
 ./scripts/sync-public-repo.sh "${PUBLIC_REPO}"
 
-# 5. Publish to GitHub Releases
-echo "🐙 5/5: Publishing to GitHub Releases (crudust/comics8)..."
+# 5. Upload binaries and version.json to Sync Server (if reachable)
+SERVER_HOST="${COMICS8_SERVER_HOST:-192.168.0.136}"
+SERVER_USER="${COMICS8_SERVER_USER:-crudust}"
+SERVER_DOWNLOAD_DIR="${COMICS8_SERVER_DOWNLOAD_DIR:-/home/crudust/comics8-sync/data/downloads}"
+SERVER_VERSION_FILE="${COMICS8_SERVER_VERSION_FILE:-/home/crudust/comics8-sync/data/version.json}"
+
+echo "📡 5/6: Uploading to Sync Server ($SERVER_HOST)..."
+if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=3 "${SERVER_USER}@${SERVER_HOST}" "mkdir -p ${SERVER_DOWNLOAD_DIR}" >/dev/null 2>&1; then
+    scp "$APK_PATH" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/comics8-latest.apk"
+    if [ -f "$WIN_ZIP_PATH" ]; then
+        scp "$WIN_ZIP_PATH" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/Comics8-win.zip"
+    fi
+    if [ -f "$MAC_ZIP_PATH" ]; then
+        scp "$MAC_ZIP_PATH" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/Comics8-mac.zip"
+    fi
+
+    COMICS8_VERSION_NAME="$VERSION_NAME" \
+    COMICS8_VERSION_CODE="$VERSION_CODE" \
+    COMICS8_RELEASE_NOTES="$RELEASE_NOTES" \
+    python3 - <<'PY' >/tmp/comics8-version.json
+import json, os, sys
+
+android = {
+    "versionCode": int(os.environ["COMICS8_VERSION_CODE"]),
+    "versionName": os.environ["COMICS8_VERSION_NAME"],
+    "downloadUrl": "/api/comics8/download/comics8-latest.apk",
+    "releaseNotes": os.environ["COMICS8_RELEASE_NOTES"],
+}
+desktop = {
+    "versionCode": int(os.environ["COMICS8_VERSION_CODE"]),
+    "versionName": os.environ["COMICS8_VERSION_NAME"],
+    "downloadUrl": "/api/comics8/download/Comics8-mac.zip",
+    "releaseNotes": os.environ["COMICS8_RELEASE_NOTES"],
+    "windowsDownloadUrl": "/api/comics8/download/Comics8-win.zip",
+}
+json.dump({"android": android, "desktop": desktop}, sys.stdout, ensure_ascii=False, indent=2)
+print()
+PY
+    scp /tmp/comics8-version.json "${SERVER_USER}@${SERVER_HOST}:${SERVER_VERSION_FILE}"
+    rm -f /tmp/comics8-version.json
+    echo "  ✅ Synced version.json and binaries to ${SERVER_HOST}"
+else
+    echo "  ⚠️ Sync server (${SERVER_HOST}) unreachable via SSH. Skipped server upload."
+fi
+
+# 6. Publish to GitHub Releases
+echo "🐙 6/6: Publishing to GitHub Releases (crudust/comics8)..."
 RELEASE_FILES=("$APK_PATH#comics8-latest.apk")
 if [ -f "$WIN_ZIP_PATH" ]; then
     RELEASE_FILES+=("$WIN_ZIP_PATH")
@@ -129,6 +174,7 @@ fi
 
 echo "=================================================="
 echo "🎉 배포가 성공적으로 완료되었습니다!"
+echo "• Version Info:  https://homeassistant.tail1946af.ts.net/api/comics8/version"
 echo "• GitHub Release: https://github.com/crudust/comics8/releases/tag/${TAG_NAME}"
 echo "• Android APK:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/comics8-latest.apk"
 echo "• Windows Zip:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/Comics8-win.zip"
