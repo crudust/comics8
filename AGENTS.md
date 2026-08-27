@@ -9,7 +9,7 @@ Comics8 Android 프로젝트 작업 시 필요한 환경 정보, 빌드/실행 �
 - **패키지명**: `com.comics8.monitor`
 - **메인 액티비티**: `com.comics8.monitor.MainActivity`
 - **기술 스택**:
-  - **언어/런타임**: Kotlin (JVM 17), Android SDK 35 (minSdk 26)
+  - **언어/런타임**: Kotlin (JVM 17), Android SDK 36 (minSdk 26)
   - **UI**: Jetpack Compose + Material3 + Material Icons Extended + Coil
   - **아키텍처**: MVVM (ViewModel + Compose UI)
   - **로컬 DB**: Room 2.6.1 (KSP 기반 컴파일)
