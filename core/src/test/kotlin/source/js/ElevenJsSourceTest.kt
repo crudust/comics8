@@ -101,11 +101,12 @@ class ElevenJsSourceTest {
             assertThat(first.id).isEqualTo("7883")
             assertThat(first.title).contains("TSUYOSHI")
             assertThat(first.updatedAt).isEqualTo("08.16")
-            assertThat(first.genre).contains("액션")
+            assertThat(first.genre).isEqualTo("액션")
             assertThat(first.thumbUrl).isEqualTo("https://11toon8.com/data/toon_category/7883.webp")
             assertThat(first.href).contains("is=7883")
             assertThat(page.items[1].sourceId).isEqualTo("eleven")
             assertThat(page.items[1].id).isEqualTo("1")
+            assertThat(page.items[1].genre).isEqualTo("무협")
         }
     }
 
@@ -121,7 +122,7 @@ class ElevenJsSourceTest {
             assertThat(first.id).isEqualTo("1")
             assertThat(first.ranking).isEqualTo("1")
             assertThat(first.updatedAt).isNull()
-            assertThat(first.genre).contains("무협")
+            assertThat(first.genre).isEqualTo("무협")
             assertThat(page.lastPage).isEqualTo(1)
             assertThat(first.sourceId).isEqualTo("eleven")
         }

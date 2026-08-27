@@ -68,7 +68,11 @@ var source = {
       var rawThumb = thumbEl ? (thumbEl.attr("data-mobile-image").trim() || thumbEl.bgUrl()) : null;
       var genreRaw = li.textOf(".homelist-genre").replace(/\u00a0/g, " ").trim();
       var updatedAt = host.match(genreRaw, "(\\d{2}\\.\\d{2})", 1);
-      var genre = updatedAt ? genreRaw.replace(updatedAt, "").replace(/^[\s,·-]+|[\s,·-]+$/g, "") : genreRaw;
+      var genre = genreRaw
+        .replace(/\(\d+\)/g, "")
+        .replace(updatedAt || "", "")
+        .replace(/^[\s,·-]+|[\s,·-]+$/g, "")
+        .trim();
       var ranking = host.digits(li.textOf(".homelist-ranking")) || null;
 
       items.push({
