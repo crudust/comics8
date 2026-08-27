@@ -1,12 +1,13 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     container_name: comics8-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-comics8}
       POSTGRES_USER: ${POSTGRES_USER:-comics8}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-comics8password}
+      PGDATA: /var/lib/postgresql/data
     ports:
       - "${POSTGRES_PORT:-5433}:5432"
     volumes:

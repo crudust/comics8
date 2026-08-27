@@ -2,7 +2,7 @@
 
 ## Architecture & Topology
 
-- **Stack**: FastAPI (Python 3.12+), PostgreSQL 16, Docker Compose.
+- **Stack**: FastAPI (Python 3.12+), PostgreSQL 18, Docker Compose.
 - **Topology & Ports**:
   - PostgreSQL Container: Exposed on port `5433` (mapped from 5432).
   - FastAPI Container: Exposed on port `8905`.

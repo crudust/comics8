@@ -1,5 +1,5 @@
 -- =============================================================================
--- Comics8 PostgreSQL 16 Database Schema
+-- Comics8 PostgreSQL 18 Database Schema
 -- Optimized for high-throughput multi-user sync and Google Play In-App Billing
 -- =============================================================================
 

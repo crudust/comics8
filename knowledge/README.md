@@ -29,7 +29,7 @@ Cross-layer runtime boundaries, build/runtime lifecycles, and platform-specific 
 - `modules/core_module.md`: Kotlin multiplatform shared core, models, network interceptors, and common interfaces.
 - `modules/android_app.md`: Android Compose UI, Room 2.6.1 DB, SAF (Storage Access Framework) URI mirroring, and WorkManager contracts.
 - `modules/desktop_app.md`: Compose Desktop UI, SQLite JDBC storage, desktop windowing/hotkeys, and folder pickers.
-- `modules/server_backend.md`: FastAPI + PostgreSQL 16 sync backend, `schema.sql` authority, billing proxy, and pubsub worker.
+- `modules/server_backend.md`: FastAPI + PostgreSQL 18 sync backend, `schema.sql` authority, billing proxy, and pubsub worker.
 - `modules/release_pipeline.md`: Linux centralized release script, Mac SSH remote packaging, Windows portable zip, and Homebrew cask automation.
 
 ### Domains (`domains/`)

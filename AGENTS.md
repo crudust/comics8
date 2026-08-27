@@ -96,7 +96,7 @@ Comics8/
 │       ├── Main.kt / DesktopVersion.kt
 │       ├── data/               # SQLite JDBC, DesktopSyncManager, ToonRepository
 │       └── ui/                 # Compose Desktop UI (Browse, Series, Reader, History)
-├── server/                     # 클라우드 동기화 & 정기구독 프록시 백엔드 (FastAPI + PostgreSQL 16)
+├── server/                     # 클라우드 동기화 & 정기구독 프록시 백엔드 (FastAPI + PostgreSQL 18)
 │   ├── app/                    # sync, billing, proxy, pubsub_worker, database, models
 │   ├── docker-compose.yml      # postgres (5433) + backend (8905) 컨테이너
 │   ├── schema.sql              # 10개 최적화 테이블 DDL
