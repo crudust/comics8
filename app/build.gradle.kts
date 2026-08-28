@@ -30,6 +30,18 @@ android {
         }
     }
 
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("standalone") {
+            dimension = "distribution"
+            buildConfigField("Boolean", "IS_PLAY_STORE", "false")
+        }
+        create("play") {
+            dimension = "distribution"
+            buildConfigField("Boolean", "IS_PLAY_STORE", "true")
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true

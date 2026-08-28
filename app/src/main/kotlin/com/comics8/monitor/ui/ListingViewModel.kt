@@ -551,6 +551,24 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun startUpdate() {
+        if (BuildConfig.IS_PLAY_STORE) {
+            try {
+                val context = getApplication<Application>()
+                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("market://details?id=${context.packageName}")).apply {
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+            } catch (_: Exception) {
+                val context = getApplication<Application>()
+                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=${context.packageName}")).apply {
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+            }
+            dismissUpdateDialog()
+            return
+        }
+
         val updateUrl = _state.value.updateState.downloadUrl
         if (updateUrl.isBlank()) return
         viewModelScope.launch {

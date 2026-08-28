@@ -78,9 +78,9 @@ VERSION_EOF
 
 # 2. Build Android Release APK & Windows Portable Zip
 echo "📦 2/5: Building Android Release APK & Windows Portable Zip..."
-./gradlew assembleRelease :desktop:packageWindowsZip
+./gradlew assembleStandaloneRelease :desktop:packageWindowsZip
 
-APK_PATH="app/build/outputs/apk/release/app-release.apk"
+APK_PATH="app/build/outputs/apk/standalone/release/app-standalone-release.apk"
 WIN_ZIP_PATH="desktop/build/compose/binaries/main/Comics8-win.zip"
 MAC_ZIP_PATH="desktop/build/compose/binaries/main/Comics8-mac.zip"
 

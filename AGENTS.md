@@ -36,12 +36,17 @@ Android는 에뮬레이터로 돌리지 않습니다. 폰은 인앱 업데이트
 
 ## 3. 주요 빌드 및 실행 명령어 (Build & Run Commands)
 
-### 3.1. APK 및 Windows 포터블 단독 빌드
-정식 서명된 Release APK 및 Windows 무설치 포터블 Zip을 빌드할 때 사용합니다:
+### 3.1. APK, AAB 및 Windows 포터블 단독 빌드
+정식 서명된 Release APK/AAB 및 Windows 무설치 포터블 Zip을 빌드할 때 사용합니다:
 ```bash
-./gradlew assembleRelease :desktop:packageWindowsZip
+# GitHub / 자체 배포용 APK 및 Windows Zip
+./gradlew assembleStandaloneRelease :desktop:packageWindowsZip
+
+# Google Play 배포용 AAB
+./gradlew bundlePlayRelease
 ```
-- **출력 APK 경로**: `app/build/outputs/apk/release/app-release.apk`
+- **출력 APK 경로**: `app/build/outputs/apk/standalone/release/app-standalone-release.apk`
+- **출력 AAB 경로**: `app/build/outputs/bundle/playRelease/app-play-release.aab`
 - **출력 Windows Zip 경로**: `desktop/build/compose/binaries/main/Comics8-win.zip`
 
 ### 3.2. macOS 데스크톱 앱 실행 (개발용)
