@@ -318,7 +318,7 @@ class DesktopToonRepository(
                 updatedAt = item.updatedAt,
                 firstSeenAt = prev?.firstSeenAt ?: nowMs,
                 lastSeenAt = nowMs,
-                notifiedKey = notifyKey(item),
+                notifiedKey = prev?.notifiedKey ?: notifyKey(item),
             )
         }
         database.saveAllSeen(rows)

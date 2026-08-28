@@ -460,11 +460,15 @@ internal class HostApiV1Impl(
                 client.fetch(fetchSpec)
             } catch (e: Exception) {
                 if (attempt == BACKOFF_MS.size) throw e
+                val backoff = BACKOFF_MS.getOrNull(attempt) ?: 0L
+                if (System.currentTimeMillis() + backoff >= deadlineEpochMs) throw e
                 sleepBackoff(attempt)
                 continue
             }
             if (last.code in 200..299) return last.toHost()
             if (!retryableStatus(last.code) || attempt == BACKOFF_MS.size) return last.toHost()
+            val backoff = BACKOFF_MS.getOrNull(attempt) ?: 0L
+            if (System.currentTimeMillis() + backoff >= deadlineEpochMs) return last.toHost()
             sleepBackoff(attempt)
         }
         return last!!.toHost()

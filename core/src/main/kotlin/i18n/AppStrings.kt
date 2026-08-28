@@ -110,6 +110,17 @@ interface AppStrings {
     val readDirectionRTLShort: String
     val readDirectionLeftToRight: String
     val readDirectionLTRShort: String
+    val titleQuickSettings: String
+    val labelPageTapZone: String
+    val descPageTapZone: String
+    val pageTapZoneDirection: String
+    val descPageTapZoneDirection: String
+    val pageTapZoneRightNext: String
+    val descPageTapZoneRightNext: String
+    val pageTapZoneLeftNext: String
+    val descPageTapZoneLeftNext: String
+    val labelVolumePageTurn: String
+    val descVolumePageTurn: String
     val actionPrevEpisode: String
     val actionNextEpisode: String
     val actionEpisodeList: String
@@ -294,11 +305,21 @@ interface AppStrings {
     val titleOpenBackupFile: String
 
     // 9. Settings
+    val sectionGeneralSettings: String
+    val descGeneralSettings: String
     val sectionLanguage: String
     val labelLanguage: String
     val langAuto: String
     val sectionViewerSettings: String
+    val descViewerSettings: String
+    val descNotificationSettings: String
+    val sectionSyncAndBackup: String
+    val descSyncAndBackup: String
+    val sectionNetworkAndDownload: String
+    val descNetworkAndDownload: String
     val sectionAppInfo: String
+    val sectionAppInfoAndAbout: String
+    val descAppInfoAndAbout: String
     val labelAppName: String
     fun labelAppVersion(name: String): String
     val statusCheckingUpdate: String

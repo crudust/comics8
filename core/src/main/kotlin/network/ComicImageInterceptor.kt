@@ -12,7 +12,12 @@ import okhttp3.Response
  */
 class ComicImageInterceptor(
     private val registry: SourceRegistry,
+    private val maxFallbacks: Int = MAX_FALLBACKS_DEFAULT,
 ) : Interceptor {
+    companion object {
+        const val MAX_FALLBACKS_DEFAULT = 2
+    }
+
     override fun intercept(chain: Interceptor.Chain): Response {
         val originalRequest = chain.request()
         val originalUrl = originalRequest.url.toString()
@@ -37,9 +42,11 @@ class ComicImageInterceptor(
             }
             .build()
 
+        var firstError: Exception? = null
         var response = try {
             chain.proceed(requestWithHeaders)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            firstError = e
             null
         }
 
@@ -49,7 +56,7 @@ class ComicImageInterceptor(
 
         val shouldTryFallback = response == null || (!response.isSuccessful && (response.code == 404 || response.code >= 500))
         if (shouldTryFallback) {
-            val fallbacks = ImageFallbacks.forUrl(originalUrl, registry)
+            val fallbacks = ImageFallbacks.forUrl(originalUrl, registry).take(maxFallbacks)
             for (fallbackUrl in fallbacks) {
                 response?.close()
                 val fallbackReferer = ImageReferer.forUrl(fallbackUrl, registry)
@@ -64,7 +71,8 @@ class ComicImageInterceptor(
 
                 val retryResp = try {
                     chain.proceed(fallbackReq)
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    firstError = e
                     null
                 }
                 if (retryResp != null && retryResp.isSuccessful) {
@@ -76,6 +84,9 @@ class ComicImageInterceptor(
             }
         }
 
-        return response ?: chain.proceed(requestWithHeaders)
+        if (response != null) {
+            return response
+        }
+        throw firstError ?: java.io.IOException("failed to load image: $originalUrl")
     }
 }
