@@ -41,8 +41,13 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import com.comics8.core.i18n.AppLanguage
 import com.comics8.core.i18n.I18n
+import com.comics8.core.model.PageTapZone
+import com.comics8.monitor.ui.settings.SettingsCategory
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -123,6 +128,9 @@ data class ListingUiState(
     val notificationIntervalMinutes: Long = 60L,
     val notificationSources: Map<String, Boolean> = emptyMap(),
     val hasNotificationPermission: Boolean = true,
+    val pageTapZone: PageTapZone = PageTapZone.FOLLOW_DIRECTION,
+    val volumePageTurnEnabled: Boolean = false,
+    val selectedSettingsCategory: SettingsCategory? = null,
 ) {
     val isSearch: Boolean get() = searchQuery != null
 
@@ -192,6 +200,48 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             prefs.edit().putString("read_direction", value.name).apply()
         }
 
+    var pageTapZonePreference: PageTapZone
+        get() = try {
+            val name = prefs.getString("page_tap_zone", PageTapZone.FOLLOW_DIRECTION.name)
+            PageTapZone.valueOf(name ?: PageTapZone.FOLLOW_DIRECTION.name)
+        } catch (_: Exception) {
+            PageTapZone.FOLLOW_DIRECTION
+        }
+        private set(value) {
+            prefs.edit().putString("page_tap_zone", value.name).apply()
+        }
+
+    var volumePageTurnPreference: Boolean
+        get() = try {
+            prefs.getBoolean("volume_page_turn", false)
+        } catch (_: Exception) {
+            false
+        }
+        private set(value) {
+            prefs.edit().putBoolean("volume_page_turn", value).apply()
+        }
+
+    private val _readerNavEvents = MutableSharedFlow<Boolean>(extraBufferCapacity = 1)
+    val readerNavEvents: SharedFlow<Boolean> = _readerNavEvents.asSharedFlow()
+
+    fun onVolumePageTurn(advance: Boolean) {
+        _readerNavEvents.tryEmit(advance)
+    }
+
+    fun setPageTapZone(zone: PageTapZone) {
+        pageTapZonePreference = zone
+        _state.update { it.copy(pageTapZone = zone) }
+    }
+
+    fun setVolumePageTurnEnabled(enabled: Boolean) {
+        volumePageTurnPreference = enabled
+        _state.update { it.copy(volumePageTurnEnabled = enabled) }
+    }
+
+    fun selectSettingsCategory(category: SettingsCategory?) {
+        _state.update { it.copy(selectedSettingsCategory = category) }
+    }
+
     private var currentScreenWidthDp: Int = 0
     private var currentScreenHeightDp: Int = 0
 
@@ -226,6 +276,17 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             },
             viewMode = ViewMode.SCROLL,
             readDirection = ReadDirection.RIGHT_TO_LEFT,
+            pageTapZone = try {
+                val name = prefs.getString("page_tap_zone", PageTapZone.FOLLOW_DIRECTION.name)
+                PageTapZone.valueOf(name ?: PageTapZone.FOLLOW_DIRECTION.name)
+            } catch (_: Exception) {
+                PageTapZone.FOLLOW_DIRECTION
+            },
+            volumePageTurnEnabled = try {
+                prefs.getBoolean("volume_page_turn", false)
+            } catch (_: Exception) {
+                false
+            },
             notificationEnabled = sourceSettings.globalNotificationEnabled(),
             notificationIntervalMinutes = sourceSettings.notificationIntervalMinutes(),
             hasNotificationPermission = androidx.core.app.NotificationManagerCompat.from(application).areNotificationsEnabled(),
@@ -1459,12 +1520,11 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         }
         loadDownloads()
     }
-
     fun closeDownloads() {
         _state.update { it.copy(screen = Screen.Browse) }
     }
 
-    fun openSettings() {
+    fun openSettings(category: SettingsCategory? = null) {
         readerJob?.cancel()
         episodeJob?.cancel()
         val notifEnabled = sourceSettings.globalNotificationEnabled()
@@ -1474,6 +1534,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         _state.update {
             it.copy(
                 screen = Screen.Settings,
+                selectedSettingsCategory = category,
                 notificationEnabled = notifEnabled,
                 notificationIntervalMinutes = notifInterval,
                 notificationSources = notifSources,
@@ -1521,7 +1582,11 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun closeSettings() {
-        _state.update { it.copy(screen = Screen.Browse) }
+        if (_state.value.selectedSettingsCategory != null) {
+            _state.update { it.copy(selectedSettingsCategory = null) }
+        } else {
+            _state.update { it.copy(screen = Screen.Browse) }
+        }
     }
 
     fun openSourceManager() {

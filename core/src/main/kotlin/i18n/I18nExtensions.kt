@@ -1,6 +1,7 @@
 package com.comics8.core.i18n
 
 import com.comics8.core.model.BrowseTab
+import com.comics8.core.model.PageTapZone
 import com.comics8.core.model.ProgressDisplayMode
 import com.comics8.core.source.ComicSource
 import com.comics8.core.source.SourceRegistry
@@ -62,4 +63,16 @@ fun SourceType.displayLabel(strings: AppStrings): String = when (this) {
     SourceType.SMB -> strings.labelSourceSmb
     SourceType.WEBDAV -> strings.labelSourceWebDav
     SourceType.JS -> strings.labelSourceJs
+}
+
+fun PageTapZone.displayLabel(strings: AppStrings): String = when (this) {
+    PageTapZone.FOLLOW_DIRECTION -> strings.pageTapZoneDirection
+    PageTapZone.RIGHT_NEXT -> strings.pageTapZoneRightNext
+    PageTapZone.LEFT_NEXT -> strings.pageTapZoneLeftNext
+}
+
+fun PageTapZone.displayDescription(strings: AppStrings): String = when (this) {
+    PageTapZone.FOLLOW_DIRECTION -> strings.descPageTapZoneDirection
+    PageTapZone.RIGHT_NEXT -> strings.descPageTapZoneRightNext
+    PageTapZone.LEFT_NEXT -> strings.descPageTapZoneLeftNext
 }

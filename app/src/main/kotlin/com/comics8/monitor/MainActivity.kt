@@ -41,6 +41,35 @@ class MainActivity : ComponentActivity() {
         viewModel.onAppBackgrounded()
     }
 
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean {
+        if (viewModel.state.value.screen == com.comics8.monitor.ui.Screen.Reader &&
+            viewModel.state.value.volumePageTurnEnabled
+        ) {
+            when (keyCode) {
+                android.view.KeyEvent.KEYCODE_VOLUME_DOWN -> {
+                    viewModel.onVolumePageTurn(advance = true)
+                    return true
+                }
+                android.view.KeyEvent.KEYCODE_VOLUME_UP -> {
+                    viewModel.onVolumePageTurn(advance = false)
+                    return true
+                }
+            }
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: android.view.KeyEvent?): Boolean {
+        if (viewModel.state.value.screen == com.comics8.monitor.ui.Screen.Reader &&
+            viewModel.state.value.volumePageTurnEnabled
+        ) {
+            if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) {
+                return true
+            }
+        }
+        return super.onKeyUp(keyCode, event)
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)

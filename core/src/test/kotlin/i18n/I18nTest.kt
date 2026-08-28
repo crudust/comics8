@@ -1,6 +1,7 @@
 package com.comics8.core.i18n
 
 import com.comics8.core.model.BrowseTab
+import com.comics8.core.model.PageTapZone
 import com.comics8.core.model.ProgressDisplayMode
 import com.comics8.core.source.SourceCatalog
 import com.comics8.core.source.SourceRegistry
@@ -44,11 +45,37 @@ class I18nTest {
             assertThat(lang.viewModeScroll).isNotEmpty()
             assertThat(lang.searchResultCount(5)).isNotEmpty()
             assertThat(lang.downloadTotalEpisodes(10)).isNotEmpty()
+
+            // 2-depth settings strings
+            assertThat(lang.sectionGeneralSettings).isNotEmpty()
+            assertThat(lang.descGeneralSettings).isNotEmpty()
+            assertThat(lang.descViewerSettings).isNotEmpty()
+            assertThat(lang.descNotificationSettings).isNotEmpty()
+            assertThat(lang.sectionSyncAndBackup).isNotEmpty()
+            assertThat(lang.descSyncAndBackup).isNotEmpty()
+            assertThat(lang.sectionNetworkAndDownload).isNotEmpty()
+            assertThat(lang.descNetworkAndDownload).isNotEmpty()
+            assertThat(lang.sectionAppInfoAndAbout).isNotEmpty()
+            assertThat(lang.descAppInfoAndAbout).isNotEmpty()
+
+            // Page Tap Zone & Volume Key & Quick Settings strings
+            assertThat(lang.labelPageTapZone).isNotEmpty()
+            assertThat(lang.descPageTapZone).isNotEmpty()
+            assertThat(lang.pageTapZoneDirection).isNotEmpty()
+            assertThat(lang.descPageTapZoneDirection).isNotEmpty()
+            assertThat(lang.pageTapZoneRightNext).isNotEmpty()
+            assertThat(lang.descPageTapZoneRightNext).isNotEmpty()
+            assertThat(lang.pageTapZoneLeftNext).isNotEmpty()
+            assertThat(lang.descPageTapZoneLeftNext).isNotEmpty()
+            assertThat(lang.labelVolumePageTurn).isNotEmpty()
+            assertThat(lang.descVolumePageTurn).isNotEmpty()
+            assertThat(lang.titleQuickSettings).isNotEmpty()
         }
     }
 
     @Test
     fun testI18nExtensions() {
+        val ko = KoStrings
         val en = EnStrings
         val ja = JaStrings
 
@@ -79,5 +106,15 @@ class I18nTest {
         // ProgressDisplayMode & SourceType
         assertThat(ProgressDisplayMode.LATEST_EPISODE.displayLabel(en)).isEqualTo("Latest Chapter")
         assertThat(SourceType.LOCAL.displayLabel(en)).isEqualTo("Local Storage")
+
+        // PageTapZone
+        assertThat(PageTapZone.FOLLOW_DIRECTION.displayLabel(ko)).isEqualTo("읽기 방향 연동 (기본값)")
+        assertThat(PageTapZone.FOLLOW_DIRECTION.displayLabel(en)).isEqualTo("Follow Reading Direction (Default)")
+        assertThat(PageTapZone.FOLLOW_DIRECTION.displayLabel(ja)).isEqualTo("読み方向に連動 (デフォルト)")
+        assertThat(PageTapZone.RIGHT_NEXT.displayLabel(en)).isEqualTo("Right Next / Left Prev")
+        assertThat(PageTapZone.LEFT_NEXT.displayLabel(en)).isEqualTo("Left Next / Right Prev")
+        assertThat(PageTapZone.FOLLOW_DIRECTION.displayDescription(ko)).isEqualTo("좌우/우좌 읽기 방향에 따라 다음 페이지 영역이 자동 변경됩니다.")
+        assertThat(PageTapZone.RIGHT_NEXT.displayDescription(en)).isEqualTo("Always tap right for next page, tap left for previous page.")
+        assertThat(PageTapZone.LEFT_NEXT.displayDescription(ja)).isEqualTo("常に左をタップすると次のページ、右をタップすると前のページに移動します。")
     }
 }

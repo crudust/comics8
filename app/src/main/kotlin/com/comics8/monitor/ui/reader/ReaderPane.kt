@@ -61,6 +61,7 @@ import coil.compose.SubcomposeAsyncImageContent
 import com.comics8.core.model.CropRect
 import com.comics8.core.model.DualSpread
 import com.comics8.core.model.ImageHalf
+import com.comics8.core.model.PageTapZone
 import com.comics8.core.model.ReadDirection
 import com.comics8.core.model.SinglePageSlice
 import com.comics8.core.model.ViewMode
@@ -126,6 +127,18 @@ private fun ReaderScrollPane(
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
     val scope = rememberCoroutineScope()
     var controlsVisible by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        viewModel.readerNavEvents.collect { advance ->
+            if (advance) {
+                val next = (listState.firstVisibleItemIndex + 1).coerceAtMost((state.readerImages.size - 1).coerceAtLeast(0))
+                listState.animateScrollToItem(next)
+            } else {
+                val prev = (listState.firstVisibleItemIndex - 1).coerceAtLeast(0)
+                listState.animateScrollToItem(prev)
+            }
+        }
+    }
 
     // Automatically hide controls when scrolling starts
     LaunchedEffect(listState.isScrollInProgress) {
@@ -353,6 +366,12 @@ private fun ReaderSinglePagePane(
         }
     }
 
+    LaunchedEffect(Unit) {
+        viewModel.readerNavEvents.collect { advance ->
+            if (advance) onAdvance() else onRetreat()
+        }
+    }
+
     val context = LocalContext.current
     LaunchedEffect(pagerState.currentPage, slices, state.readerImages) {
         val imageLoader = coil.Coil.imageLoader(context)
@@ -389,9 +408,14 @@ private fun ReaderSinglePagePane(
                 onTap = { tapOffset, size ->
                     val tapX = tapOffset.x
                     val width = size.width.toFloat()
+                    val isNextOnLeft = when (state.pageTapZone) {
+                        PageTapZone.FOLLOW_DIRECTION -> isR2L
+                        PageTapZone.LEFT_NEXT -> true
+                        PageTapZone.RIGHT_NEXT -> false
+                    }
                     when {
-                        tapX < width * 0.35f -> if (isR2L) onAdvance() else onRetreat()
-                        tapX > width * 0.65f -> if (isR2L) onRetreat() else onAdvance()
+                        tapX < width * 0.35f -> if (isNextOnLeft) onAdvance() else onRetreat()
+                        tapX > width * 0.65f -> if (isNextOnLeft) onRetreat() else onAdvance()
                         else -> {
                             controlsVisible = !controlsVisible
                             nextPromptVisible = false
@@ -627,6 +651,12 @@ private fun ReaderDualPagePane(
         }
     }
 
+    LaunchedEffect(Unit) {
+        viewModel.readerNavEvents.collect { advance ->
+            if (advance) onAdvance() else onRetreat()
+        }
+    }
+
     val context = LocalContext.current
     LaunchedEffect(pagerState.currentPage, spreads, state.readerImages) {
         val imageLoader = coil.Coil.imageLoader(context)
@@ -687,9 +717,14 @@ private fun ReaderDualPagePane(
                 onTap = { tapOffset, size ->
                     val tapX = tapOffset.x
                     val width = size.width.toFloat()
+                    val isNextOnLeft = when (state.pageTapZone) {
+                        PageTapZone.FOLLOW_DIRECTION -> isR2L
+                        PageTapZone.LEFT_NEXT -> true
+                        PageTapZone.RIGHT_NEXT -> false
+                    }
                     when {
-                        tapX < width * 0.35f -> if (isR2L) onAdvance() else onRetreat()
-                        tapX > width * 0.65f -> if (isR2L) onRetreat() else onAdvance()
+                        tapX < width * 0.35f -> if (isNextOnLeft) onAdvance() else onRetreat()
+                        tapX > width * 0.65f -> if (isNextOnLeft) onRetreat() else onAdvance()
                         else -> {
                             controlsVisible = !controlsVisible
                             nextPromptVisible = false

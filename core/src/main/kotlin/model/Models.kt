@@ -84,6 +84,12 @@ enum class ReadDirection(val label: String) {
     LEFT_TO_RIGHT("LR (좌우)"),
 }
 
+enum class PageTapZone(val label: String) {
+    FOLLOW_DIRECTION("읽기 방향 연동"),
+    RIGHT_NEXT("오른쪽 다음 / 왼쪽 이전"),
+    LEFT_NEXT("왼쪽 다음 / 오른쪽 이전"),
+}
+
 enum class SplitMode(val label: String) {
     FIT("Fit"),
     SLICE("Slice"),

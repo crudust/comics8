@@ -471,6 +471,20 @@ fun TopBar(
                         }
                     }
                 }
+
+                Spacer(Modifier.weight(1f))
+
+                IconButton(
+                    onClick = { viewModel.openSettings(com.comics8.monitor.ui.settings.SettingsCategory.READER) },
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = strings.sectionViewerSettings,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
             }
         }
 
