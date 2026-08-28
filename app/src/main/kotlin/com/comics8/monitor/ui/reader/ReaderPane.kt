@@ -1058,15 +1058,24 @@ private fun ReaderImage(
 ) {
     val strings = LocalStrings.current
     val context = LocalContext.current
-    val imageModel = remember(model, half) {
+    var retryKey by remember(model) { mutableStateOf(0) }
+    val imageModel = remember(model, half, retryKey) {
         if (half == ImageHalf.FULL) {
-            model
+            if (retryKey == 0) model else {
+                coil.request.ImageRequest.Builder(context)
+                    .data(model)
+                    .memoryCachePolicy(coil.request.CachePolicy.WRITE_ONLY)
+                    .build()
+            }
         } else if (model is coil.request.ImageRequest) {
             model
         } else {
             coil.request.ImageRequest.Builder(context)
                 .data(model)
                 .allowHardware(false)
+                .apply {
+                    if (retryKey > 0) memoryCachePolicy(coil.request.CachePolicy.WRITE_ONLY)
+                }
                 .build()
         }
     }
@@ -1096,7 +1105,9 @@ private fun ReaderImage(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .defaultMinSize(minHeight = 200.dp),
+                    .defaultMinSize(minHeight = 200.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { retryKey++ },
                 contentAlignment = Alignment.Center,
             ) {
                 Column(
@@ -1115,6 +1126,13 @@ private fun ReaderImage(
                         text = strings.errorCannotLoadImage,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "(${strings.actionRetry})",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold,
                     )
                 }
             }

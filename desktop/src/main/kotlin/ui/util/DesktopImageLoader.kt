@@ -2,6 +2,7 @@ package com.comics8.desktop.ui.util
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,6 +29,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toAwtImage
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.comics8.core.model.CropRect
 import com.comics8.core.model.ImageHalf
@@ -125,8 +127,8 @@ object DesktopImageCache {
 
     @Volatile
     var httpClient: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
         .build()
 
     fun shareHttpClient(client: OkHttpClient) {
@@ -595,28 +597,48 @@ fun DesktopAsyncImage(
             }
         } else if (!loading) {
             val strings = LocalStrings.current
+            var localRetry by remember(url) { mutableStateOf(0) }
+            LaunchedEffect(localRetry) {
+                if (localRetry > 0) {
+                    loading = true
+                    val loaded = DesktopImageCache.loadImage(url, forceRetry = true)
+                    displayedBitmap = loaded
+                    loading = false
+                    if (loaded != null) {
+                        onLoaded?.invoke(loaded)
+                    }
+                }
+            }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f)),
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f))
+                    .clickable { localRetry++ },
                 contentAlignment = Alignment.Center,
             ) {
-                androidx.compose.foundation.layout.Column(
+                Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+                    verticalArrangement = Arrangement.Center,
                     modifier = Modifier.padding(16.dp),
                 ) {
-                    androidx.compose.material3.Icon(
-                        imageVector = androidx.compose.material.icons.Icons.Default.BrokenImage,
+                    Icon(
+                        imageVector = Icons.Default.BrokenImage,
                         contentDescription = strings.errorImageLoadFailed,
                         tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
                         modifier = Modifier.size(36.dp),
                     )
-                    androidx.compose.foundation.layout.Spacer(Modifier.height(6.dp))
-                    androidx.compose.material3.Text(
+                    Spacer(Modifier.height(6.dp))
+                    Text(
                         text = strings.errorCannotLoadImage,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "(${strings.actionRetry})",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold,
                     )
                 }
             }

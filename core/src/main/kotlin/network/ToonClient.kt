@@ -143,9 +143,16 @@ class ToonClient(
         }
     }
 
+    private val headClient by lazy {
+        client.newBuilder()
+            .connectTimeout(3, TimeUnit.SECONDS)
+            .readTimeout(4, TimeUnit.SECONDS)
+            .build()
+    }
+
     private fun executeHead(spec: FetchSpec): Boolean {
         val request = buildRequest(spec, head = true)
-        return client.newCall(request).execute().use { it.isSuccessful }
+        return headClient.newCall(request).execute().use { it.isSuccessful }
     }
 
     private fun buildRequest(spec: FetchSpec, head: Boolean): Request {
@@ -301,6 +308,8 @@ class ToonClient(
             sources: com.comics8.core.source.SourceRegistry,
         ): OkHttpClient {
             return baseClient.newBuilder()
+                .connectTimeout(5, TimeUnit.SECONDS)
+                .readTimeout(8, TimeUnit.SECONDS)
                 .addInterceptor(ComicImageInterceptor(sources))
                 .build()
         }
