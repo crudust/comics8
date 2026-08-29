@@ -132,12 +132,26 @@ object PlayUpdateManager {
         onFallback()
     }
 
-    fun resumeUpdateIfDownloaded(context: Context) {
-        val manager = getAppUpdateManager(context)
+    /**
+     * Google Play 공식 생명주기 가이드: onResume 시점에 미완료된 업데이트 상태를 복구합니다.
+     * 1. Flexible 다운로드가 완료된 상태(DOWNLOADED)라면 completeUpdate()로 설치 실행
+     * 2. Immediate 업데이트 도중 앱이 백그라운드로 갔다가 복귀한 경우(IN_PROGRESS) 즉시 업데이트 플로우 재개
+     */
+    fun checkAndResumeUpdate(activity: Activity) {
+        val manager = getAppUpdateManager(activity)
         manager.appUpdateInfo.addOnSuccessListener { info ->
             cachedAppUpdateInfo = info
             if (info.installStatus() == InstallStatus.DOWNLOADED) {
                 manager.completeUpdate()
+            } else if (info.updateAvailability() == UpdateAvailability.DEVELOPER_TRIGGERED_UPDATE_IN_PROGRESS) {
+                if (info.isUpdateTypeAllowed(AppUpdateType.IMMEDIATE)) {
+                    try {
+                        val options = AppUpdateOptions.newBuilder(AppUpdateType.IMMEDIATE).build()
+                        manager.startUpdateFlow(info, activity, options)
+                    } catch (_: Exception) {
+                        // ignore or fallback
+                    }
+                }
             }
         }
     }

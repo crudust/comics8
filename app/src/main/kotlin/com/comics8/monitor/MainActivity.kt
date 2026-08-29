@@ -39,7 +39,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         if (BuildConfig.IS_PLAY_STORE) {
-            com.comics8.monitor.data.PlayUpdateManager.resumeUpdateIfDownloaded(this)
+            com.comics8.monitor.data.PlayUpdateManager.checkAndResumeUpdate(this)
         }
     }
 
