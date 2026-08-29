@@ -2126,51 +2126,22 @@ class DesktopViewModel(
                     return@launch
                 }
 
-                val initialRatios = mutableMapOf<Int, Float>()
-                val targetPage = ReaderDomain.initialImagePage(episode.lastReadPage, images.size)
-                    ?: return@launch
-
-                withContext(Dispatchers.IO) {
-                    for (i in images.indices) {
-                        DesktopImageCache.probeDimensions(images[i])?.let { (w, h) ->
-                            if (h > 0) initialRatios[i] = w.toFloat() / h.toFloat()
-                        }
-                    }
-                    if (!initialRatios.containsKey(targetPage)) {
-                        DesktopImageCache.loadImage(images[targetPage])?.let { bmp ->
-                            if (bmp.height > 0) initialRatios[targetPage] = bmp.width.toFloat() / bmp.height.toFloat()
-                        }
-                    }
-                }
-
                 _state.update {
                     it.copy(
                         readerImages = images,
-                        imageAspectRatios = initialRatios,
+                        imageAspectRatios = emptyMap(),
                         readerLoading = false,
                         readerError = null,
                     )
                 }
 
-                // Proactively resolve aspect ratios for remaining images in background
+                val targetPage = ReaderDomain.initialImagePage(episode.lastReadPage, images.size) ?: 0
+                val preloadUrls = images.subList(
+                    (targetPage - 1).coerceAtLeast(0),
+                    (targetPage + 3).coerceAtMost(images.size),
+                )
                 scope.launch(Dispatchers.IO) {
-                    val resolved = mutableMapOf<Int, Float>()
-                    for (i in images.indices) {
-                        if (!initialRatios.containsKey(i)) {
-                            DesktopImageCache.loadImage(images[i])?.let { bmp ->
-                                if (bmp.height > 0) {
-                                    resolved[i] = bmp.width.toFloat() / bmp.height.toFloat()
-                                }
-                            }
-                        }
-                    }
-                    if (resolved.isNotEmpty()) {
-                        _state.update { curr ->
-                            if (curr.currentEpisode?.wrId == episode.wrId) {
-                                curr.copy(imageAspectRatios = curr.imageAspectRatios + resolved)
-                            } else curr
-                        }
-                    }
+                    DesktopImageCache.preload(preloadUrls)
                 }
             } catch (e: Exception) {
                 if (e is CancellationException) return@launch

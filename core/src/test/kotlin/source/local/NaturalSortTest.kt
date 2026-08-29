@@ -28,4 +28,21 @@ class NaturalSortTest {
     fun shorterTokenListWinsWhenPrefixEqual() {
         assertThat(NaturalSort.compare("img", "img1")).isLessThan(0)
     }
+
+    @Test
+    fun handlesLargeNumbersWithoutOverflow() {
+        val n1 = "file1000000000000000000000000000000.jpg"
+        val n2 = "file2000000000000000000000000000000.jpg"
+        val n3 = "file10000000000000000000000000000000.jpg"
+        val sorted = listOf(n3, n2, n1).sortedWith(NaturalSort)
+        assertThat(sorted).containsExactly(n1, n2, n3).inOrder()
+    }
+
+    @Test
+    fun handlesNullAndIdentical() {
+        assertThat(NaturalSort.compare(null, null)).isEqualTo(0)
+        assertThat(NaturalSort.compare(null, "a")).isLessThan(0)
+        assertThat(NaturalSort.compare("a", null)).isGreaterThan(0)
+        assertThat(NaturalSort.compare("same", "same")).isEqualTo(0)
+    }
 }

@@ -42,20 +42,20 @@ import java.io.File
 @Config(application = Application::class, sdk = [34])
 class DownloadManagerTest {
     @Test
-    fun migrateMovesLegacyDirAndUpdatesLocalDirPath() = runBlocking {
+    fun getLocalEpisodeImagesResolvesPopulatedDir() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
             .allowMainThreadQueries()
             .build()
         try {
             val downloads = File(context.filesDir, "dl-test-${System.nanoTime()}").apply { mkdirs() }
-            val legacy = DownloadLayout.legacyEpisodeDir(downloads, "123", "999")
-            legacy.mkdirs()
-            File(legacy, "0001.jpg").writeText("img")
+            val workId = WorkId.eleven("123")
+            val dir = DownloadLayout.episodeDir(downloads, workId, "999").apply { mkdirs() }
+            File(dir, "0001.jpg").writeText("img")
             db.downloadedEpisodeDao().upsert(
                 DownloadedEpisode(
-                    sourceId = WorkId.DEFAULT_SOURCE,
-                    toonId = "123",
+                    sourceId = workId.sourceId,
+                    toonId = workId.toonId,
                     wrId = "999",
                     toonTitle = "원피스",
                     toonThumbUrl = "t",
@@ -65,7 +65,7 @@ class DownloadManagerTest {
                     imageCount = 1,
                     totalBytes = 3,
                     downloadedAt = 1L,
-                    localDirPath = legacy.absolutePath,
+                    localDirPath = dir.absolutePath,
                 ),
             )
 
@@ -76,68 +76,10 @@ class DownloadManagerTest {
                 baseDir = downloads,
                 sources = SourceRegistry(),
             )
-            manager.migrateLegacyDownloads()
 
-            val neu = DownloadLayout.episodeDir(downloads, WorkId.eleven("123"), "999")
-            assertThat(File(neu, "0001.jpg").readText()).isEqualTo("img")
-            assertThat(legacy.exists()).isFalse()
-            val stored = db.downloadedEpisodeDao().get(WorkId.eleven("123"), "999")
-            assertThat(stored?.localDirPath).isEqualTo(neu.absolutePath)
-            val images = manager.getLocalEpisodeImages(WorkId.eleven("123"), "999")
+            val images = manager.getLocalEpisodeImages(workId, "999")
             assertThat(images).isNotNull()
             assertThat(images!!.single()).endsWith("/0001.jpg")
-        } finally {
-            db.close()
-        }
-    }
-
-    @Test
-    fun incompleteDestDoesNotRewriteLocalDirPath() = runBlocking {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
-            .allowMainThreadQueries()
-            .build()
-        try {
-            val downloads = File(context.filesDir, "dl-partial-${System.nanoTime()}").apply { mkdirs() }
-            val workId = WorkId.eleven("123")
-            val dest = DownloadLayout.episodeDir(downloads, workId, "999")
-            dest.mkdirs()
-            File(dest, "0001.jpg").writeText("partial")
-            val legacy = DownloadLayout.legacyEpisodeDir(downloads, "123", "999")
-            legacy.mkdirs()
-            File(legacy, "0001.jpg").writeText("1")
-            File(legacy, "0002.jpg").writeText("2")
-            db.downloadedEpisodeDao().upsert(
-                DownloadedEpisode(
-                    sourceId = WorkId.DEFAULT_SOURCE,
-                    toonId = "123",
-                    wrId = "999",
-                    toonTitle = "원피스",
-                    toonThumbUrl = "t",
-                    toonHref = "h",
-                    episodeTitle = "1화",
-                    episodeHref = "e",
-                    imageCount = 2,
-                    totalBytes = 2,
-                    downloadedAt = 1L,
-                    localDirPath = legacy.absolutePath,
-                ),
-            )
-
-            val manager = DownloadManager(
-                context,
-                db,
-                ToonClient(isProxyEnabled = false, sources = emptyLocator()),
-                baseDir = downloads,
-                sources = SourceRegistry(),
-            )
-            manager.migrateLegacyDownloads()
-
-            val stored = db.downloadedEpisodeDao().get(workId, "999")
-            assertThat(stored?.localDirPath).isEqualTo(legacy.absolutePath)
-            assertThat(File(legacy, "0002.jpg").exists()).isTrue()
-            val images = manager.getLocalEpisodeImages(workId, "999")
-            assertThat(images).hasSize(2)
         } finally {
             db.close()
         }

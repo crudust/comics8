@@ -531,20 +531,13 @@ class ToonRepository(
         result
     }
 
-    data class AppReaderSetting(
-        val viewMode: ViewMode,
-        val readDirection: ReadDirection,
-        val splitMode: SplitMode,
-    )
-
-    suspend fun getReaderSetting(workId: WorkId): AppReaderSetting? = withContext(Dispatchers.IO) {
+    suspend fun getReaderSetting(workId: WorkId): RepositoryTransforms.ReaderSettingValues? = withContext(Dispatchers.IO) {
         val setting = readerSettingDao.getSetting(workId) ?: return@withContext null
-        val values = RepositoryTransforms.parseReaderSetting(
+        RepositoryTransforms.parseReaderSetting(
             setting.viewMode,
             setting.readDirection,
             setting.splitMode,
         )
-        AppReaderSetting(values.viewMode, values.readDirection, values.splitMode)
     }
 
     suspend fun saveReaderSetting(

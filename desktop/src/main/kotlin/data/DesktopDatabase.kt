@@ -653,14 +653,16 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
         val toonIds = ids.map { it.toonId }.distinct()
         val list = mutableListOf<FavoriteRecord>()
         withConnection { conn ->
-            val placeholders = toonIds.joinToString(",") { "?" }
-            conn.prepareStatement("SELECT * FROM favorites WHERE toonId IN ($placeholders)").use { stmt ->
-                toonIds.forEachIndexed { index, id -> stmt.setString(index + 1, id) }
-                val rs = stmt.executeQuery()
-                while (rs.next()) {
-                    val record = favoriteFrom(rs)
-                    if (record.workId().storageKey() in wanted) {
-                        list.add(record)
+            for (chunk in toonIds.chunked(400)) {
+                val placeholders = chunk.joinToString(",") { "?" }
+                conn.prepareStatement("SELECT * FROM favorites WHERE toonId IN ($placeholders)").use { stmt ->
+                    chunk.forEachIndexed { index, id -> stmt.setString(index + 1, id) }
+                    val rs = stmt.executeQuery()
+                    while (rs.next()) {
+                        val record = favoriteFrom(rs)
+                        if (record.workId().storageKey() in wanted) {
+                            list.add(record)
+                        }
                     }
                 }
             }
@@ -752,15 +754,17 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
         val toonIds = ids.map { it.toonId }.distinct()
         val map = mutableMapOf<String, SeenRecord>()
         withConnection { conn ->
-            val placeholders = toonIds.joinToString(",") { "?" }
-            conn.prepareStatement("SELECT * FROM seen_toons WHERE toonId IN ($placeholders)").use { stmt ->
-                toonIds.forEachIndexed { index, id -> stmt.setString(index + 1, id) }
-                val rs = stmt.executeQuery()
-                while (rs.next()) {
-                    val record = seenFrom(rs)
-                    val key = record.workId().storageKey()
-                    if (key in wanted) {
-                        map[key] = record
+            for (chunk in toonIds.chunked(400)) {
+                val placeholders = chunk.joinToString(",") { "?" }
+                conn.prepareStatement("SELECT * FROM seen_toons WHERE toonId IN ($placeholders)").use { stmt ->
+                    chunk.forEachIndexed { index, id -> stmt.setString(index + 1, id) }
+                    val rs = stmt.executeQuery()
+                    while (rs.next()) {
+                        val record = seenFrom(rs)
+                        val key = record.workId().storageKey()
+                        if (key in wanted) {
+                            map[key] = record
+                        }
                     }
                 }
             }
@@ -823,14 +827,16 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
         val toonIds = ids.map { it.toonId }.distinct()
         val list = mutableListOf<ReadHistoryRecord>()
         withConnection { conn ->
-            val placeholders = toonIds.joinToString(",") { "?" }
-            conn.prepareStatement("SELECT * FROM read_history WHERE toonId IN ($placeholders)").use { stmt ->
-                toonIds.forEachIndexed { index, id -> stmt.setString(index + 1, id) }
-                val rs = stmt.executeQuery()
-                while (rs.next()) {
-                    val record = historyFrom(rs)
-                    if (record.workId().storageKey() in wanted) {
-                        list.add(record)
+            for (chunk in toonIds.chunked(400)) {
+                val placeholders = chunk.joinToString(",") { "?" }
+                conn.prepareStatement("SELECT * FROM read_history WHERE toonId IN ($placeholders)").use { stmt ->
+                    chunk.forEachIndexed { index, id -> stmt.setString(index + 1, id) }
+                    val rs = stmt.executeQuery()
+                    while (rs.next()) {
+                        val record = historyFrom(rs)
+                        if (record.workId().storageKey() in wanted) {
+                            list.add(record)
+                        }
                     }
                 }
             }
@@ -1010,21 +1016,23 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
         val toonIds = workIds.map { it.toonId }.distinct()
         val counts = mutableMapOf<String, Int>()
         withConnection { conn ->
-            val placeholders = toonIds.joinToString(",") { "?" }
-            conn.prepareStatement(
-                """
-                SELECT sourceId, toonId, COUNT(*)
-                FROM read_episodes
-                WHERE toonId IN ($placeholders)
-                GROUP BY sourceId, toonId
-                """.trimIndent(),
-            ).use { stmt ->
-                toonIds.forEachIndexed { index, id -> stmt.setString(index + 1, id) }
-                val rs = stmt.executeQuery()
-                while (rs.next()) {
-                    val key = "${rs.getString(1)}:${rs.getString(2)}"
-                    if (key in wanted) {
-                        counts[key] = rs.getInt(3)
+            for (chunk in toonIds.chunked(400)) {
+                val placeholders = chunk.joinToString(",") { "?" }
+                conn.prepareStatement(
+                    """
+                    SELECT sourceId, toonId, COUNT(*)
+                    FROM read_episodes
+                    WHERE toonId IN ($placeholders)
+                    GROUP BY sourceId, toonId
+                    """.trimIndent(),
+                ).use { stmt ->
+                    chunk.forEachIndexed { index, id -> stmt.setString(index + 1, id) }
+                    val rs = stmt.executeQuery()
+                    while (rs.next()) {
+                        val key = "${rs.getString(1)}:${rs.getString(2)}"
+                        if (key in wanted) {
+                            counts[key] = rs.getInt(3)
+                        }
                     }
                 }
             }

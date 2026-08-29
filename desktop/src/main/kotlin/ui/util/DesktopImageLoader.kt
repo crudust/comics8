@@ -152,58 +152,9 @@ object DesktopImageCache {
         }
     }
 
-    private val dimensionCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Int, Int>>()
-
-    fun getDimensions(url: String): Pair<Int, Int>? {
-        if (url.isBlank()) return null
-        dimensionCache[url]?.let { return it }
-        get(url)?.let {
-            val dim = Pair(it.width, it.height)
-            dimensionCache[url] = dim
-            return dim
-        }
-        return null
-    }
-
-    fun probeDimensions(url: String): Pair<Int, Int>? {
-        if (url.isBlank()) return null
-        getDimensions(url)?.let { return it }
-        return try {
-            val hash = hashUrl(url)
-            val cachedFile = File(diskCacheDir, "$hash.img")
-            val localFile = LocalImageUri.toFile(url)
-            val zipRef = ZipImageUri.parse(url)
-
-            val bytes = if (localFile != null && localFile.isFile && localFile.length() > 0L) {
-                localFile.readBytes()
-            } else if (cachedFile.isFile && cachedFile.length() > 0L) {
-                cachedFile.readBytes()
-            } else if (zipRef != null) {
-                ZipArchive(zipRef.zip).use { archive ->
-                    archive.open(zipRef.entry).use { it.readBytes() }
-                }
-            } else {
-                null
-            }
-
-            if (bytes != null && bytes.isNotEmpty()) {
-                Image.makeFromEncoded(bytes).use { img ->
-                    val dim = Pair(img.width, img.height)
-                    dimensionCache[url] = dim
-                    dim
-                }
-            } else {
-                null
-            }
-        } catch (_: Exception) {
-            null
-        }
-    }
-
     private fun putMemory(url: String, bitmap: ImageBitmap) {
         synchronized(memoryLock) {
             memoryCache[url] = bitmap
-            dimensionCache[url] = Pair(bitmap.width, bitmap.height)
         }
     }
 
@@ -254,7 +205,6 @@ object DesktopImageCache {
         synchronized(inFlightLock) { inFlightRequests.clear() }
         synchronized(memoryLock) {
             memoryCache.clear()
-            dimensionCache.clear()
         }
     }
 

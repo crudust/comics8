@@ -1,6 +1,5 @@
 package com.comics8.core.source.local
 
-import java.math.BigInteger
 
 /**
  * Tokenize into non-digit runs + digit runs.
@@ -13,51 +12,82 @@ object NaturalSort : Comparator<String> {
         if (a === b) return 0
         if (a == null) return -1
         if (b == null) return 1
-        val left = tokens(a)
-        val right = tokens(b)
-        val n = minOf(left.size, right.size)
-        for (i in 0 until n) {
-            val c = compareToken(left[i], right[i])
-            if (c != 0) return c
+
+        var ia = 0
+        var ib = 0
+        val lenA = a.length
+        val lenB = b.length
+
+        while (ia < lenA && ib < lenB) {
+            val isDigitA = a[ia] in '0'..'9'
+            val startA = ia
+            while (ia < lenA && (a[ia] in '0'..'9') == isDigitA) ia++
+            val endA = ia
+
+            val isDigitB = b[ib] in '0'..'9'
+            val startB = ib
+            while (ib < lenB && (b[ib] in '0'..'9') == isDigitB) ib++
+            val endB = ib
+
+            if (isDigitA && isDigitB) {
+                var nonZeroA = startA
+                while (nonZeroA < endA && a[nonZeroA] == '0') nonZeroA++
+                var nonZeroB = startB
+                while (nonZeroB < endB && b[nonZeroB] == '0') nonZeroB++
+
+                val numLenA = endA - nonZeroA
+                val numLenB = endB - nonZeroB
+
+                if (numLenA != numLenB) return numLenA.compareTo(numLenB)
+
+                for (k in 0 until numLenA) {
+                    val ca = a[nonZeroA + k]
+                    val cb = b[nonZeroB + k]
+                    if (ca != cb) return ca.compareTo(cb)
+                }
+
+                val rawLenA = endA - startA
+                val rawLenB = endB - startB
+                if (rawLenA != rawLenB) return rawLenA.compareTo(rawLenB)
+            } else {
+                val tLenA = endA - startA
+                val tLenB = endB - startB
+                val minLen = minOf(tLenA, tLenB)
+                for (k in 0 until minLen) {
+                    var ca = a[startA + k]
+                    var cb = b[startB + k]
+                    if (ca != cb) {
+                        ca = ca.uppercaseChar()
+                        cb = cb.uppercaseChar()
+                        if (ca != cb) {
+                            ca = ca.lowercaseChar()
+                            cb = cb.lowercaseChar()
+                            if (ca != cb) return ca.compareTo(cb)
+                        }
+                    }
+                }
+                if (tLenA != tLenB) return tLenA.compareTo(tLenB)
+            }
         }
-        val len = left.size.compareTo(right.size)
-        if (len != 0) return len
+
+        val tokensRemainingA = countRemainingTokens(a, ia)
+        val tokensRemainingB = countRemainingTokens(b, ib)
+        if (tokensRemainingA != tokensRemainingB) {
+            return tokensRemainingA.compareTo(tokensRemainingB)
+        }
+
         return a.compareTo(b)
     }
 
-    private data class Token(val raw: String, val number: BigInteger?)
-
-    private fun tokens(s: String): List<Token> {
-        if (s.isEmpty()) return emptyList()
-        val out = ArrayList<Token>()
-        val buf = StringBuilder()
-        var inDigit = s[0] in '0'..'9'
-        fun flush() {
-            if (buf.isEmpty()) return
-            val raw = buf.toString()
-            out += if (inDigit) Token(raw, raw.toBigInteger()) else Token(raw, null)
-            buf.clear()
+    private fun countRemainingTokens(s: String, from: Int): Int {
+        if (from >= s.length) return 0
+        var count = 0
+        var i = from
+        while (i < s.length) {
+            val isDigit = s[i] in '0'..'9'
+            count++
+            while (i < s.length && (s[i] in '0'..'9') == isDigit) i++
         }
-        for (ch in s) {
-            val digit = ch in '0'..'9'
-            if (digit != inDigit) {
-                flush()
-                inDigit = digit
-            }
-            buf.append(ch)
-        }
-        flush()
-        return out
-    }
-
-    private fun compareToken(a: Token, b: Token): Int {
-        val an = a.number
-        val bn = b.number
-        if (an != null && bn != null) {
-            val value = an.compareTo(bn)
-            if (value != 0) return value
-            return a.raw.length.compareTo(b.raw.length)
-        }
-        return String.CASE_INSENSITIVE_ORDER.compare(a.raw, b.raw)
+        return count
     }
 }
