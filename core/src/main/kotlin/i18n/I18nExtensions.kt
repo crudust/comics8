@@ -85,6 +85,12 @@ fun ViewMode.displayLabel(strings: AppStrings): String = when (this) {
     ViewMode.DUAL -> strings.viewModeDualLong
 }
 
+fun ViewMode.displayDescription(strings: AppStrings): String = when (this) {
+    ViewMode.SCROLL -> strings.viewModeScrollDesc
+    ViewMode.PAGE -> strings.viewModeSingleDesc
+    ViewMode.DUAL -> strings.viewModeDualDesc
+}
+
 fun ViewMode.displayShortLabel(strings: AppStrings): String = when (this) {
     ViewMode.SCROLL -> strings.viewModeScrollShort
     ViewMode.PAGE -> strings.viewModeSingleShort
@@ -94,6 +100,11 @@ fun ViewMode.displayShortLabel(strings: AppStrings): String = when (this) {
 fun ReadDirection.displayLabel(strings: AppStrings): String = when (this) {
     ReadDirection.RIGHT_TO_LEFT -> strings.readDirectionRightToLeft
     ReadDirection.LEFT_TO_RIGHT -> strings.readDirectionLeftToRight
+}
+
+fun ReadDirection.displayDescription(strings: AppStrings): String = when (this) {
+    ReadDirection.RIGHT_TO_LEFT -> strings.readDirectionRTLDesc
+    ReadDirection.LEFT_TO_RIGHT -> strings.readDirectionLTRDesc
 }
 
 fun ReadDirection.displayShortLabel(strings: AppStrings): String = when (this) {

@@ -281,7 +281,10 @@ private fun ReaderScrollView(
     onRegisterActions: (onAdvance: () -> Unit, onRetreat: () -> Unit) -> Unit,
 ) {
     val strings = LocalStrings.current
-    val listState = rememberLazyListState()
+    val initialIndex = remember(state.currentEpisode?.wrId) {
+        (state.currentEpisode?.lastReadPage ?: 0).coerceIn(0, (state.readerImages.size - 1).coerceAtLeast(0))
+    }
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
     val scope = rememberCoroutineScope()
     var controlsVisible by remember { mutableStateOf(false) }
 
@@ -308,10 +311,15 @@ private fun ReaderScrollView(
         onRegisterActions(onAdvance, onRetreat)
     }
 
-    LaunchedEffect(state.readerImages, state.currentEpisode?.lastReadPage) {
-        val target = state.currentEpisode?.lastReadPage ?: 0
-        if (state.readerImages.isNotEmpty() && target > 0) {
-            listState.scrollToItem(target.coerceIn(0, state.readerImages.size - 1))
+    var restoredWrId by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.currentEpisode?.wrId, state.readerImages.isNotEmpty()) {
+        val wrId = state.currentEpisode?.wrId
+        if (wrId != null && wrId != restoredWrId && state.readerImages.isNotEmpty()) {
+            restoredWrId = wrId
+            val target = state.currentEpisode?.lastReadPage ?: 0
+            if (target > 0 && target != listState.firstVisibleItemIndex) {
+                listState.scrollToItem(target.coerceIn(0, state.readerImages.size - 1))
+            }
         }
     }
 
