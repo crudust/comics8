@@ -76,16 +76,21 @@ object DesktopVersion {
 }
 VERSION_EOF
 
-# 2. Build Android Release APK & Windows Portable Zip
-echo "📦 2/5: Building Android Release APK & Windows Portable Zip..."
-./gradlew assembleStandaloneRelease :desktop:packageWindowsZip
+# 2. Build Android Release APK, AAB & Windows Portable Zip
+echo "📦 2/5: Building Android Release APK, AAB & Windows Portable Zip..."
+./gradlew assembleStandaloneRelease bundlePlayRelease :desktop:packageWindowsZip
 
 APK_PATH="app/build/outputs/apk/standalone/release/app-standalone-release.apk"
+AAB_PATH="app/build/outputs/bundle/playRelease/app-play-release.aab"
 WIN_ZIP_PATH="desktop/build/compose/binaries/main/Comics8-win.zip"
 MAC_ZIP_PATH="desktop/build/compose/binaries/main/Comics8-mac.zip"
 
 if [ ! -f "$APK_PATH" ]; then
     echo "❌ APK file not found: $APK_PATH"
+    exit 1
+fi
+if [ ! -f "$AAB_PATH" ]; then
+    echo "❌ AAB file not found: $AAB_PATH"
     exit 1
 fi
 
@@ -117,6 +122,9 @@ SERVER_VERSION_FILE="${COMICS8_SERVER_VERSION_FILE:-/home/crudust/comics8-sync/d
 echo "📡 5/5: Uploading to Sync Server ($SERVER_HOST)..."
 if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=3 "${SERVER_USER}@${SERVER_HOST}" "mkdir -p ${SERVER_DOWNLOAD_DIR}" >/dev/null 2>&1; then
     scp "$APK_PATH" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/comics8-latest.apk"
+    if [ -f "$AAB_PATH" ]; then
+        scp "$AAB_PATH" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/comics8-play-release.aab"
+    fi
     if [ -f "$WIN_ZIP_PATH" ]; then
         scp "$WIN_ZIP_PATH" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/Comics8-win.zip"
     fi
@@ -134,6 +142,7 @@ android = {
     "versionCode": int(os.environ["COMICS8_VERSION_CODE"]),
     "versionName": os.environ["COMICS8_VERSION_NAME"],
     "downloadUrl": "/api/comics8/download/comics8-latest.apk",
+    "aabDownloadUrl": "/api/comics8/download/comics8-play-release.aab",
     "releaseNotes": os.environ["COMICS8_RELEASE_NOTES"],
 }
 desktop = {
@@ -156,6 +165,9 @@ fi
 # 6. Publish to GitHub Releases
 echo "🐙 6/6: Publishing to GitHub Releases (crudust/comics8)..."
 RELEASE_FILES=("$APK_PATH#comics8-latest.apk")
+if [ -f "$AAB_PATH" ]; then
+    RELEASE_FILES+=("$AAB_PATH#comics8-play-release.aab")
+fi
 if [ -f "$WIN_ZIP_PATH" ]; then
     RELEASE_FILES+=("$WIN_ZIP_PATH")
 fi
@@ -193,6 +205,7 @@ echo "🎉 배포가 성공적으로 완료되었습니다!"
 echo "• Version Info:  https://homeassistant.tail1946af.ts.net/api/comics8/version"
 echo "• GitHub Release: https://github.com/crudust/comics8/releases/tag/${TAG_NAME}"
 echo "• Android APK:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/comics8-latest.apk"
+echo "• Android AAB:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/comics8-play-release.aab"
 echo "• Windows Zip:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/Comics8-win.zip"
 if [ -f "$MAC_ZIP_PATH" ]; then
     echo "• Mac Desktop:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/Comics8-mac.zip"

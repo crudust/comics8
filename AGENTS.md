@@ -71,6 +71,7 @@ Linux에서 `./scripts/deploy-release.sh`를 실행하면 APK와 Windows Zip을 
 ./scripts/deploy-release.sh 1.5.64 90 "성능 개선 및 안정화"
 ```
 - **Android APK**: `crudust/comics8` GitHub Releases에 `comics8-latest.apk`로 자동 업로드
+- **Android AAB**: `crudust/comics8` GitHub Releases에 `comics8-play-release.aab`로 자동 업로드
 - **Windows Zip**: `Comics8-win.zip` 자동 업로드
 - **macOS Desktop**: GitHub Actions (`macos-latest`) 또는 빌더 Mac을 통해 자동 빌드/업로드
 - **Homebrew Cask**: `build/homebrew/comics8.rb` 자동 생성 (SHA256 포함)
