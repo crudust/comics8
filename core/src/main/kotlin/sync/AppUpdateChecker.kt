@@ -17,6 +17,21 @@ object AppUpdateChecker {
         .build()
 
     fun fetchVersionInfo(serverUrl: String = SyncConstants.DEFAULT_SERVER_URL): VersionResponse? {
+        val direct = fetchVersionInfoDirect(serverUrl)
+        if (direct != null) return direct
+
+        // Fallback: If current server is unreachable, check remote discovery (e.g. GitHub server.json)
+        val discoveredUrl = ServerDiscovery.fetchRemoteServerUrl()
+        if (!discoveredUrl.isNullOrBlank() && discoveredUrl != serverUrl) {
+            val fallbackResp = fetchVersionInfoDirect(discoveredUrl)
+            if (fallbackResp != null) {
+                return fallbackResp.copy(serverUrl = discoveredUrl)
+            }
+        }
+        return null
+    }
+
+    private fun fetchVersionInfoDirect(serverUrl: String): VersionResponse? {
         val url = SyncConstants.versionUrl(serverUrl)
         return try {
             val request = Request.Builder()
@@ -31,6 +46,7 @@ object AppUpdateChecker {
             val root = JSONObject(jsonStr)
             val androidObj = root.optJSONObject("android")
             val desktopObj = root.optJSONObject("desktop")
+            val remoteServerUrl = root.optString("serverUrl", "").trim().ifBlank { null }
 
             val androidInfo = androidObj?.let {
                 PlatformUpdateInfo(
@@ -49,7 +65,11 @@ object AppUpdateChecker {
                     releaseNotes = it.optString("releaseNotes", ""),
                 )
             }
-            VersionResponse(android = androidInfo, desktop = desktopInfo)
+            VersionResponse(
+                android = androidInfo,
+                desktop = desktopInfo,
+                serverUrl = remoteServerUrl,
+            )
         } catch (_: Exception) {
             null
         }
@@ -81,9 +101,11 @@ object AppUpdateChecker {
             currentVersionCode = currentVersionCode,
             error = "업데이트 정보를 확인할 수 없습니다",
         )
+        val effectiveServerUrl = response.serverUrl ?: serverUrl
         val info = response.android ?: return AppUpdateState(
             currentVersion = currentVersionName,
             currentVersionCode = currentVersionCode,
+            newServerUrl = response.serverUrl,
             error = "Android 버전 정보가 없습니다",
         )
 
@@ -94,7 +116,7 @@ object AppUpdateChecker {
             currentCode = currentVersionCode,
         )
 
-        val resolvedUrl = SyncConstants.resolveDownloadUrl(info.downloadUrl, serverUrl)
+        val resolvedUrl = SyncConstants.resolveDownloadUrl(info.downloadUrl, effectiveServerUrl)
 
         return AppUpdateState(
             hasUpdate = hasUpdate,
@@ -104,6 +126,7 @@ object AppUpdateChecker {
             latestVersionCode = info.versionCode,
             downloadUrl = resolvedUrl,
             releaseNotes = info.releaseNotes,
+            newServerUrl = response.serverUrl,
         )
     }
 
@@ -117,9 +140,11 @@ object AppUpdateChecker {
             currentVersionCode = currentVersionCode,
             error = "업데이트 정보를 확인할 수 없습니다",
         )
+        val effectiveServerUrl = response.serverUrl ?: serverUrl
         val info = response.desktop ?: return AppUpdateState(
             currentVersion = currentVersionName,
             currentVersionCode = currentVersionCode,
+            newServerUrl = response.serverUrl,
             error = "Desktop 버전 정보가 없습니다",
         )
 
@@ -136,7 +161,7 @@ object AppUpdateChecker {
         } else {
             info.downloadUrl
         }
-        val resolvedUrl = SyncConstants.resolveDownloadUrl(rawUrl, serverUrl)
+        val resolvedUrl = SyncConstants.resolveDownloadUrl(rawUrl, effectiveServerUrl)
 
         return AppUpdateState(
             hasUpdate = hasUpdate,
@@ -146,6 +171,7 @@ object AppUpdateChecker {
             latestVersionCode = info.versionCode,
             downloadUrl = resolvedUrl,
             releaseNotes = info.releaseNotes,
+            newServerUrl = response.serverUrl,
         )
     }
 }

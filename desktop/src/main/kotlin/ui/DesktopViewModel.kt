@@ -325,6 +325,10 @@ class DesktopViewModel(
                     serverUrl = serverUrl,
                 )
             }
+            val newServerUrl = updateState.newServerUrl
+            if (newServerUrl != null) {
+                repository.syncManager?.updateServerUrlIfChanged(newServerUrl)
+            }
             _state.update {
                 it.copy(
                     updateState = updateState.copy(isChecking = false),

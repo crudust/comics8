@@ -565,6 +565,14 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 }
             }
 
+            val newServerUrl = updateState.newServerUrl
+            if (newServerUrl != null) {
+                repository.syncManager?.updateServerUrlIfChanged(newServerUrl)
+            } else if (BuildConfig.IS_PLAY_STORE) {
+                // Play Store users also check for remote server migration in background
+                repository.syncManager?.checkAndMigrateServerUrl()
+            }
+
             _state.update {
                 it.copy(
                     updateState = updateState.copy(isChecking = false),
