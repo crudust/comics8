@@ -86,6 +86,7 @@ import com.comics8.core.model.ReadDirection
 import com.comics8.core.model.SplitMode
 import com.comics8.core.model.ViewMode
 import com.comics8.monitor.ui.theme.LocalStrings
+import com.comics8.monitor.ui.theme.MonochromeTheme
 import com.comics8.monitor.ui.ListingUiState
 import com.comics8.monitor.ui.ListingViewModel
 import com.comics8.monitor.ui.Screen
@@ -259,7 +260,7 @@ fun TopBar(
                         imageVector = if (state.seriesFavorited) Icons.Filled.Star else Icons.Outlined.StarBorder,
                         contentDescription = if (state.seriesFavorited) strings.actionRemoveFavorite else strings.actionAddFavorite,
                         tint = if (state.seriesFavorited) {
-                            MaterialTheme.colorScheme.primary
+                            MonochromeTheme.Gold
                         } else {
                             MaterialTheme.colorScheme.onBackground
                         },

@@ -38,6 +38,7 @@ import com.comics8.core.source.SourceRegistry
 import com.comics8.monitor.ui.components.Badge
 import com.comics8.monitor.ui.components.sourceChipLabel
 import com.comics8.monitor.ui.theme.LocalStrings
+import com.comics8.monitor.ui.theme.MonochromeTheme
 
 import androidx.compose.foundation.border
 
@@ -185,9 +186,9 @@ fun ToonCard(
                     imageVector = if (item.isFavorite) Icons.Filled.Star else Icons.Outlined.StarBorder,
                     contentDescription = if (item.isFavorite) strings.actionRemoveFavorite else strings.actionAddFavorite,
                     tint = if (item.isFavorite) {
-                        MaterialTheme.colorScheme.primary
+                        MonochromeTheme.Gold
                     } else {
-                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
                     },
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))

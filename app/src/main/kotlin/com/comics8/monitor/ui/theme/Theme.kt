@@ -23,6 +23,7 @@ object MonochromeTheme {
     val Zinc900 = Color(0xFF18181B)
     val Zinc950 = Color(0xFF09090B)
     val PureBlack = Color(0xFF000000)
+    val Gold = Color(0xFFFFB800)
 }
 
 val MonochromeColorScheme = darkColorScheme(
