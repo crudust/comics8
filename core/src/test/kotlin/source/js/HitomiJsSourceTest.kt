@@ -202,17 +202,14 @@ class HitomiJsSourceTest {
         assertThat(ranged).isNotEmpty()
         assertThat(ranged.all { it.headers["Range"] != null }).isTrue()
         assertThat(ranged.any { it.url.contains("/artist/demo%20artist-") }).isTrue()
-        assertThat(ranged.any { it.url.contains("/female/sole%20female-") }).isTrue()
+        assertThat(ranged.any { it.url.contains("/tag/female%3Asole%20female-") }).isTrue()
     }
 
     @Test
-    fun searchFailsWhenFilterNozomiIsNotOk() = runBlocking<Unit> {
-        val http = FakeHitomiHttp(missingNozomi = setOf("/female/"))
-        val error = runCatching {
-            loadHitomi().search(SearchQuery("female:sole_female"), http)
-        }.exceptionOrNull()
-        assertThat(error).isNotNull()
-        assertThat(error!!.message).contains("HTTP")
+    fun searchReturnsEmptyWhenFilterNozomiIsNotAccessible() = runBlocking<Unit> {
+        val http = FakeHitomiHttp(missingNozomi = setOf("female%3Asole%20female"))
+        val items = loadHitomi().search(SearchQuery("female:sole_female"), http)
+        assertThat(items).isEmpty()
     }
 
     @Test
@@ -426,7 +423,8 @@ class HitomiJsSourceTest {
             return result.body.toString(Charsets.UTF_8)
         }
 
-        override fun isAccessible(url: String, policy: RequestPolicy): Boolean = true
+        override fun isAccessible(url: String, policy: RequestPolicy): Boolean =
+            !missingNozomi.any { url.contains(it) }
 
         private fun gallery(id: String): HttpResult {
             val hits = galleryHits.getOrPut(id) { AtomicInteger(0) }.incrementAndGet()
@@ -450,7 +448,7 @@ class HitomiJsSourceTest {
                 custom != null -> custom
                 url.contains("/artist/demo%20artist-") || url.contains("/artist/demo_artist-") ->
                     listOf(1001L, 2002L)
-                url.contains("/female/") -> listOf(1001L, 3003L)
+                url.contains("female%3A") || url.contains("/female/") -> listOf(1001L, 3003L)
                 url.contains("/index-") -> listingIds
                 else -> listingIds
             }

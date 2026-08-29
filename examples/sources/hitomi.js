@@ -238,6 +238,8 @@ var source;
     for (var i = 0; i < parts.length; i++) {
       var p = parts[i];
       if (!p || p.charAt(0) === "-") continue;
+      if (p.indexOf("tag:female:") === 0) p = p.substring(4);
+      if (p.indexOf("tag:male:") === 0) p = p.substring(4);
       var idx = p.indexOf(":");
       if (idx > 0) {
         var ns = p.substring(0, idx).toLowerCase();
@@ -255,10 +257,20 @@ var source;
   }
 
   function nozomiUrlForToken(token, lang) {
+    var l = (lang || DEFAULT_LANG).toLowerCase();
     var slug = host.slug(token.value);
     if (token.ns === "language") return indexNozomi(slug);
-    if (token.ns === "type") return typeNozomi(slug, lang);
-    return nsNozomi(token.ns, slug, lang);
+    if (token.ns === "type") return typeNozomi(slug, l);
+    if (token.ns === "female" || token.ns === "male") {
+      return LTN + "/tag/" + encodePath(token.ns + ":" + slug.replace(/_/g, " ")) + "-" + l + ".nozomi";
+    }
+    if (token.ns === "tag") {
+      var femaleUrl = LTN + "/tag/" + encodePath("female:" + slug.replace(/_/g, " ")) + "-" + l + ".nozomi";
+      if (host.isAccessible(femaleUrl)) return femaleUrl;
+      var maleUrl = LTN + "/tag/" + encodePath("male:" + slug.replace(/_/g, " ")) + "-" + l + ".nozomi";
+      if (host.isAccessible(maleUrl)) return maleUrl;
+    }
+    return nsNozomi(token.ns, slug, l);
   }
 
   source = {
@@ -311,7 +323,9 @@ var source;
       }
       if (filters.length === 1 && SERIES_NS[filters[0].ns]) {
         var token = filters[0];
-        var ids = host.fetchInt32Index(nsNozomi(token.ns, token.value, lang), 1, 1).ids;
+        var artistNozomi = nsNozomi(token.ns, token.value, lang);
+        if (!host.isAccessible(artistNozomi)) return [];
+        var ids = host.fetchInt32Index(artistNozomi, 1, 1).ids;
         var cover = ids.length ? fetchGalleryInfo(String(ids[0])) : null;
         var first = cover && cover.files.length ? cover.files[0] : null;
         return [{
@@ -325,6 +339,9 @@ var source;
         }];
       }
       var urls = filters.length ? filters.map(function (f) { return nozomiUrlForToken(f, lang); }) : [indexNozomi(lang)];
+      for (var u = 0; u < urls.length; u++) {
+        if (!host.isAccessible(urls[u])) return [];
+      }
       var matchedIds = host.intersectIndexUrls(urls, PAGE_SIZE);
       return loadGalleryCards(matchedIds);
     },
@@ -335,6 +352,8 @@ var source;
       var parts = text.split(/\s+/);
       var last = parts[parts.length - 1] || "";
       if (last.charAt(0) === "-") last = last.substring(1);
+      if (last.indexOf("tag:female:") === 0) last = last.substring(4);
+      if (last.indexOf("tag:male:") === 0) last = last.substring(4);
       var ns = "artist";
       var term = last;
       var idx = last.indexOf(":");
