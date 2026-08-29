@@ -176,7 +176,10 @@ fi
 
 # 6. Publish to GitHub Releases (AAB is excluded from public release for security)
 echo "🐙 6/6: Publishing to GitHub Releases (crudust/comics8)..."
-RELEASE_FILES=("$APK_PATH#comics8-latest.apk")
+GITHUB_APK_PATH="build/release/comics8-latest.apk"
+mkdir -p "$(dirname "${GITHUB_APK_PATH}")"
+cp "${APK_PATH}" "${GITHUB_APK_PATH}"
+RELEASE_FILES=("$GITHUB_APK_PATH")
 if [ -f "$WIN_ZIP_PATH" ]; then
     RELEASE_FILES+=("$WIN_ZIP_PATH")
 fi
