@@ -130,6 +130,7 @@ data class ListingUiState(
     val hasNotificationPermission: Boolean = true,
     val pageTapZone: PageTapZone = PageTapZone.FOLLOW_DIRECTION,
     val volumePageTurnEnabled: Boolean = false,
+    val showViewerOptions: Boolean = false,
     val selectedSettingsCategory: SettingsCategory? = null,
 ) {
     val isSearch: Boolean get() = searchQuery != null
@@ -238,6 +239,18 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         _state.update { it.copy(volumePageTurnEnabled = enabled) }
     }
 
+    fun openViewerOptions() {
+        _state.update { it.copy(showViewerOptions = true) }
+    }
+
+    fun closeViewerOptions() {
+        _state.update { it.copy(showViewerOptions = false) }
+    }
+
+    fun toggleViewerOptions(show: Boolean = !_state.value.showViewerOptions) {
+        _state.update { it.copy(showViewerOptions = show) }
+    }
+
     fun selectSettingsCategory(category: SettingsCategory?) {
         _state.update { it.copy(selectedSettingsCategory = category) }
     }
@@ -315,6 +328,10 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
     fun goBack(): Boolean {
         val current = _state.value
+        if (current.showViewerOptions) {
+            closeViewerOptions()
+            return true
+        }
         if (current.artistPick != null) {
             dismissArtistPick()
             return true
@@ -2267,6 +2284,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 readerImages = emptyList(),
                 readerLoading = false,
                 readerError = null,
+                showViewerOptions = false,
             )
         }
         repository.syncManager?.triggerDebouncedPush()

@@ -144,7 +144,7 @@ private fun ComicsAppUiContent(
     }
     val addLibraryFolder = { treePicker.launch(null) }
 
-    val canGoBack = state.screen != Screen.Browse || state.isSearch || state.showPageJump || state.showSyncDialog || state.showUpdateDialog || state.showDownloadOptions || state.artistPick != null || state.showAddSourceSheet || state.showRemoveSourceSheet || state.sourceError != null || state.networkDraft != null
+    val canGoBack = state.screen != Screen.Browse || state.isSearch || state.showPageJump || state.showSyncDialog || state.showUpdateDialog || state.showDownloadOptions || state.artistPick != null || state.showAddSourceSheet || state.showRemoveSourceSheet || state.sourceError != null || state.networkDraft != null || state.showViewerOptions
     BackHandler(enabled = canGoBack) {
         viewModel.goBack()
     }

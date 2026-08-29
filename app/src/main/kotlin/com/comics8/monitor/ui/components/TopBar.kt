@@ -475,7 +475,7 @@ fun TopBar(
                 Spacer(Modifier.weight(1f))
 
                 IconButton(
-                    onClick = { viewModel.openSettings(com.comics8.monitor.ui.settings.SettingsCategory.READER) },
+                    onClick = viewModel::openViewerOptions,
                     modifier = Modifier.size(32.dp),
                 ) {
                     Icon(

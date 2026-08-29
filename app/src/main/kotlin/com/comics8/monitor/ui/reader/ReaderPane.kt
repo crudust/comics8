@@ -76,10 +76,18 @@ import com.comics8.monitor.ui.components.ErrorPane
 import com.comics8.monitor.ui.components.LoadingPane
 import com.comics8.monitor.ui.components.TopBar
 import com.comics8.monitor.ui.components.ZoomableBox
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import com.comics8.monitor.ui.settings.ReaderSettingsPane
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReaderPane(
     state: ListingUiState,
@@ -110,6 +118,25 @@ fun ReaderPane(
         }
         else -> {
             ReaderDualPagePane(state, viewModel, modifier)
+        }
+    }
+
+    if (state.showViewerOptions) {
+        ModalBottomSheet(
+            onDismissRequest = viewModel::closeViewerOptions,
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = MaterialTheme.colorScheme.surface,
+            dragHandle = { BottomSheetDefaults.DragHandle() },
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp)
+                    .padding(bottom = 32.dp),
+            ) {
+                ReaderSettingsPane(state = state, viewModel = viewModel)
+            }
         }
     }
 }
