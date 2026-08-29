@@ -7,6 +7,7 @@ import com.comics8.monitor.data.local.FavoriteToon
 import com.comics8.monitor.data.local.ReadEpisode
 import com.comics8.monitor.data.local.ReadHistory
 import com.comics8.monitor.data.local.ReaderSetting
+import androidx.room.withTransaction
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -191,10 +192,12 @@ object BackupManager {
                 )
             }
 
-            if (favorites.isNotEmpty()) database.favoriteDao().upsertAll(favorites)
-            if (history.isNotEmpty()) database.readHistoryDao().upsertAll(history)
-            if (episodes.isNotEmpty()) database.readEpisodeDao().markReadAll(episodes)
-            if (settings.isNotEmpty()) database.readerSettingDao().saveAll(settings)
+            database.withTransaction {
+                if (favorites.isNotEmpty()) database.favoriteDao().upsertAll(favorites)
+                if (history.isNotEmpty()) database.readHistoryDao().upsertAll(history)
+                if (episodes.isNotEmpty()) database.readEpisodeDao().markReadAll(episodes)
+                if (settings.isNotEmpty()) database.readerSettingDao().saveAll(settings)
+            }
 
             BackupRestoreResult(
                 success = true,
@@ -214,10 +217,10 @@ object BackupManager {
 
     suspend fun getStats(database: AppDatabase): BackupStats {
         return BackupStats(
-            favoriteCount = database.favoriteDao().all().size,
-            historyCount = database.readHistoryDao().all().size,
-            episodeCount = database.readEpisodeDao().all().size,
-            settingCount = database.readerSettingDao().all().size,
+            favoriteCount = database.favoriteDao().count(),
+            historyCount = database.readHistoryDao().count(),
+            episodeCount = database.readEpisodeDao().count(),
+            settingCount = database.readerSettingDao().count(),
         )
     }
 }

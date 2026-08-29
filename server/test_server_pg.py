@@ -8,8 +8,9 @@ import tempfile
 import time
 import pytest
 import pytest_asyncio
+import httpx
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 # Set test environment
@@ -22,7 +23,7 @@ from app.config import get_settings
 from app.database import Base, get_db, get_engine
 from app.main import app
 from app.models import User, Subscription, UserFavorite, UserHistory, UserReadEpisode, UserReaderSetting, UserTombstone
-from app.sync import get_safe_user_id
+from app.sync import get_safe_user_id, import_snapshot_for_user
 from migrate_sqlite_to_pg import migrate_single_sqlite_db, save_user_data_to_pg
 
 
@@ -108,6 +109,8 @@ async def test_pairing_workflow(client: AsyncClient):
     assert req_resp.status_code == 200
     req_data = req_resp.json()
     assert req_data["success"] is True
+    assert req_data["expiresInSeconds"] == 300
+    assert "expiresIn" not in req_data
     code = req_data["code"]
     assert len(code) == 6
 
@@ -121,6 +124,68 @@ async def test_pairing_workflow(client: AsyncClient):
     # Re-confirming should fail (consumed)
     fail_resp = await client.post("/pair/confirm", json={"code": code})
     assert fail_resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_snapshot_import_prefetches_favorites_in_one_query(test_session: AsyncSession):
+    user_id = "bulk-prefetch-user"
+    test_session.add(User(user_id=user_id, sync_key=user_id))
+    await test_session.commit()
+
+    statements: list[str] = []
+
+    def record_statement(_conn, _cursor, statement, _parameters, _context, _executemany):
+        if statement.lstrip().upper().startswith("SELECT"):
+            statements.append(statement)
+
+    engine = test_session.bind
+    event.listen(engine.sync_engine, "before_cursor_execute", record_statement)
+    try:
+        await import_snapshot_for_user(
+            test_session,
+            user_id,
+            {
+                "favorites": [
+                    {"sourceId": "eleven", "id": str(i), "title": f"Work {i}", "savedAt": i + 1}
+                    for i in range(50)
+                ]
+            },
+            now_ms=10_000,
+        )
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", record_statement)
+
+    favorite_selects = [sql for sql in statements if "user_favorites" in sql]
+    assert len(favorite_selects) == 1
+    result = await test_session.execute(
+        select(UserFavorite).where(UserFavorite.user_id == user_id)
+    )
+    assert len(result.scalars().all()) == 50
+
+
+@pytest.mark.asyncio
+async def test_proxy_reuses_application_client(client: AsyncClient):
+    upstream_calls = 0
+
+    def upstream(_request: httpx.Request) -> httpx.Response:
+        nonlocal upstream_calls
+        upstream_calls += 1
+        return httpx.Response(200, headers={"Content-Type": "image/jpeg"})
+
+    shared_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    app.state.proxy_client = shared_client
+    try:
+        for _ in range(2):
+            response = await client.head(
+                "/proxy",
+                params={"url": "https://tn.hitomi.la/image.jpg"},
+            )
+            assert response.status_code == 200
+        assert upstream_calls == 2
+        assert not shared_client.is_closed
+    finally:
+        await shared_client.aclose()
+        del app.state.proxy_client
 
 
 # =============================================================================
@@ -461,4 +526,3 @@ async def test_rtdn_pubsub_worker(client: AsyncClient, test_session: AsyncSessio
     assert event is not None
     assert event.notification_type == 2
     assert "RENEWED" in event.event_type
-

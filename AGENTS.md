@@ -106,7 +106,7 @@ Comics8/
 ├── server/                     # 클라우드 동기화 & 정기구독 프록시 백엔드 (FastAPI + PostgreSQL 18)
 │   ├── app/                    # sync, billing, proxy, pubsub_worker, database, models
 │   ├── docker-compose.yml      # postgres (5433) + backend (8905) 컨테이너
-│   ├── schema.sql              # 10개 최적화 테이블 DDL
+│   ├── schema.sql              # 9개 최적화 테이블 DDL
 │   └── Dockerfile
 ├── scripts/
 │   ├── build-mac-local.sh          # Mac에서 /Applications 첫 설치

@@ -158,24 +158,6 @@ class SubscriptionEvent(Base):
     )
 
 
-class Work(Base):
-    __tablename__ = "works"
-
-    source_id: Mapped[str] = mapped_column(String(32), primary_key=True, default="eleven")
-    toon_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    title: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    thumb_url: Mapped[str | None] = mapped_column(Text, nullable=True)
-    href: Mapped[str | None] = mapped_column(Text, nullable=True)
-    genre: Mapped[str | None] = mapped_column(Text, nullable=True)
-    author: Mapped[str | None] = mapped_column(Text, nullable=True)
-    updated_at: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        nullable=False,
-    )
-
-
 class UserFavorite(Base):
     __tablename__ = "user_favorites"
 

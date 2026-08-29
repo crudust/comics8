@@ -64,9 +64,12 @@ import org.jetbrains.skia.Rect
 import org.jetbrains.skia.SamplingMode
 import org.jetbrains.skia.Surface
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.Semaphore
+import java.util.concurrent.atomic.AtomicLong
 
 object AwtThumbEncoder : ThumbEncoder {
     override fun webp(bytes: ByteArray, longEdgePx: Int, quality: Int): ByteArray {
@@ -118,6 +121,9 @@ object DesktopImageCache {
             size > MEMORY_MAX_ENTRIES
     }
     private val diskCacheDir = File(System.getProperty("user.home"), ".comics8/cache").apply { mkdirs() }
+    private val estimatedDiskBytes = AtomicLong(
+        diskCacheDir.listFiles()?.asSequence()?.filter { it.isFile }?.sumOf { it.length() } ?: 0L,
+    )
     val coverThumbs = CoverThumbCache(
         File(System.getProperty("user.home"), ".comics8/thumbs"),
         AwtThumbEncoder,
@@ -217,10 +223,21 @@ object DesktopImageCache {
 
     private fun writeAtomically(targetFile: File, bytes: ByteArray) {
         val tempFile = File(targetFile.parentFile, "${targetFile.name}.tmp.${java.util.UUID.randomUUID()}")
+        val previousSize = targetFile.takeIf { it.isFile }?.length() ?: 0L
         try {
             tempFile.writeBytes(bytes)
             if (tempFile.exists() && tempFile.length() > 0L) {
-                tempFile.renameTo(targetFile)
+                try {
+                    Files.move(
+                        tempFile.toPath(),
+                        targetFile.toPath(),
+                        StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING,
+                    )
+                } catch (_: Exception) {
+                    Files.move(tempFile.toPath(), targetFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                }
+                estimatedDiskBytes.addAndGet(targetFile.length() - previousSize)
             }
         } catch (_: Exception) {
             tempFile.delete()
@@ -445,10 +462,14 @@ object DesktopImageCache {
 
 
     private fun evictDiskIfNeeded(keep: File) {
+        if (estimatedDiskBytes.get() <= DISK_HARD_LIMIT_BYTES) return
         try {
             val files = diskCacheDir.listFiles()?.filter { it.isFile } ?: return
             var total = files.sumOf { it.length() }
-            if (total <= DISK_HARD_LIMIT_BYTES) return
+            if (total <= DISK_HARD_LIMIT_BYTES) {
+                estimatedDiskBytes.set(total)
+                return
+            }
             val keepPath = keep.absolutePath
             val oldestFirst = files
                 .filter { it.absolutePath != keepPath }
@@ -460,6 +481,7 @@ object DesktopImageCache {
                     total -= size
                 }
             }
+            estimatedDiskBytes.set(total)
         } catch (_: Exception) {
         }
     }

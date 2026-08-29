@@ -16,6 +16,7 @@ import com.comics8.core.source.WorkId
 @Entity(
     tableName = "seen_toons",
     primaryKeys = ["sourceId", "toonId"],
+    indices = [Index("toonId")],
 )
 data class SeenToon(
     val sourceId: String = WorkId.DEFAULT_SOURCE,
@@ -32,7 +33,7 @@ data class SeenToon(
 @Entity(
     tableName = "favorites",
     primaryKeys = ["sourceId", "toonId"],
-    indices = [Index("savedAt")],
+    indices = [Index("savedAt"), Index("toonId")],
 )
 data class FavoriteToon(
     val sourceId: String = WorkId.DEFAULT_SOURCE,
@@ -49,6 +50,9 @@ data class FavoriteToon(
 
 @Dao
 interface FavoriteDao {
+    @Query("SELECT COUNT(*) FROM favorites")
+    suspend fun count(): Int
+
     @Query("SELECT * FROM favorites ORDER BY COALESCE(updatedAt, '') DESC, savedAt DESC")
     suspend fun all(): List<FavoriteToon>
 
@@ -104,6 +108,7 @@ interface SeenDao {
 @Entity(
     tableName = "reader_settings",
     primaryKeys = ["sourceId", "toonId"],
+    indices = [Index("updatedAt")],
 )
 data class ReaderSetting(
     val sourceId: String = WorkId.DEFAULT_SOURCE,
@@ -118,6 +123,9 @@ data class ReaderSetting(
 
 @Dao
 interface ReaderSettingDao {
+    @Query("SELECT COUNT(*) FROM reader_settings")
+    suspend fun count(): Int
+
     @Query("SELECT * FROM reader_settings WHERE sourceId = :sourceId AND toonId = :toonId")
     suspend fun getSetting(sourceId: String, toonId: String): ReaderSetting?
 
@@ -140,6 +148,7 @@ suspend fun ReaderSettingDao.getSetting(workId: WorkId): ReaderSetting? =
 @Entity(
     tableName = "read_episodes",
     primaryKeys = ["sourceId", "toonId", "wrId"],
+    indices = [Index("toonId"), Index("readAt")],
 )
 data class ReadEpisode(
     val sourceId: String = WorkId.DEFAULT_SOURCE,
@@ -153,6 +162,9 @@ data class ReadEpisode(
 
 @Dao
 interface ReadEpisodeDao {
+    @Query("SELECT COUNT(*) FROM read_episodes")
+    suspend fun count(): Int
+
     @Query("SELECT * FROM read_episodes WHERE sourceId = :sourceId AND toonId = :toonId")
     suspend fun getReadEpisodes(sourceId: String, toonId: String): List<ReadEpisode>
 
@@ -226,7 +238,7 @@ suspend fun ReadEpisodeDao.deleteByToonId(workId: WorkId) =
 @Entity(
     tableName = "read_history",
     primaryKeys = ["sourceId", "toonId"],
-    indices = [Index("lastReadAt")],
+    indices = [Index("lastReadAt"), Index("toonId")],
 )
 data class ReadHistory(
     val sourceId: String = WorkId.DEFAULT_SOURCE,
@@ -250,6 +262,9 @@ data class ReadHistory(
 
 @Dao
 interface ReadHistoryDao {
+    @Query("SELECT COUNT(*) FROM read_history")
+    suspend fun count(): Int
+
     @Query("SELECT * FROM read_history ORDER BY lastReadAt DESC")
     suspend fun all(): List<ReadHistory>
 
@@ -285,7 +300,11 @@ suspend fun ReadHistoryDao.get(workId: WorkId): ReadHistory? = get(workId.source
 
 suspend fun ReadHistoryDao.delete(workId: WorkId) = delete(workId.sourceId, workId.toonId)
 
-@Entity(tableName = "tombstones", primaryKeys = ["entityType", "entityId"])
+@Entity(
+    tableName = "tombstones",
+    primaryKeys = ["entityType", "entityId"],
+    indices = [Index("deletedAt")],
+)
 data class Tombstone(
     val entityType: String,
     val entityId: String,
@@ -381,7 +400,7 @@ suspend fun DownloadedEpisodeDao.deleteByToon(workId: WorkId) =
         Tombstone::class,
         DownloadedEpisode::class,
     ],
-    version = 11,
+    version = 12,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -402,6 +421,17 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_10_11: Migration = object : Migration(10, 11) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE reader_settings ADD COLUMN splitMode TEXT NOT NULL DEFAULT 'FIT'")
+            }
+        }
+        val MIGRATION_11_12: Migration = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_seen_toons_toonId ON seen_toons(toonId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_favorites_toonId ON favorites(toonId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_reader_settings_updatedAt ON reader_settings(updatedAt)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_read_episodes_toonId ON read_episodes(toonId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_read_episodes_readAt ON read_episodes(readAt)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_read_history_toonId ON read_history(toonId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_tombstones_deletedAt ON tombstones(deletedAt)")
             }
         }
     }

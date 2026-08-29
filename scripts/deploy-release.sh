@@ -12,6 +12,18 @@ if [[ -f "${HOME}/.comics8-deploy.env" ]]; then
     source "${HOME}/.comics8-deploy.env"
 fi
 
+# Variables loaded by `source` are shell-local unless explicitly exported. Gradle
+# reads signing secrets from the environment and must never receive them on its CLI.
+for signing_var in \
+    COMICS8_SIGNING_STORE_FILE \
+    COMICS8_SIGNING_STORE_PASSWORD \
+    COMICS8_SIGNING_KEY_ALIAS \
+    COMICS8_SIGNING_KEY_PASSWORD; do
+    if [[ -n "${!signing_var:-}" ]]; then
+        export "${signing_var}"
+    fi
+done
+
 if [[ -z "${JAVA_HOME:-}" ]]; then
     if [[ -x "/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home/bin/java" ]]; then
         export JAVA_HOME="/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"
@@ -38,6 +50,10 @@ if [[ -z "${ANDROID_SDK_ROOT:-}" || ! -d "${ANDROID_SDK_ROOT}" ]]; then
     echo "❌ ANDROID_SDK_ROOT is not set"
     exit 1
 fi
+
+
+# Fail before editing version files when release signing is unavailable or invalid.
+./gradlew -q :app:validateReleaseSigning
 
 VERSION_NAME="${1:-1.0.0}"
 VERSION_CODE="${2:-1}"

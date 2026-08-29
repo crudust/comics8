@@ -1,9 +1,13 @@
 package com.comics8.core.network
 
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.io.path.createTempDirectory
 
 class ImageBatchDownloadTest {
@@ -51,6 +55,58 @@ class ImageBatchDownloadTest {
             delayMillis = { delays += it },
         )
         assertThat(delays).containsExactly(ImageBatchDownload.FETCH_GAP_MS)
+    }
+
+    @Test
+    fun fetchConcurrencyIsBoundedAndProgressCallbacksAreSerialized() = runBlocking(Dispatchers.Default) {
+        val dir = tempDir("img-workers")
+        val activeFetches = AtomicInteger()
+        val maxFetches = AtomicInteger()
+        val callbackActive = AtomicBoolean()
+        val callbackOverlap = AtomicBoolean()
+        val progress = mutableListOf<Int>()
+
+        ImageBatchDownload.toNumberedFiles(
+            urls = (1..20).map { "u$it" },
+            destDir = dir,
+            concurrency = 3,
+            fetchGapMs = 0,
+            fetchBytes = {
+                val active = activeFetches.incrementAndGet()
+                maxFetches.updateAndGet { maxOf(it, active) }
+                delay(10)
+                activeFetches.decrementAndGet()
+                byteArrayOf(1)
+            },
+            onProgress = { completed, _ ->
+                if (!callbackActive.compareAndSet(false, true)) callbackOverlap.set(true)
+                Thread.sleep(2)
+                progress += completed
+                callbackActive.set(false)
+            },
+        )
+
+        assertThat(maxFetches.get()).isAtMost(3)
+        assertThat(callbackOverlap.get()).isFalse()
+        assertThat(progress).containsExactlyElementsIn(1..20).inOrder()
+    }
+
+    @Test
+    fun failedFetchLeavesNoPartialDestinationOrTemporaryFile() = runBlocking<Unit> {
+        val dir = tempDir("img-atomic")
+
+        val failure = runCatching {
+            ImageBatchDownload.toNumberedFiles(
+                urls = listOf("u1"),
+                destDir = dir,
+                fetchGapMs = 0,
+                fetchBytes = { error("network failed") },
+            )
+        }.exceptionOrNull()
+
+        assertThat(failure).isInstanceOf(IllegalStateException::class.java)
+        assertThat(File(dir, "0001.jpg").exists()).isFalse()
+        assertThat(dir.listFiles().orEmpty().toList()).isEmpty()
     }
 
     private fun tempDir(prefix: String): File {

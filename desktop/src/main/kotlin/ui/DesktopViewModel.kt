@@ -2184,18 +2184,21 @@ class DesktopViewModel(
 
                 // Proactively resolve aspect ratios for remaining images in background
                 scope.launch(Dispatchers.IO) {
+                    val resolved = mutableMapOf<Int, Float>()
                     for (i in images.indices) {
                         if (!initialRatios.containsKey(i)) {
                             DesktopImageCache.loadImage(images[i])?.let { bmp ->
                                 if (bmp.height > 0) {
-                                    val ratio = bmp.width.toFloat() / bmp.height.toFloat()
-                                    _state.update { curr ->
-                                        if (curr.currentEpisode?.wrId == episode.wrId) {
-                                            curr.copy(imageAspectRatios = curr.imageAspectRatios + (i to ratio))
-                                        } else curr
-                                    }
+                                    resolved[i] = bmp.width.toFloat() / bmp.height.toFloat()
                                 }
                             }
+                        }
+                    }
+                    if (resolved.isNotEmpty()) {
+                        _state.update { curr ->
+                            if (curr.currentEpisode?.wrId == episode.wrId) {
+                                curr.copy(imageAspectRatios = curr.imageAspectRatios + resolved)
+                            } else curr
                         }
                     }
                 }

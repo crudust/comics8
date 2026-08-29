@@ -1,6 +1,7 @@
 package com.comics8.core.sync
 
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -151,5 +152,37 @@ class BaseSyncManagerTest {
         assertThat(manager.syncState.value.lastSyncedAt).isEqualTo(1700000002000L)
         assertThat(result.favoritesCount).isEqualTo(5)
         assertThat(result.historyCount).isEqualTo(12)
+    }
+
+    @Test
+    fun pairingUsesExpiresInSecondsField() = runBlocking {
+        val okClient = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body(
+                        JSONObject().put("code", "123456").put("expiresInSeconds", 90).toString()
+                            .toResponseBody("application/json".toMediaType())
+                    )
+                    .build()
+            }
+            .build()
+
+        val result = BaseSyncManager(storage = storage, client = okClient).requestPairingCode()
+
+        assertThat(result.success).isTrue()
+        assertThat(result.expiresInSeconds).isEqualTo(90)
+    }
+
+    @Test(expected = CancellationException::class)
+    fun pairingDoesNotSwallowCancellation() = runBlocking<Unit> {
+        val okClient = OkHttpClient.Builder()
+            .addInterceptor { throw CancellationException("cancelled") }
+            .build()
+
+        BaseSyncManager(storage = storage, client = okClient).requestPairingCode()
     }
 }

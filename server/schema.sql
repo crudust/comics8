@@ -64,25 +64,7 @@ CREATE INDEX IF NOT EXISTS idx_sub_events_tx ON subscription_events(original_tra
 CREATE INDEX IF NOT EXISTS idx_sub_events_user ON subscription_events(user_id);
 
 -- -----------------------------------------------------------------------------
--- 4. Works Table (Shared comic metadata cache across users)
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS works (
-    source_id VARCHAR(32) NOT NULL DEFAULT 'eleven',
-    toon_id VARCHAR(128) NOT NULL,
-    title TEXT NOT NULL,
-    thumb_url TEXT,
-    href TEXT,
-    genre TEXT,
-    author TEXT,
-    updated_at TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (source_id, toon_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_works_title ON works(title);
-
--- -----------------------------------------------------------------------------
--- 5. User Favorites Table
+-- 4. User Favorites Table
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS user_favorites (
     user_id VARCHAR(64) NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
@@ -102,7 +84,7 @@ CREATE INDEX IF NOT EXISTS idx_user_favorites_sync ON user_favorites(user_id, sy
 CREATE INDEX IF NOT EXISTS idx_user_favorites_saved ON user_favorites(user_id, saved_at DESC);
 
 -- -----------------------------------------------------------------------------
--- 6. User History Table
+-- 5. User History Table
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS user_history (
     user_id VARCHAR(64) NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
@@ -129,7 +111,7 @@ CREATE INDEX IF NOT EXISTS idx_user_history_sync ON user_history(user_id, sync_u
 CREATE INDEX IF NOT EXISTS idx_user_history_read_at ON user_history(user_id, last_read_at DESC);
 
 -- -----------------------------------------------------------------------------
--- 7. User Read Episodes Table
+-- 6. User Read Episodes Table
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS user_read_episodes (
     user_id VARCHAR(64) NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
@@ -145,7 +127,7 @@ CREATE TABLE IF NOT EXISTS user_read_episodes (
 CREATE INDEX IF NOT EXISTS idx_user_read_episodes_sync ON user_read_episodes(user_id, sync_updated_at);
 
 -- -----------------------------------------------------------------------------
--- 8. User Reader Settings Table
+-- 7. User Reader Settings Table
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS user_reader_settings (
     user_id VARCHAR(64) NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
@@ -162,7 +144,7 @@ CREATE TABLE IF NOT EXISTS user_reader_settings (
 CREATE INDEX IF NOT EXISTS idx_user_reader_settings_sync ON user_reader_settings(user_id, sync_updated_at);
 
 -- -----------------------------------------------------------------------------
--- 9. User Tombstones Table (LWW soft-delete tracking)
+-- 8. User Tombstones Table (LWW soft-delete tracking)
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS user_tombstones (
     user_id VARCHAR(64) NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
@@ -175,7 +157,7 @@ CREATE TABLE IF NOT EXISTS user_tombstones (
 CREATE INDEX IF NOT EXISTS idx_user_tombstones_deleted ON user_tombstones(user_id, deleted_at DESC);
 
 -- -----------------------------------------------------------------------------
--- 10. Pairing Codes Table (Device-to-device quick pairing)
+-- 9. Pairing Codes Table (Device-to-device quick pairing)
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS pairing_codes (
     code VARCHAR(16) PRIMARY KEY,

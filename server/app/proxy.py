@@ -28,6 +28,14 @@ _TOON_HOST_RE = re.compile(r"(www\.)?11toon\d*\.com\Z")
 PROXY_REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 
 
+def create_proxy_client() -> httpx.AsyncClient:
+    settings = get_settings()
+    return httpx.AsyncClient(
+        timeout=httpx.Timeout(settings.PROXY_TIMEOUT_SECONDS, connect=10.0),
+        follow_redirects=False,
+    )
+
+
 def is_allowed_proxy_host(host: str | None) -> bool:
     if not host:
         return False
@@ -145,17 +153,12 @@ async def handle_proxy_request(request: Request, is_head: bool = False):
     current_url = url_param
     method = "HEAD" if is_head else "GET"
 
-    # Async HTTP client with streaming
-    client = httpx.AsyncClient(
-        timeout=httpx.Timeout(settings.PROXY_TIMEOUT_SECONDS, connect=10.0),
-        follow_redirects=False,
-    )
+    client: httpx.AsyncClient = request.app.state.proxy_client
 
+    resp: httpx.Response | None = None
     try:
-        resp = None
         for _ in range(settings.MAX_PROXY_REDIRECTS + 1):
             if not allowed_proxy_url(current_url):
-                await client.aclose()
                 if is_head:
                     return RawResponse(status_code=403)
                 return JSONResponse(status_code=403, content={"error": "Forbidden", "message": "Host not allowed"})
@@ -168,7 +171,6 @@ async def handle_proxy_request(request: Request, is_head: bool = False):
                 nxt = next_proxy_url(current_url, location)
                 await resp.aclose()
                 if nxt is None:
-                    await client.aclose()
                     if is_head:
                         return RawResponse(status_code=403)
                     return JSONResponse(status_code=403, content={"error": "Forbidden", "message": "Host not allowed"})
@@ -179,7 +181,6 @@ async def handle_proxy_request(request: Request, is_head: bool = False):
             break
 
         if resp is None:
-            await client.aclose()
             if is_head:
                 return RawResponse(status_code=502)
             return JSONResponse(status_code=502, content={"error": "BadGateway", "message": "Proxy request failed"})
@@ -190,7 +191,6 @@ async def handle_proxy_request(request: Request, is_head: bool = False):
         if is_head:
             status_code = resp.status_code
             await resp.aclose()
-            await client.aclose()
             return RawResponse(status_code=status_code, headers=out_headers)
 
         async def stream_content() -> AsyncGenerator[bytes, None]:
@@ -199,7 +199,6 @@ async def handle_proxy_request(request: Request, is_head: bool = False):
                     yield chunk
             finally:
                 await resp.aclose()
-                await client.aclose()
 
         return StreamingResponse(
             stream_content(),
@@ -208,7 +207,8 @@ async def handle_proxy_request(request: Request, is_head: bool = False):
         )
 
     except httpx.TimeoutException:
-        await client.aclose()
+        if resp is not None:
+            await resp.aclose()
         if is_head:
             return RawResponse(status_code=504)
         return JSONResponse(
@@ -216,7 +216,8 @@ async def handle_proxy_request(request: Request, is_head: bool = False):
             content={"error": "GatewayTimeout", "message": "Target server timed out"},
         )
     except Exception as e:
-        await client.aclose()
+        if resp is not None:
+            await resp.aclose()
         logger.error(f"Proxy error for {url_param}: {e}")
         if is_head:
             return RawResponse(status_code=502)

@@ -72,6 +72,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.comics8.core.i18n.displayDescription
 import com.comics8.core.i18n.displayLabel
 import com.comics8.core.i18n.displayTitle
 import com.comics8.core.model.ProgressDisplayMode
@@ -303,12 +304,8 @@ fun SourceDetailSettingsPane(
 
                             ProgressDisplayMode.entries.forEach { mode ->
                                 val isChecked = mode == currentProgressMode
-                                val (modeLabel, modeDesc) = when (mode) {
-                                    ProgressDisplayMode.LATEST_EPISODE -> strings.progressModeLatestEpisode to strings.progressModeLatestEpisodeDesc
-                                    ProgressDisplayMode.READ_COUNT -> strings.progressModeReadCount to strings.progressModeReadCountDesc
-                                    ProgressDisplayMode.PERCENTAGE -> strings.progressModePercentage to strings.progressModePercentageDesc
-                                    ProgressDisplayMode.HIDDEN -> strings.progressModeHidden to strings.progressModeHiddenDesc
-                                }
+                                val modeLabel = mode.displayLabel(strings)
+                                val modeDesc = mode.displayDescription(strings)
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier

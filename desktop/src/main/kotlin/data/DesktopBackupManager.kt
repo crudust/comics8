@@ -184,10 +184,7 @@ object DesktopBackupManager {
                 )
             }
 
-            if (favorites.isNotEmpty()) database.saveAllFavorites(favorites)
-            if (history.isNotEmpty()) database.saveAllHistory(history)
-            if (episodes.isNotEmpty()) database.markAllEpisodesRead(episodes)
-            if (settings.isNotEmpty()) database.saveAllReaderSettings(settings)
+            database.restoreBackup(favorites, history, episodes, settings)
 
             DesktopBackupResult(
                 success = true,
@@ -206,12 +203,7 @@ object DesktopBackupManager {
     }
 
     fun getStats(database: DesktopDatabase): DesktopBackupStats {
-        return DesktopBackupStats(
-            favoriteCount = database.getAllFavorites().size,
-            historyCount = database.getAllHistory().size,
-            episodeCount = database.getAllReadEpisodes().size,
-            settingCount = database.getAllReaderSettings().size,
-        )
+        return database.getBackupStats()
     }
 }
 

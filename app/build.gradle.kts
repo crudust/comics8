@@ -1,8 +1,68 @@
+import java.io.File
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
+}
+
+fun signingValue(propertyName: String, environmentName: String): String? =
+    providers.gradleProperty(propertyName)
+        .orElse(providers.environmentVariable(environmentName))
+        .orNull
+        ?.takeIf { it.isNotBlank() }
+
+val releaseStoreFile = signingValue("comics8.signing.storeFile", "COMICS8_SIGNING_STORE_FILE")
+    ?: "keystore/release.keystore"
+val releaseStorePassword = signingValue("comics8.signing.storePassword", "COMICS8_SIGNING_STORE_PASSWORD")
+val releaseKeyAlias = signingValue("comics8.signing.keyAlias", "COMICS8_SIGNING_KEY_ALIAS")
+val releaseKeyPassword = signingValue("comics8.signing.keyPassword", "COMICS8_SIGNING_KEY_PASSWORD")
+val hasReleaseSigningCredentials = listOf(
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+).all { it != null }
+
+abstract class ValidateReleaseSigningTask : DefaultTask() {
+    @get:Input
+    abstract val storeFilePath: Property<String>
+
+    @get:Internal
+    abstract val configuredStorePassword: Property<String>
+
+    @get:Input
+    @get:Optional
+    abstract val configuredKeyAlias: Property<String>
+
+    @get:Internal
+    abstract val configuredKeyPassword: Property<String>
+
+    @TaskAction
+    fun validate() {
+        val missing = buildList {
+            if (!configuredStorePassword.isPresent) add("COMICS8_SIGNING_STORE_PASSWORD / comics8.signing.storePassword")
+            if (!configuredKeyAlias.isPresent) add("COMICS8_SIGNING_KEY_ALIAS / comics8.signing.keyAlias")
+            if (!configuredKeyPassword.isPresent) add("COMICS8_SIGNING_KEY_PASSWORD / comics8.signing.keyPassword")
+        }
+        check(missing.isEmpty()) {
+            "Android release signing is not configured. Missing: ${missing.joinToString()}. " +
+                "Set environment variables on the release host or private Gradle properties."
+        }
+        check(File(storeFilePath.get()).isFile) {
+            "Android release keystore was not found: ${storeFilePath.get()}. " +
+                "Set COMICS8_SIGNING_STORE_FILE or comics8.signing.storeFile."
+        }
+    }
+}
+
+val validateReleaseSigning by tasks.registering(ValidateReleaseSigningTask::class) {
+    group = "verification"
+    description = "Validates the external Android release signing configuration."
+    storeFilePath.set(rootProject.file(releaseStoreFile).absolutePath)
+    releaseStorePassword?.let(configuredStorePassword::set)
+    releaseKeyAlias?.let(configuredKeyAlias::set)
+    releaseKeyPassword?.let(configuredKeyPassword::set)
 }
 
 android {
@@ -18,11 +78,11 @@ android {
     }
 
     signingConfigs {
-        create("release") {
-            storeFile = rootProject.file("keystore/release.keystore")
-            storePassword = "comics8pass"
-            keyAlias = "comics8"
-            keyPassword = "comics8pass"
+        if (hasReleaseSigningCredentials) create("release") {
+            storeFile = rootProject.file(releaseStoreFile)
+            storePassword = releaseStorePassword
+            keyAlias = releaseKeyAlias
+            keyPassword = releaseKeyPassword
             enableV1Signing = true
             enableV2Signing = true
             enableV3Signing = true
@@ -46,7 +106,9 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("release")
+            if (hasReleaseSigningCredentials) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
@@ -79,6 +141,13 @@ android {
             isIncludeAndroidResources = true
         }
     }
+}
+
+// Keep debug builds/tests usable without release secrets, but fail every release package explicitly.
+tasks.matching {
+    (it.name.startsWith("assemble") || it.name.startsWith("bundle")) && it.name.endsWith("Release")
+}.configureEach {
+    dependsOn(validateReleaseSigning)
 }
 
 dependencies {

@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response as RawRespons
 from app.billing import router as billing_router
 from app.config import get_settings
 from app.database import close_db, init_db
-from app.proxy import router as proxy_router
+from app.proxy import create_proxy_client, router as proxy_router
 from app.pubsub_worker import start_pubsub_worker, stop_pubsub_worker
 from app.sync import router as sync_router
 
@@ -38,19 +38,26 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Pub/Sub worker startup warning: {e}")
 
-    yield
-
-    # Shutdown
-    logger.info("Shutting down Comics8 Backend Server...")
-    try:
-        stop_pubsub_worker()
-    except Exception as e:
-        logger.warning(f"Error stopping Pub/Sub worker: {e}")
+    app.state.proxy_client = create_proxy_client()
 
     try:
-        await close_db()
-    except Exception as e:
-        logger.warning(f"Error closing DB: {e}")
+        yield
+    finally:
+        logger.info("Shutting down Comics8 Backend Server...")
+        try:
+            stop_pubsub_worker()
+        except Exception as e:
+            logger.warning(f"Error stopping Pub/Sub worker: {e}")
+
+        try:
+            await app.state.proxy_client.aclose()
+        except Exception as e:
+            logger.warning(f"Error closing proxy client: {e}")
+
+        try:
+            await close_db()
+        except Exception as e:
+            logger.warning(f"Error closing DB: {e}")
 
 
 app = FastAPI(

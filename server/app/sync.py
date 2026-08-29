@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.database import get_db
@@ -27,6 +27,33 @@ from app.models import (
 
 logger = logging.getLogger("comics8.sync")
 router = APIRouter(tags=["Sync"])
+
+_PREFETCH_CHUNK_SIZE = 400
+
+
+async def _prefetch_entities(
+    session: AsyncSession,
+    model: type,
+    user_id: str,
+    key_columns: tuple,
+    keys: set[tuple],
+) -> dict[tuple, Any]:
+    """Load request-scoped entities in bounded batches instead of one query per row."""
+    if not keys:
+        return {}
+
+    ordered_keys = list(keys)
+    entities: dict[tuple, Any] = {}
+    for offset in range(0, len(ordered_keys), _PREFETCH_CHUNK_SIZE):
+        chunk = ordered_keys[offset:offset + _PREFETCH_CHUNK_SIZE]
+        stmt = select(model).where(
+            model.user_id == user_id,
+            tuple_(*key_columns).in_(chunk),
+        )
+        result = await session.execute(stmt)
+        for entity in result.scalars():
+            entities[tuple(getattr(entity, column.key) for column in key_columns)] = entity
+    return entities
 
 
 def get_safe_user_id(key: str) -> str:
@@ -277,16 +304,51 @@ async def import_snapshot_for_user(
     data: dict[str, Any],
     now_ms: int,
 ) -> None:
+    favorite_rows = [
+        f for f in data.get("favorites", [])
+        if accept_inbound_row(f) and favorite_local_id(f)
+    ]
+    history_rows = [
+        h for h in data.get("history", [])
+        if accept_inbound_row(h) and h.get("toonId")
+    ]
+    episode_rows = [
+        ep for ep in data.get("readEpisodes", [])
+        if accept_inbound_row(ep) and ep.get("toonId") and ep.get("wrId")
+    ]
+    setting_rows = [
+        s for s in data.get("readerSettings", [])
+        if accept_inbound_row(s) and s.get("toonId")
+    ]
+
+    favorites = await _prefetch_entities(
+        session, UserFavorite, user_id,
+        (UserFavorite.source_id, UserFavorite.toon_id),
+        {(row_source_id(f), favorite_local_id(f)) for f in favorite_rows},
+    )
+    histories = await _prefetch_entities(
+        session, UserHistory, user_id,
+        (UserHistory.source_id, UserHistory.toon_id),
+        {(row_source_id(h), h["toonId"]) for h in history_rows},
+    )
+    episodes = await _prefetch_entities(
+        session, UserReadEpisode, user_id,
+        (UserReadEpisode.source_id, UserReadEpisode.toon_id, UserReadEpisode.wr_id),
+        {(row_source_id(ep), ep["toonId"], ep["wrId"]) for ep in episode_rows},
+    )
+    settings = await _prefetch_entities(
+        session, UserReaderSetting, user_id,
+        (UserReaderSetting.source_id, UserReaderSetting.toon_id),
+        {(row_source_id(s), s["toonId"]) for s in setting_rows},
+    )
+
     # 1. Favorites
-    for f in data.get("favorites", []):
-        if not accept_inbound_row(f):
-            continue
+    for f in favorite_rows:
         source_id = row_source_id(f)
         toon_id = favorite_local_id(f)
-        if not toon_id:
-            continue
         saved_at = int(f.get("savedAt") or now_ms)
-        fav = await session.get(UserFavorite, (user_id, source_id, toon_id))
+        key = (source_id, toon_id)
+        fav = favorites.get(key)
         if fav is None:
             fav = UserFavorite(
                 user_id=user_id,
@@ -301,6 +363,7 @@ async def import_snapshot_for_user(
                 sync_updated_at=now_ms,
             )
             session.add(fav)
+            favorites[key] = fav
         else:
             fav.title = f.get("title", "")
             fav.thumb_url = f.get("thumbUrl", "")
@@ -311,15 +374,12 @@ async def import_snapshot_for_user(
             fav.sync_updated_at = now_ms
 
     # 2. History
-    for h in data.get("history", []):
-        if not accept_inbound_row(h):
-            continue
+    for h in history_rows:
         source_id = row_source_id(h)
         toon_id = h.get("toonId")
-        if not toon_id:
-            continue
         last_read_at = int(h.get("lastReadAt") or now_ms)
-        hist = await session.get(UserHistory, (user_id, source_id, toon_id))
+        key = (source_id, toon_id)
+        hist = histories.get(key)
         if hist is None:
             hist = UserHistory(
                 user_id=user_id,
@@ -341,6 +401,7 @@ async def import_snapshot_for_user(
                 sync_updated_at=now_ms,
             )
             session.add(hist)
+            histories[key] = hist
         else:
             hist.toon_title = h.get("toonTitle", "")
             hist.toon_thumb_url = h.get("toonThumbUrl", "")
@@ -358,16 +419,13 @@ async def import_snapshot_for_user(
             hist.sync_updated_at = now_ms
 
     # 3. Read Episodes
-    for ep in data.get("readEpisodes", []):
-        if not accept_inbound_row(ep):
-            continue
+    for ep in episode_rows:
         source_id = row_source_id(ep)
         toon_id = ep.get("toonId")
         wr_id = ep.get("wrId")
-        if not toon_id or not wr_id:
-            continue
         read_at = int(ep.get("readAt") or now_ms)
-        read_ep = await session.get(UserReadEpisode, (user_id, source_id, toon_id, wr_id))
+        key = (source_id, toon_id, wr_id)
+        read_ep = episodes.get(key)
         if read_ep is None:
             read_ep = UserReadEpisode(
                 user_id=user_id,
@@ -379,21 +437,19 @@ async def import_snapshot_for_user(
                 sync_updated_at=now_ms,
             )
             session.add(read_ep)
+            episodes[key] = read_ep
         else:
             read_ep.read_at = read_at
             read_ep.last_page = int(ep.get("lastPage", 0))
             read_ep.sync_updated_at = now_ms
 
     # 4. Reader Settings
-    for s in data.get("readerSettings", []):
-        if not accept_inbound_row(s):
-            continue
+    for s in setting_rows:
         source_id = row_source_id(s)
         toon_id = s.get("toonId")
-        if not toon_id:
-            continue
         up_at = int(s.get("updatedAt") or now_ms)
-        setting = await session.get(UserReaderSetting, (user_id, source_id, toon_id))
+        key = (source_id, toon_id)
+        setting = settings.get(key)
         if setting is None:
             setting = UserReaderSetting(
                 user_id=user_id,
@@ -406,6 +462,7 @@ async def import_snapshot_for_user(
                 sync_updated_at=now_ms,
             )
             session.add(setting)
+            settings[key] = setting
         else:
             setting.view_mode = s.get("viewMode", "SINGLE")
             setting.read_direction = s.get("readDirection", "RIGHT_TO_LEFT")
@@ -423,17 +480,78 @@ async def apply_delta_for_user(
     changes: dict[str, Any],
     now_ms: int,
 ) -> None:
-    # A. Tombstones
+    tombstone_rows: list[tuple[dict[str, Any], str, str, str]] = []
     for t in changes.get("tombstones", []):
-        e_type = (t.get("entityType") or "").upper()
+        entity_type = (t.get("entityType") or "").upper()
         source_id, local_id = parse_entity_id(t.get("entityId", ""))
-        if not local_id or source_id == "local":
-            continue
+        if local_id and source_id != "local":
+            tombstone_rows.append((t, entity_type, source_id, local_id))
+
+    favorite_rows = [
+        f for f in changes.get("favorites", [])
+        if accept_inbound_row(f) and favorite_local_id(f)
+    ]
+    history_rows = [
+        h for h in changes.get("history", [])
+        if accept_inbound_row(h) and h.get("toonId")
+    ]
+    episode_rows = [
+        ep for ep in changes.get("readEpisodes", [])
+        if accept_inbound_row(ep) and ep.get("toonId") and ep.get("wrId")
+    ]
+    setting_rows = [
+        s for s in changes.get("readerSettings", [])
+        if accept_inbound_row(s) and s.get("toonId")
+    ]
+
+    live_tombstone_keys = {
+        ("FAVORITE", f"{row_source_id(f)}:{favorite_local_id(f)}") for f in favorite_rows
+    } | {
+        ("HISTORY", f"{row_source_id(h)}:{h['toonId']}") for h in history_rows
+    }
+    all_tombstone_keys = live_tombstone_keys | {
+        (entity_type, f"{source_id}:{local_id}")
+        for _, entity_type, source_id, local_id in tombstone_rows
+    }
+    tombstones = await _prefetch_entities(
+        session, UserTombstone, user_id,
+        (UserTombstone.entity_type, UserTombstone.entity_id),
+        all_tombstone_keys,
+    )
+    favorites = await _prefetch_entities(
+        session, UserFavorite, user_id,
+        (UserFavorite.source_id, UserFavorite.toon_id),
+        {(row_source_id(f), favorite_local_id(f)) for f in favorite_rows},
+    )
+    histories = await _prefetch_entities(
+        session, UserHistory, user_id,
+        (UserHistory.source_id, UserHistory.toon_id),
+        {(row_source_id(h), h["toonId"]) for h in history_rows},
+    )
+    episodes = await _prefetch_entities(
+        session, UserReadEpisode, user_id,
+        (UserReadEpisode.source_id, UserReadEpisode.toon_id, UserReadEpisode.wr_id),
+        {(row_source_id(ep), ep["toonId"], ep["wrId"]) for ep in episode_rows},
+    )
+    settings = await _prefetch_entities(
+        session, UserReaderSetting, user_id,
+        (UserReaderSetting.source_id, UserReaderSetting.toon_id),
+        {(row_source_id(s), s["toonId"]) for s in setting_rows},
+    )
+
+    # A. Tombstones
+    delete_keys: dict[str, set[tuple[str, str]]] = {
+        "FAVORITE": set(),
+        "HISTORY": set(),
+        "EPISODE": set(),
+    }
+    for t, e_type, source_id, local_id in tombstone_rows:
         del_at = int(t.get("deletedAt", now_ms))
         stored_id = f"{source_id}:{local_id}"
+        tombstone_key = (e_type, stored_id)
 
         # Upsert tombstone
-        tomb = await session.get(UserTombstone, (user_id, e_type, stored_id))
+        tomb = tombstones.get(tombstone_key)
         if tomb is None:
             tomb = UserTombstone(
                 user_id=user_id,
@@ -442,45 +560,46 @@ async def apply_delta_for_user(
                 deleted_at=del_at,
             )
             session.add(tomb)
+            tombstones[tombstone_key] = tomb
         else:
             tomb.deleted_at = max(tomb.deleted_at, del_at)
 
-        # Delete corresponding live entities
-        if e_type == "FAVORITE":
+        if e_type in delete_keys:
+            delete_keys[e_type].add((source_id, local_id))
+
+    delete_specs = (
+        ("FAVORITE", UserFavorite),
+        ("HISTORY", UserHistory),
+        ("EPISODE", UserReadEpisode),
+    )
+    for entity_type, model in delete_specs:
+        keys = delete_keys[entity_type]
+        ordered_keys = list(keys)
+        for offset in range(0, len(ordered_keys), _PREFETCH_CHUNK_SIZE):
+            chunk = ordered_keys[offset:offset + _PREFETCH_CHUNK_SIZE]
             await session.execute(
-                delete(UserFavorite).where(
-                    UserFavorite.user_id == user_id,
-                    UserFavorite.source_id == source_id,
-                    UserFavorite.toon_id == local_id,
+                delete(model).where(
+                    model.user_id == user_id,
+                    tuple_(model.source_id, model.toon_id).in_(chunk),
                 )
             )
-        elif e_type == "HISTORY":
-            await session.execute(
-                delete(UserHistory).where(
-                    UserHistory.user_id == user_id,
-                    UserHistory.source_id == source_id,
-                    UserHistory.toon_id == local_id,
-                )
-            )
-        elif e_type == "EPISODE":
-            await session.execute(
-                delete(UserReadEpisode).where(
-                    UserReadEpisode.user_id == user_id,
-                    UserReadEpisode.source_id == source_id,
-                    UserReadEpisode.toon_id == local_id,
-                )
-            )
+    for key in delete_keys["FAVORITE"]:
+        favorites.pop(key, None)
+    for key in delete_keys["HISTORY"]:
+        histories.pop(key, None)
+    if delete_keys["EPISODE"]:
+        episodes = {
+            key: value for key, value in episodes.items()
+            if key[:2] not in delete_keys["EPISODE"]
+        }
 
     # B. Favorites
-    for f in changes.get("favorites", []):
-        if not accept_inbound_row(f):
-            continue
+    for f in favorite_rows:
         source_id = row_source_id(f)
         f_id = favorite_local_id(f)
-        if not f_id:
-            continue
         saved_at = int(f.get("savedAt", now_ms))
-        fav = await session.get(UserFavorite, (user_id, source_id, f_id))
+        key = (source_id, f_id)
+        fav = favorites.get(key)
         if fav is None:
             fav = UserFavorite(
                 user_id=user_id,
@@ -495,6 +614,7 @@ async def apply_delta_for_user(
                 sync_updated_at=now_ms,
             )
             session.add(fav)
+            favorites[key] = fav
         elif saved_at >= fav.saved_at:
             fav.title = f.get("title", "")
             fav.thumb_url = f.get("thumbUrl", "")
@@ -506,25 +626,19 @@ async def apply_delta_for_user(
 
         # Delete older tombstone if re-added
         stored_id = f"{source_id}:{f_id}"
-        await session.execute(
-            delete(UserTombstone).where(
-                UserTombstone.user_id == user_id,
-                UserTombstone.entity_type == "FAVORITE",
-                UserTombstone.entity_id == stored_id,
-                UserTombstone.deleted_at < saved_at,
-            )
-        )
+        tombstone_key = ("FAVORITE", stored_id)
+        tomb = tombstones.get(tombstone_key)
+        if tomb is not None and tomb.deleted_at < saved_at:
+            await session.delete(tomb)
+            tombstones.pop(tombstone_key, None)
 
     # C. History
-    for h in changes.get("history", []):
-        if not accept_inbound_row(h):
-            continue
+    for h in history_rows:
         source_id = row_source_id(h)
         toon_id = h.get("toonId")
-        if not toon_id:
-            continue
         last_read_at = int(h.get("lastReadAt", now_ms))
-        hist = await session.get(UserHistory, (user_id, source_id, toon_id))
+        key = (source_id, toon_id)
+        hist = histories.get(key)
         if hist is None:
             hist = UserHistory(
                 user_id=user_id,
@@ -546,6 +660,7 @@ async def apply_delta_for_user(
                 sync_updated_at=now_ms,
             )
             session.add(hist)
+            histories[key] = hist
         elif last_read_at >= hist.last_read_at:
             hist.toon_title = h.get("toonTitle", "")
             hist.toon_thumb_url = h.get("toonThumbUrl", "")
@@ -563,26 +678,20 @@ async def apply_delta_for_user(
             hist.sync_updated_at = now_ms
 
         stored_id = f"{source_id}:{toon_id}"
-        await session.execute(
-            delete(UserTombstone).where(
-                UserTombstone.user_id == user_id,
-                UserTombstone.entity_type == "HISTORY",
-                UserTombstone.entity_id == stored_id,
-                UserTombstone.deleted_at < last_read_at,
-            )
-        )
+        tombstone_key = ("HISTORY", stored_id)
+        tomb = tombstones.get(tombstone_key)
+        if tomb is not None and tomb.deleted_at < last_read_at:
+            await session.delete(tomb)
+            tombstones.pop(tombstone_key, None)
 
     # D. Read Episodes
-    for ep in changes.get("readEpisodes", []):
-        if not accept_inbound_row(ep):
-            continue
+    for ep in episode_rows:
         source_id = row_source_id(ep)
         toon_id = ep.get("toonId")
         wr_id = ep.get("wrId")
-        if not toon_id or not wr_id:
-            continue
         read_at = int(ep.get("readAt", now_ms))
-        read_ep = await session.get(UserReadEpisode, (user_id, source_id, toon_id, wr_id))
+        key = (source_id, toon_id, wr_id)
+        read_ep = episodes.get(key)
         if read_ep is None:
             read_ep = UserReadEpisode(
                 user_id=user_id,
@@ -594,21 +703,19 @@ async def apply_delta_for_user(
                 sync_updated_at=now_ms,
             )
             session.add(read_ep)
+            episodes[key] = read_ep
         elif read_at >= read_ep.read_at:
             read_ep.read_at = read_at
             read_ep.last_page = int(ep.get("lastPage", 0))
             read_ep.sync_updated_at = now_ms
 
     # E. Reader Settings
-    for s in changes.get("readerSettings", []):
-        if not accept_inbound_row(s):
-            continue
+    for s in setting_rows:
         source_id = row_source_id(s)
         toon_id = s.get("toonId")
-        if not toon_id:
-            continue
         up_at = int(s.get("updatedAt", now_ms))
-        setting = await session.get(UserReaderSetting, (user_id, source_id, toon_id))
+        key = (source_id, toon_id)
+        setting = settings.get(key)
         if setting is None:
             setting = UserReaderSetting(
                 user_id=user_id,
@@ -621,6 +728,7 @@ async def apply_delta_for_user(
                 sync_updated_at=now_ms,
             )
             session.add(setting)
+            settings[key] = setting
         elif up_at >= setting.updated_at:
             setting.view_mode = s.get("viewMode", "SINGLE")
             setting.read_direction = s.get("readDirection", "RIGHT_TO_LEFT")

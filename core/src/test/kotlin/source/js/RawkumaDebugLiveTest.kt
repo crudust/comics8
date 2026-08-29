@@ -5,9 +5,11 @@ import com.comics8.core.source.HttpResult
 import com.comics8.core.source.RequestPolicy
 import com.comics8.core.source.SourceHttp
 import kotlinx.coroutines.runBlocking
+import org.junit.Ignore
 import org.junit.Test
 import java.io.File
 
+@Ignore("Manual parser diagnostic that requires /tmp/debug_home.html")
 class RawkumaDebugLiveTest {
     @Test
     fun debugHomeParsing() {

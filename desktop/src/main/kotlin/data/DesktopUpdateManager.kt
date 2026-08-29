@@ -7,6 +7,9 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.util.concurrent.TimeUnit
 import java.util.zip.ZipInputStream
 import kotlin.system.exitProcess
@@ -29,7 +32,8 @@ object DesktopUpdateManager {
             val isWindows = System.getProperty("os.name", "").lowercase().contains("win")
             val zipFileName = if (isWindows) "Comics8-win.zip" else "Comics8-mac.zip"
             val zipFile = File(updateDir, zipFileName)
-            if (zipFile.exists()) zipFile.delete()
+            val partialZip = File(updateDir, "$zipFileName.part")
+            partialZip.delete()
 
             val request = Request.Builder()
                 .url(downloadUrl)
@@ -37,39 +41,54 @@ object DesktopUpdateManager {
                 .get()
                 .build()
 
-            val response = httpClient.newCall(request).execute()
-            if (!response.isSuccessful) {
-                return@withContext Result.failure(Exception("다운로드 실패 (HTTP ${response.code})"))
-            }
+            try {
+                httpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        return@withContext Result.failure(Exception("다운로드 실패 (HTTP ${response.code})"))
+                    }
 
-            val body = response.body ?: return@withContext Result.failure(Exception("빈 응답 바디"))
-            val totalBytes = body.contentLength()
-            var downloadedBytes = 0L
+                    val body = response.body ?: return@withContext Result.failure(Exception("빈 응답 바디"))
+                    val totalBytes = body.contentLength()
+                    var downloadedBytes = 0L
 
-            body.byteStream().use { input ->
-                FileOutputStream(zipFile).use { output ->
-                    val buffer = ByteArray(65536)
-                    var read: Int
-                    while (input.read(buffer).also { read = it } != -1) {
-                        output.write(buffer, 0, read)
-                        downloadedBytes += read
-                        if (totalBytes > 0) {
-                            onProgress(downloadedBytes.toFloat() / totalBytes.toFloat())
+                    body.byteStream().use { input ->
+                        FileOutputStream(partialZip).use { output ->
+                            val buffer = ByteArray(65536)
+                            var read: Int
+                            while (input.read(buffer).also { read = it } != -1) {
+                                output.write(buffer, 0, read)
+                                downloadedBytes += read
+                                if (totalBytes > 0) {
+                                    onProgress(downloadedBytes.toFloat() / totalBytes.toFloat())
+                                }
+                            }
+                            output.fd.sync()
                         }
                     }
-                    output.flush()
+                    check(totalBytes < 0 || downloadedBytes == totalBytes) {
+                        "다운로드 크기가 일치하지 않습니다. (예상 $totalBytes, 실제 $downloadedBytes)"
+                    }
                 }
+                moveReplacing(partialZip, zipFile)
+            } finally {
+                partialZip.delete()
             }
 
             onProgress(1.0f)
 
             // Extract ZIP
-            val extractedDir = File(updateDir, "extracted").apply {
-                if (exists()) deleteRecursively()
+            val extractedDir = File(updateDir, "extracted")
+            val partialExtractedDir = File(updateDir, "extracted.part").apply {
+                deleteRecursively()
                 mkdirs()
             }
-
-            unzip(zipFile, extractedDir)
+            try {
+                unzip(zipFile, partialExtractedDir)
+                extractedDir.deleteRecursively()
+                moveReplacing(partialExtractedDir, extractedDir)
+            } finally {
+                partialExtractedDir.deleteRecursively()
+            }
 
             val currentPid = ProcessHandle.current().pid()
             val destApp = findCurrentAppPath() ?: error("설치된 Comics8 경로를 찾지 못했습니다.")
@@ -191,11 +210,17 @@ object DesktopUpdateManager {
     }
 
 
-    private fun unzip(zipFile: File, targetDir: File) {
+    internal fun unzip(zipFile: File, targetDir: File) {
+        val targetPath = targetDir.toPath().toAbsolutePath().normalize()
         ZipInputStream(zipFile.inputStream().buffered()).use { zis ->
             var entry = zis.nextEntry
             while (entry != null) {
-                val newFile = File(targetDir, entry.name)
+                val normalizedName = entry.name.replace('\\', '/')
+                val outputPath = targetPath.resolve(normalizedName).normalize()
+                require(outputPath.startsWith(targetPath)) {
+                    "압축 파일에 안전하지 않은 경로가 있습니다: ${entry.name}"
+                }
+                val newFile = outputPath.toFile()
                 if (entry.isDirectory) {
                     newFile.mkdirs()
                 } else {
@@ -214,6 +239,19 @@ object DesktopUpdateManager {
                 zis.closeEntry()
                 entry = zis.nextEntry
             }
+        }
+    }
+
+    private fun moveReplacing(source: File, destination: File) {
+        try {
+            Files.move(
+                source.toPath(),
+                destination.toPath(),
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+        } catch (_: AtomicMoveNotSupportedException) {
+            Files.move(source.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING)
         }
     }
 }

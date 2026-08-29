@@ -9,7 +9,7 @@
   - Docker config: `server/docker-compose.yml`.
 - **Database Authority (`server/schema.sql`)**:
   - `schema.sql` is the canonical ground truth for fresh database initialization.
-  - Contains 10 optimized tables covering sync states, device pairings, history, favorites, billing, and proxy rate limits.
+  - Contains 9 optimized tables covering sync states, device pairings, history, favorites, billing, and proxy rate limits.
   - Database schema changes must update `schema.sql` and provide migration scripts in `server/`.
 
 ## Key Service Boundaries

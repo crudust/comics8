@@ -70,6 +70,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.comics8.core.i18n.AppStrings
+import com.comics8.core.i18n.displayDescription
 import com.comics8.core.i18n.displayLabel
 import com.comics8.core.i18n.displayTitle
 import com.comics8.core.model.ProgressDisplayMode
@@ -80,27 +81,6 @@ import com.comics8.desktop.data.DesktopSourcePrefs
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
 import com.comics8.desktop.ui.theme.LocalStrings
-
-private fun ProgressDisplayMode.label(strings: AppStrings): String = when (this) {
-    ProgressDisplayMode.LATEST_EPISODE -> strings.progressModeLatestEpisode
-    ProgressDisplayMode.READ_COUNT -> strings.progressModeReadCount
-    ProgressDisplayMode.PERCENTAGE -> strings.progressModePercentage
-    ProgressDisplayMode.HIDDEN -> strings.progressModeHidden
-}
-
-private fun ProgressDisplayMode.description(strings: AppStrings): String = when (this) {
-    ProgressDisplayMode.LATEST_EPISODE -> strings.progressModeLatestEpisodeDesc
-    ProgressDisplayMode.READ_COUNT -> strings.progressModeReadCountDesc
-    ProgressDisplayMode.PERCENTAGE -> strings.progressModePercentageDesc
-    ProgressDisplayMode.HIDDEN -> strings.progressModeHiddenDesc
-}
-
-private fun SourceType.label(strings: AppStrings): String = when (this) {
-    SourceType.LOCAL -> strings.labelSourceLocal
-    SourceType.SMB -> strings.labelSourceSmb
-    SourceType.WEBDAV -> strings.labelSourceWebDav
-    SourceType.JS -> strings.labelSourceJs
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -356,13 +336,13 @@ fun SourceDetailSettingsPane(
                                     Spacer(Modifier.width(8.dp))
                                     Column {
                                         Text(
-                                            text = mode.label(strings),
+                                            text = mode.displayLabel(strings),
                                             style = MaterialTheme.typography.bodyMedium,
                                             fontWeight = if (isChecked) FontWeight.Bold else FontWeight.Normal,
                                             color = MaterialTheme.colorScheme.onSurface,
                                         )
                                         Text(
-                                            text = mode.description(strings),
+                                            text = mode.displayDescription(strings),
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
