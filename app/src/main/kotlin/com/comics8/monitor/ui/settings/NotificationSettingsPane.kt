@@ -129,44 +129,14 @@ fun NotificationSettingsPane(
                 Spacer(Modifier.height(16.dp))
 
                 // 3. 알림 확인 간격
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = strings.labelNotificationInterval,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    val intervals = listOf(
-                        15L to strings.interval15m,
-                        30L to strings.interval30m,
-                        60L to strings.interval1h,
-                        180L to strings.interval3h,
-                        360L to strings.interval6h,
-                        720L to strings.interval12h,
-                        1440L to strings.interval24h,
-                    )
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        intervals.chunked(4).forEach { rowIntervals ->
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                rowIntervals.forEach { (mins, label) ->
-                                    val selected = state.notificationIntervalMinutes == mins
-                                    ViewModeOption(
-                                        label = label,
-                                        selected = selected,
-                                        onClick = { viewModel.setNotificationIntervalMinutes(mins) },
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                }
-                                repeat(4 - rowIntervals.size) {
-                                    Spacer(Modifier.weight(1f))
-                                }
-                            }
-                        }
-                    }
-                }
+                val intervals = listOf(15L, 30L, 60L, 180L, 360L, 720L, 1440L)
+                SettingDropdownRow(
+                    title = strings.labelNotificationInterval,
+                    selectedOption = state.notificationIntervalMinutes,
+                    options = intervals,
+                    optionLabel = { com.comics8.core.i18n.formatNotificationInterval(it, strings) },
+                    onSelect = { viewModel.setNotificationIntervalMinutes(it) },
+                )
 
                 // 4. 알림 대상 소스
                 if (state.installedSources.isNotEmpty()) {

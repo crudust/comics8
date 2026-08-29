@@ -98,18 +98,23 @@ interface AppStrings {
     // 5. Reader & Viewer
     val viewModeScroll: String
     val viewModeScrollShort: String
+    val viewModeScrollDesc: String
     val viewModeSingle: String
     val viewModeSingleLong: String
     val viewModeSingleShort: String
+    val viewModeSingleDesc: String
     val viewModeDual: String
     val viewModeDualLong: String
     val viewModeDualShort: String
+    val viewModeDualDesc: String
     val labelDefaultViewMode: String
     val labelReadDirection: String
     val readDirectionRightToLeft: String
     val readDirectionRTLShort: String
+    val readDirectionRTLDesc: String
     val readDirectionLeftToRight: String
     val readDirectionLTRShort: String
+    val readDirectionLTRDesc: String
     val titleQuickSettings: String
     val labelPageTapZone: String
     val descPageTapZone: String

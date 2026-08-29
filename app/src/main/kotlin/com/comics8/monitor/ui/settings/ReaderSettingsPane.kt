@@ -53,28 +53,41 @@ fun ReaderSettingsPane(
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Spacer(Modifier.height(8.dp))
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                ViewModeOption(
-                    label = strings.viewModeScroll,
-                    selected = state.viewMode == ViewMode.SCROLL,
-                    onClick = { viewModel.setViewMode(ViewMode.SCROLL) },
-                    modifier = Modifier.weight(1f),
-                )
-                ViewModeOption(
-                    label = strings.viewModeSingleLong,
-                    selected = state.viewMode == ViewMode.PAGE,
-                    onClick = { viewModel.setViewMode(ViewMode.PAGE) },
-                    modifier = Modifier.weight(1f),
-                )
-                ViewModeOption(
-                    label = strings.viewModeDualLong,
-                    selected = state.viewMode == ViewMode.DUAL,
-                    onClick = { viewModel.setViewMode(ViewMode.DUAL) },
-                    modifier = Modifier.weight(1f),
-                )
+
+            val viewModes = listOf(ViewMode.SCROLL, ViewMode.PAGE, ViewMode.DUAL)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                viewModes.forEachIndexed { index, mode ->
+                    val isSelected = state.viewMode == mode
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { viewModel.setViewMode(mode) }
+                            .padding(vertical = 4.dp),
+                    ) {
+                        RadioButton(
+                            selected = isSelected,
+                            onClick = { viewModel.setViewMode(mode) },
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = mode.displayLabel(strings),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                text = mode.displayDescription(strings),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    if (index < viewModes.lastIndex) {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                    }
+                }
             }
 
             Spacer(Modifier.height(16.dp))
@@ -88,22 +101,41 @@ fun ReaderSettingsPane(
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Spacer(Modifier.height(8.dp))
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                ViewModeOption(
-                    label = strings.readDirectionRightToLeft,
-                    selected = state.readDirection == ReadDirection.RIGHT_TO_LEFT,
-                    onClick = { viewModel.setReadDirection(ReadDirection.RIGHT_TO_LEFT) },
-                    modifier = Modifier.weight(1f),
-                )
-                ViewModeOption(
-                    label = strings.readDirectionLeftToRight,
-                    selected = state.readDirection == ReadDirection.LEFT_TO_RIGHT,
-                    onClick = { viewModel.setReadDirection(ReadDirection.LEFT_TO_RIGHT) },
-                    modifier = Modifier.weight(1f),
-                )
+
+            val readDirections = listOf(ReadDirection.RIGHT_TO_LEFT, ReadDirection.LEFT_TO_RIGHT)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                readDirections.forEachIndexed { index, dir ->
+                    val isSelected = state.readDirection == dir
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { viewModel.setReadDirection(dir) }
+                            .padding(vertical = 4.dp),
+                    ) {
+                        RadioButton(
+                            selected = isSelected,
+                            onClick = { viewModel.setReadDirection(dir) },
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = dir.displayLabel(strings),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                text = dir.displayDescription(strings),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    if (index < readDirections.lastIndex) {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                    }
+                }
             }
         }
 
