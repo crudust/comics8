@@ -30,7 +30,7 @@ object SyncConstants {
         }
     }
 
-    private fun fallbackUrl(): String = "https://homeassistant.tail1946af.ts.net/api/comics8/sync"
+    private fun fallbackUrl(): String = ""
 
     fun generateSyncKey(): String {
         val chars = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"

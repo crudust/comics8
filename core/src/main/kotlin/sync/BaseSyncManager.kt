@@ -142,16 +142,6 @@ open class BaseSyncManager(
         }
     }
 
-    suspend fun checkAndMigrateServerUrl(): Boolean = withContext(Dispatchers.IO) {
-        val discoveredUrl = ServerDiscovery.fetchRemoteServerUrl()
-        if (!discoveredUrl.isNullOrBlank() && discoveredUrl != _syncState.value.serverUrl) {
-            updateServerUrl(discoveredUrl)
-            true
-        } else {
-            false
-        }
-    }
-
     fun setAutoSyncEnabled(enabled: Boolean) {
         storage.setPreference(SyncConstants.KEY_AUTO_SYNC, enabled.toString())
         _syncState.value = _syncState.value.copy(autoSyncEnabled = enabled)
