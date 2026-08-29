@@ -6,6 +6,8 @@ import com.comics8.core.backup.BackupHistoryWire
 import com.comics8.core.backup.BackupReaderSettingWire
 import com.comics8.core.backup.BackupWire
 import com.comics8.core.backup.BackupWireCodec
+import com.comics8.core.model.BackupResult
+import com.comics8.core.model.BackupStats as CoreBackupStats
 import com.comics8.core.source.WorkId
 import com.comics8.monitor.data.local.AppDatabase
 import com.comics8.monitor.data.local.FavoriteToon
@@ -15,21 +17,8 @@ import com.comics8.monitor.data.local.ReaderSetting
 import androidx.room.withTransaction
 import org.json.JSONObject
 
-data class BackupStats(
-    val favoriteCount: Int = 0,
-    val historyCount: Int = 0,
-    val episodeCount: Int = 0,
-    val settingCount: Int = 0,
-)
-
-data class BackupRestoreResult(
-    val success: Boolean,
-    val message: String,
-    val favoriteCount: Int = 0,
-    val historyCount: Int = 0,
-    val episodeCount: Int = 0,
-    val settingCount: Int = 0,
-)
+typealias BackupStats = CoreBackupStats
+typealias BackupRestoreResult = BackupResult
 
 object BackupManager {
     const val BACKUP_VERSION = BackupWireCodec.VERSION

@@ -84,6 +84,28 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
         }
     }
 
+    fun applySyncBatch(
+        deletions: List<Pair<String, WorkId>>,
+        favorites: List<FavoriteRecord>,
+        history: List<ReadHistoryRecord>,
+        episodes: List<ReadEpisodeRecord>,
+        settings: List<ReaderSettingRecord>,
+    ) {
+        withTransaction {
+            deletions.forEach { (entityType, workId) ->
+                when (entityType) {
+                    "FAVORITE" -> deleteFavorite(workId)
+                    "HISTORY" -> deleteHistory(workId)
+                    "EPISODE" -> deleteReadEpisodesByToon(workId)
+                }
+            }
+            if (favorites.isNotEmpty()) saveAllFavorites(favorites)
+            if (history.isNotEmpty()) saveAllHistory(history)
+            if (episodes.isNotEmpty()) markAllEpisodesRead(episodes)
+            if (settings.isNotEmpty()) saveAllReaderSettings(settings)
+        }
+    }
+
     fun getBackupStats(): DesktopBackupStats = withConnection { conn ->
         fun count(table: String): Int = conn.createStatement().use { stmt ->
             stmt.executeQuery("SELECT COUNT(*) FROM $table").use { rs ->

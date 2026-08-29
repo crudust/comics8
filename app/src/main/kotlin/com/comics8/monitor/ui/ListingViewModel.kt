@@ -29,6 +29,7 @@ import com.comics8.core.source.network.createNetworkFileSystem
 import com.comics8.core.source.resolveSourceType
 import com.comics8.core.sync.AppUpdateChecker
 import com.comics8.core.sync.SyncConstants
+import com.comics8.core.sync.SyncActionCoordinator
 import com.comics8.monitor.BuildConfig
 import com.comics8.monitor.ComicsApp
 import com.comics8.monitor.data.AndroidUpdateManager
@@ -181,6 +182,9 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     private val libraryMirror = app.libraryMirror
     private val coverThumbs = app.coverThumbs
     private val prefs = application.getSharedPreferences("comics_reader_prefs", Context.MODE_PRIVATE)
+    private val syncActions by lazy {
+        SyncActionCoordinator(viewModelScope, { repository.syncManager }, ::applySyncRefresh)
+    }
 
     var singleViewPreference: ViewMode
         get() = try {
@@ -1811,27 +1815,11 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun syncNow() {
-        viewModelScope.launch {
-            val res = repository.syncManager?.syncFull()
-            if (res?.success == true) {
-                applySyncRefresh()
-            }
-        }
+        syncActions.syncNow()
     }
 
     fun restoreWithMasterKey(key: String, onResult: (com.comics8.core.model.SyncResult) -> Unit) {
-        viewModelScope.launch {
-            val sm = repository.syncManager
-            if (sm == null) {
-                onResult(com.comics8.core.model.SyncResult(false, "동기화 매니저를 찾을 수 없습니다."))
-                return@launch
-            }
-            val res = sm.restoreAccount(key)
-            if (res.success) {
-                applySyncRefresh()
-            }
-            onResult(res)
-        }
+        syncActions.restore(key, onResult)
     }
 
     fun updateSyncKey(key: String) {
@@ -1890,30 +1878,11 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun requestPairingCode(onResult: (com.comics8.core.model.PairRequestResult) -> Unit) {
-        viewModelScope.launch {
-            val sm = repository.syncManager
-            if (sm == null) {
-                onResult(com.comics8.core.model.PairRequestResult(false, message = "동기화 매니저를 찾을 수 없습니다."))
-                return@launch
-            }
-            val res = sm.requestPairingCode()
-            onResult(res)
-        }
+        syncActions.requestPairingCode(onResult)
     }
 
     fun confirmPairingCode(code: String, onResult: (com.comics8.core.model.PairConfirmResult) -> Unit) {
-        viewModelScope.launch {
-            val sm = repository.syncManager
-            if (sm == null) {
-                onResult(com.comics8.core.model.PairConfirmResult(false, message = "동기화 매니저를 찾을 수 없습니다."))
-                return@launch
-            }
-            val res = sm.confirmPairingCode(code)
-            if (res.success) {
-                applySyncRefresh()
-            }
-            onResult(res)
-        }
+        syncActions.confirmPairingCode(code, onResult)
     }
 
     fun exportBackup(uri: Uri, onResult: (Boolean, String) -> Unit) {

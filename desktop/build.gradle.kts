@@ -16,17 +16,17 @@ dependencies {
     implementation(project(":core"))
 
     implementation(compose.desktop.currentOs)
-    runtimeOnly("org.jetbrains.skiko:skiko-awt-runtime-windows-x64:0.8.18")
-    runtimeOnly("org.jetbrains.skiko:skiko-awt-runtime-macos-x64:0.8.18")
-    runtimeOnly("org.jetbrains.skiko:skiko-awt-runtime-macos-arm64:0.8.18")
+    runtimeOnly(libs.skiko.windows.x64)
+    runtimeOnly(libs.skiko.macos.x64)
+    runtimeOnly(libs.skiko.macos.arm64)
     implementation(compose.material3)
     implementation(compose.materialIconsExtended)
 
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.9.0")
-    implementation("org.xerial:sqlite-jdbc:3.47.1.0")
+    implementation(libs.coroutines.swing)
+    implementation(libs.sqlite)
 
-    testImplementation("junit:junit:4.13.2")
-    testImplementation("com.google.truth:truth:1.4.4")
+    testImplementation(libs.junit)
+    testImplementation(libs.truth)
 }
 
 compose.desktop {

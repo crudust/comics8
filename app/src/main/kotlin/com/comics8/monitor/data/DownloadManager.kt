@@ -5,6 +5,9 @@ import android.app.NotificationManager
 import android.content.Context
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import com.comics8.core.download.DownloadProgressState as CoreDownloadProgressState
+import com.comics8.core.download.DownloadQueueEngine
+import com.comics8.core.download.DownloadTask as CoreDownloadTask
 import com.comics8.core.model.DownloadedToonSummary
 import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.ToonItem
@@ -24,39 +27,18 @@ import com.comics8.monitor.data.local.delete
 import com.comics8.monitor.data.local.deleteByToon
 import com.comics8.monitor.data.local.get
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.util.concurrent.ConcurrentLinkedQueue
-
-data class DownloadTask(
-    val sourceId: String,
-    val toonId: String,
-    val toonTitle: String,
-    val toonThumbUrl: String,
-    val toonHref: String,
-    val episode: EpisodeItem,
-) {
-    fun workId(): WorkId = WorkId(sourceId, toonId)
-}
-
-data class DownloadProgressState(
-    val isRunning: Boolean = false,
-    val currentTask: DownloadTask? = null,
-    val currentImage: Int = 0,
-    val totalImages: Int = 0,
-    val queueSize: Int = 0,
-    val activeToonTitle: String = "",
-)
+typealias DownloadTask = CoreDownloadTask
+typealias DownloadProgressState = CoreDownloadProgressState
 
 class DownloadManager(
     private val context: Context,
@@ -66,16 +48,14 @@ class DownloadManager(
     baseDir: File = File(context.filesDir, "downloads"),
     private val sources: SourceRegistry,
     private val installedIds: () -> Set<String> = { sources.knownIds() },
-) {
+) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val baseDir = baseDir.apply { mkdirs() }
-    private val taskQueue = ConcurrentLinkedQueue<DownloadTask>()
-    private var workerJob: Job? = null
     private val migrateMutex = Mutex()
     private var migrated = false
 
-    private val _progress = MutableStateFlow(DownloadProgressState())
-    val progress: StateFlow<DownloadProgressState> = _progress.asStateFlow()
+    private val queue = DownloadQueueEngine(scope, ::processTask, ::dismissNotification)
+    val progress: StateFlow<DownloadProgressState> = queue.progress
 
     init {
         createNotificationChannel()
@@ -107,8 +87,7 @@ class DownloadManager(
             val newEpisodes = episodes.filter { it.wrId !in existing }
             if (newEpisodes.isEmpty()) return@launch
 
-            for (ep in newEpisodes) {
-                taskQueue.add(
+            queue.enqueue(newEpisodes.map { ep ->
                     DownloadTask(
                         sourceId = workId.sourceId,
                         toonId = workId.toonId,
@@ -117,45 +96,11 @@ class DownloadManager(
                         toonHref = series.href,
                         episode = ep,
                     )
-                )
-            }
-            _progress.update { it.copy(queueSize = taskQueue.size) }
-            startWorkerIfNeeded()
+            })
         }
     }
 
-    @Synchronized
-    private fun startWorkerIfNeeded() {
-        if (workerJob?.isActive == true) return
-        workerJob = scope.launch {
-            _progress.update { it.copy(isRunning = true) }
-            while (taskQueue.isNotEmpty()) {
-                val task = taskQueue.poll() ?: break
-                _progress.update {
-                    it.copy(
-                        currentTask = task,
-                        queueSize = taskQueue.size,
-                        activeToonTitle = task.toonTitle,
-                        currentImage = 0,
-                        totalImages = 0,
-                    )
-                }
-                processTask(task)
-            }
-            _progress.update {
-                it.copy(
-                    isRunning = false,
-                    currentTask = null,
-                    queueSize = 0,
-                    currentImage = 0,
-                    totalImages = 0,
-                )
-            }
-            dismissNotification()
-        }
-    }
-
-    private suspend fun processTask(task: DownloadTask) {
+    private suspend fun processTask(task: DownloadTask, report: (Int, Int) -> Unit) {
         migrateLegacyDownloads()
         val epDir = DownloadLayout.episodeDir(baseDir, task.workId(), task.episode.wrId).apply { mkdirs() }
         try {
@@ -176,17 +121,17 @@ class DownloadManager(
             val imageUrls = sources.get(task.sourceId).resolveImages(task.episode, series, client)
             if (imageUrls.isEmpty()) return
 
-            _progress.update { it.copy(totalImages = imageUrls.size) }
+            report(0, imageUrls.size)
 
             val batch = ImageBatchDownload.toNumberedFiles(
                 urls = imageUrls,
                 destDir = epDir,
                 fetchBytes = { url -> ImageFallbacks.fetchBytes(url, sources) { client.fetchBytes(it) } },
                 onProgress = { completed, total ->
-                    _progress.update { it.copy(currentImage = completed, totalImages = total) }
+                    report(completed, total)
                     updateNotification(
                         title = "${task.toonTitle} - ${task.episode.title}",
-                        text = "$completed / $total 다운로드 중 (남은 회차: ${taskQueue.size})",
+                        text = "$completed / $total 다운로드 중 (남은 회차: ${progress.value.queueSize})",
                         progress = completed,
                         max = total,
                         indeterminate = false,
@@ -209,6 +154,8 @@ class DownloadManager(
                 localDirPath = epDir.absolutePath,
             )
             database.downloadedEpisodeDao().upsert(entity)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (_: Exception) {
             // In case of failure, keep partial or retry
         }
@@ -245,18 +192,12 @@ class DownloadManager(
     }
 
     fun cancelAll() {
-        taskQueue.clear()
-        workerJob?.cancel()
-        _progress.update {
-            it.copy(
-                isRunning = false,
-                currentTask = null,
-                queueSize = 0,
-                currentImage = 0,
-                totalImages = 0,
-            )
-        }
-        dismissNotification()
+        queue.cancelAll()
+    }
+
+    override fun close() {
+        queue.close()
+        scope.cancel()
     }
 
     suspend fun isEpisodeDownloaded(workId: WorkId, wrId: String): Boolean = withContext(Dispatchers.IO) {

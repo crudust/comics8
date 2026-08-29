@@ -15,8 +15,9 @@
   - Windows release is packaged as a standalone portable zip via `./gradlew :desktop:packageWindowsZip`.
   - Output artifact: `desktop/build/compose/binaries/main/Comics8-win.zip`.
 - **Android Release APK**:
-  - Signed release APK is built via `./gradlew assembleRelease`.
-  - Output artifact: `app/build/outputs/apk/release/app-release.apk`.
+  - Signed standalone APK is built via `./gradlew assembleStandaloneRelease`; Play AAB uses `./gradlew bundlePlayRelease`.
+  - Output artifacts: `app/build/outputs/apk/standalone/release/app-standalone-release.apk` and `app/build/outputs/bundle/playRelease/app-play-release.aab`.
+  - Signing credentials and the keystore MUST remain outside the repository and are supplied through `COMICS8_SIGNING_*` environment variables (or the equivalent private Gradle properties).
   - Distributed as `comics8-latest.apk` on GitHub Releases.
 - **Homebrew Cask Formula**:
   - Formula generated at `build/homebrew/comics8.rb` with auto-calculated SHA-256 hash of the macOS zip bundle.

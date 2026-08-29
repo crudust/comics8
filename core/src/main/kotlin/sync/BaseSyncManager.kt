@@ -10,6 +10,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -33,7 +34,7 @@ open class BaseSyncManager(
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
         .build(),
-) {
+) : AutoCloseable {
     protected val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var debounceJob: Job? = null
     private val inFlight = AtomicBoolean(false)
@@ -71,6 +72,11 @@ open class BaseSyncManager(
     }
 
     val syncState: StateFlow<SyncState> = _syncState.asStateFlow()
+
+    override fun close() {
+        debounceJob?.cancel()
+        scope.cancel()
+    }
 
     private fun applyProxyConfig(serverUrl: String, useProxy: Boolean) {
         toonClient?.proxyBaseUrl = SyncConstants.proxyBaseUrl(serverUrl)

@@ -53,6 +53,7 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -246,6 +247,15 @@ object DesktopImageCache {
 
     fun clearFailures() {
         coverThumbs.clearFailures()
+    }
+
+    fun close() {
+        loadScope.cancel()
+        synchronized(inFlightLock) { inFlightRequests.clear() }
+        synchronized(memoryLock) {
+            memoryCache.clear()
+            dimensionCache.clear()
+        }
     }
 
     internal fun readImageBytes(url: String, forceRetry: Boolean = false): ByteArray? {

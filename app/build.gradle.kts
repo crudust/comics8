@@ -153,32 +153,31 @@ tasks.matching {
 dependencies {
     implementation(project(":core"))
 
-    val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
+    val composeBom = platform(libs.compose.bom)
     implementation(composeBom)
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-extended")
+    implementation(libs.compose.ui)
+    implementation(libs.compose.material3)
+    implementation(libs.compose.icons)
 
-    implementation("androidx.core:core-ktx:1.15.0")
-    implementation("androidx.activity:activity-compose:1.9.3")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+    implementation(libs.core.ktx)
+    implementation(libs.activity.compose)
+    implementation(libs.lifecycle.runtime.ktx)
+    implementation(libs.lifecycle.viewmodel.compose)
+    implementation(libs.lifecycle.runtime.compose)
 
-    implementation("io.coil-kt:coil-compose:2.7.0")
-    implementation("androidx.documentfile:documentfile:1.0.1")
+    implementation(libs.coil.compose)
+    implementation(libs.documentfile)
 
-    val room = "2.6.1"
-    implementation("androidx.room:room-runtime:$room")
-    implementation("androidx.room:room-ktx:$room")
-    ksp("androidx.room:room-compiler:$room")
+    implementation(libs.room.runtime)
+    implementation(libs.room.ktx)
+    ksp(libs.room.compiler)
 
-    implementation("androidx.work:work-runtime-ktx:2.10.0")
-    implementation("com.google.android.play:app-update:2.1.0")
+    implementation(libs.work.runtime)
+    implementation(libs.play.app.update)
 
-    testImplementation("junit:junit:4.13.2")
-    testImplementation("com.google.truth:truth:1.4.4")
-    testImplementation("org.xerial:sqlite-jdbc:3.47.1.0")
-    testImplementation("androidx.test:core-ktx:1.6.1")
-    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation(libs.junit)
+    testImplementation(libs.truth)
+    testImplementation(libs.sqlite)
+    testImplementation(libs.test.core.ktx)
+    testImplementation(libs.robolectric)
 }

@@ -1,5 +1,10 @@
 package com.comics8.desktop.data
 
+import com.comics8.core.backup.BackupEpisodeWire
+import com.comics8.core.backup.BackupFavoriteWire
+import com.comics8.core.backup.BackupHistoryWire
+import com.comics8.core.backup.BackupReaderSettingWire
+import com.comics8.core.backup.BackupWireCodec
 import com.comics8.core.model.SyncResult
 import com.comics8.core.model.SyncState
 import com.comics8.core.network.ToonClient
@@ -7,11 +12,13 @@ import com.comics8.core.source.WorkId
 import com.comics8.core.sync.BaseSyncManager
 import com.comics8.core.sync.SyncConstants
 import com.comics8.core.sync.SyncStorageAdapter
+import com.comics8.core.sync.SyncPayload
+import com.comics8.core.sync.SyncPayloadCodec
+import com.comics8.core.sync.SyncTombstoneWire
 import com.comics8.core.sync.SyncWire
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
-import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.Properties
@@ -57,352 +64,168 @@ class DesktopSyncStorageAdapter(
         database.deleteTombstonesOlderThan(cutoff)
     }
 
-    override suspend fun getLocalChangesSince(since: Long): JSONObject {
-        val localFavs = database.getFavoritesSince(since).filter { SyncWire.isSyncableSource(it.sourceId) }
-        val localHist = database.getHistorySince(since).filter { SyncWire.isSyncableSource(it.sourceId) }
-        val localEps = database.getReadEpisodesSince(since).filter { SyncWire.isSyncableSource(it.sourceId) }
-        val localSettings = database.getReaderSettingsSince(since).filter { SyncWire.isSyncableSource(it.sourceId) }
-        val localTombs = database.getTombstonesSince(since).filter { SyncWire.isSyncableSource(WorkId.parse(it.entityId).sourceId) }
+    override suspend fun getLocalChangesSince(since: Long): JSONObject = SyncPayloadCodec.encode(
+        syncPayload(
+            favorites = database.getFavoritesSince(since),
+            history = database.getHistorySince(since),
+            episodes = database.getReadEpisodesSince(since),
+            settings = database.getReaderSettingsSince(since),
+            tombstones = database.getTombstonesSince(since),
+        ),
+    )
 
-        return JSONObject().apply {
-            val favArr = JSONArray()
-            localFavs.forEach { f ->
-                favArr.put(JSONObject().apply {
-                    put("id", f.id)
-                    put("sourceId", f.sourceId)
-                    put("title", f.title)
-                    put("thumbUrl", f.thumbUrl)
-                    put("href", f.href)
-                    put("genre", f.genre)
-                    put("updatedAt", f.updatedAt ?: JSONObject.NULL)
-                    put("savedAt", f.savedAt)
-                })
-            }
-            put("favorites", favArr)
+    override suspend fun getFullSnapshot(): JSONObject = SyncPayloadCodec.encode(
+        syncPayload(
+            favorites = database.getAllFavorites(),
+            history = database.getAllHistory(),
+            episodes = database.getAllReadEpisodes(),
+            settings = database.getAllReaderSettings(),
+        ),
+        includeMetadata = true,
+    )
 
-            val histArr = JSONArray()
-            localHist.forEach { h ->
-                histArr.put(JSONObject().apply {
-                    put("toonId", h.toonId)
-                    put("sourceId", h.sourceId)
-                    put("toonTitle", h.toonTitle)
-                    put("toonThumbUrl", h.toonThumbUrl)
-                    put("toonHref", h.toonHref)
-                    put("lastWrId", h.lastWrId)
-                    put("lastEpisodeTitle", h.lastEpisodeTitle)
-                    put("lastEpisodeHref", h.lastEpisodeHref)
-                    put("lastReadOrder", h.lastReadOrder)
-                    put("totalEpisodes", h.totalEpisodes)
-                    put("lastReadAt", h.lastReadAt)
-                    put("nextWrId", h.nextWrId ?: JSONObject.NULL)
-                    put("nextEpisodeTitle", h.nextEpisodeTitle ?: JSONObject.NULL)
-                    put("nextEpisodeHref", h.nextEpisodeHref ?: JSONObject.NULL)
-                    put("hasNew", if (h.hasNew) 1 else 0)
-                })
-            }
-            put("history", histArr)
+    private fun syncPayload(
+        favorites: List<FavoriteRecord>,
+        history: List<ReadHistoryRecord>,
+        episodes: List<ReadEpisodeRecord>,
+        settings: List<ReaderSettingRecord>,
+        tombstones: List<com.comics8.core.model.SyncTombstone> = emptyList(),
+    ): SyncPayload = SyncPayload(
+        favorites = favorites.filter { SyncWire.isSyncableSource(it.sourceId) }.map { item ->
+            BackupFavoriteWire(
+                sourceId = item.sourceId,
+                id = item.id,
+                title = item.title,
+                thumbUrl = item.thumbUrl,
+                href = item.href,
+                genre = item.genre,
+                updatedAt = item.updatedAt,
+                savedAt = item.savedAt,
+            )
+        },
+        history = history.filter { SyncWire.isSyncableSource(it.sourceId) }.map { item ->
+            BackupHistoryWire(
+                sourceId = item.sourceId,
+                toonId = item.toonId,
+                toonTitle = item.toonTitle,
+                toonThumbUrl = item.toonThumbUrl,
+                toonHref = item.toonHref,
+                lastWrId = item.lastWrId,
+                lastEpisodeTitle = item.lastEpisodeTitle,
+                lastEpisodeHref = item.lastEpisodeHref,
+                lastReadOrder = item.lastReadOrder,
+                totalEpisodes = item.totalEpisodes,
+                lastReadAt = item.lastReadAt,
+                nextWrId = item.nextWrId,
+                nextEpisodeTitle = item.nextEpisodeTitle,
+                nextEpisodeHref = item.nextEpisodeHref,
+                hasNew = item.hasNew,
+            )
+        },
+        readEpisodes = episodes.filter { SyncWire.isSyncableSource(it.sourceId) }.map { item ->
+            BackupEpisodeWire(
+                sourceId = item.sourceId,
+                toonId = item.toonId,
+                wrId = item.wrId,
+                readAt = item.readAt,
+                lastPage = item.lastPage,
+            )
+        },
+        readerSettings = settings.filter { SyncWire.isSyncableSource(it.sourceId) }.map { item ->
+            BackupReaderSettingWire(
+                sourceId = item.sourceId,
+                toonId = item.toonId,
+                viewMode = item.viewMode,
+                readDirection = item.readDirection,
+                splitMode = item.splitMode,
+                updatedAt = item.updatedAt,
+            )
+        },
+        tombstones = tombstones
+            .filter { SyncWire.isSyncableSource(WorkId.parse(it.entityId).sourceId) }
+            .map { SyncTombstoneWire(it.entityType, it.entityId, it.deletedAt) },
+    )
+    override suspend fun applyRemoteChanges(
+        serverChanges: JSONObject,
+        serverTime: Long,
+    ): Pair<Int, Int> = applyPayload(serverChanges, serverTime, applyTombstones = true)
 
-            val epArr = JSONArray()
-            localEps.forEach { ep ->
-                epArr.put(JSONObject().apply {
-                    put("toonId", ep.toonId)
-                    put("sourceId", ep.sourceId)
-                    put("wrId", ep.wrId)
-                    put("readAt", ep.readAt)
-                    put("lastPage", ep.lastPage)
-                })
-            }
-            put("readEpisodes", epArr)
+    override suspend fun applyFullSnapshot(
+        snapshot: JSONObject,
+        serverTime: Long,
+    ): Pair<Int, Int> = applyPayload(snapshot, serverTime, applyTombstones = false)
 
-            val setArr = JSONArray()
-            localSettings.forEach { s ->
-                setArr.put(JSONObject().apply {
-                    put("toonId", s.toonId)
-                    put("sourceId", s.sourceId)
-                    put("viewMode", s.viewMode)
-                    put("readDirection", s.readDirection)
-                    put("splitMode", s.splitMode)
-                    put("updatedAt", s.updatedAt)
-                })
-            }
-            put("readerSettings", setArr)
-
-            val tombArr = JSONArray()
-            localTombs.forEach { t ->
-                tombArr.put(JSONObject().apply {
-                    put("entityType", t.entityType)
-                    put("entityId", SyncWire.tombstoneEntityId(t.entityId))
-                    put("deletedAt", t.deletedAt)
-                })
-            }
-            put("tombstones", tombArr)
-        }
-    }
-
-    override suspend fun getFullSnapshot(): JSONObject {
-        val favs = database.getAllFavorites().filter { SyncWire.isSyncableSource(it.sourceId) }
-        val hist = database.getAllHistory().filter { SyncWire.isSyncableSource(it.sourceId) }
-        val eps = database.getAllReadEpisodes().filter { SyncWire.isSyncableSource(it.sourceId) }
-        val settings = database.getAllReaderSettings().filter { SyncWire.isSyncableSource(it.sourceId) }
-
-        return JSONObject().apply {
-            put("version", 2)
-            put("exportedAt", System.currentTimeMillis())
-            put("appName", "Comics8")
-
-            val favArr = JSONArray()
-            favs.forEach { f ->
-                favArr.put(JSONObject().apply {
-                    put("id", f.id)
-                    put("sourceId", f.sourceId)
-                    put("title", f.title)
-                    put("thumbUrl", f.thumbUrl)
-                    put("href", f.href)
-                    put("genre", f.genre)
-                    put("updatedAt", f.updatedAt ?: JSONObject.NULL)
-                    put("savedAt", f.savedAt)
-                })
-            }
-            put("favorites", favArr)
-
-            val histArr = JSONArray()
-            hist.forEach { h ->
-                histArr.put(JSONObject().apply {
-                    put("toonId", h.toonId)
-                    put("sourceId", h.sourceId)
-                    put("toonTitle", h.toonTitle)
-                    put("toonThumbUrl", h.toonThumbUrl)
-                    put("toonHref", h.toonHref)
-                    put("lastWrId", h.lastWrId)
-                    put("lastEpisodeTitle", h.lastEpisodeTitle)
-                    put("lastEpisodeHref", h.lastEpisodeHref)
-                    put("lastReadOrder", h.lastReadOrder)
-                    put("totalEpisodes", h.totalEpisodes)
-                    put("lastReadAt", h.lastReadAt)
-                    put("nextWrId", h.nextWrId ?: JSONObject.NULL)
-                    put("nextEpisodeTitle", h.nextEpisodeTitle ?: JSONObject.NULL)
-                    put("nextEpisodeHref", h.nextEpisodeHref ?: JSONObject.NULL)
-                    put("hasNew", if (h.hasNew) 1 else 0)
-                })
-            }
-            put("history", histArr)
-
-            val epArr = JSONArray()
-            eps.forEach { ep ->
-                epArr.put(JSONObject().apply {
-                    put("toonId", ep.toonId)
-                    put("sourceId", ep.sourceId)
-                    put("wrId", ep.wrId)
-                    put("readAt", ep.readAt)
-                    put("lastPage", ep.lastPage)
-                })
-            }
-            put("readEpisodes", epArr)
-
-            val setArr = JSONArray()
-            settings.forEach { s ->
-                setArr.put(JSONObject().apply {
-                    put("toonId", s.toonId)
-                    put("sourceId", s.sourceId)
-                    put("viewMode", s.viewMode)
-                    put("readDirection", s.readDirection)
-                    put("splitMode", s.splitMode)
-                    put("updatedAt", s.updatedAt)
-                })
-            }
-            put("readerSettings", setArr)
-        }
-    }
-
-    override suspend fun applyRemoteChanges(serverChanges: JSONObject, serverTime: Long): Pair<Int, Int> {
-        // Apply received tombstones
-        val serverTombs = serverChanges.optJSONArray("tombstones") ?: JSONArray()
-        for (i in 0 until serverTombs.length()) {
-            val t = serverTombs.getJSONObject(i)
-            val type = t.optString("entityType", "")
-            val id = t.optString("entityId", "")
-            val workId = WorkId.parse(id)
-            when (type) {
-                "FAVORITE" -> database.deleteFavorite(workId)
-                "HISTORY" -> database.deleteHistory(workId)
-                "EPISODE" -> database.deleteReadEpisodesByToon(workId)
-            }
-        }
-
-        // Apply received favorites
-        val serverFavs = serverChanges.optJSONArray("favorites") ?: JSONArray()
-        val favList = mutableListOf<FavoriteRecord>()
-        for (i in 0 until serverFavs.length()) {
-            val f = serverFavs.getJSONObject(i)
-            val workId = DesktopBackupJson.workId(f, preferId = true) ?: continue
-            favList.add(
-                FavoriteRecord(
-                    sourceId = workId.sourceId,
-                    id = workId.toonId,
-                    title = f.optString("title", ""),
-                    thumbUrl = f.optString("thumbUrl", ""),
-                    href = f.optString("href", ""),
-                    genre = f.optString("genre", ""),
-                    updatedAt = if (f.isNull("updatedAt")) null else f.optString("updatedAt", "").ifBlank { null },
-                    savedAt = f.optLong("savedAt", serverTime),
-                )
+    private suspend fun applyPayload(
+        root: JSONObject,
+        serverTime: Long,
+        applyTombstones: Boolean,
+    ): Pair<Int, Int> {
+        val payload = SyncPayloadCodec.decode(root, serverTime)
+        val favorites = payload.favorites.mapNotNull { item ->
+            val workId = BackupWireCodec.workId(item.sourceId, item.id, item.toonId, preferId = true)
+                ?: return@mapNotNull null
+            FavoriteRecord(
+                sourceId = workId.sourceId,
+                id = workId.toonId,
+                title = item.title.orEmpty(),
+                thumbUrl = item.thumbUrl,
+                href = item.href,
+                genre = item.genre,
+                updatedAt = item.updatedAt,
+                savedAt = item.savedAt,
             )
         }
-        if (favList.isNotEmpty()) database.saveAllFavorites(favList)
-
-        // Apply received history
-        val serverHist = serverChanges.optJSONArray("history") ?: JSONArray()
-        val histList = mutableListOf<ReadHistoryRecord>()
-        for (i in 0 until serverHist.length()) {
-            val h = serverHist.getJSONObject(i)
-            val workId = DesktopBackupJson.workId(h, preferId = false) ?: continue
-            histList.add(
-                ReadHistoryRecord(
-                    sourceId = workId.sourceId,
-                    toonId = workId.toonId,
-                    toonTitle = h.optString("toonTitle", ""),
-                    toonThumbUrl = h.optString("toonThumbUrl", ""),
-                    toonHref = h.optString("toonHref", ""),
-                    lastWrId = h.optString("lastWrId", ""),
-                    lastEpisodeTitle = h.optString("lastEpisodeTitle", ""),
-                    lastEpisodeHref = h.optString("lastEpisodeHref", ""),
-                    lastReadOrder = h.optInt("lastReadOrder", 0),
-                    totalEpisodes = h.optInt("totalEpisodes", 0),
-                    lastReadAt = h.optLong("lastReadAt", serverTime),
-                    nextWrId = if (h.isNull("nextWrId")) null else h.optString("nextWrId", "").ifBlank { null },
-                    nextEpisodeTitle = if (h.isNull("nextEpisodeTitle")) null else h.optString("nextEpisodeTitle", "").ifBlank { null },
-                    nextEpisodeHref = if (h.isNull("nextEpisodeHref")) null else h.optString("nextEpisodeHref", "").ifBlank { null },
-                    hasNew = h.optInt("hasNew", 0) == 1,
-                )
+        val history = payload.history.mapNotNull { item ->
+            val workId = BackupWireCodec.workId(item.sourceId, item.id, item.toonId, preferId = false)
+                ?: return@mapNotNull null
+            ReadHistoryRecord(
+                sourceId = workId.sourceId,
+                toonId = workId.toonId,
+                toonTitle = item.toonTitle.orEmpty(),
+                toonThumbUrl = item.toonThumbUrl,
+                toonHref = item.toonHref,
+                lastWrId = item.lastWrId.orEmpty(),
+                lastEpisodeTitle = item.lastEpisodeTitle.orEmpty(),
+                lastEpisodeHref = item.lastEpisodeHref,
+                lastReadOrder = item.lastReadOrder,
+                totalEpisodes = item.totalEpisodes,
+                lastReadAt = item.lastReadAt,
+                nextWrId = item.nextWrId?.ifBlank { null },
+                nextEpisodeTitle = item.nextEpisodeTitle?.ifBlank { null },
+                nextEpisodeHref = item.nextEpisodeHref?.ifBlank { null },
+                hasNew = item.hasNew,
             )
         }
-        if (histList.isNotEmpty()) database.saveAllHistory(histList)
-
-        // Apply received read episodes
-        val serverEps = serverChanges.optJSONArray("readEpisodes") ?: JSONArray()
-        val epList = mutableListOf<ReadEpisodeRecord>()
-        for (i in 0 until serverEps.length()) {
-            val ep = serverEps.getJSONObject(i)
-            val workId = DesktopBackupJson.workId(ep, preferId = false) ?: continue
-            epList.add(
-                ReadEpisodeRecord(
-                    sourceId = workId.sourceId,
-                    toonId = workId.toonId,
-                    wrId = ep.optString("wrId", ""),
-                    readAt = ep.optLong("readAt", serverTime),
-                    lastPage = ep.optInt("lastPage", 0),
-                )
+        val episodes = payload.readEpisodes.mapNotNull { item ->
+            val workId = BackupWireCodec.workId(item.sourceId, item.id, item.toonId, preferId = false)
+                ?: return@mapNotNull null
+            ReadEpisodeRecord(
+                sourceId = workId.sourceId,
+                toonId = workId.toonId,
+                wrId = item.wrId.orEmpty(),
+                readAt = item.readAt,
+                lastPage = item.lastPage,
             )
         }
-        if (epList.isNotEmpty()) database.markAllEpisodesRead(epList)
-
-        // Apply received reader settings
-        val serverSettings = serverChanges.optJSONArray("readerSettings") ?: JSONArray()
-        val setList = mutableListOf<ReaderSettingRecord>()
-        for (i in 0 until serverSettings.length()) {
-            val s = serverSettings.getJSONObject(i)
-            val workId = DesktopBackupJson.workId(s, preferId = false) ?: continue
-            setList.add(
-                ReaderSettingRecord(
-                    sourceId = workId.sourceId,
-                    toonId = workId.toonId,
-                    viewMode = s.optString("viewMode", "SCROLL"),
-                    readDirection = s.optString("readDirection", "TOP_TO_BOTTOM"),
-                    splitMode = s.optString("splitMode", "NONE"),
-                    updatedAt = s.optLong("updatedAt", serverTime),
-                )
+        val settings = payload.readerSettings.mapNotNull { item ->
+            val workId = BackupWireCodec.workId(item.sourceId, item.id, item.toonId, preferId = false)
+                ?: return@mapNotNull null
+            ReaderSettingRecord(
+                sourceId = workId.sourceId,
+                toonId = workId.toonId,
+                viewMode = item.viewMode,
+                readDirection = item.readDirection,
+                splitMode = item.splitMode,
+                updatedAt = item.updatedAt,
             )
         }
-        if (setList.isNotEmpty()) database.saveAllReaderSettings(setList)
-
-        return Pair(favList.size, histList.size)
-    }
-
-    override suspend fun applyFullSnapshot(snapshot: JSONObject, serverTime: Long): Pair<Int, Int> {
-        val favs = snapshot.optJSONArray("favorites") ?: JSONArray()
-        val hist = snapshot.optJSONArray("history") ?: JSONArray()
-        val eps = snapshot.optJSONArray("readEpisodes") ?: JSONArray()
-        val settings = snapshot.optJSONArray("readerSettings") ?: JSONArray()
-
-        val favList = mutableListOf<FavoriteRecord>()
-        for (i in 0 until favs.length()) {
-            val f = favs.getJSONObject(i)
-            val workId = DesktopBackupJson.workId(f, preferId = true) ?: continue
-            favList.add(
-                FavoriteRecord(
-                    sourceId = workId.sourceId,
-                    id = workId.toonId,
-                    title = f.optString("title", ""),
-                    thumbUrl = f.optString("thumbUrl", ""),
-                    href = f.optString("href", ""),
-                    genre = f.optString("genre", ""),
-                    updatedAt = if (f.isNull("updatedAt")) null else f.optString("updatedAt", "").ifBlank { null },
-                    savedAt = f.optLong("savedAt", serverTime),
-                )
-            )
+        val deletions = if (applyTombstones) {
+            payload.tombstones.map { it.entityType to WorkId.parse(it.entityId) }
+        } else {
+            emptyList()
         }
-        if (favList.isNotEmpty()) database.saveAllFavorites(favList)
-
-        val histList = mutableListOf<ReadHistoryRecord>()
-        for (i in 0 until hist.length()) {
-            val h = hist.getJSONObject(i)
-            val workId = DesktopBackupJson.workId(h, preferId = false) ?: continue
-            histList.add(
-                ReadHistoryRecord(
-                    sourceId = workId.sourceId,
-                    toonId = workId.toonId,
-                    toonTitle = h.optString("toonTitle", ""),
-                    toonThumbUrl = h.optString("toonThumbUrl", ""),
-                    toonHref = h.optString("toonHref", ""),
-                    lastWrId = h.optString("lastWrId", ""),
-                    lastEpisodeTitle = h.optString("lastEpisodeTitle", ""),
-                    lastEpisodeHref = h.optString("lastEpisodeHref", ""),
-                    lastReadOrder = h.optInt("lastReadOrder", 0),
-                    totalEpisodes = h.optInt("totalEpisodes", 0),
-                    lastReadAt = h.optLong("lastReadAt", serverTime),
-                    nextWrId = if (h.isNull("nextWrId")) null else h.optString("nextWrId", "").ifBlank { null },
-                    nextEpisodeTitle = if (h.isNull("nextEpisodeTitle")) null else h.optString("nextEpisodeTitle", "").ifBlank { null },
-                    nextEpisodeHref = if (h.isNull("nextEpisodeHref")) null else h.optString("nextEpisodeHref", "").ifBlank { null },
-                    hasNew = h.optInt("hasNew", 0) == 1,
-                )
-            )
-        }
-        if (histList.isNotEmpty()) database.saveAllHistory(histList)
-
-        val epList = mutableListOf<ReadEpisodeRecord>()
-        for (i in 0 until eps.length()) {
-            val ep = eps.getJSONObject(i)
-            val workId = DesktopBackupJson.workId(ep, preferId = false) ?: continue
-            epList.add(
-                ReadEpisodeRecord(
-                    sourceId = workId.sourceId,
-                    toonId = workId.toonId,
-                    wrId = ep.optString("wrId", ""),
-                    readAt = ep.optLong("readAt", serverTime),
-                    lastPage = ep.optInt("lastPage", 0),
-                )
-            )
-        }
-        if (epList.isNotEmpty()) database.markAllEpisodesRead(epList)
-
-        val setList = mutableListOf<ReaderSettingRecord>()
-        for (i in 0 until settings.length()) {
-            val s = settings.getJSONObject(i)
-            val workId = DesktopBackupJson.workId(s, preferId = false) ?: continue
-            setList.add(
-                ReaderSettingRecord(
-                    sourceId = workId.sourceId,
-                    toonId = workId.toonId,
-                    viewMode = s.optString("viewMode", "SCROLL"),
-                    readDirection = s.optString("readDirection", "TOP_TO_BOTTOM"),
-                    splitMode = s.optString("splitMode", "NONE"),
-                    updatedAt = s.optLong("updatedAt", serverTime),
-                )
-            )
-        }
-        if (setList.isNotEmpty()) database.saveAllReaderSettings(setList)
-
-        return Pair(favList.size, histList.size)
+        database.applySyncBatch(deletions, favorites, history, episodes, settings)
+        return favorites.size to history.size
     }
 }
 

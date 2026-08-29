@@ -21,6 +21,7 @@ import com.comics8.core.source.network.createNetworkFileSystem
 import com.comics8.core.source.resolveSourceType
 import com.comics8.core.sync.AppUpdateChecker
 import com.comics8.core.sync.SyncConstants
+import com.comics8.core.sync.SyncActionCoordinator
 import com.comics8.desktop.DesktopVersion
 import com.comics8.desktop.data.DesktopSourcePrefs
 import com.comics8.desktop.data.DesktopToonRepository
@@ -38,7 +39,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.cancel
 import java.io.File
 
 import com.comics8.core.i18n.AppLanguage
@@ -49,9 +52,12 @@ class DesktopViewModel(
     private val jsPackStore: JsPackStore,
     private val networkSourceStore: NetworkSourceStore,
     private val pickLibraryFolder: () -> File? = { DesktopFolderPicker.pickDirectory() },
-) {
+) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val prefs: Preferences = Preferences.userRoot().node("com.comics8.desktop")
+    private val syncActions by lazy {
+        SyncActionCoordinator(scope, { repository.syncManager }, ::applySyncRefresh)
+    }
 
     val appLanguage: AppLanguage
         get() = try {
@@ -98,6 +104,18 @@ class DesktopViewModel(
     private var lastViewedEpisodePage: Int = 1
     private var lastViewedEpisode: EpisodeItem? = null
     private var previousScreenBeforeSeries: Screen = Screen.Browse
+
+    override fun close() {
+        pageSaveJob?.cancel()
+        val pending = pendingPageSave
+        pendingPageSave = null
+        if (pending != null) {
+            runBlocking(Dispatchers.IO) {
+                repository.saveEpisodePage(pending.first, pending.second, pending.third)
+            }
+        }
+        scope.cancel()
+    }
 
     fun goBack(): Boolean {
         val current = _state.value
@@ -1714,27 +1732,11 @@ class DesktopViewModel(
     }
 
     fun syncNow() {
-        scope.launch {
-            val res = repository.syncManager?.syncFull()
-            if (res?.success == true) {
-                applySyncRefresh()
-            }
-        }
+        syncActions.syncNow()
     }
 
     fun restoreWithMasterKey(key: String, onResult: (com.comics8.core.model.SyncResult) -> Unit) {
-        scope.launch {
-            val sm = repository.syncManager
-            if (sm == null) {
-                onResult(com.comics8.core.model.SyncResult(false, "동기화 매니저를 찾을 수 없습니다."))
-                return@launch
-            }
-            val res = sm.restoreAccount(key)
-            if (res.success) {
-                applySyncRefresh()
-            }
-            onResult(res)
-        }
+        syncActions.restore(key, onResult)
     }
 
     fun updateSyncKey(key: String) {
@@ -1787,30 +1789,11 @@ class DesktopViewModel(
     }
 
     fun requestPairingCode(onResult: (com.comics8.core.model.PairRequestResult) -> Unit) {
-        scope.launch {
-            val sm = repository.syncManager
-            if (sm == null) {
-                onResult(com.comics8.core.model.PairRequestResult(false, message = "동기화 매니저를 찾을 수 없습니다."))
-                return@launch
-            }
-            val res = sm.requestPairingCode()
-            onResult(res)
-        }
+        syncActions.requestPairingCode(onResult)
     }
 
     fun confirmPairingCode(code: String, onResult: (com.comics8.core.model.PairConfirmResult) -> Unit) {
-        scope.launch {
-            val sm = repository.syncManager
-            if (sm == null) {
-                onResult(com.comics8.core.model.PairConfirmResult(false, message = "동기화 매니저를 찾을 수 없습니다."))
-                return@launch
-            }
-            val res = sm.confirmPairingCode(code)
-            if (res.success) {
-                applySyncRefresh()
-            }
-            onResult(res)
-        }
+        syncActions.confirmPairingCode(code, onResult)
     }
 
     fun exportBackup(file: java.io.File, onResult: (Boolean, String) -> Unit) {

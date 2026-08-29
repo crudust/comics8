@@ -65,11 +65,32 @@ data class BackupReaderSettingWire(
     val updatedAt: Long,
 )
 
+data class BackupWireDefaults(
+    val lastReadOrder: Int = 1,
+    val totalEpisodes: Int = 1,
+    val viewMode: String = "SINGLE",
+    val readDirection: String = "RIGHT_TO_LEFT",
+    val splitMode: String = "FIT",
+) {
+    companion object {
+        val BACKUP = BackupWireDefaults()
+        val SYNC = BackupWireDefaults(
+            lastReadOrder = 0,
+            totalEpisodes = 0,
+            viewMode = "SCROLL",
+            readDirection = "TOP_TO_BOTTOM",
+            splitMode = "NONE",
+        )
+    }
+}
+
 object BackupWireCodec {
     const val VERSION = 2
     const val APP_NAME = "Comics8"
 
-    fun encode(backup: BackupWire): String = JSONObject().apply {
+    fun encode(backup: BackupWire): String = encodeObject(backup).toString(2)
+
+    fun encodeObject(backup: BackupWire): JSONObject = JSONObject().apply {
         put("version", backup.version)
         put("appName", backup.appName)
         put("exportedAt", backup.exportedAt)
@@ -77,10 +98,19 @@ object BackupWireCodec {
         put("history", JSONArray().apply { backup.history.forEach { put(it.toJson()) } })
         put("readEpisodes", JSONArray().apply { backup.readEpisodes.forEach { put(it.toJson()) } })
         put("readerSettings", JSONArray().apply { backup.readerSettings.forEach { put(it.toJson()) } })
-    }.toString(2)
+    }
 
-    fun decode(jsonString: String, nowMillis: () -> Long = System::currentTimeMillis): BackupWire {
-        val root = JSONObject(jsonString)
+    fun decode(
+        jsonString: String,
+        nowMillis: () -> Long = System::currentTimeMillis,
+        defaults: BackupWireDefaults = BackupWireDefaults.BACKUP,
+    ): BackupWire = decodeObject(JSONObject(jsonString), nowMillis, defaults)
+
+    fun decodeObject(
+        root: JSONObject,
+        nowMillis: () -> Long = System::currentTimeMillis,
+        defaults: BackupWireDefaults = BackupWireDefaults.BACKUP,
+    ): BackupWire {
         return BackupWire(
             version = root.optInt("version", 0),
             appName = root.optString("appName", ""),
@@ -109,13 +139,13 @@ object BackupWireCodec {
                     lastWrId = obj.optionalString("lastWrId"),
                     lastEpisodeTitle = obj.optionalString("lastEpisodeTitle"),
                     lastEpisodeHref = obj.optString("lastEpisodeHref", ""),
-                    lastReadOrder = obj.optInt("lastReadOrder", 1),
-                    totalEpisodes = obj.optInt("totalEpisodes", 1),
+                    lastReadOrder = obj.optInt("lastReadOrder", defaults.lastReadOrder),
+                    totalEpisodes = obj.optInt("totalEpisodes", defaults.totalEpisodes),
                     lastReadAt = obj.optLong("lastReadAt", nowMillis()),
                     nextWrId = obj.optionalString("nextWrId"),
                     nextEpisodeTitle = obj.optionalString("nextEpisodeTitle"),
                     nextEpisodeHref = obj.optionalString("nextEpisodeHref"),
-                    hasNew = obj.optBoolean("hasNew", false),
+                    hasNew = obj.booleanValue("hasNew"),
                 )
             },
             readEpisodes = root.objects("readEpisodes").map { obj ->
@@ -133,9 +163,9 @@ object BackupWireCodec {
                     sourceId = obj.optionalString("sourceId"),
                     toonId = obj.optionalString("toonId"),
                     id = obj.optionalString("id"),
-                    viewMode = obj.optString("viewMode", "SINGLE"),
-                    readDirection = obj.optString("readDirection", "RIGHT_TO_LEFT"),
-                    splitMode = obj.optString("splitMode", "FIT"),
+                    viewMode = obj.optString("viewMode", defaults.viewMode),
+                    readDirection = obj.optString("readDirection", defaults.readDirection),
+                    splitMode = obj.optString("splitMode", defaults.splitMode),
                     updatedAt = obj.optLong("updatedAt", nowMillis()),
                 )
             },
@@ -159,6 +189,13 @@ object BackupWireCodec {
 
     private fun JSONObject.optionalString(key: String): String? =
         if (!has(key) || isNull(key)) null else getString(key)
+
+    private fun JSONObject.booleanValue(key: String): Boolean = when (val value = opt(key)) {
+        is Boolean -> value
+        is Number -> value.toInt() != 0
+        is String -> value.equals("true", ignoreCase = true) || value == "1"
+        else -> false
+    }
 
     private fun BackupFavoriteWire.toJson() = JSONObject().apply {
         put("id", id ?: toonId.orEmpty())

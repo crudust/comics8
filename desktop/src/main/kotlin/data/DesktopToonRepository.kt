@@ -30,6 +30,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.cancel
 
 class DesktopToonRepository(
     val client: ToonClient,
@@ -40,7 +41,7 @@ class DesktopToonRepository(
     private val sources: SourceRegistry,
     private val isSourceEnabled: (String) -> Boolean = { false },
     private val installedIds: () -> Set<String> = { sources.knownIds() },
-) {
+) : AutoCloseable {
     init {
         database.isSourceEnabled = isSourceEnabled
         database.installedIds = installedIds
@@ -156,6 +157,10 @@ class DesktopToonRepository(
 
     private val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val activeSyncKeys = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    override fun close() {
+        syncScope.cancel()
+    }
 
     fun syncEpisodeCounts(
         items: List<ToonItem>,

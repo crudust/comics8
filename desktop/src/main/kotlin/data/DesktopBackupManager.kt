@@ -6,24 +6,13 @@ import com.comics8.core.backup.BackupHistoryWire
 import com.comics8.core.backup.BackupReaderSettingWire
 import com.comics8.core.backup.BackupWire
 import com.comics8.core.backup.BackupWireCodec
+import com.comics8.core.model.BackupResult
+import com.comics8.core.model.BackupStats
 import com.comics8.core.source.WorkId
 import org.json.JSONObject
 
-data class DesktopBackupStats(
-    val favoriteCount: Int = 0,
-    val historyCount: Int = 0,
-    val episodeCount: Int = 0,
-    val settingCount: Int = 0,
-)
-
-data class DesktopBackupResult(
-    val success: Boolean,
-    val message: String,
-    val favoriteCount: Int = 0,
-    val historyCount: Int = 0,
-    val episodeCount: Int = 0,
-    val settingCount: Int = 0,
-)
+typealias DesktopBackupStats = BackupStats
+typealias DesktopBackupResult = BackupResult
 
 object DesktopBackupManager {
     fun createBackupJson(database: DesktopDatabase): String {

@@ -54,6 +54,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.cancel
 
 class ToonRepository(
     val client: ToonClient,
@@ -70,7 +71,7 @@ class ToonRepository(
     private val sources: SourceRegistry,
     private val isSourceEnabled: (String) -> Boolean = { false },
     private val installedIds: () -> Set<String> = { sources.knownIds() },
-) {
+) : AutoCloseable {
     fun sourceRegistry(): SourceRegistry = sources
 
     fun source(id: String) = sources.get(id)
@@ -171,6 +172,10 @@ class ToonRepository(
 
     private val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val activeSyncKeys = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    override fun close() {
+        syncScope.cancel()
+    }
 
     fun syncEpisodeCounts(
         items: List<ToonItem>,
