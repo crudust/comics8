@@ -317,7 +317,7 @@ private fun ComicsAppUiContent(
             com.comics8.monitor.ui.components.UpdateDialog(
                 updateState = state.updateState,
                 onDismiss = viewModel::dismissUpdateDialog,
-                onConfirmUpdate = viewModel::startUpdate,
+                onConfirmUpdate = { viewModel.startUpdate(context.findActivity()) },
             )
         }
         state.networkDraft?.let { draft ->

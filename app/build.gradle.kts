@@ -105,6 +105,7 @@ dependencies {
     ksp("androidx.room:room-compiler:$room")
 
     implementation("androidx.work:work-runtime-ktx:2.10.0")
+    implementation("com.google.android.play:app-update:2.1.0")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("com.google.truth:truth:1.4.4")

@@ -518,14 +518,36 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             _state.update { it.copy(updateState = it.updateState.copy(isChecking = true)) }
             val currentVersionName = BuildConfig.VERSION_NAME
             val currentVersionCode = BuildConfig.VERSION_CODE
-            val serverUrl = _state.value.syncState.serverUrl.ifBlank { SyncConstants.DEFAULT_SERVER_URL }
-            val updateState = withContext(Dispatchers.IO) {
-                AppUpdateChecker.checkAndroidUpdate(
-                    currentVersionName = currentVersionName,
-                    currentVersionCode = currentVersionCode,
-                    serverUrl = serverUrl,
-                )
+
+            val updateState = if (BuildConfig.IS_PLAY_STORE) {
+                val playResult = com.comics8.monitor.data.PlayUpdateManager.checkPlayUpdate(getApplication())
+                if (playResult.hasUpdate) {
+                    com.comics8.core.model.AppUpdateState(
+                        hasUpdate = true,
+                        latestVersion = if (playResult.availableVersionCode > 0) "Build ${playResult.availableVersionCode}" else currentVersionName,
+                        currentVersion = currentVersionName,
+                        isChecking = false,
+                    )
+                } else {
+                    com.comics8.core.model.AppUpdateState(
+                        hasUpdate = false,
+                        currentVersion = currentVersionName,
+                        latestVersion = currentVersionName,
+                        isChecking = false,
+                        error = playResult.error,
+                    )
+                }
+            } else {
+                val serverUrl = _state.value.syncState.serverUrl.ifBlank { SyncConstants.DEFAULT_SERVER_URL }
+                withContext(Dispatchers.IO) {
+                    AppUpdateChecker.checkAndroidUpdate(
+                        currentVersionName = currentVersionName,
+                        currentVersionCode = currentVersionCode,
+                        serverUrl = serverUrl,
+                    )
+                }
             }
+
             _state.update {
                 it.copy(
                     updateState = updateState.copy(isChecking = false),
@@ -533,7 +555,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 )
             }
             if (manual) {
-                if (updateState.error != null) {
+                if (updateState.error != null && !BuildConfig.IS_PLAY_STORE) {
                     onFeedback?.invoke(updateState.error ?: "업데이트 확인 실패")
                 } else if (!updateState.hasUpdate) {
                     onFeedback?.invoke("현재 최신 버전(v${currentVersionName})을 사용 중입니다.")
@@ -550,20 +572,12 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         _state.update { it.copy(showUpdateDialog = false) }
     }
 
-    fun startUpdate() {
+    fun startUpdate(activity: android.app.Activity? = null) {
         if (BuildConfig.IS_PLAY_STORE) {
-            try {
-                val context = getApplication<Application>()
-                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("market://details?id=${context.packageName}")).apply {
-                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                context.startActivity(intent)
-            } catch (_: Exception) {
-                val context = getApplication<Application>()
-                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=${context.packageName}")).apply {
-                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                context.startActivity(intent)
+            if (activity != null) {
+                com.comics8.monitor.data.PlayUpdateManager.startUpdateFlow(activity)
+            } else {
+                com.comics8.monitor.data.PlayUpdateManager.openPlayStore(getApplication())
             }
             dismissUpdateDialog()
             return
