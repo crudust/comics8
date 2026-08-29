@@ -866,6 +866,7 @@ class DesktopViewModel(
                         loading = false,
                         refreshing = false,
                         error = null,
+                        scrollToTopTrigger = it.scrollToTopTrigger + 1,
                     )
                 }
                 if (result.items.isNotEmpty() && tab !is BrowseTab.Favorite) {
@@ -948,6 +949,7 @@ class DesktopViewModel(
                         items = results,
                         loading = false,
                         error = if (results.isEmpty()) "'$q' 검색 결과가 없습니다." else null,
+                        scrollToTopTrigger = it.scrollToTopTrigger + 1,
                     )
                 }
                 triggerEpisodeCountSync(results)
@@ -1076,6 +1078,7 @@ class DesktopViewModel(
                         episodeLastPage = result.lastPage,
                         episodeLoading = false,
                         episodeError = null,
+                        scrollToTopTrigger = it.scrollToTopTrigger + 1,
                     )
                 }
                 refreshDownloadedWrIds()
@@ -1434,6 +1437,7 @@ class DesktopViewModel(
                     historyItems = items,
                     historyLoading = false,
                     readCounts = it.readCounts + counts,
+                    scrollToTopTrigger = it.scrollToTopTrigger + 1,
                 )
             }
         }
@@ -1623,7 +1627,13 @@ class DesktopViewModel(
             val items = repository.downloadManager
                 ?.getDownloadedToonSummaries(sourceId)
                 .orEmpty()
-            _state.update { it.copy(downloadSummaries = items, downloadLoading = false) }
+            _state.update {
+                it.copy(
+                    downloadSummaries = items,
+                    downloadLoading = false,
+                    scrollToTopTrigger = it.scrollToTopTrigger + 1,
+                )
+            }
         }
     }
 

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
@@ -24,6 +25,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -83,8 +85,15 @@ fun SeriesPane(
                 onRetry = viewModel::refresh,
             )
         else -> {
+            val listState = rememberLazyListState()
+            LaunchedEffect(state.scrollToTopTrigger) {
+                if (state.scrollToTopTrigger > 0) {
+                    listState.scrollToItem(0)
+                }
+            }
             Column(modifier = modifier.fillMaxSize()) {
                 LazyColumn(
+                    state = listState,
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.weight(1f).fillMaxWidth(),

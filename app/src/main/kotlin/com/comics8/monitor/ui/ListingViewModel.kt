@@ -1473,6 +1473,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                     historyItems = items,
                     historyLoading = false,
                     readCounts = it.readCounts + counts,
+                    scrollToTopTrigger = it.scrollToTopTrigger + 1,
                 )
             }
         }
@@ -1724,7 +1725,13 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             val items = repository.downloadManager
                 ?.getDownloadedToonSummaries(sourceId)
                 .orEmpty()
-            _state.update { it.copy(downloadSummaries = items, downloadLoading = false) }
+            _state.update {
+                it.copy(
+                    downloadSummaries = items,
+                    downloadLoading = false,
+                    scrollToTopTrigger = it.scrollToTopTrigger + 1,
+                )
+            }
         }
     }
 
@@ -2463,6 +2470,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                         loading = false,
                         refreshing = false,
                         error = null,
+                        scrollToTopTrigger = it.scrollToTopTrigger + 1,
                     )
                 }
                 triggerEpisodeCountSync(items)
@@ -2506,6 +2514,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                         loading = false,
                         refreshing = false,
                         error = null,
+                        scrollToTopTrigger = it.scrollToTopTrigger + 1,
                     )
                 }
                 triggerEpisodeCountSync(result.items)
@@ -2556,6 +2565,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                         episodeLoading = false,
                         refreshing = false,
                         episodeError = null,
+                        scrollToTopTrigger = it.scrollToTopTrigger + 1,
                     )
                 }
                 refreshDownloadedWrIds()
