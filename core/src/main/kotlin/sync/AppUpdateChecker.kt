@@ -17,22 +17,9 @@ object AppUpdateChecker {
         .build()
 
     fun fetchVersionInfo(serverUrl: String = SyncConstants.DEFAULT_SERVER_URL): VersionResponse? {
-        val direct = fetchVersionInfoDirect(serverUrl)
-        if (direct != null) return direct
-
-        // Fallback: If current server is unreachable, check remote discovery (e.g. GitHub server.json)
-        val discoveredUrl = ServerDiscovery.fetchRemoteServerUrl()
-        if (!discoveredUrl.isNullOrBlank() && discoveredUrl != serverUrl) {
-            val fallbackResp = fetchVersionInfoDirect(discoveredUrl)
-            if (fallbackResp != null) {
-                return fallbackResp.copy(serverUrl = discoveredUrl)
-            }
-        }
-        return null
-    }
-
-    private fun fetchVersionInfoDirect(serverUrl: String): VersionResponse? {
-        val url = SyncConstants.versionUrl(serverUrl)
+        // Always discover the latest active server URL from GitHub first
+        val activeServerUrl = ServerDiscovery.fetchRemoteServerUrl() ?: serverUrl
+        val url = SyncConstants.versionUrl(activeServerUrl)
         return try {
             val request = Request.Builder()
                 .url(url)
@@ -46,7 +33,7 @@ object AppUpdateChecker {
             val root = JSONObject(jsonStr)
             val androidObj = root.optJSONObject("android")
             val desktopObj = root.optJSONObject("desktop")
-            val remoteServerUrl = root.optString("serverUrl", "").trim().ifBlank { null }
+            val remoteServerUrl = root.optString("serverUrl", "").trim().ifBlank { activeServerUrl }
 
             val androidInfo = androidObj?.let {
                 PlatformUpdateInfo(
