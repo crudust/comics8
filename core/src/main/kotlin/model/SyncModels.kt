@@ -20,10 +20,10 @@ data class SyncResult(
 )
 
 data class BackupStats(
-    val favoriteCount: Int,
-    val historyCount: Int,
-    val episodeCount: Int,
-    val settingCount: Int,
+    val favoriteCount: Int = 0,
+    val historyCount: Int = 0,
+    val episodeCount: Int = 0,
+    val settingCount: Int = 0,
 )
 
 data class BackupResult(
@@ -31,6 +31,8 @@ data class BackupResult(
     val message: String,
     val favoriteCount: Int = 0,
     val historyCount: Int = 0,
+    val episodeCount: Int = 0,
+    val settingCount: Int = 0,
 )
 
 data class SyncTombstone(

@@ -1,5 +1,9 @@
 import java.io.File
 import java.net.URI
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
 import java.util.zip.ZipInputStream
 
 plugins {
@@ -12,17 +16,17 @@ dependencies {
     implementation(project(":core"))
 
     implementation(compose.desktop.currentOs)
-    runtimeOnly("org.jetbrains.skiko:skiko-awt-runtime-windows-x64:0.8.18")
-    runtimeOnly("org.jetbrains.skiko:skiko-awt-runtime-macos-x64:0.8.18")
-    runtimeOnly("org.jetbrains.skiko:skiko-awt-runtime-macos-arm64:0.8.18")
+    runtimeOnly(libs.skiko.windows.x64)
+    runtimeOnly(libs.skiko.macos.x64)
+    runtimeOnly(libs.skiko.macos.arm64)
     implementation(compose.material3)
     implementation(compose.materialIconsExtended)
 
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.9.0")
-    implementation("org.xerial:sqlite-jdbc:3.47.1.0")
+    implementation(libs.coroutines.swing)
+    implementation(libs.sqlite)
 
-    testImplementation("junit:junit:4.13.2")
-    testImplementation("com.google.truth:truth:1.4.4")
+    testImplementation(libs.junit)
+    testImplementation(libs.truth)
 }
 
 compose.desktop {
@@ -39,7 +43,7 @@ compose.desktop {
                 "jdk.unsupported",
             )
             packageName = "Comics8"
-            packageVersion = "1.2.4"
+            packageVersion = "1.2.5"
             description = "Comics8 Monitor Desktop"
             macOS {
                 bundleID = "com.comics8.desktop"
@@ -62,6 +66,9 @@ abstract class PrepareWindowsJreTask : DefaultTask() {
     @get:Internal
     abstract val jreZip: RegularFileProperty
 
+    @get:Input
+    abstract val expectedSha256: Property<String>
+
     @TaskAction
     fun run() {
         val target = runtimeDir.get().asFile
@@ -71,37 +78,91 @@ abstract class PrepareWindowsJreTask : DefaultTask() {
             zip.parentFile.mkdirs()
             println("Downloading Adoptium Temurin 17 Windows x64 JRE...")
             val url = URI("https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.14%2B7/OpenJDK17U-jre_x64_windows_hotspot_17.0.14_7.zip").toURL()
-            url.openStream().use { input ->
-                zip.outputStream().use { output ->
-                    input.copyTo(output)
+            val partialZip = File(zip.parentFile, "${zip.name}.part")
+            partialZip.delete()
+            try {
+                url.openStream().use { input ->
+                    partialZip.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
                 }
+                verifySha256(partialZip)
+                moveReplacing(partialZip, zip)
+            } finally {
+                partialZip.delete()
             }
+        } else {
+            verifySha256(zip)
         }
 
         if (!File(target, "bin/javaw.exe").exists()) {
             println("Extracting Windows JRE runtime into ${target.absolutePath}...")
-            target.deleteRecursively()
-            target.mkdirs()
+            val staging = File(target.parentFile, "${target.name}.part")
+            staging.deleteRecursively()
+            staging.mkdirs()
 
-            ZipInputStream(zip.inputStream().buffered()).use { zis ->
-                var entry = zis.nextEntry
-                while (entry != null) {
-                    val entryPath = entry.name.substringAfter("/")
-                    if (entryPath.isNotEmpty()) {
-                        val outFile = File(target, entryPath)
-                        if (entry.isDirectory) {
-                            outFile.mkdirs()
-                        } else {
-                            outFile.parentFile.mkdirs()
-                            outFile.outputStream().use { fos ->
-                                zis.copyTo(fos)
+            try {
+                val stagingRoot = staging.toPath().toAbsolutePath().normalize()
+                ZipInputStream(zip.inputStream().buffered()).use { zis ->
+                    var entry = zis.nextEntry
+                    while (entry != null) {
+                        val entryPath = entry.name.replace('\\', '/').substringAfter('/')
+                        if (entryPath.isNotEmpty()) {
+                            val outPath = stagingRoot.resolve(entryPath).normalize()
+                            check(outPath.startsWith(stagingRoot)) {
+                                "Unsafe path in Windows JRE archive: ${entry.name}"
+                            }
+                            val outFile = outPath.toFile()
+                            if (entry.isDirectory) {
+                                outFile.mkdirs()
+                            } else {
+                                outFile.parentFile.mkdirs()
+                                outFile.outputStream().use { output ->
+                                    zis.copyTo(output)
+                                }
                             }
                         }
+                        zis.closeEntry()
+                        entry = zis.nextEntry
                     }
-                    zis.closeEntry()
-                    entry = zis.nextEntry
                 }
+                check(File(staging, "bin/javaw.exe").isFile) {
+                    "Downloaded Windows JRE archive does not contain bin/javaw.exe"
+                }
+                target.deleteRecursively()
+                moveReplacing(staging, target)
+            } finally {
+                staging.deleteRecursively()
             }
+        }
+    }
+
+    private fun verifySha256(file: File) {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().buffered().use { input ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        val actual = digest.digest().joinToString("") { "%02x".format(it) }
+        check(actual.equals(expectedSha256.get(), ignoreCase = true)) {
+            "Windows JRE checksum mismatch: expected ${expectedSha256.get()}, got $actual"
+        }
+    }
+
+    private fun moveReplacing(source: File, destination: File) {
+        try {
+            Files.move(
+                source.toPath(),
+                destination.toPath(),
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+        } catch (_: AtomicMoveNotSupportedException) {
+            Files.move(source.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING)
         }
     }
 }
@@ -111,6 +172,7 @@ val prepareWindowsJre = tasks.register<PrepareWindowsJreTask>("prepareWindowsJre
     description = "Downloads and extracts Adoptium Temurin OpenJDK 17 Windows x64 JRE into build/windows-runtime/runtime"
     runtimeDir.set(layout.buildDirectory.dir("windows-runtime/runtime"))
     jreZip.set(rootProject.layout.projectDirectory.file(".gradle/windows-jre-cache/temurin-jre-17-win-x64.zip"))
+    expectedSha256.set("d42f84605c8e27c38998b44ac493d1067abbe45be89969c935d71a858393405c")
 }
 
 val compileWindowsResource by tasks.registering(Exec::class) {

@@ -9,6 +9,7 @@ import com.comics8.core.model.ListingPage
 import com.comics8.core.model.OfflineEpisodeRef
 import com.comics8.core.model.ProgressDisplayMode
 import com.comics8.core.model.ReadDirection
+import com.comics8.core.model.RepositoryTransforms
 import com.comics8.core.model.SplitMode
 import com.comics8.core.model.ToonItem
 import com.comics8.core.model.ViewMode
@@ -20,7 +21,6 @@ import com.comics8.core.source.SourceAccess
 import com.comics8.core.source.SourceConfig
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
-import com.comics8.core.source.resolveSourceType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -30,6 +30,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.cancel
 
 class DesktopToonRepository(
     val client: ToonClient,
@@ -40,7 +41,7 @@ class DesktopToonRepository(
     private val sources: SourceRegistry,
     private val isSourceEnabled: (String) -> Boolean = { false },
     private val installedIds: () -> Set<String> = { sources.knownIds() },
-) {
+) : AutoCloseable {
     init {
         database.isSourceEnabled = isSourceEnabled
         database.installedIds = installedIds
@@ -55,35 +56,7 @@ class DesktopToonRepository(
     fun allSources() = sources.all()
 
     fun installedSources(): List<ComicSource> {
-        val ids = installedIds()
-        val all = sources.all()
-        val byId = all.associateBy { it.id }
-
-        val local = byId[WorkId.LOCAL_SOURCE]
-
-        val orderedStorage = ids.mapNotNull { id ->
-            if (id != WorkId.LOCAL_SOURCE) {
-                byId[id]?.takeIf { it.resolveSourceType().isStorage }
-            } else null
-        }
-        val remainingStorage = all.filter {
-            it.id in ids && it.resolveSourceType().isStorage && it.id != WorkId.LOCAL_SOURCE && it !in orderedStorage
-        }
-
-        val orderedOnline = ids.mapNotNull { id ->
-            byId[id]?.takeIf { !it.resolveSourceType().isStorage }
-        }
-        val remainingOnline = all.filter {
-            it.id in ids && !it.resolveSourceType().isStorage && it !in orderedOnline
-        }
-
-        return buildList {
-            if (local != null && local.id in ids) add(local)
-            addAll(orderedStorage)
-            addAll(remainingStorage)
-            addAll(orderedOnline)
-            addAll(remainingOnline)
-        }
+        return RepositoryTransforms.installedSources(sources.all(), installedIds())
     }
 
     fun activeSource(stored: String?): ComicSource? =
@@ -151,15 +124,10 @@ class DesktopToonRepository(
             }
         }
         val readMap = database.getReadEpisodesByToon(workId).associateBy { it.wrId }
-        val enriched = parsed.items.map { ep ->
-            val read = readMap[ep.wrId]
-            if (read != null) {
-                ep.copy(isRead = true, readAt = read.readAt, lastReadPage = read.lastPage)
-            } else {
-                ep
-            }
+        val readStates = readMap.mapValues { (_, read) ->
+            RepositoryTransforms.EpisodeReadState(read.readAt, read.lastPage)
         }
-        parsed.copy(items = enriched.distinctBy { it.wrId })
+        RepositoryTransforms.enrichEpisodePage(parsed, readStates)
     }
 
     suspend fun loadAllEpisodes(item: ToonItem): List<EpisodeItem> =
@@ -189,6 +157,10 @@ class DesktopToonRepository(
 
     private val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val activeSyncKeys = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    override fun close() {
+        syncScope.cancel()
+    }
 
     fun syncEpisodeCounts(
         items: List<ToonItem>,
@@ -251,18 +223,17 @@ class DesktopToonRepository(
 
     suspend fun fetchTotalEpisodes(item: ToonItem): Int = withContext(Dispatchers.IO) {
         val firstPage = loadEpisodes(item, 1)
-        if (firstPage.items.isEmpty()) return@withContext 0
         val lastP = firstPage.lastPage.coerceAtLeast(1)
-        if (lastP <= 1) {
-            return@withContext firstPage.items.size
+        if (firstPage.items.isEmpty() || lastP <= 1) {
+            return@withContext RepositoryTransforms.estimateTotalEpisodes(firstPage, 1)
         }
         val pageSize = sourceFor(item).episodePageSize
-        try {
-            val lastPageRes = loadEpisodes(item, lastP)
-            (lastP - 1) * pageSize + lastPageRes.items.size
+        val lastPageItemCount = try {
+            loadEpisodes(item, lastP).items.size
         } catch (_: Exception) {
-            (lastP - 1) * pageSize + firstPage.items.size
+            null
         }
+        RepositoryTransforms.estimateTotalEpisodes(firstPage, pageSize, lastPageItemCount)
     }
 
     suspend fun loadImages(episode: EpisodeItem, workId: WorkId? = null): List<String> = withContext(Dispatchers.IO) {
@@ -346,18 +317,16 @@ class DesktopToonRepository(
             }
         }
 
-        return items.map { item ->
-            val key = item.workId().storageKey()
-            val prev = existing[key]
-            val history = historyMap[key]
-            val isUpdated = prev != null && !item.updatedAt.isNullOrBlank() && prev.updatedAt != item.updatedAt
-            item.copy(
-                isNew = total > 0 && (prev == null || isUpdated),
-                isFavorite = key in favoriteKeys,
-                readProgress = history?.let { h ->
-                    formatReadProgress(item.sourceId, h.lastReadOrder, h.totalEpisodes, readCounts[key] ?: 0)
-                },
-            )
+        return RepositoryTransforms.applyListingFlags(
+            items = items,
+            seenCount = total,
+            favoriteKeys = favoriteKeys,
+            seenByKey = existing,
+            historyByKey = historyMap,
+            readCountsByKey = readCounts,
+            seenUpdatedAt = { it.updatedAt },
+        ) { item, history, readCount ->
+            formatReadProgress(item.sourceId, history.lastReadOrder, history.totalEpisodes, readCount)
         }
     }
 
@@ -400,22 +369,12 @@ class DesktopToonRepository(
 
     suspend fun getReaderSetting(workId: WorkId): DesktopReaderSetting? = withContext(Dispatchers.IO) {
         val setting = database.getReaderSetting(workId) ?: return@withContext null
-        val viewMode = try {
-            ViewMode.valueOf(setting.viewMode)
-        } catch (_: Exception) {
-            ViewMode.SINGLE
-        }
-        val direction = try {
-            ReadDirection.valueOf(setting.readDirection)
-        } catch (_: Exception) {
-            ReadDirection.RIGHT_TO_LEFT
-        }
-        val splitMode = try {
-            SplitMode.valueOf(setting.splitMode)
-        } catch (_: Exception) {
-            SplitMode.FIT
-        }
-        DesktopReaderSetting(viewMode, direction, splitMode)
+        val values = RepositoryTransforms.parseReaderSetting(
+            setting.viewMode,
+            setting.readDirection,
+            setting.splitMode,
+        )
+        DesktopReaderSetting(values.viewMode, values.readDirection, values.splitMode)
     }
 
     suspend fun saveReaderSetting(

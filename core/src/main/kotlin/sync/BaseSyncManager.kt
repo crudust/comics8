@@ -6,9 +6,11 @@ import com.comics8.core.model.SyncResult
 import com.comics8.core.model.SyncState
 import com.comics8.core.network.ToonClient
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,7 +34,7 @@ open class BaseSyncManager(
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
         .build(),
-) {
+) : AutoCloseable {
     protected val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var debounceJob: Job? = null
     private val inFlight = AtomicBoolean(false)
@@ -70,6 +72,11 @@ open class BaseSyncManager(
     }
 
     val syncState: StateFlow<SyncState> = _syncState.asStateFlow()
+
+    override fun close() {
+        debounceJob?.cancel()
+        scope.cancel()
+    }
 
     private fun applyProxyConfig(serverUrl: String, useProxy: Boolean) {
         toonClient?.proxyBaseUrl = SyncConstants.proxyBaseUrl(serverUrl)
@@ -178,21 +185,28 @@ open class BaseSyncManager(
                 .addComics8SyncHeaders(syncKey)
                 .post("{}".toRequestBody("application/json; charset=utf-8".toMediaType()))
                 .build()
-            val resp = client.newCall(req).execute()
-            if (!resp.isSuccessful) {
-                return@withContext PairRequestResult(
-                    false,
-                    message = if (resp.code == 404) "서버에서 페어링 기능이 지원되지 않습니다. 마스터 복구 키를 이용해주세요." else "페어링 코드 발급 실패 (${resp.code})"
-                )
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    return@withContext PairRequestResult(
+                        false,
+                        message = if (resp.code == 404) "서버에서 페어링 기능이 지원되지 않습니다. 마스터 복구 키를 이용해주세요." else "페어링 코드 발급 실패 (${resp.code})"
+                    )
+                }
+                val body = resp.body?.string().orEmpty()
+                val json = JSONObject(body)
+                val code = json.optString("code", "")
+                val expiresIn = if (json.has("expiresInSeconds")) {
+                    json.optInt("expiresInSeconds", 300)
+                } else {
+                    json.optInt("expiresIn", 300)
+                }
+                if (code.isBlank()) {
+                    return@withContext PairRequestResult(false, message = "서버 응답 오류")
+                }
+                PairRequestResult(true, code = code, expiresInSeconds = expiresIn)
             }
-            val body = resp.body?.string().orEmpty()
-            val json = JSONObject(body)
-            val code = json.optString("code", "")
-            val expiresIn = json.optInt("expiresIn", 300)
-            if (code.isBlank()) {
-                return@withContext PairRequestResult(false, message = "서버 응답 오류")
-            }
-            PairRequestResult(true, code = code, expiresInSeconds = expiresIn)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             PairRequestResult(false, message = e.localizedMessage ?: "서버 연결 오류")
         }
@@ -213,28 +227,28 @@ open class BaseSyncManager(
                 .url(confirmUrl)
                 .post(reqBody)
                 .build()
-            val resp = client.newCall(req).execute()
-            if (!resp.isSuccessful) {
-                return@withContext PairConfirmResult(
-                    success = false,
-                    message = if (resp.code == 400 || resp.code == 404) "유효하지 않거나 만료된 코드입니다." else "인증 실패 (${resp.code})"
-                )
-            }
-            val body = resp.body?.string().orEmpty()
-            val json = JSONObject(body)
-            val syncKey = json.optString("syncKey", "")
-            if (syncKey.isBlank()) {
-                return@withContext PairConfirmResult(false, message = json.optString("message", "인증 실패"))
+            val syncKey = client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    return@withContext PairConfirmResult(
+                        success = false,
+                        message = if (resp.code == 400 || resp.code == 404) "유효하지 않거나 만료된 코드입니다." else "인증 실패 (${resp.code})"
+                    )
+                }
+                val body = resp.body?.string().orEmpty()
+                val json = JSONObject(body)
+                json.optString("syncKey", "").also {
+                    if (it.isBlank()) {
+                        return@withContext PairConfirmResult(false, message = json.optString("message", "인증 실패"))
+                    }
+                }
             }
             storage.setPreference(SyncConstants.KEY_SYNC_KEY, syncKey)
             storage.setPreference(SyncConstants.KEY_LAST_SYNCED_AT, "0")
-            _syncState.value = _syncState.value.copy(
-                syncKey = syncKey,
-                lastSyncedAt = 0L,
-                syncMessage = "기기 연결 중...",
-            )
+            _syncState.value = _syncState.value.copy(syncKey = syncKey, lastSyncedAt = 0L, syncMessage = "기기 연결 중...")
             val pullRes = syncPullInternal(isSilent = false)
             PairConfirmResult(pullRes.success, syncKey = syncKey, message = if (pullRes.success) "기기 연결 및 데이터 가져오기 완료" else pullRes.message)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             PairConfirmResult(false, message = e.localizedMessage ?: "서버 연결 오류")
         }
@@ -295,23 +309,21 @@ open class BaseSyncManager(
                 .post(reqBody)
                 .build()
 
-            val resp = client.newCall(req).execute()
+            val json = client.newCall(req).execute().use { resp ->
+                // Fallback to legacy syncPull if delta is not supported
+                if (resp.code == 404) return@use null
 
-            // Fallback to legacy syncPull if delta is not supported
-            if (resp.code == 404) {
-                return@withContext syncPullInternal(isSilent)
-            }
-
-            if (!resp.isSuccessful) {
-                val err = "서버 응답 오류 (${resp.code})"
-                if (!isSilent) {
-                    _syncState.value = _syncState.value.copy(isSyncing = false, isSuccess = false, syncMessage = err)
+                if (!resp.isSuccessful) {
+                    val err = "서버 응답 오류 (${resp.code})"
+                    if (!isSilent) {
+                        _syncState.value = _syncState.value.copy(isSyncing = false, isSuccess = false, syncMessage = err)
+                    }
+                    return@withContext SyncResult(false, err)
                 }
-                return@withContext SyncResult(false, err)
+                JSONObject(resp.body?.string().orEmpty())
             }
+            if (json == null) return@withContext syncPullInternal(isSilent)
 
-            val body = resp.body?.string().orEmpty()
-            val json = JSONObject(body)
             val serverTime = json.optLong("serverTime", System.currentTimeMillis())
             val serverChanges = json.optJSONObject("changes") ?: JSONObject()
             val isPro = json.optBoolean("isPro", false)
@@ -334,6 +346,8 @@ open class BaseSyncManager(
                 syncMessage = msg,
             )
             SyncResult(true, msg, favCount, histCount)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             val err = "증분 동기화 실패: ${e.localizedMessage ?: "서버 연결 오류"}"
             if (!isSilent) {
@@ -360,17 +374,17 @@ open class BaseSyncManager(
                 .get()
                 .build()
 
-            val resp = client.newCall(req).execute()
-            if (!resp.isSuccessful) {
-                val err = "서버 응답 오류 (${resp.code})"
-                if (!isSilent) {
-                    _syncState.value = _syncState.value.copy(isSyncing = false, isSuccess = false, syncMessage = err)
+            val json = client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    val err = "서버 응답 오류 (${resp.code})"
+                    if (!isSilent) {
+                        _syncState.value = _syncState.value.copy(isSyncing = false, isSuccess = false, syncMessage = err)
+                    }
+                    return@withContext SyncResult(false, err)
                 }
-                return@withContext SyncResult(false, err)
+                JSONObject(resp.body?.string().orEmpty())
             }
 
-            val body = resp.body?.string().orEmpty()
-            val json = JSONObject(body)
             val serverTime = json.optLong("exportedAt", System.currentTimeMillis())
             val isPro = json.optBoolean("isPro", false)
 
@@ -388,6 +402,8 @@ open class BaseSyncManager(
                 syncMessage = msg,
             )
             SyncResult(true, msg, favCount, histCount)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             val err = "가져오기 실패: ${e.localizedMessage ?: "서버 연결 오류"}"
             if (!isSilent) {
@@ -414,15 +430,15 @@ open class BaseSyncManager(
                 .post(reqBody)
                 .build()
 
-            val resp = client.newCall(req).execute()
-            if (!resp.isSuccessful) {
-                val err = "서버 응답 오류 (${resp.code})"
-                _syncState.value = _syncState.value.copy(isSyncing = false, isSuccess = false, syncMessage = err)
-                return@withContext SyncResult(false, err)
+            val json = client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    val err = "서버 응답 오류 (${resp.code})"
+                    _syncState.value = _syncState.value.copy(isSyncing = false, isSuccess = false, syncMessage = err)
+                    return@withContext SyncResult(false, err)
+                }
+                JSONObject(resp.body?.string().orEmpty())
             }
 
-            val body = resp.body?.string().orEmpty()
-            val json = JSONObject(body)
             val isPro = json.optBoolean("isPro", false)
             val favCount = json.optInt("favorites", 0)
             val histCount = json.optInt("history", 0)
@@ -439,6 +455,8 @@ open class BaseSyncManager(
                 syncMessage = msg,
             )
             SyncResult(true, msg, favCount, histCount)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             val err = "올리기 실패: ${e.localizedMessage ?: "서버 연결 오류"}"
             _syncState.value = _syncState.value.copy(isSyncing = false, isSuccess = false, syncMessage = err)

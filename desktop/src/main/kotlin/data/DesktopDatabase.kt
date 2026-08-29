@@ -51,21 +51,74 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
     private inline fun <T> withTransaction(block: (Connection) -> T): T =
         withConnection { conn ->
             val previous = conn.autoCommit
-            conn.autoCommit = false
+            val ownsTransaction = previous
+            if (ownsTransaction) conn.autoCommit = false
             try {
                 val result = block(conn)
-                conn.commit()
+                if (ownsTransaction) conn.commit()
                 result
             } catch (e: Exception) {
-                try {
-                    conn.rollback()
-                } catch (_: Exception) {
+                if (ownsTransaction) {
+                    try {
+                        conn.rollback()
+                    } catch (_: Exception) {
+                    }
                 }
                 throw e
             } finally {
-                conn.autoCommit = previous
+                if (ownsTransaction) conn.autoCommit = previous
             }
         }
+
+    fun restoreBackup(
+        favorites: List<FavoriteRecord>,
+        history: List<ReadHistoryRecord>,
+        episodes: List<ReadEpisodeRecord>,
+        settings: List<ReaderSettingRecord>,
+    ) {
+        withTransaction {
+            saveAllFavorites(favorites)
+            saveAllHistory(history)
+            markAllEpisodesRead(episodes)
+            saveAllReaderSettings(settings)
+        }
+    }
+
+    fun applySyncBatch(
+        deletions: List<Pair<String, WorkId>>,
+        favorites: List<FavoriteRecord>,
+        history: List<ReadHistoryRecord>,
+        episodes: List<ReadEpisodeRecord>,
+        settings: List<ReaderSettingRecord>,
+    ) {
+        withTransaction {
+            deletions.forEach { (entityType, workId) ->
+                when (entityType) {
+                    "FAVORITE" -> deleteFavorite(workId)
+                    "HISTORY" -> deleteHistory(workId)
+                    "EPISODE" -> deleteReadEpisodesByToon(workId)
+                }
+            }
+            if (favorites.isNotEmpty()) saveAllFavorites(favorites)
+            if (history.isNotEmpty()) saveAllHistory(history)
+            if (episodes.isNotEmpty()) markAllEpisodesRead(episodes)
+            if (settings.isNotEmpty()) saveAllReaderSettings(settings)
+        }
+    }
+
+    fun getBackupStats(): DesktopBackupStats = withConnection { conn ->
+        fun count(table: String): Int = conn.createStatement().use { stmt ->
+            stmt.executeQuery("SELECT COUNT(*) FROM $table").use { rs ->
+                if (rs.next()) rs.getInt(1) else 0
+            }
+        }
+        DesktopBackupStats(
+            favoriteCount = count("favorites"),
+            historyCount = count("read_history"),
+            episodeCount = count("read_episodes"),
+            settingCount = count("reader_settings"),
+        )
+    }
 
     override fun close() {
         synchronized(connectionLock) {
@@ -351,6 +404,7 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
                 )
                 """.trimIndent(),
             )
+            stmt.execute("CREATE INDEX IF NOT EXISTS index_seen_toons_toonId ON seen_toons(toonId)")
             stmt.execute(
                 """
                 CREATE TABLE IF NOT EXISTS favorites (
@@ -366,6 +420,8 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
                 )
                 """.trimIndent(),
             )
+            stmt.execute("CREATE INDEX IF NOT EXISTS index_favorites_toonId ON favorites(toonId)")
+            stmt.execute("CREATE INDEX IF NOT EXISTS index_favorites_savedAt ON favorites(savedAt)")
             stmt.execute(
                 """
                 CREATE TABLE IF NOT EXISTS reader_settings (
@@ -382,6 +438,7 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
             if (!hasColumn(conn, "reader_settings", "splitMode")) {
                 stmt.execute("ALTER TABLE reader_settings ADD COLUMN splitMode TEXT DEFAULT 'FIT'")
             }
+            stmt.execute("CREATE INDEX IF NOT EXISTS index_reader_settings_updatedAt ON reader_settings(updatedAt)")
             stmt.execute(
                 """
                 CREATE TABLE IF NOT EXISTS read_episodes (
@@ -394,6 +451,8 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
                 )
                 """.trimIndent(),
             )
+            stmt.execute("CREATE INDEX IF NOT EXISTS index_read_episodes_toonId ON read_episodes(toonId)")
+            stmt.execute("CREATE INDEX IF NOT EXISTS index_read_episodes_readAt ON read_episodes(readAt)")
             stmt.execute(
                 """
                 CREATE TABLE IF NOT EXISTS read_history (
@@ -416,6 +475,8 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
                 )
                 """.trimIndent(),
             )
+            stmt.execute("CREATE INDEX IF NOT EXISTS index_read_history_toonId ON read_history(toonId)")
+            stmt.execute("CREATE INDEX IF NOT EXISTS index_read_history_lastReadAt ON read_history(lastReadAt)")
             stmt.execute(
                 """
                 CREATE TABLE IF NOT EXISTS tombstones (
@@ -426,6 +487,7 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
                 )
                 """.trimIndent(),
             )
+            stmt.execute("CREATE INDEX IF NOT EXISTS index_tombstones_deletedAt ON tombstones(deletedAt)")
             stmt.execute(
                 """
                 CREATE TABLE IF NOT EXISTS downloaded_episodes (

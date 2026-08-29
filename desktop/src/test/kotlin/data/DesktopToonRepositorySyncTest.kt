@@ -3,7 +3,10 @@ package com.comics8.desktop.data
 import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.EpisodePage
 import com.comics8.core.model.ListingPage
+import com.comics8.core.model.ReadDirection
+import com.comics8.core.model.SplitMode
 import com.comics8.core.model.ToonItem
+import com.comics8.core.model.ViewMode
 import com.comics8.core.network.ToonClient
 import com.comics8.core.source.ComicSource
 import com.comics8.core.source.RequestPolicy
@@ -186,5 +189,26 @@ class DesktopToonRepositorySyncTest {
 
         val refreshed = repository.refreshProgress(listOf(item))
         assertThat(refreshed.first().readProgress).isEqualTo("3/20")
+    }
+
+    @Test
+    fun getReaderSettingUsesSharedLegacyFallbacks() = runBlocking {
+        val workId = WorkId("test_source", "reader-setting-test")
+        db.saveReaderSetting(
+            ReaderSettingRecord(
+                sourceId = workId.sourceId,
+                toonId = workId.toonId,
+                viewMode = "SINGLE",
+                readDirection = "invalid",
+                splitMode = "invalid",
+                updatedAt = 1L,
+            ),
+        )
+
+        val setting = repository.getReaderSetting(workId)
+
+        assertThat(setting?.viewMode).isEqualTo(ViewMode.PAGE)
+        assertThat(setting?.readDirection).isEqualTo(ReadDirection.RIGHT_TO_LEFT)
+        assertThat(setting?.splitMode).isEqualTo(SplitMode.FIT)
     }
 }

@@ -114,3 +114,77 @@ interface SourceSettings {
     fun setNotificationEnabled(sourceId: String, enabled: Boolean) {}
     fun implementationOverride(sourceId: String): String? = null
 }
+
+interface SourcePreferenceStore {
+    fun contains(key: String): Boolean
+    fun getString(key: String): String?
+    fun putString(key: String, value: String)
+    fun remove(key: String)
+    fun getBoolean(key: String, default: Boolean): Boolean
+    fun putBoolean(key: String, value: Boolean)
+}
+
+/** Platform-neutral implementation; platform classes only adapt their native preference API. */
+class StoredSourceSettings(
+    private val store: SourcePreferenceStore,
+    private val languageFallback: (String) -> String? = { null },
+) : SourceSettings {
+    fun migrateIfNeeded() {
+        val result = SourcePrefs.migrateInstalled(raw(SourcePrefs.INSTALLED_KEY), storedActiveRaw())
+        if (result.wrote) {
+            setInstalledIds(result.installed)
+            store.putString(SourcePrefs.INSTALL_MIGRATED_KEY, "1")
+        }
+        if (result.activeId == null) store.remove(SourcePrefs.ACTIVE_SOURCE_KEY)
+        else if (storedActiveRaw() != result.activeId) setActiveSourceId(result.activeId)
+    }
+
+    override fun installedIds(): Set<String> =
+        SourcePrefs.withLocal(SourcePrefs.parseIdList(raw(SourcePrefs.INSTALLED_KEY)))
+
+    override fun setInstalledIds(ids: Set<String>) = store.putString(
+        SourcePrefs.INSTALLED_KEY,
+        SourcePrefs.formatIdList(SourcePrefs.withLocal(ids)),
+    )
+
+    override fun storedActiveRaw(): String? = raw(SourcePrefs.ACTIVE_SOURCE_KEY)
+
+    override fun activeSourceId(): String? =
+        SourcePrefs.resolveActiveId(storedActiveRaw(), installedIds()) ?: WorkId.LOCAL_SOURCE
+
+    override fun setActiveSourceId(id: String?) {
+        val value = id?.trim().orEmpty()
+        if (value.isEmpty()) store.remove(SourcePrefs.ACTIVE_SOURCE_KEY)
+        else store.putString(SourcePrefs.ACTIVE_SOURCE_KEY, value)
+    }
+
+    override fun language(sourceId: String): String? =
+        raw(SourcePrefs.languageKey(sourceId))?.ifBlank { null } ?: languageFallback(sourceId)
+
+    override fun setLanguage(sourceId: String, value: String) {
+        store.putString(SourcePrefs.languageKey(sourceId), value.ifBlank { languageFallback(sourceId).orEmpty() })
+    }
+
+    override fun libraryRoots(): List<String> =
+        SourcePrefs.parseIdList(raw(SourcePrefs.LIBRARY_ROOTS_KEY))
+
+    override fun setLibraryRoots(paths: List<String>) =
+        store.putString(SourcePrefs.LIBRARY_ROOTS_KEY, SourcePrefs.formatIdList(paths))
+
+    override fun progressDisplayMode(sourceId: String): ProgressDisplayMode =
+        ProgressDisplayMode.fromName(raw(SourcePrefs.progressDisplayModeKey(sourceId)), sourceId)
+
+    override fun setProgressDisplayMode(sourceId: String, mode: ProgressDisplayMode) =
+        store.putString(SourcePrefs.progressDisplayModeKey(sourceId), mode.name)
+
+    override fun isNotificationEnabled(sourceId: String): Boolean {
+        val key = SourcePrefs.notificationKey(sourceId)
+        return if (store.contains(key)) store.getBoolean(key, true) else true
+    }
+
+    override fun setNotificationEnabled(sourceId: String, enabled: Boolean) =
+        store.putBoolean(SourcePrefs.notificationKey(sourceId), enabled)
+
+    private fun raw(key: String): String? =
+        SourcePrefs.storedActiveRaw(store.contains(key), store.getString(key))
+}

@@ -3,6 +3,7 @@ package com.comics8.desktop.ui
 import com.comics8.core.model.BrowseTab
 import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.ReadDirection
+import com.comics8.core.model.ReaderDomain
 import com.comics8.core.model.SplitMode
 import com.comics8.core.model.ToonItem
 import com.comics8.core.model.ViewMode
@@ -110,10 +111,12 @@ data class DesktopUiState(
         get() = currentEpisode?.let { ep -> episodes.indexOfFirst { it.wrId == ep.wrId } } ?: -1
 
     val hasNextEpisode: Boolean
-        get() = (currentEpisodeIndex in 1 until episodes.size) || (currentEpisodeIndex == 0 && episodePage > 1)
+        get() = ReaderDomain.newerEpisode(currentEpisodeIndex, episodes.size, episodePage) !=
+            ReaderDomain.EpisodeNavigation.None
 
     val hasPrevEpisode: Boolean
-        get() = (currentEpisodeIndex in 0 until (episodes.size - 1)) || (currentEpisodeIndex == episodes.size - 1 && episodePage < episodeLastPage)
+        get() = ReaderDomain.olderEpisode(currentEpisodeIndex, episodes.size, episodePage, episodeLastPage) !=
+            ReaderDomain.EpisodeNavigation.None
 
     fun progressLabel(history: ReadHistoryRecord): String =
         sourceRegistry.formatReadProgress(

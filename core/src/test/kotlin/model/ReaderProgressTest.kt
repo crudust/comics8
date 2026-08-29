@@ -5,6 +5,13 @@ import org.junit.Test
 
 class ReaderProgressTest {
     @Test
+    fun completionRequiresSeeingLastImage() {
+        assertThat(ReaderProgress.isCompleted(totalImages = 10, seenThroughPage = 9)).isTrue()
+        assertThat(ReaderProgress.isCompleted(totalImages = 10, seenThroughPage = 8)).isFalse()
+        assertThat(ReaderProgress.isCompleted(totalImages = 0, seenThroughPage = 0)).isFalse()
+    }
+
+    @Test
     fun lastImageClearsSavedPage() {
         assertThat(ReaderProgress.persistPage(page = 9, totalImages = 10)).isEqualTo(0)
         assertThat(ReaderProgress.persistPage(page = 0, totalImages = 1)).isEqualTo(0)

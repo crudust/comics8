@@ -8,6 +8,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -16,6 +17,8 @@ import com.comics8.core.i18n.I18n
 import com.comics8.desktop.ui.theme.LocalStrings
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isAltPressed
@@ -24,7 +27,6 @@ import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.utf16CodePoint
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPlacement
@@ -52,6 +54,7 @@ import com.comics8.desktop.ui.components.TopBar
 import com.comics8.desktop.ui.history.HistoryPane
 import com.comics8.desktop.ui.reader.ReaderPane
 import com.comics8.desktop.ui.series.SeriesPane
+import org.jetbrains.skia.Image
 
 private val DarkColors = darkColorScheme(
     primary = Color(0xFFFFFFFF), // White
@@ -152,6 +155,16 @@ fun main() {
             )
         }
         val viewModel = remember { DesktopViewModel(repository, jsPackStore, networkSourceStore) }
+        DisposableEffect(viewModel) {
+            onDispose {
+                viewModel.close()
+                repository.close()
+                downloadManager.close()
+                syncManager.close()
+                database.close()
+                com.comics8.desktop.ui.util.DesktopImageCache.close()
+            }
+        }
         val state by viewModel.state.collectAsState()
         LaunchedEffect(Unit) {
             viewModel.onImportedPacksReady()
@@ -166,7 +179,7 @@ fun main() {
         Window(
             onCloseRequest = ::exitApplication,
             title = "Comics8",
-            icon = painterResource("icon.png"),
+            icon = rememberApplicationIcon(),
             state = windowState,
             onKeyEvent = { event ->
                 if (event.type == KeyEventType.KeyDown) {
@@ -208,6 +221,14 @@ fun main() {
             }
         }
     }
+}
+
+@Composable
+private fun rememberApplicationIcon(): BitmapPainter = remember {
+    val bytes = checkNotNull(object {}.javaClass.getResourceAsStream("/icon.png")) {
+        "Missing desktop application icon"
+    }.use { it.readBytes() }
+    Image.makeFromEncoded(bytes).use { BitmapPainter(it.toComposeImageBitmap()) }
 }
 
 @Composable
