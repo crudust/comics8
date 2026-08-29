@@ -36,9 +36,23 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (BuildConfig.IS_PLAY_STORE) {
+            com.comics8.monitor.data.PlayUpdateManager.resumeUpdateIfDownloaded(this)
+        }
+    }
+
     override fun onPause() {
         super.onPause()
         viewModel.onAppBackgrounded()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        if (BuildConfig.IS_PLAY_STORE) {
+            com.comics8.monitor.data.PlayUpdateManager.unregisterListener()
+        }
     }
 
     override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean {
