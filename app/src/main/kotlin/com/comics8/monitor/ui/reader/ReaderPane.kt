@@ -180,10 +180,15 @@ private fun ReaderScrollPane(
         }
     }
 
-    LaunchedEffect(state.readerImages, state.currentEpisode?.lastReadPage) {
-        val target = state.currentEpisode?.lastReadPage ?: 0
-        if (state.readerImages.isNotEmpty() && target > 0) {
-            listState.scrollToItem(target.coerceIn(0, state.readerImages.size - 1))
+    var restoredWrId by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.currentEpisode?.wrId, state.readerImages.isNotEmpty()) {
+        val wrId = state.currentEpisode?.wrId
+        if (wrId != null && wrId != restoredWrId && state.readerImages.isNotEmpty()) {
+            restoredWrId = wrId
+            val target = state.currentEpisode?.lastReadPage ?: 0
+            if (target > 0 && target != listState.firstVisibleItemIndex) {
+                listState.scrollToItem(target.coerceIn(0, state.readerImages.size - 1))
+            }
         }
     }
 
@@ -611,19 +616,47 @@ private fun ReaderDualPagePane(
         }
     }
 
-    LaunchedEffect(spreads, state.currentEpisode?.lastReadPage) {
-        val target = state.currentEpisode?.lastReadPage ?: 0
-        if (spreads.isNotEmpty() && target > 0) {
-            val idx = spreads.indexOfFirst { spread ->
-                when (spread) {
-                    is DualSpread.Single -> spread.index >= target
-                    is DualSpread.Dual -> spread.secondIndex >= target
+    var restoredWrId by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.currentEpisode?.wrId, state.readerImages.isNotEmpty()) {
+        val wrId = state.currentEpisode?.wrId
+        if (wrId != null && wrId != restoredWrId && state.readerImages.isNotEmpty()) {
+            restoredWrId = wrId
+            val target = state.currentEpisode?.lastReadPage ?: 0
+            if (target > 0) {
+                val idx = spreads.indexOfFirst { spread ->
+                    when (spread) {
+                        is DualSpread.Single -> spread.index >= target
+                        is DualSpread.Dual -> spread.secondIndex >= target
+                    }
+                }
+                if (idx in 0 until totalSpreads && idx != pagerState.currentPage) {
+                    pagerState.scrollToPage(idx)
                 }
             }
-            if (idx in 0 until totalSpreads) {
-                pagerState.scrollToPage(idx)
+        }
+    }
+
+    var prevSpreads by remember { mutableStateOf(spreads) }
+    if (spreads != prevSpreads) {
+        val oldSpread = prevSpreads.getOrNull(pagerState.currentPage)
+        if (oldSpread != null) {
+            val activeImage = when (oldSpread) {
+                is DualSpread.Single -> oldSpread.index
+                is DualSpread.Dual -> oldSpread.firstIndex
+            }
+            val newIdx = spreads.indexOfFirst { spread ->
+                when (spread) {
+                    is DualSpread.Single -> spread.index == activeImage
+                    is DualSpread.Dual -> spread.firstIndex == activeImage || spread.secondIndex == activeImage
+                }
+            }
+            if (newIdx >= 0 && newIdx != pagerState.currentPage) {
+                LaunchedEffect(newIdx) {
+                    pagerState.scrollToPage(newIdx.coerceIn(0, totalSpreads - 1))
+                }
             }
         }
+        prevSpreads = spreads
     }
 
     val onAdvance = {
