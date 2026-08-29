@@ -33,6 +33,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.comics8.core.i18n.AppLanguage
 import com.comics8.core.i18n.displayLabel
+import com.comics8.core.i18n.displayShortLabel
+import com.comics8.core.i18n.formatNotificationInterval
 import com.comics8.core.model.ReadDirection
 import com.comics8.monitor.BuildConfig
 import com.comics8.monitor.ui.ListingUiState
@@ -140,11 +142,12 @@ fun SettingsPane(
                 }
 
                 item {
-                    val dirText = if (state.readDirection == ReadDirection.RIGHT_TO_LEFT) strings.readDirectionRTLShort else strings.readDirectionLTRShort
+                    val dirText = state.readDirection.displayShortLabel(strings)
                     val tapZoneText = state.pageTapZone.displayLabel(strings)
+                    val viewModeText = state.viewMode.displayLabel(strings)
                     SettingsCategoryCard(
                         title = strings.sectionViewerSettings,
-                        summary = "${state.viewMode.label} · $dirText · $tapZoneText",
+                        summary = "$viewModeText · $dirText · $tapZoneText",
                         icon = Icons.AutoMirrored.Filled.MenuBook,
                         onClick = { viewModel.selectSettingsCategory(SettingsCategory.READER) },
                     )
@@ -152,7 +155,8 @@ fun SettingsPane(
 
                 item {
                     val notifSummary = if (state.notificationEnabled) {
-                        "${strings.labelPeriodicUpdateNotification} (${state.notificationIntervalMinutes}분)"
+                        val intervalText = formatNotificationInterval(state.notificationIntervalMinutes, strings)
+                        "${strings.labelPeriodicUpdateNotification} ($intervalText)"
                     } else {
                         strings.descNotificationSettings
                     }
