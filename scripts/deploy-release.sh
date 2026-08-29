@@ -122,9 +122,6 @@ SERVER_VERSION_FILE="${COMICS8_SERVER_VERSION_FILE:-/home/crudust/comics8-sync/d
 echo "📡 5/5: Uploading to Sync Server ($SERVER_HOST)..."
 if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=3 "${SERVER_USER}@${SERVER_HOST}" "mkdir -p ${SERVER_DOWNLOAD_DIR}" >/dev/null 2>&1; then
     scp "$APK_PATH" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/comics8-latest.apk"
-    if [ -f "$AAB_PATH" ]; then
-        scp "$AAB_PATH" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/comics8-play-release.aab"
-    fi
     if [ -f "$WIN_ZIP_PATH" ]; then
         scp "$WIN_ZIP_PATH" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/Comics8-win.zip"
     fi
@@ -142,7 +139,6 @@ android = {
     "versionCode": int(os.environ["COMICS8_VERSION_CODE"]),
     "versionName": os.environ["COMICS8_VERSION_NAME"],
     "downloadUrl": "/api/comics8/download/comics8-latest.apk",
-    "aabDownloadUrl": "/api/comics8/download/comics8-play-release.aab",
     "releaseNotes": os.environ["COMICS8_RELEASE_NOTES"],
 }
 desktop = {
@@ -162,12 +158,9 @@ else
     echo "  ⚠️ Sync server (${SERVER_HOST}) unreachable via SSH. Skipped server upload."
 fi
 
-# 6. Publish to GitHub Releases
+# 6. Publish to GitHub Releases (AAB is excluded from public release for security)
 echo "🐙 6/6: Publishing to GitHub Releases (crudust/comics8)..."
 RELEASE_FILES=("$APK_PATH#comics8-latest.apk")
-if [ -f "$AAB_PATH" ]; then
-    RELEASE_FILES+=("$AAB_PATH#comics8-play-release.aab")
-fi
 if [ -f "$WIN_ZIP_PATH" ]; then
     RELEASE_FILES+=("$WIN_ZIP_PATH")
 fi
@@ -187,6 +180,18 @@ else
       --notes "${RELEASE_NOTES}"
 fi
 
+# 7. Prune older releases (Keep only the latest 2 releases)
+echo "🧹 Pruning old releases (keeping latest 2)..."
+ALL_RELEASES=$(gh release list --repo crudust/comics8 --limit 100 --json tagName --jq '.[].tagName' 2>/dev/null || true)
+RELEASE_COUNT=0
+for r_tag in $ALL_RELEASES; do
+    RELEASE_COUNT=$((RELEASE_COUNT + 1))
+    if [ $RELEASE_COUNT -gt 2 ]; then
+        echo "  🗑️ Deleting older release: $r_tag..."
+        gh release delete "$r_tag" --repo crudust/comics8 --cleanup-tag -y >/dev/null 2>&1 || true
+    fi
+done
+
 # Generate Homebrew Cask Formula if Mac zip exists
 if [ -f "$MAC_ZIP_PATH" ]; then
     MAC_SHA256=$(sha256sum "$MAC_ZIP_PATH" | awk '{print $1}')
@@ -202,12 +207,11 @@ fi
 
 echo "=================================================="
 echo "🎉 배포가 성공적으로 완료되었습니다!"
-echo "• Version Info:  https://homeassistant.tail1946af.ts.net/api/comics8/version"
 echo "• GitHub Release: https://github.com/crudust/comics8/releases/tag/${TAG_NAME}"
 echo "• Android APK:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/comics8-latest.apk"
-echo "• Android AAB:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/comics8-play-release.aab"
 echo "• Windows Zip:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/Comics8-win.zip"
 if [ -f "$MAC_ZIP_PATH" ]; then
     echo "• Mac Desktop:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/Comics8-mac.zip"
 fi
+echo "• Play Store AAB: ${AAB_PATH} (로컬 보관, 비공개 Play Console 전용)"
 echo "=================================================="
