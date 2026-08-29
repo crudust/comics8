@@ -23,6 +23,7 @@ import com.comics8.core.sync.AppUpdateChecker
 import com.comics8.core.sync.SyncConstants
 import com.comics8.core.sync.SyncActionCoordinator
 import com.comics8.desktop.DesktopVersion
+import com.comics8.desktop.ui.settings.SettingsCategory
 import com.comics8.desktop.data.DesktopSourcePrefs
 import com.comics8.desktop.data.DesktopToonRepository
 import com.comics8.desktop.data.DesktopUpdateManager
@@ -1565,11 +1566,19 @@ class DesktopViewModel(
     fun openSettings() {
         readerJob?.cancel()
         episodeJob?.cancel()
-        _state.update { it.copy(screen = Screen.Settings) }
+        _state.update { it.copy(screen = Screen.Settings, selectedSettingsCategory = null) }
+    }
+
+    fun selectSettingsCategory(category: SettingsCategory?) {
+        _state.update { it.copy(selectedSettingsCategory = category) }
     }
 
     fun closeSettings() {
-        _state.update { it.copy(screen = Screen.Browse) }
+        if (_state.value.selectedSettingsCategory != null) {
+            _state.update { it.copy(selectedSettingsCategory = null) }
+        } else {
+            _state.update { it.copy(screen = Screen.Browse) }
+        }
     }
 
     fun openSourceManager() {
