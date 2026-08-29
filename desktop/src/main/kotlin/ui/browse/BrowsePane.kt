@@ -58,6 +58,7 @@ import com.comics8.desktop.ui.components.ErrorPane
 import com.comics8.desktop.ui.components.LoadingPane
 import com.comics8.desktop.ui.components.sourceChipLabel
 import com.comics8.desktop.ui.theme.LocalStrings
+import com.comics8.desktop.ui.theme.MonochromeTheme
 import com.comics8.desktop.ui.util.DesktopAsyncImage
 
 @Composable
@@ -323,7 +324,7 @@ fun ToonCard(
                 Icon(
                     imageVector = if (item.isFavorite) Icons.Filled.Star else Icons.Outlined.StarBorder,
                     contentDescription = if (item.isFavorite) strings.actionRemoveFavorite else strings.actionAddFavorite,
-                    tint = if (item.isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                    tint = if (item.isFavorite) MonochromeTheme.Gold else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))
                         .background(MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.82f))

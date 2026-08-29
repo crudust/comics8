@@ -1,12 +1,36 @@
 package com.comics8.core.sync
 
+import org.json.JSONObject
+
 object SyncConstants {
     const val KEY_SYNC_KEY = "sync_key"
     const val KEY_SERVER_URL = "sync_server_url"
     const val KEY_AUTO_SYNC = "sync_auto_enabled"
     const val KEY_LAST_SYNCED_AT = "sync_last_at"
     const val KEY_USE_SERVER_PROXY = "sync_use_server_proxy"
-    const val DEFAULT_SERVER_URL = "https://homeassistant.tail1946af.ts.net/api/comics8/sync"
+
+    const val REMOTE_DISCOVERY_URL = "https://raw.githubusercontent.com/crudust/comics8/main/server.json"
+
+    val DEFAULT_SERVER_URL: String by lazy {
+        loadBundledServerUrl()
+    }
+
+    private fun loadBundledServerUrl(): String {
+        return try {
+            val stream = SyncConstants::class.java.classLoader?.getResourceAsStream("server.json")
+            if (stream != null) {
+                val jsonStr = stream.bufferedReader().use { it.readText() }
+                val obj = JSONObject(jsonStr)
+                obj.optString("serverUrl").trim().ifBlank { fallbackUrl() }
+            } else {
+                fallbackUrl()
+            }
+        } catch (_: Exception) {
+            fallbackUrl()
+        }
+    }
+
+    private fun fallbackUrl(): String = ""
 
     fun generateSyncKey(): String {
         val chars = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
@@ -52,11 +76,17 @@ object SyncConstants {
         if (downloadPath.startsWith("http://") || downloadPath.startsWith("https://")) {
             return downloadPath
         }
-        val origin = if (serverUrl.startsWith("http://") || serverUrl.startsWith("https://")) {
+        val origin = try {
             val uri = java.net.URI(serverUrl)
-            "${uri.scheme}://${uri.authority}"
-        } else {
-            "https://homeassistant.tail1946af.ts.net"
+            if (uri.scheme != null && uri.authority != null) {
+                "${uri.scheme}://${uri.authority}"
+            } else {
+                val defUri = java.net.URI(DEFAULT_SERVER_URL)
+                "${defUri.scheme}://${defUri.authority}"
+            }
+        } catch (_: Exception) {
+            val defUri = java.net.URI(DEFAULT_SERVER_URL)
+            "${defUri.scheme}://${defUri.authority}"
         }
         val cleaned = if (downloadPath.startsWith("/")) downloadPath else "/$downloadPath"
         return "$origin$cleaned"

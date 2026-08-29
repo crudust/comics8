@@ -66,6 +66,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.comics8.core.i18n.AppLanguage
@@ -705,7 +706,7 @@ fun SettingsPane(
                                             label = { Text(strings.labelProxyHost) },
                                             placeholder = { Text("127.0.0.1") },
                                             singleLine = true,
-                                            modifier = Modifier.weight(2f),
+                                            modifier = Modifier.weight(2.5f),
                                         )
                                         OutlinedTextField(
                                             value = customPort,
@@ -721,32 +722,30 @@ fun SettingsPane(
                                         )
                                     }
 
-                                    // Username & Password
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    // Username
+                                    OutlinedTextField(
+                                        value = customUser,
+                                        onValueChange = {
+                                            customUser = it
+                                            viewModel.setCustomProxy(net.customProxy.copy(username = it))
+                                        },
+                                        label = { Text(strings.labelProxyUser) },
+                                        singleLine = true,
                                         modifier = Modifier.fillMaxWidth(),
-                                    ) {
-                                        OutlinedTextField(
-                                            value = customUser,
-                                            onValueChange = {
-                                                customUser = it
-                                                viewModel.setCustomProxy(net.customProxy.copy(username = it))
-                                            },
-                                            label = { Text(strings.labelProxyUser) },
-                                            singleLine = true,
-                                            modifier = Modifier.weight(1f),
-                                        )
-                                        OutlinedTextField(
-                                            value = customPass,
-                                            onValueChange = {
-                                                customPass = it
-                                                viewModel.setCustomProxy(net.customProxy.copy(password = it))
-                                            },
-                                            label = { Text(strings.labelProxyPassword) },
-                                            singleLine = true,
-                                            modifier = Modifier.weight(1f),
-                                        )
-                                    }
+                                    )
+
+                                    // Password
+                                    OutlinedTextField(
+                                        value = customPass,
+                                        onValueChange = {
+                                            customPass = it
+                                            viewModel.setCustomProxy(net.customProxy.copy(password = it))
+                                        },
+                                        label = { Text(strings.labelProxyPassword) },
+                                        singleLine = true,
+                                        visualTransformation = PasswordVisualTransformation(),
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
 
                                     // Test Connection Button & Result
                                     Row(

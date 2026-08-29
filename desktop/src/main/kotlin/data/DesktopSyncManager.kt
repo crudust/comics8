@@ -421,7 +421,7 @@ class DesktopSyncManager(
     client = client,
 ) {
     companion object {
-        const val DEFAULT_SERVER_URL = SyncConstants.DEFAULT_SERVER_URL
+        val DEFAULT_SERVER_URL: String get() = SyncConstants.DEFAULT_SERVER_URL
         const val KEY_SYNC_KEY = SyncConstants.KEY_SYNC_KEY
         const val KEY_SERVER_URL = SyncConstants.KEY_SERVER_URL
         const val KEY_AUTO_SYNC = SyncConstants.KEY_AUTO_SYNC

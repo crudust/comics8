@@ -11,6 +11,7 @@ data class PlatformUpdateInfo(
 data class VersionResponse(
     val android: PlatformUpdateInfo? = null,
     val desktop: PlatformUpdateInfo? = null,
+    val serverUrl: String? = null,
 )
 
 data class AppUpdateState(
@@ -26,4 +27,5 @@ data class AppUpdateState(
     val downloadProgress: Float = 0f,
     val statusMessage: String? = null,
     val error: String? = null,
+    val newServerUrl: String? = null,
 )

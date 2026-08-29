@@ -82,6 +82,7 @@ import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
 import com.comics8.desktop.ui.Screen
 import com.comics8.desktop.ui.theme.LocalStrings
+import com.comics8.desktop.ui.theme.MonochromeTheme
 
 @Composable
 fun TopBar(
@@ -250,7 +251,7 @@ fun TopBar(
                         imageVector = if (state.seriesFavorited) Icons.Filled.Star else Icons.Outlined.StarBorder,
                         contentDescription = if (state.seriesFavorited) strings.actionRemoveFavorite else strings.actionAddFavorite,
                         tint = if (state.seriesFavorited) {
-                            MaterialTheme.colorScheme.primary
+                            MonochromeTheme.Gold
                         } else {
                             MaterialTheme.colorScheme.onBackground
                         },
