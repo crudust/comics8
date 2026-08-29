@@ -5,6 +5,7 @@ import com.comics8.core.model.BrowseTab
 import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.ProgressDisplayMode
 import com.comics8.core.model.ReadDirection
+import com.comics8.core.model.ReaderDomain
 import com.comics8.core.model.SplitMode
 import com.comics8.core.model.ToonItem
 import com.comics8.core.model.ViewMode
@@ -1088,7 +1089,7 @@ class DesktopViewModel(
                 refreshDownloadedWrIds()
                 if (result.items.isNotEmpty()) {
                     val lastP = result.lastPage.coerceAtLeast(1)
-                    val currP = result.currentPage.coerceIn(1, lastP)
+                    val currP = ReaderDomain.clampPage(result.currentPage, lastP)
                     val pageSize = repository.sourceOrNull(item.sourceId)?.episodePageSize ?: 100
 
                     val itemKey = item.workId().storageKey()
@@ -1254,13 +1255,13 @@ class DesktopViewModel(
 
     fun goToEpisodePage(page: Int) {
         val series = _state.value.series ?: return
-        val clamped = page.coerceIn(1, _state.value.episodeLastPage.coerceAtLeast(1))
+        val clamped = ReaderDomain.clampPage(page, _state.value.episodeLastPage)
         loadEpisodes(series, clamped)
     }
 
     fun goToPage(page: Int) {
         if (_state.value.tab?.paginated != true) return
-        val clamped = page.coerceIn(1, _state.value.lastPage.coerceAtLeast(1))
+        val clamped = ReaderDomain.clampPage(page, _state.value.lastPage)
         _state.update {
             it.copy(
                 items = emptyList(),
@@ -1883,9 +1884,7 @@ class DesktopViewModel(
                     readEp?.lastPage ?: 0
                 } else startPage
 
-                val predictedPage = if (item.totalEpisodes > item.lastReadOrder && item.totalEpisodes > 100) {
-                    ((item.totalEpisodes - item.lastReadOrder) / 100 + 1).coerceAtLeast(1)
-                } else 1
+                val predictedPage = ReaderDomain.predictedEpisodePage(item.totalEpisodes, item.lastReadOrder)
 
                 var epPage = repository.loadEpisodes(toon, predictedPage)
                 var targetEp = epPage.items.firstOrNull { it.wrId == item.lastWrId }
@@ -1952,9 +1951,7 @@ class DesktopViewModel(
         scope.launch {
             try {
                 val nextOrder = item.lastReadOrder + 1
-                val predictedPage = if (item.totalEpisodes > nextOrder && item.totalEpisodes > 100) {
-                    ((item.totalEpisodes - nextOrder) / 100 + 1).coerceAtLeast(1)
-                } else 1
+                val predictedPage = ReaderDomain.predictedEpisodePage(item.totalEpisodes, nextOrder)
 
                 val epPage = repository.loadEpisodes(toon, predictedPage)
                 _state.update {
@@ -2033,36 +2030,16 @@ class DesktopViewModel(
         lastViewedEpisode = episode
         val nowMs = System.currentTimeMillis()
         val episodes = current.episodes
-        val idx = episodes.indexOfFirst { it.wrId == episode.wrId }
-        val lastPage = current.episodeLastPage.coerceAtLeast(1)
-        val currentPage = current.episodePage.coerceIn(1, lastPage)
-        val pageSize = 100
-
         val seriesKey = series?.workId()?.storageKey().orEmpty()
-        val knownLastPageCount = toonLastPageCounts[seriesKey]
-        val knownTotalCount = toonTotalCounts[seriesKey]
-
-        val totalEpCount = when {
-            knownTotalCount != null && knownTotalCount > 0 -> knownTotalCount
-            lastPage <= 1 -> episodes.size.coerceAtLeast(1)
-            currentPage == lastPage && episodes.isNotEmpty() -> (lastPage - 1) * pageSize + episodes.size
-            knownLastPageCount != null -> (lastPage - 1) * pageSize + knownLastPageCount
-            else -> (lastPage - 1) * pageSize + episodes.size
-        }
-
-        val calculatedOrder = if (idx >= 0 && episodes.isNotEmpty()) {
-            val olderCount = if (currentPage == lastPage) {
-                0
-            } else {
-                val lastPageItems = knownLastPageCount ?: pageSize
-                val middlePagesCount = (lastPage - 1 - currentPage).coerceAtLeast(0) * pageSize
-                lastPageItems + middlePagesCount
-            }
-            val onPageOrder = (episodes.size - idx).coerceAtLeast(1)
-            (olderCount + onPageOrder).coerceIn(1, totalEpCount)
-        } else null
-
-        val nextEp = if (idx in 1 until episodes.size) episodes[idx - 1] else null
+        val position = ReaderDomain.episodePosition(
+            episodeIds = episodes.map(EpisodeItem::wrId),
+            currentEpisodeId = episode.wrId,
+            currentPage = current.episodePage,
+            lastPage = current.episodeLastPage,
+            knownLastPageCount = toonLastPageCounts[seriesKey],
+            knownTotalCount = toonTotalCounts[seriesKey],
+        )
+        val nextEp = position.nextEpisodeIndex?.let(episodes::get)
 
         _state.update { curr ->
             val updatedEpisodes = curr.episodes.map {
@@ -2094,11 +2071,11 @@ class DesktopViewModel(
                 repository.markEpisodeRead(series.workId(), episode.wrId, episode.lastReadPage)
                 val existingHistory = repository.getHistory(series.workId())
 
-                val finalOrder = calculatedOrder
+                val finalOrder = position.readOrder
                     ?: existingHistory?.lastReadOrder
                     ?: 1
 
-                val candidateTotal = if (totalEpCount > 1) totalEpCount else (existingHistory?.totalEpisodes ?: 1)
+                val candidateTotal = if (position.totalEpisodes > 1) position.totalEpisodes else (existingHistory?.totalEpisodes ?: 1)
                 val finalTotal = maxOf(candidateTotal, finalOrder, existingHistory?.totalEpisodes ?: 1)
 
                 val (progressText, readCount) = listingProgress(
@@ -2158,7 +2135,8 @@ class DesktopViewModel(
                 }
 
                 val initialRatios = mutableMapOf<Int, Float>()
-                val targetPage = episode.lastReadPage.coerceIn(0, images.size - 1)
+                val targetPage = ReaderDomain.initialImagePage(episode.lastReadPage, images.size)
+                    ?: return@launch
 
                 withContext(Dispatchers.IO) {
                     for (i in images.indices) {
@@ -2216,51 +2194,68 @@ class DesktopViewModel(
 
     fun openNextEpisode() {
         val current = _state.value
-        val idx = current.currentEpisodeIndex
-        if (idx in 1 until current.episodes.size) {
-            openEpisode(current.episodes[idx - 1])
-        } else if (idx == 0 && current.episodePage > 1) {
-            val series = current.series ?: return
-            val targetPage = current.episodePage - 1
-            scope.launch {
-                try {
-                    val result = repository.loadEpisodes(series, targetPage)
-                    _state.update {
-                        it.copy(
-                            episodes = result.items,
-                            episodePage = result.currentPage,
-                            episodeLastPage = result.lastPage,
-                        )
+        when (val navigation = ReaderDomain.newerEpisode(
+            currentIndex = current.currentEpisodeIndex,
+            itemCount = current.episodes.size,
+            currentPage = current.episodePage,
+        )) {
+            is ReaderDomain.EpisodeNavigation.InCurrentPage -> openEpisode(current.episodes[navigation.index])
+            is ReaderDomain.EpisodeNavigation.LoadPage -> {
+                val series = current.series ?: return
+                scope.launch {
+                    try {
+                        val result = repository.loadEpisodes(series, navigation.page)
+                        _state.update {
+                            it.copy(
+                                episodes = result.items,
+                                episodePage = result.currentPage,
+                                episodeLastPage = result.lastPage,
+                            )
+                        }
+                        val target = when (navigation.edge) {
+                            ReaderDomain.PageEdge.FIRST -> result.items.firstOrNull()
+                            ReaderDomain.PageEdge.LAST -> result.items.lastOrNull()
+                        }
+                        target?.let { openEpisode(it) }
+                    } catch (_: Exception) {
                     }
-                    result.items.lastOrNull()?.let { openEpisode(it) }
-                } catch (_: Exception) {
                 }
             }
+            ReaderDomain.EpisodeNavigation.None -> Unit
         }
     }
 
     fun openPrevEpisode() {
         val current = _state.value
-        val idx = current.currentEpisodeIndex
-        if (idx in 0 until (current.episodes.size - 1)) {
-            openEpisode(current.episodes[idx + 1])
-        } else if (idx == current.episodes.size - 1 && current.episodePage < current.episodeLastPage) {
-            val series = current.series ?: return
-            val targetPage = current.episodePage + 1
-            scope.launch {
-                try {
-                    val result = repository.loadEpisodes(series, targetPage)
-                    _state.update {
-                        it.copy(
-                            episodes = result.items,
-                            episodePage = result.currentPage,
-                            episodeLastPage = result.lastPage,
-                        )
+        when (val navigation = ReaderDomain.olderEpisode(
+            currentIndex = current.currentEpisodeIndex,
+            itemCount = current.episodes.size,
+            currentPage = current.episodePage,
+            lastPage = current.episodeLastPage,
+        )) {
+            is ReaderDomain.EpisodeNavigation.InCurrentPage -> openEpisode(current.episodes[navigation.index])
+            is ReaderDomain.EpisodeNavigation.LoadPage -> {
+                val series = current.series ?: return
+                scope.launch {
+                    try {
+                        val result = repository.loadEpisodes(series, navigation.page)
+                        _state.update {
+                            it.copy(
+                                episodes = result.items,
+                                episodePage = result.currentPage,
+                                episodeLastPage = result.lastPage,
+                            )
+                        }
+                        val target = when (navigation.edge) {
+                            ReaderDomain.PageEdge.FIRST -> result.items.firstOrNull()
+                            ReaderDomain.PageEdge.LAST -> result.items.lastOrNull()
+                        }
+                        target?.let { openEpisode(it) }
+                    } catch (_: Exception) {
                     }
-                    result.items.firstOrNull()?.let { openEpisode(it) }
-                } catch (_: Exception) {
                 }
             }
+            ReaderDomain.EpisodeNavigation.None -> Unit
         }
     }
 
@@ -2337,8 +2332,7 @@ class DesktopViewModel(
     }
 
     fun recordImageAspectRatio(index: Int, width: Int, height: Int) {
-        if (width <= 0 || height <= 0) return
-        val ratio = width.toFloat() / height.toFloat()
+        val ratio = ReaderDomain.imageAspectRatio(width, height) ?: return
         _state.update {
             it.copy(imageAspectRatios = it.imageAspectRatios + (index to ratio))
         }

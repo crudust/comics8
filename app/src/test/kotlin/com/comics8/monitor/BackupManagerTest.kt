@@ -1,6 +1,7 @@
 package com.comics8.monitor
 
 import com.comics8.core.source.WorkId
+import com.comics8.core.backup.BackupWireCodec
 import com.comics8.monitor.data.BackupJson
 import com.comics8.monitor.data.BackupManager
 import com.google.common.truth.Truth.assertThat
@@ -86,6 +87,11 @@ class BackupManagerTest {
         val set = root.getJSONArray("readerSettings").getJSONObject(0)
         assertThat(set.getString("viewMode")).isEqualTo("DUAL")
         assertThat(BackupJson.workId(set, preferId = false)).isEqualTo(WorkId.eleven("12345"))
+
+        val decoded = BackupWireCodec.decode(json, nowMillis = { 1700000000000 })
+        assertThat(decoded.favorites).hasSize(1)
+        assertThat(decoded.history[0].nextWrId).isNull()
+        assertThat(decoded.readerSettings[0].splitMode).isEqualTo("FIT")
     }
 
     @Test

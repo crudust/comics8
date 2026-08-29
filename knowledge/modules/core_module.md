@@ -19,3 +19,6 @@
 - **Dependency Invariant**:
   - `core` MUST NOT depend on Android framework (`android.*`) or Desktop Compose UI (`androidx.compose.*`).
   - Keep `core` completely agnostic to UI layers to allow pure Kotlin multiplatform/JVM compilation and headless unit testing.
+- **Cross-Platform Data Boundaries**:
+  - `BackupWireCodec` owns the local backup JSON v2 wire format and legacy-compatible decoding; Android Room and Desktop SQLite layers only map their persistence records to and from wire DTOs.
+  - `RepositoryTransforms` owns pure source ordering, episode enrichment/counting, listing flags, and persisted reader-setting parsing. Platform repositories retain database, filesystem, network, and coroutine ownership.

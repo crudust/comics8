@@ -18,3 +18,7 @@ Governs the comic/webtoon reading canvas across Android and Desktop platforms, i
   - Exact scroll offset / page index is recorded upon page turn and viewport settlement.
   - Emits progress events to `SyncManager` only when progress advances or user explicitly pauses reading.
   - Finished status is flagged when reaching the last page threshold.
+- **Shared Reader Decisions (`ReaderDomain.kt`)**:
+  - One-based page clamping, newest-first episode order/navigation, initial image position,
+    aspect-ratio validation, and dimension-based dual-mode selection are pure `core` decisions.
+  - Platform ViewModels own lifecycle, persistence, repository calls, and UI state mutation only.

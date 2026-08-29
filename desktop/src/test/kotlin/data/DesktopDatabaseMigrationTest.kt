@@ -183,6 +183,12 @@ class DesktopDatabaseMigrationTest {
             assertThat(hist[0].sourceId).isEqualTo("hitomi")
             assertThat(hist[0].lastEpisodeTitle).isEmpty()
             assertThat(hist[0].lastEpisodeHref).isEmpty()
+
+            val exported = org.json.JSONObject(DesktopBackupManager.createBackupJson(db))
+            assertThat(exported.getInt("version")).isEqualTo(2)
+            assertThat(exported.getJSONArray("favorites").getJSONObject(0).getString("sourceId"))
+                .isEqualTo("hitomi")
+            assertThat(exported.getJSONArray("history").getJSONObject(0).isNull("nextWrId")).isTrue()
         } finally {
             db.close()
         }

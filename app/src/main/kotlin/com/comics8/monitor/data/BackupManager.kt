@@ -1,14 +1,18 @@
 package com.comics8.monitor.data
 
+import com.comics8.core.backup.BackupEpisodeWire
+import com.comics8.core.backup.BackupFavoriteWire
+import com.comics8.core.backup.BackupHistoryWire
+import com.comics8.core.backup.BackupReaderSettingWire
+import com.comics8.core.backup.BackupWire
+import com.comics8.core.backup.BackupWireCodec
 import com.comics8.core.source.WorkId
-import com.comics8.core.sync.SyncWire
 import com.comics8.monitor.data.local.AppDatabase
 import com.comics8.monitor.data.local.FavoriteToon
 import com.comics8.monitor.data.local.ReadEpisode
 import com.comics8.monitor.data.local.ReadHistory
 import com.comics8.monitor.data.local.ReaderSetting
 import androidx.room.withTransaction
-import org.json.JSONArray
 import org.json.JSONObject
 
 data class BackupStats(
@@ -28,7 +32,7 @@ data class BackupRestoreResult(
 )
 
 object BackupManager {
-    const val BACKUP_VERSION = 2
+    const val BACKUP_VERSION = BackupWireCodec.VERSION
 
     suspend fun createBackupJson(database: AppDatabase): String {
         val favorites = database.favoriteDao().all()
@@ -36,160 +40,71 @@ object BackupManager {
         val episodes = database.readEpisodeDao().all()
         val settings = database.readerSettingDao().all()
 
-        val root = JSONObject()
-        root.put("version", BACKUP_VERSION)
-        root.put("appName", "Comics8")
-        root.put("exportedAt", System.currentTimeMillis())
-
-        val favArray = JSONArray()
-        favorites.forEach { f ->
-            val obj = JSONObject().apply {
-                put("id", f.id)
-                put("sourceId", f.sourceId)
-                put("title", f.title)
-                put("thumbUrl", f.thumbUrl)
-                put("href", f.href)
-                put("genre", f.genre)
-                put("updatedAt", f.updatedAt ?: JSONObject.NULL)
-                put("savedAt", f.savedAt)
-            }
-            favArray.put(obj)
-        }
-        root.put("favorites", favArray)
-
-        val histArray = JSONArray()
-        history.forEach { h ->
-            val obj = JSONObject().apply {
-                put("toonId", h.toonId)
-                put("sourceId", h.sourceId)
-                put("toonTitle", h.toonTitle)
-                put("toonThumbUrl", h.toonThumbUrl)
-                put("toonHref", h.toonHref)
-                put("lastWrId", h.lastWrId)
-                put("lastEpisodeTitle", h.lastEpisodeTitle)
-                put("lastEpisodeHref", h.lastEpisodeHref)
-                put("lastReadOrder", h.lastReadOrder)
-                put("totalEpisodes", h.totalEpisodes)
-                put("lastReadAt", h.lastReadAt)
-                put("nextWrId", h.nextWrId ?: JSONObject.NULL)
-                put("nextEpisodeTitle", h.nextEpisodeTitle ?: JSONObject.NULL)
-                put("nextEpisodeHref", h.nextEpisodeHref ?: JSONObject.NULL)
-                put("hasNew", h.hasNew)
-            }
-            histArray.put(obj)
-        }
-        root.put("history", histArray)
-
-        val epArray = JSONArray()
-        episodes.forEach { ep ->
-            val obj = JSONObject().apply {
-                put("toonId", ep.toonId)
-                put("sourceId", ep.sourceId)
-                put("wrId", ep.wrId)
-                put("readAt", ep.readAt)
-                put("lastPage", ep.lastPage)
-            }
-            epArray.put(obj)
-        }
-        root.put("readEpisodes", epArray)
-
-        val settingArray = JSONArray()
-        settings.forEach { s ->
-            val obj = JSONObject().apply {
-                put("toonId", s.toonId)
-                put("sourceId", s.sourceId)
-                put("viewMode", s.viewMode)
-                put("readDirection", s.readDirection)
-                put("splitMode", s.splitMode)
-                put("updatedAt", s.updatedAt)
-            }
-            settingArray.put(obj)
-        }
-        root.put("readerSettings", settingArray)
-
-        return root.toString(2)
+        return BackupWireCodec.encode(
+            BackupWire(
+                exportedAt = System.currentTimeMillis(),
+                favorites = favorites.map { f ->
+                    BackupFavoriteWire(f.sourceId, f.id, title = f.title, thumbUrl = f.thumbUrl, href = f.href, genre = f.genre, updatedAt = f.updatedAt, savedAt = f.savedAt)
+                },
+                history = history.map { h ->
+                    BackupHistoryWire(h.sourceId, h.toonId, toonTitle = h.toonTitle, toonThumbUrl = h.toonThumbUrl, toonHref = h.toonHref, lastWrId = h.lastWrId, lastEpisodeTitle = h.lastEpisodeTitle, lastEpisodeHref = h.lastEpisodeHref, lastReadOrder = h.lastReadOrder, totalEpisodes = h.totalEpisodes, lastReadAt = h.lastReadAt, nextWrId = h.nextWrId, nextEpisodeTitle = h.nextEpisodeTitle, nextEpisodeHref = h.nextEpisodeHref, hasNew = h.hasNew)
+                },
+                readEpisodes = episodes.map { ep ->
+                    BackupEpisodeWire(ep.sourceId, ep.toonId, wrId = ep.wrId, readAt = ep.readAt, lastPage = ep.lastPage)
+                },
+                readerSettings = settings.map { s ->
+                    BackupReaderSettingWire(s.sourceId, s.toonId, viewMode = s.viewMode, readDirection = s.readDirection, splitMode = s.splitMode, updatedAt = s.updatedAt)
+                },
+            )
+        )
     }
 
     suspend fun restoreBackupJson(database: AppDatabase, jsonString: String): BackupRestoreResult {
         return try {
-            val root = JSONObject(jsonString)
-            val favArray = root.optJSONArray("favorites") ?: JSONArray()
-            val histArray = root.optJSONArray("history") ?: JSONArray()
-            val epArray = root.optJSONArray("readEpisodes") ?: JSONArray()
-            val settingArray = root.optJSONArray("readerSettings") ?: JSONArray()
-
-            val favorites = mutableListOf<FavoriteToon>()
-            for (i in 0 until favArray.length()) {
-                val obj = favArray.getJSONObject(i)
-                val workId = BackupJson.workId(obj, preferId = true) ?: continue
-                favorites.add(
+            val backup = BackupWireCodec.decode(jsonString)
+            val favorites = backup.favorites.mapNotNull { item ->
+                val workId = BackupWireCodec.workId(item.sourceId, item.id, item.toonId, preferId = true) ?: return@mapNotNull null
                     FavoriteToon(
                         sourceId = workId.sourceId,
                         id = workId.toonId,
-                        title = obj.getString("title"),
-                        thumbUrl = obj.optString("thumbUrl", ""),
-                        href = obj.optString("href", ""),
-                        genre = obj.optString("genre", ""),
-                        updatedAt = if (obj.isNull("updatedAt")) null else obj.getString("updatedAt"),
-                        savedAt = obj.optLong("savedAt", System.currentTimeMillis()),
-                    ),
-                )
+                        title = requireNotNull(item.title) { "Missing title" },
+                        thumbUrl = item.thumbUrl, href = item.href, genre = item.genre,
+                        updatedAt = item.updatedAt, savedAt = item.savedAt,
+                    )
             }
 
-            val history = mutableListOf<ReadHistory>()
-            for (i in 0 until histArray.length()) {
-                val obj = histArray.getJSONObject(i)
-                val workId = BackupJson.workId(obj, preferId = false) ?: continue
-                history.add(
+            val history = backup.history.mapNotNull { item ->
+                val workId = BackupWireCodec.workId(item.sourceId, item.id, item.toonId, preferId = false) ?: return@mapNotNull null
                     ReadHistory(
                         sourceId = workId.sourceId,
                         toonId = workId.toonId,
-                        toonTitle = obj.getString("toonTitle"),
-                        toonThumbUrl = obj.optString("toonThumbUrl", ""),
-                        toonHref = obj.optString("toonHref", ""),
-                        lastWrId = obj.getString("lastWrId"),
-                        lastEpisodeTitle = obj.getString("lastEpisodeTitle"),
-                        lastEpisodeHref = obj.optString("lastEpisodeHref", ""),
-                        lastReadOrder = obj.optInt("lastReadOrder", 1),
-                        totalEpisodes = obj.optInt("totalEpisodes", 1),
-                        lastReadAt = obj.optLong("lastReadAt", System.currentTimeMillis()),
-                        nextWrId = if (obj.isNull("nextWrId")) null else obj.getString("nextWrId"),
-                        nextEpisodeTitle = if (obj.isNull("nextEpisodeTitle")) null else obj.getString("nextEpisodeTitle"),
-                        nextEpisodeHref = if (obj.isNull("nextEpisodeHref")) null else obj.getString("nextEpisodeHref"),
-                        hasNew = obj.optBoolean("hasNew", false),
-                    ),
-                )
+                        toonTitle = requireNotNull(item.toonTitle) { "Missing toonTitle" },
+                        toonThumbUrl = item.toonThumbUrl, toonHref = item.toonHref,
+                        lastWrId = requireNotNull(item.lastWrId) { "Missing lastWrId" },
+                        lastEpisodeTitle = requireNotNull(item.lastEpisodeTitle) { "Missing lastEpisodeTitle" },
+                        lastEpisodeHref = item.lastEpisodeHref, lastReadOrder = item.lastReadOrder,
+                        totalEpisodes = item.totalEpisodes, lastReadAt = item.lastReadAt,
+                        nextWrId = item.nextWrId, nextEpisodeTitle = item.nextEpisodeTitle,
+                        nextEpisodeHref = item.nextEpisodeHref, hasNew = item.hasNew,
+                    )
             }
 
-            val episodes = mutableListOf<ReadEpisode>()
-            for (i in 0 until epArray.length()) {
-                val obj = epArray.getJSONObject(i)
-                val workId = BackupJson.workId(obj, preferId = false) ?: continue
-                episodes.add(
+            val episodes = backup.readEpisodes.mapNotNull { item ->
+                val workId = BackupWireCodec.workId(item.sourceId, item.id, item.toonId, preferId = false) ?: return@mapNotNull null
                     ReadEpisode(
-                        sourceId = workId.sourceId,
-                        toonId = workId.toonId,
-                        wrId = obj.getString("wrId"),
-                        readAt = obj.optLong("readAt", System.currentTimeMillis()),
-                        lastPage = obj.optInt("lastPage", 0),
-                    ),
-                )
+                        sourceId = workId.sourceId, toonId = workId.toonId,
+                        wrId = requireNotNull(item.wrId) { "Missing wrId" },
+                        readAt = item.readAt, lastPage = item.lastPage,
+                    )
             }
 
-            val settings = mutableListOf<ReaderSetting>()
-            for (i in 0 until settingArray.length()) {
-                val obj = settingArray.getJSONObject(i)
-                val workId = BackupJson.workId(obj, preferId = false) ?: continue
-                settings.add(
+            val settings = backup.readerSettings.mapNotNull { item ->
+                val workId = BackupWireCodec.workId(item.sourceId, item.id, item.toonId, preferId = false) ?: return@mapNotNull null
                     ReaderSetting(
-                        sourceId = workId.sourceId,
-                        toonId = workId.toonId,
-                        viewMode = obj.optString("viewMode", "SINGLE"),
-                        readDirection = obj.optString("readDirection", "RIGHT_TO_LEFT"),
-                        splitMode = obj.optString("splitMode", "FIT"),
-                        updatedAt = obj.optLong("updatedAt", System.currentTimeMillis()),
-                    ),
-                )
+                        sourceId = workId.sourceId, toonId = workId.toonId,
+                        viewMode = item.viewMode, readDirection = item.readDirection,
+                        splitMode = item.splitMode, updatedAt = item.updatedAt,
+                    )
             }
 
             database.withTransaction {
@@ -226,5 +141,10 @@ object BackupManager {
 }
 
 object BackupJson {
-    fun workId(obj: JSONObject, preferId: Boolean): WorkId? = SyncWire.workId(obj, preferId)
+    fun workId(obj: JSONObject, preferId: Boolean): WorkId? = BackupWireCodec.workId(
+        sourceId = if (obj.isNull("sourceId")) null else obj.optString("sourceId"),
+        id = if (obj.isNull("id")) null else obj.optString("id"),
+        toonId = if (obj.isNull("toonId")) null else obj.optString("toonId"),
+        preferId = preferId,
+    )
 }
