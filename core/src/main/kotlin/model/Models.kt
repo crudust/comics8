@@ -71,12 +71,7 @@ data class EpisodePage(
 enum class ViewMode(val label: String) {
     SCROLL("세로 스크롤"),
     PAGE("단면 페이지"),
-    DUAL("양쪽보기");
-
-    companion object {
-        // Alias for SINGLE
-        val SINGLE = PAGE
-    }
+    DUAL("양쪽보기"),
 }
 
 enum class ReadDirection(val label: String) {

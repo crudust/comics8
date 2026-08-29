@@ -101,7 +101,11 @@ object RepositoryTransforms {
         readDirection: String,
         splitMode: String,
     ): ReaderSettingValues = ReaderSettingValues(
-        viewMode = enumValueOrDefault(viewMode, ViewMode.SINGLE),
+        viewMode = when (viewMode.uppercase()) {
+            "SCROLL" -> ViewMode.SCROLL
+            "DUAL" -> ViewMode.DUAL
+            else -> ViewMode.PAGE
+        },
         readDirection = enumValueOrDefault(readDirection, ReadDirection.RIGHT_TO_LEFT),
         splitMode = enumValueOrDefault(splitMode, SplitMode.FIT),
     )

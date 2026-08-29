@@ -812,7 +812,7 @@ async def sync_pull(
 
 @router.post("/sync")
 @router.post("/api/comics8/sync")
-async def sync_push_legacy(
+async def sync_push_snapshot(
     request: Request,
     user_info: tuple[str, str] = Depends(get_sync_user),
     session: AsyncSession = Depends(get_db),
