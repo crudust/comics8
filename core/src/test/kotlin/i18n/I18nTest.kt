@@ -116,5 +116,27 @@ class I18nTest {
         assertThat(PageTapZone.FOLLOW_DIRECTION.displayDescription(ko)).isEqualTo("좌우/우좌 읽기 방향에 따라 다음 페이지 영역이 자동 변경됩니다.")
         assertThat(PageTapZone.RIGHT_NEXT.displayDescription(en)).isEqualTo("Always tap right for next page, tap left for previous page.")
         assertThat(PageTapZone.LEFT_NEXT.displayDescription(ja)).isEqualTo("常に左をタップすると次のページ、右をタップすると前のページに移動します。")
+
+        // ViewMode
+        assertThat(com.comics8.core.model.ViewMode.SCROLL.displayLabel(ko)).isEqualTo("세로 스크롤")
+        assertThat(com.comics8.core.model.ViewMode.SCROLL.displayLabel(en)).isEqualTo("Webtoon (Scroll)")
+        assertThat(com.comics8.core.model.ViewMode.SCROLL.displayLabel(ja)).isEqualTo("縦スクロール (Webtoon)")
+        assertThat(com.comics8.core.model.ViewMode.SCROLL.displayShortLabel(ko)).isEqualTo("스크롤")
+        assertThat(com.comics8.core.model.ViewMode.SCROLL.displayShortLabel(en)).isEqualTo("Scroll")
+
+        // ReadDirection
+        assertThat(com.comics8.core.model.ReadDirection.RIGHT_TO_LEFT.displayLabel(ko)).isEqualTo("오른쪽 → 왼쪽 (만화)")
+        assertThat(com.comics8.core.model.ReadDirection.RIGHT_TO_LEFT.displayShortLabel(ko)).isEqualTo("우→좌")
+        assertThat(com.comics8.core.model.ReadDirection.RIGHT_TO_LEFT.displayShortLabel(en)).isEqualTo("R → L")
+
+        // Notification Interval
+        assertThat(formatNotificationInterval(15L, ko)).isEqualTo("15분")
+        assertThat(formatNotificationInterval(60L, ko)).isEqualTo("1시간")
+        assertThat(formatNotificationInterval(60L, en)).isEqualTo("1 hour")
+        assertThat(formatNotificationInterval(60L, ja)).isEqualTo("1時間")
+        assertThat(formatNotificationInterval(180L, ko)).isEqualTo("3시간")
+        assertThat(formatNotificationInterval(180L, en)).isEqualTo("3 hours")
+        assertThat(formatNotificationInterval(1440L, ko)).isEqualTo("24시간")
+        assertThat(formatNotificationInterval(1440L, en)).isEqualTo("24 hours")
     }
 }

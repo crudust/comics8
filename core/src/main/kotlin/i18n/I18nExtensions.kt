@@ -3,6 +3,8 @@ package com.comics8.core.i18n
 import com.comics8.core.model.BrowseTab
 import com.comics8.core.model.PageTapZone
 import com.comics8.core.model.ProgressDisplayMode
+import com.comics8.core.model.ReadDirection
+import com.comics8.core.model.ViewMode
 import com.comics8.core.source.ComicSource
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.SourceType
@@ -76,3 +78,37 @@ fun PageTapZone.displayDescription(strings: AppStrings): String = when (this) {
     PageTapZone.RIGHT_NEXT -> strings.descPageTapZoneRightNext
     PageTapZone.LEFT_NEXT -> strings.descPageTapZoneLeftNext
 }
+
+fun ViewMode.displayLabel(strings: AppStrings): String = when (this) {
+    ViewMode.SCROLL -> strings.viewModeScroll
+    ViewMode.PAGE -> strings.viewModeSingleLong
+    ViewMode.DUAL -> strings.viewModeDualLong
+}
+
+fun ViewMode.displayShortLabel(strings: AppStrings): String = when (this) {
+    ViewMode.SCROLL -> strings.viewModeScrollShort
+    ViewMode.PAGE -> strings.viewModeSingleShort
+    ViewMode.DUAL -> strings.viewModeDualShort
+}
+
+fun ReadDirection.displayLabel(strings: AppStrings): String = when (this) {
+    ReadDirection.RIGHT_TO_LEFT -> strings.readDirectionRightToLeft
+    ReadDirection.LEFT_TO_RIGHT -> strings.readDirectionLeftToRight
+}
+
+fun ReadDirection.displayShortLabel(strings: AppStrings): String = when (this) {
+    ReadDirection.RIGHT_TO_LEFT -> strings.readDirectionRTLShort
+    ReadDirection.LEFT_TO_RIGHT -> strings.readDirectionLTRShort
+}
+
+fun formatNotificationInterval(minutes: Long, strings: AppStrings): String = when (minutes) {
+    15L -> strings.interval15m
+    30L -> strings.interval30m
+    60L -> strings.interval1h
+    180L -> strings.interval3h
+    360L -> strings.interval6h
+    720L -> strings.interval12h
+    1440L -> strings.interval24h
+    else -> "${minutes}m"
+}
+
