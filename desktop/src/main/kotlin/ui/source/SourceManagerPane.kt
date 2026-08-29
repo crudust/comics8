@@ -185,14 +185,12 @@ fun SourceManagerPane(
             // 최상단 고정 로컬 저장소
             if (localSource != null) {
                 item(key = localSource.id) {
-                    val currentMode = DesktopSourcePrefs.progressDisplayMode(localSource.id)
                     val subtitle = if (state.libraryRoots.isEmpty()) strings.noRegisteredFolders else strings.connectedFolderCount(state.libraryRoots.size)
 
                     SourceItemCard(
                         icon = Icons.Default.Folder,
                         title = localSource.displayTitle(strings),
                         subtitle = subtitle,
-                        modeLabel = currentMode.displayLabel(strings),
                         onClick = { selectedSourceForDetail = localSource },
                     )
                 }
@@ -207,7 +205,6 @@ fun SourceManagerPane(
                         onReorder = viewModel::reorderStorageSources,
                     ) { source, dragModifier, isDragging ->
                         val sType = source.resolveSourceType()
-                        val currentMode = DesktopSourcePrefs.progressDisplayMode(source.id)
                         val icon = if (sType == SourceType.SMB) Icons.Default.Dns else Icons.Default.Cloud
                         val subtitle = when (sType) {
                             SourceType.SMB -> {
@@ -225,7 +222,6 @@ fun SourceManagerPane(
                             icon = icon,
                             title = source.displayTitle(strings),
                             subtitle = subtitle,
-                            modeLabel = currentMode.displayLabel(strings),
                             onClick = { selectedSourceForDetail = source },
                             dragHandleModifier = dragModifier,
                             isDragging = isDragging,
@@ -262,13 +258,11 @@ fun SourceManagerPane(
                         val sType = source.resolveSourceType()
                         val icon = if (sType == SourceType.JS) Icons.Default.Description else Icons.Default.Language
                         val subtitle = sType.displayLabel(strings)
-                        val currentMode = DesktopSourcePrefs.progressDisplayMode(source.id)
 
                         SourceItemCard(
                             icon = icon,
                             title = source.displayTitle(strings),
                             subtitle = subtitle,
-                            modeLabel = currentMode.displayLabel(strings),
                             onClick = { selectedSourceForDetail = source },
                             dragHandleModifier = dragModifier,
                             isDragging = isDragging,
@@ -432,7 +426,6 @@ private fun SourceItemCard(
     icon: ImageVector,
     title: String,
     subtitle: String,
-    modeLabel: String,
     onClick: () -> Unit,
     dragHandleModifier: Modifier? = null,
     isDragging: Boolean = false,
@@ -517,36 +510,13 @@ private fun SourceItemCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Spacer(Modifier.height(2.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Text(
-                        text = subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f))
-                            .border(
-                                width = 0.5.dp,
-                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
-                                shape = RoundedCornerShape(6.dp),
-                            )
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                    ) {
-                        Text(
-                            text = modeLabel,
-                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        )
-                    }
-                }
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
 
             Spacer(Modifier.width(8.dp))
