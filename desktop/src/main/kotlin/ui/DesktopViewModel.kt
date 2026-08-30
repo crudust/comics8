@@ -969,11 +969,12 @@ class DesktopViewModel(
         loadJob = scope.launch {
             try {
                 val results = repository.search(q, sourceId)
+                repository.markSeen(results)
                 _state.update {
                     it.copy(
                         items = results,
                         loading = false,
-                        error = if (results.isEmpty()) "'$q' 검색 결과가 없습니다." else null,
+                        error = null,
                         scrollToTopTrigger = it.scrollToTopTrigger + 1,
                     )
                 }
@@ -983,7 +984,7 @@ class DesktopViewModel(
                 _state.update {
                     it.copy(
                         loading = false,
-                        error = e.localizedMessage ?: "검색에 실패했습니다.",
+                        error = humanError("검색에 실패했습니다.", e),
                     )
                 }
             }
@@ -2084,31 +2085,16 @@ class DesktopViewModel(
 
     fun openNextEpisode() {
         val current = _state.value
+        val series = current.series
         when (val navigation = ReaderDomain.newerEpisode(
             currentIndex = current.currentEpisodeIndex,
             itemCount = current.episodes.size,
             currentPage = current.episodePage,
         )) {
             is ReaderDomain.EpisodeNavigation.InCurrentPage -> openEpisode(current.episodes[navigation.index])
-            is ReaderDomain.EpisodeNavigation.LoadPage -> {
-                val series = current.series ?: return
+            is ReaderDomain.EpisodeNavigation.LoadPage -> if (series != null) {
                 scope.launch {
-                    try {
-                        val result = repository.loadEpisodes(series, navigation.page)
-                        _state.update {
-                            it.copy(
-                                episodes = result.items,
-                                episodePage = result.currentPage,
-                                episodeLastPage = result.lastPage,
-                            )
-                        }
-                        val target = when (navigation.edge) {
-                            ReaderDomain.PageEdge.FIRST -> result.items.firstOrNull()
-                            ReaderDomain.PageEdge.LAST -> result.items.lastOrNull()
-                        }
-                        target?.let { openEpisode(it) }
-                    } catch (_: Exception) {
-                    }
+                    navigateToEpisodePage(series, navigation.page, navigation.edge)
                 }
             }
             ReaderDomain.EpisodeNavigation.None -> Unit
@@ -2117,6 +2103,7 @@ class DesktopViewModel(
 
     fun openPrevEpisode() {
         val current = _state.value
+        val series = current.series
         when (val navigation = ReaderDomain.olderEpisode(
             currentIndex = current.currentEpisodeIndex,
             itemCount = current.episodes.size,
@@ -2124,28 +2111,57 @@ class DesktopViewModel(
             lastPage = current.episodeLastPage,
         )) {
             is ReaderDomain.EpisodeNavigation.InCurrentPage -> openEpisode(current.episodes[navigation.index])
-            is ReaderDomain.EpisodeNavigation.LoadPage -> {
-                val series = current.series ?: return
+            is ReaderDomain.EpisodeNavigation.LoadPage -> if (series != null) {
                 scope.launch {
-                    try {
-                        val result = repository.loadEpisodes(series, navigation.page)
-                        _state.update {
-                            it.copy(
-                                episodes = result.items,
-                                episodePage = result.currentPage,
-                                episodeLastPage = result.lastPage,
-                            )
-                        }
-                        val target = when (navigation.edge) {
-                            ReaderDomain.PageEdge.FIRST -> result.items.firstOrNull()
-                            ReaderDomain.PageEdge.LAST -> result.items.lastOrNull()
-                        }
-                        target?.let { openEpisode(it) }
-                    } catch (_: Exception) {
-                    }
+                    navigateToEpisodePage(series, navigation.page, navigation.edge)
                 }
             }
             ReaderDomain.EpisodeNavigation.None -> Unit
+        }
+    }
+
+    private suspend fun navigateToEpisodePage(
+        series: ToonItem,
+        page: Int,
+        edge: ReaderDomain.PageEdge,
+    ) {
+        try {
+            val result = repository.loadEpisodes(series, page)
+            val lastP = result.lastPage.coerceAtLeast(1)
+            val currP = ReaderDomain.clampPage(result.currentPage, lastP)
+            val pageSize = repository.sourceOrNull(series.sourceId)?.episodePageSize ?: 100
+            val seriesKey = series.workId().storageKey()
+
+            if (lastP <= 1) {
+                val exactTotal = result.items.size
+                toonTotalCounts[seriesKey] = exactTotal
+                toonLastPageCounts[seriesKey] = exactTotal
+            } else if (currP == lastP) {
+                val lastCount = result.items.size
+                toonLastPageCounts[seriesKey] = lastCount
+                val exactTotal = RepositoryTransforms.estimateTotalEpisodes(result, pageSize, lastCount)
+                toonTotalCounts[seriesKey] = exactTotal
+            } else {
+                val knownLast = toonLastPageCounts[seriesKey]
+                if (knownLast != null) {
+                    val exactTotal = RepositoryTransforms.estimateTotalEpisodes(result, pageSize, knownLast)
+                    toonTotalCounts[seriesKey] = exactTotal
+                }
+            }
+
+            _state.update {
+                it.copy(
+                    episodes = result.items,
+                    episodePage = result.currentPage,
+                    episodeLastPage = result.lastPage,
+                )
+            }
+            val target = when (edge) {
+                ReaderDomain.PageEdge.FIRST -> result.items.firstOrNull()
+                ReaderDomain.PageEdge.LAST -> result.items.lastOrNull()
+            }
+            target?.let { openEpisode(it) }
+        } catch (_: Exception) {
         }
     }
 
@@ -2286,7 +2302,18 @@ class DesktopViewModel(
         genre = "",
         updatedAt = null,
         sourceId = sourceId,
+        readProgress = repository.formatReadProgress(
+            sourceId = sourceId,
+            lastReadOrder = lastReadOrder,
+            totalEpisodes = totalEpisodes,
+            readCount = _state.value.readCounts[workId().storageKey()] ?: 0,
+        ),
     )
+
+    private fun humanError(prefix: String, e: Exception): String {
+        val detail = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
+        return "$prefix\n$detail"
+    }
 
     private fun clearCatalogCache(sourceId: String) {
         val stale = catalogCache.keys.filter { browseSourceId(it) == sourceId }

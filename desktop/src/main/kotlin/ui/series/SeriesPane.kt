@@ -42,18 +42,11 @@ import androidx.compose.ui.unit.sp
 import com.comics8.core.model.EpisodeItem
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
+import com.comics8.core.model.UpdateDates
 import com.comics8.desktop.ui.components.ErrorPane
 import com.comics8.desktop.ui.components.LoadingPane
 import com.comics8.desktop.ui.theme.LocalStrings
 import com.comics8.desktop.ui.util.DesktopAsyncImage
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-
-private fun formatReadDate(millis: Long): String {
-    val sdf = SimpleDateFormat("yy.MM.dd", Locale.getDefault())
-    return sdf.format(Date(millis))
-}
 
 @Composable
 fun SeriesPane(
@@ -268,7 +261,7 @@ fun EpisodeCard(
                     val readAt = episode.readAt
                     if (readAt != null) {
                         Text(
-                            text = formatReadDate(readAt),
+                            text = UpdateDates.formatEpoch(readAt),
                             style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                             modifier = Modifier.padding(top = 2.dp),

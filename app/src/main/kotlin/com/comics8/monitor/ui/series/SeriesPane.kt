@@ -47,16 +47,9 @@ import com.comics8.monitor.ui.theme.LocalStrings
 import com.comics8.monitor.ui.ListingUiState
 import com.comics8.monitor.ui.ListingViewModel
 import com.comics8.monitor.ui.components.ErrorPane
+import com.comics8.core.model.UpdateDates
 import com.comics8.monitor.ui.components.LoadingPane
 import com.comics8.monitor.ui.components.PageBar
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-
-private fun formatReadDate(millis: Long): String {
-    val sdf = SimpleDateFormat("yy.MM.dd", Locale.getDefault())
-    return sdf.format(Date(millis))
-}
 
 @Composable
 fun SeriesPane(
@@ -257,7 +250,7 @@ fun EpisodeRow(
                 val readAt = episode.readAt
                 if (readAt != null) {
                     Text(
-                        text = formatReadDate(readAt),
+                        text = UpdateDates.formatEpoch(readAt),
                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                         modifier = Modifier.padding(top = 2.dp),

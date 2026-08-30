@@ -39,6 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.comics8.core.i18n.AppStrings
+import com.comics8.core.i18n.formatRelativeTime
 import com.comics8.desktop.data.ReadHistoryRecord
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
@@ -47,9 +48,6 @@ import com.comics8.desktop.ui.components.EmptySourcePane
 import com.comics8.desktop.ui.components.ErrorPane
 import com.comics8.desktop.ui.components.LoadingPane
 import com.comics8.desktop.ui.theme.LocalStrings
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 @Composable
 fun HistoryPane(
@@ -255,22 +253,5 @@ fun HistoryItemCard(
                 }
             }
         }
-    }
-}
-
-private fun formatRelativeTime(timestamp: Long, strings: AppStrings): String {
-    if (timestamp <= 0) return ""
-    val diff = System.currentTimeMillis() - timestamp
-    val seconds = diff / 1000
-    val minutes = seconds / 60
-    val hours = minutes / 60
-    val days = hours / 24
-
-    return when {
-        minutes < 1 -> strings.timeJustNow
-        minutes < 60 -> strings.timeMinutesAgo(minutes)
-        hours < 24 -> strings.timeHoursAgo(hours)
-        days < 7 -> strings.timeDaysAgo(days)
-        else -> SimpleDateFormat("yyyy.MM.dd", Locale.getDefault()).format(Date(timestamp))
     }
 }

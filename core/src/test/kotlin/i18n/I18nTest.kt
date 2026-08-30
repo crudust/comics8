@@ -138,5 +138,14 @@ class I18nTest {
         assertThat(formatNotificationInterval(180L, en)).isEqualTo("3 hours")
         assertThat(formatNotificationInterval(1440L, ko)).isEqualTo("24시간")
         assertThat(formatNotificationInterval(1440L, en)).isEqualTo("24 hours")
+
+        // Relative Time Formatting
+        val baseMs = 1_000_000_000_000L
+        assertThat(formatRelativeTime(baseMs - 10_000L, ko, nowMs = baseMs)).isEqualTo("방금 전")
+        assertThat(formatRelativeTime(baseMs - 5 * 60_000L, ko, nowMs = baseMs)).isEqualTo("5분 전")
+        assertThat(formatRelativeTime(baseMs - 3 * 3600_000L, ko, nowMs = baseMs)).isEqualTo("3시간 전")
+        assertThat(formatRelativeTime(baseMs - 2 * 86400_000L, ko, nowMs = baseMs)).isEqualTo("2일 전")
+        assertThat(formatRelativeTime(baseMs - 10 * 86400_000L, ko, nowMs = baseMs)).isNotEmpty()
+        assertThat(formatRelativeTime(0L, ko, nowMs = baseMs)).isEmpty()
     }
 }

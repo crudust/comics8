@@ -43,6 +43,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.comics8.core.i18n.AppStrings
+import com.comics8.core.i18n.formatRelativeTime
 import com.comics8.core.model.DownloadedToonSummary
 import com.comics8.core.model.ToonItem
 import com.comics8.monitor.ui.theme.LocalStrings
@@ -51,8 +52,6 @@ import com.comics8.monitor.ui.ListingViewModel
 import com.comics8.monitor.ui.components.EmptySourcePane
 import com.comics8.monitor.ui.components.ErrorPane
 import com.comics8.monitor.ui.components.LoadingPane
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 @Composable
@@ -337,22 +336,5 @@ fun formatFileSize(bytes: Long): String {
         mb >= 1.0 -> String.format(Locale.US, "%.1f MB", mb)
         kb >= 1.0 -> String.format(Locale.US, "%.1f KB", kb)
         else -> "$bytes B"
-    }
-}
-
-private fun formatRelativeTime(timestamp: Long, strings: AppStrings): String {
-    if (timestamp <= 0) return ""
-    val diff = System.currentTimeMillis() - timestamp
-    val seconds = diff / 1000
-    val minutes = seconds / 60
-    val hours = minutes / 60
-    val days = hours / 24
-
-    return when {
-        minutes < 1 -> strings.timeJustNow
-        minutes < 60 -> strings.timeMinutesAgo(minutes)
-        hours < 24 -> strings.timeHoursAgo(hours)
-        days < 7 -> strings.timeDaysAgo(days)
-        else -> SimpleDateFormat("yyyy.MM.dd", Locale.getDefault()).format(Date(timestamp))
     }
 }
