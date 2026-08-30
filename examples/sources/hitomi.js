@@ -13,6 +13,18 @@ var source;
   var GALLERY_PREFIX = "gallery:";
   var SERIES_NS = { artist: true, series: true, character: true, group: true };
   var NAMESPACES = { language: true, type: true, female: true, male: true, tag: true, artist: true, series: true, character: true, group: true };
+  var EXCLUDED_IMAGE_HASHES = {
+    "d48185b927798950699899130d070961b6d0336fb0fa0d63e237c4c493cd58d7": true,
+    "87533c35d6658dcc792a2bbd0491e9dd3439f5bf1521aabe5d3089cab099be95": true,
+    "d0a9889842c04f64ba3e8a961b234693a48b1a9229665ce6c11f47fad0a35047": true,
+    "d97e692da6eea7545799610ea38a0805a28f1d49c007544e12d51acc2676761c": true,
+    "86e1619d413f090cb396e595706da0ee31a1e349c782e0edc6fa7429e0bb42f1": true,
+    "b27e783e21b995917a121c738683431431e05f95e9fc2abf3bb5c304b087a4e1": true,
+    "b5615f4c1663de9fc414e299dff2b5c3627440a4df2f6540a78fb22b51fd2e2d": true,
+    "3b9e0af962469ef2550d59de199c662ba6d291f986ecd0812715c2c7664903a6": true,
+    "f3618fd40ff4329e4c7304eaa2d036de37d89484e3d55dbd9479cd4f176f61e3": true,
+    "a263c82ea591691498a65686a58f5307660cdb3827e481e9b4fc6308cf694111": true
+  };
 
   var language = DEFAULT_LANG;
 
@@ -90,8 +102,10 @@ var source;
     for (var j = 0; j < rawFiles.length; j++) {
       var f = rawFiles[j];
       if (!f || !f.hash) continue;
+      var hashStr = String(f.hash).trim();
+      if (EXCLUDED_IMAGE_HASHES[hashStr]) continue;
       files.push({
-        hash: String(f.hash).trim(),
+        hash: hashStr,
         hasWebp: f.haswebp == null ? true : f.haswebp != 0,
         hasAvif: f.hasavif == null ? false : f.hasavif != 0
       });

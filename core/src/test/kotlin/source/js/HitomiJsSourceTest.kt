@@ -184,6 +184,46 @@ class HitomiJsSourceTest {
     }
 
     @Test
+    fun resolveImagesFiltersExcludedAdImages() = runBlocking<Unit> {
+        val gallery4151478 = """
+            var galleryinfo = {
+              "id": "4151478",
+              "title": "Yama kara no Okurimono | 산이 내려준 선물♥",
+              "type": "manga",
+              "date": "2026-08-27 21:51:00-05",
+              "artists": [{"artist": "soramame-san", "url": "/artist/soramame%2Dsan-all.html"}],
+              "files": [
+                {"hash": "c67d1a75aa9f5abee5f9c660d46e24b9abfeb1efe0974f7c8ec44bc6d7e7aefc", "name": "01_000.jpg", "hasavif": 1},
+                {"hash": "d97e692da6eea7545799610ea38a0805a28f1d49c007544e12d51acc2676761c", "name": "02_A.jpg", "hasavif": 1},
+                {"hash": "86e1619d413f090cb396e595706da0ee31a1e349c782e0edc6fa7429e0bb42f1", "name": "03_B.jpg", "hasavif": 1},
+                {"hash": "b27e783e21b995917a121c738683431431e05f95e9fc2abf3bb5c304b087a4e1", "name": "04_C.jpg", "hasavif": 1},
+                {"hash": "b5615f4c1663de9fc414e299dff2b5c3627440a4df2f6540a78fb22b51fd2e2d", "name": "05_D.jpg", "hasavif": 1},
+                {"hash": "3b9e0af962469ef2550d59de199c662ba6d291f986ecd0812715c2c7664903a6", "name": "06_E.jpg", "hasavif": 1},
+                {"hash": "f3618fd40ff4329e4c7304eaa2d036de37d89484e3d55dbd9479cd4f176f61e3", "name": "07_f.jpg", "hasavif": 1},
+                {"hash": "a263c82ea591691498a65686a58f5307660cdb3827e481e9b4fc6308cf694111", "name": "08_g.jpg", "hasavif": 1},
+                {"hash": "09f412d7e177b386f858a509ec8b583b6fb616bf47cd6f0a1880ccb0efaa2261", "name": "09_084_1_.jpg", "hasavif": 1}
+              ]
+            };
+        """.trimIndent()
+        val http = FakeHitomiHttp(extraFixtures = mapOf("4151478" to gallery4151478))
+        val source = loadHitomi()
+        val item = ToonItem(
+            id = "gallery:4151478",
+            title = "Yama kara no Okurimono",
+            thumbUrl = "",
+            href = "https://hitomi.la/galleries/4151478.html",
+            sourceId = "hitomi",
+            entryEpisodeId = "4151478",
+        )
+        val episode = source.loadEpisodes(item, 1, http).items.first { it.wrId == "4151478" }
+        val images = source.resolveImages(episode, item, http)
+        // 9 files minus 7 ad files = 2 content images
+        assertThat(images).hasSize(2)
+        assertThat(images[0]).contains("c67d1a75aa9f5abee5f9c660d46e24b9abfeb1efe0974f7c8ec44bc6d7e7aefc")
+        assertThat(images[1]).contains("09f412d7e177b386f858a509ec8b583b6fb616bf47cd6f0a1880ccb0efaa2261")
+    }
+
+    @Test
     fun searchBareArtistReturnsSeriesCard() = runBlocking<Unit> {
         val http = FakeHitomiHttp()
         val items = loadHitomi().search(SearchQuery("demo_artist"), http)
