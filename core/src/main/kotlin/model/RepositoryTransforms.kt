@@ -61,14 +61,29 @@ object RepositoryTransforms {
     )
 
     fun estimateTotalEpisodes(
+        lastPage: Int,
+        pageSize: Int,
+        lastPageItemCount: Int? = null,
+        fallbackCount: Int = 0,
+    ): Int {
+        val safeLast = lastPage.coerceAtLeast(1)
+        if (safeLast == 1) return lastPageItemCount ?: fallbackCount
+        val safePageSize = pageSize.coerceAtLeast(1)
+        return (safeLast - 1) * safePageSize + (lastPageItemCount ?: fallbackCount)
+    }
+
+    fun estimateTotalEpisodes(
         firstPage: EpisodePage,
         pageSize: Int,
         lastPageItemCount: Int? = null,
     ): Int {
         if (firstPage.items.isEmpty()) return 0
-        val lastPage = firstPage.lastPage.coerceAtLeast(1)
-        if (lastPage == 1) return firstPage.items.size
-        return (lastPage - 1) * pageSize + (lastPageItemCount ?: firstPage.items.size)
+        return estimateTotalEpisodes(
+            lastPage = firstPage.lastPage,
+            pageSize = pageSize,
+            lastPageItemCount = lastPageItemCount,
+            fallbackCount = firstPage.items.size,
+        )
     }
 
     fun <Seen, History> applyListingFlags(

@@ -70,6 +70,25 @@ class RepositoryTransformsTest {
                 pageSize = 20,
             ),
         ).isEqualTo(0)
+
+        // Unified overload tests (e.g. 11toon 2 pages with 100 on page 1 and 52 on page 2)
+        assertThat(
+            RepositoryTransforms.estimateTotalEpisodes(
+                lastPage = 2,
+                pageSize = 100,
+                lastPageItemCount = 52,
+                fallbackCount = 100,
+            ),
+        ).isEqualTo(152)
+
+        assertThat(
+            RepositoryTransforms.estimateTotalEpisodes(
+                lastPage = 1,
+                pageSize = 100,
+                lastPageItemCount = null,
+                fallbackCount = 42,
+            ),
+        ).isEqualTo(42)
     }
 
     @Test

@@ -6,6 +6,7 @@ import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.ProgressDisplayMode
 import com.comics8.core.model.ReadDirection
 import com.comics8.core.model.ReaderDomain
+import com.comics8.core.model.RepositoryTransforms
 import com.comics8.core.model.SplitMode
 import com.comics8.core.model.ToonItem
 import com.comics8.core.model.ViewMode
@@ -1110,147 +1111,36 @@ class DesktopViewModel(
                     val lastP = result.lastPage.coerceAtLeast(1)
                     val currP = ReaderDomain.clampPage(result.currentPage, lastP)
                     val pageSize = repository.sourceOrNull(item.sourceId)?.episodePageSize ?: 100
-
                     val itemKey = item.workId().storageKey()
+
                     if (lastP <= 1) {
                         val exactTotal = result.items.size
                         toonTotalCounts[itemKey] = exactTotal
                         toonLastPageCounts[itemKey] = exactTotal
-                        val existing = repository.getHistory(item.workId())
-                        if (existing != null) {
-                            val safeOrder = existing.lastReadOrder.coerceIn(0, exactTotal)
-                            val hasNew = safeOrder < exactTotal
-                            if (existing.totalEpisodes != exactTotal || existing.lastReadOrder != safeOrder || existing.hasNew != hasNew) {
-                                val updated = existing.copy(
-                                    totalEpisodes = exactTotal,
-                                    lastReadOrder = safeOrder,
-                                    hasNew = hasNew,
-                                )
-                                repository.saveHistory(updated)
-                                val (progressText, readCount) = listingProgress(
-                                    item.sourceId,
-                                    updated.lastReadOrder,
-                                    updated.totalEpisodes,
-                                    item.workId(),
-                                )
-                                _state.update { curr ->
-                                    val updatedItems = curr.items.map { row ->
-                                        if (row.workId() == item.workId()) row.copy(readProgress = progressText) else row
-                                    }
-                                    curr.copy(
-                                        items = updatedItems,
-                                        seriesHistory = if (curr.series?.workId() == item.workId()) updated else curr.seriesHistory,
-                                        readCounts = curr.readCounts.withCount(item.workId(), readCount),
-                                    )
-                                }
-                            }
-                        }
+                        updateHistoryAndProgress(item, exactTotal)
                     } else if (currP == lastP) {
-                        toonLastPageCounts[itemKey] = result.items.size
-                        val exactTotal = (lastP - 1) * pageSize + result.items.size
+                        val lastCount = result.items.size
+                        toonLastPageCounts[itemKey] = lastCount
+                        val exactTotal = RepositoryTransforms.estimateTotalEpisodes(result, pageSize, lastCount)
                         toonTotalCounts[itemKey] = exactTotal
-                        val existing = repository.getHistory(item.workId())
-                        if (existing != null) {
-                            val safeOrder = existing.lastReadOrder.coerceIn(0, exactTotal)
-                            val hasNew = safeOrder < exactTotal
-                            if (existing.totalEpisodes != exactTotal || existing.lastReadOrder != safeOrder || existing.hasNew != hasNew) {
-                                val updated = existing.copy(
-                                    totalEpisodes = exactTotal,
-                                    lastReadOrder = safeOrder,
-                                    hasNew = hasNew,
-                                )
-                                repository.saveHistory(updated)
-                                val (progressText, readCount) = listingProgress(
-                                    item.sourceId,
-                                    updated.lastReadOrder,
-                                    updated.totalEpisodes,
-                                    item.workId(),
-                                )
-                                _state.update { curr ->
-                                    val updatedItems = curr.items.map { row ->
-                                        if (row.workId() == item.workId()) row.copy(readProgress = progressText) else row
-                                    }
-                                    curr.copy(
-                                        items = updatedItems,
-                                        seriesHistory = if (curr.series?.workId() == item.workId()) updated else curr.seriesHistory,
-                                        readCounts = curr.readCounts.withCount(item.workId(), readCount),
-                                    )
-                                }
-                            }
-                        }
+                        updateHistoryAndProgress(item, exactTotal)
                     } else {
                         val knownLast = toonLastPageCounts[itemKey]
                         if (knownLast != null) {
-                            val exactTotal = (lastP - 1) * pageSize + knownLast
+                            val exactTotal = RepositoryTransforms.estimateTotalEpisodes(result, pageSize, knownLast)
                             toonTotalCounts[itemKey] = exactTotal
-                            val existing = repository.getHistory(item.workId())
-                            if (existing != null) {
-                                val safeOrder = existing.lastReadOrder.coerceIn(0, exactTotal)
-                                val hasNew = safeOrder < exactTotal
-                                if (existing.totalEpisodes != exactTotal || existing.lastReadOrder != safeOrder || existing.hasNew != hasNew) {
-                                    val updated = existing.copy(
-                                        totalEpisodes = exactTotal,
-                                        lastReadOrder = safeOrder,
-                                        hasNew = hasNew,
-                                    )
-                                    repository.saveHistory(updated)
-                                    val (progressText, readCount) = listingProgress(
-                                        item.sourceId,
-                                        updated.lastReadOrder,
-                                        updated.totalEpisodes,
-                                        item.workId(),
-                                    )
-                                    _state.update { curr ->
-                                        val updatedItems = curr.items.map { row ->
-                                            if (row.workId() == item.workId()) row.copy(readProgress = progressText) else row
-                                        }
-                                        curr.copy(
-                                            items = updatedItems,
-                                            seriesHistory = if (curr.series?.workId() == item.workId()) updated else curr.seriesHistory,
-                                            readCounts = curr.readCounts.withCount(item.workId(), readCount),
-                                        )
-                                    }
-                                }
-                            }
+                            updateHistoryAndProgress(item, exactTotal)
                         } else {
                             scope.launch(Dispatchers.IO) {
                                 try {
                                     val lastRes = repository.loadEpisodes(item, lastP)
                                     val lastCount = lastRes.items.size
                                     toonLastPageCounts[itemKey] = lastCount
-                                    val exactTotal = (lastP - 1) * pageSize + lastCount
+                                    val exactTotal = RepositoryTransforms.estimateTotalEpisodes(result, pageSize, lastCount)
                                     toonTotalCounts[itemKey] = exactTotal
-
-                                    val existing = repository.getHistory(item.workId())
-                                    if (existing != null) {
-                                        val safeOrder = existing.lastReadOrder.coerceIn(0, exactTotal)
-                                        val hasNew = safeOrder < exactTotal
-                                        if (existing.totalEpisodes != exactTotal || existing.lastReadOrder != safeOrder || existing.hasNew != hasNew) {
-                                            val updated = existing.copy(
-                                                totalEpisodes = exactTotal,
-                                                lastReadOrder = safeOrder,
-                                                hasNew = hasNew,
-                                            )
-                                            repository.saveHistory(updated)
-                                            val (progressText, readCount) = listingProgress(
-                                                item.sourceId,
-                                                updated.lastReadOrder,
-                                                updated.totalEpisodes,
-                                                item.workId(),
-                                            )
-                                            _state.update { curr ->
-                                                val updatedItems = curr.items.map { row ->
-                                                    if (row.workId() == item.workId()) row.copy(readProgress = progressText) else row
-                                                }
-                                                curr.copy(
-                                                    items = updatedItems,
-                                                    seriesHistory = if (curr.series?.workId() == item.workId()) updated else curr.seriesHistory,
-                                                    readCounts = curr.readCounts.withCount(item.workId(), readCount),
-                                                )
-                                            }
-                                        }
-                                    }
-                                } catch (_: Exception) {}
+                                    updateHistoryAndProgress(item, exactTotal)
+                                } catch (_: Exception) {
+                                }
                             }
                         }
                     }
@@ -1268,6 +1158,37 @@ class DesktopViewModel(
                         },
                     )
                 }
+            }
+        }
+    }
+
+    private suspend fun updateHistoryAndProgress(item: ToonItem, exactTotal: Int) {
+        if (exactTotal <= 0) return
+        val existing = repository.getHistory(item.workId()) ?: return
+        val safeOrder = existing.lastReadOrder.coerceIn(0, exactTotal)
+        val hasNew = safeOrder < exactTotal
+        if (existing.totalEpisodes != exactTotal || existing.lastReadOrder != safeOrder || existing.hasNew != hasNew) {
+            val updated = existing.copy(
+                totalEpisodes = exactTotal,
+                lastReadOrder = safeOrder,
+                hasNew = hasNew,
+            )
+            repository.saveHistory(updated)
+            val (progressText, readCount) = listingProgress(
+                item.sourceId,
+                updated.lastReadOrder,
+                updated.totalEpisodes,
+                item.workId(),
+            )
+            _state.update { curr ->
+                val updatedItems = curr.items.map { row ->
+                    if (row.workId() == item.workId()) row.copy(readProgress = progressText) else row
+                }
+                curr.copy(
+                    items = updatedItems,
+                    seriesHistory = if (curr.series?.workId() == item.workId()) updated else curr.seriesHistory,
+                    readCounts = curr.readCounts.withCount(item.workId(), readCount),
+                )
             }
         }
     }
@@ -2030,6 +1951,7 @@ class DesktopViewModel(
             lastPage = current.episodeLastPage,
             knownLastPageCount = toonLastPageCounts[seriesKey],
             knownTotalCount = toonTotalCounts[seriesKey],
+            pageSize = series?.let { repository.sourceOrNull(it.sourceId)?.episodePageSize } ?: 100,
         )
         val nextEp = position.nextEpisodeIndex?.let(episodes::get)
 
@@ -2068,7 +1990,12 @@ class DesktopViewModel(
                     ?: 1
 
                 val candidateTotal = if (position.totalEpisodes > 1) position.totalEpisodes else (existingHistory?.totalEpisodes ?: 1)
-                val finalTotal = maxOf(candidateTotal, finalOrder, existingHistory?.totalEpisodes ?: 1)
+                val finalTotal = when {
+                    existingHistory != null && existingHistory.totalEpisodes > 1 && (toonTotalCounts[seriesKey] == null && toonLastPageCounts[seriesKey] == null) ->
+                        maxOf(existingHistory.totalEpisodes, finalOrder)
+                    else ->
+                        maxOf(candidateTotal, finalOrder, existingHistory?.totalEpisodes ?: 1)
+                }
 
                 val (progressText, readCount) = listingProgress(
                     series.sourceId,

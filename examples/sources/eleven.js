@@ -128,9 +128,9 @@ var source = {
     for (var i = 0; i < nodes.length; i++) {
       var btn = nodes[i];
       var onclick = btn.attr("onclick");
-      var wrId = host.match(onclick, "wr_id=(\\d+)", 1) || btn.attr("data-episode-id").trim();
+      var wrId = host.match(onclick, "wr_id=(\\d+)", 1);
       var title = btn.textOf(".episode-title").trim();
-      if (!wrId || !title || seen[wrId]) continue;
+      if (!wrId || !title || title.indexOf("+value") >= 0 || seen[wrId]) continue;
       seen[wrId] = true;
 
       var dateText = btn.textOf(".free-date").replace(/\u00a0/g, " ");

@@ -370,17 +370,17 @@ class ToonRepository(
                                     readHistoryDao.get(workId)?.lastWrId == latestWrId
 
                                 val lastP = epPage.lastPage.coerceAtLeast(1)
-                                val exactTotal = if (lastP <= 1) {
-                                    epPage.items.size
-                                } else {
-                                    val pageSize = source.episodePageSize
+                                val pageSize = source.episodePageSize
+                                val lastPageItemCount = if (lastP > 1) {
                                     try {
-                                        val lastPageRes = loadEpisodes(item, lastP)
-                                        (lastP - 1) * pageSize + lastPageRes.items.size
+                                        loadEpisodes(item, lastP).items.size
                                     } catch (_: Exception) {
-                                        (lastP - 1) * pageSize + epPage.items.size
+                                        null
                                     }
+                                } else {
+                                    null
                                 }
+                                val exactTotal = RepositoryTransforms.estimateTotalEpisodes(epPage, pageSize, lastPageItemCount)
 
                                 var changed = false
                                 if (exactTotal > 0) {

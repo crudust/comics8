@@ -70,9 +70,11 @@ object ReaderDomain {
             knownTotalCount != null && knownTotalCount > 0 -> knownTotalCount
             safeLastPage <= 1 -> itemCount.coerceAtLeast(1)
             safeCurrentPage == safeLastPage && itemCount > 0 ->
-                (safeLastPage - 1) * pageSize + itemCount
-            knownLastPageCount != null -> (safeLastPage - 1) * pageSize + knownLastPageCount
-            else -> (safeLastPage - 1) * pageSize + itemCount
+                RepositoryTransforms.estimateTotalEpisodes(safeLastPage, pageSize, itemCount, itemCount)
+            knownLastPageCount != null ->
+                RepositoryTransforms.estimateTotalEpisodes(safeLastPage, pageSize, knownLastPageCount, itemCount)
+            else ->
+                RepositoryTransforms.estimateTotalEpisodes(safeLastPage, pageSize, null, itemCount)
         }.coerceAtLeast(1)
 
         val readOrder = if (currentIndex >= 0 && itemCount > 0) {

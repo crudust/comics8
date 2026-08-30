@@ -222,6 +222,29 @@ class ElevenJsSourceTest {
     }
 
     @Test
+    fun loadEpisodesIgnoresTemplateRows() {
+        runBlocking {
+            val html = """
+                <html>
+                <body>
+                <button class="episode is-series" onclick="location.href='./board.php?bo_table=toons&wr_id=100&stx=test&is=1'">
+                    <div class="episode-title">100화</div>
+                    <div class="free-date">26.08.30</div>
+                </button>
+                <button class="episode is-series" data-episode-id="999999" onclick="location.href='./board.php?bo_table=toons&wr_id='+value.id+'&stx='+value.name+'&is='+value.parent+'">
+                    <div class="episode-title">'+value.newsub+'</div>
+                </button>
+                </body>
+                </html>
+            """.trimIndent()
+            val page = loadEleven().loadEpisodes(item(), 1, RecordingHttp(html))
+            assertThat(page.items).hasSize(1)
+            assertThat(page.items.single().wrId).isEqualTo("100")
+            assertThat(page.items.single().title).isEqualTo("100화")
+        }
+    }
+
+    @Test
     fun resolveImagesFromJsArray() {
         runBlocking {
             val html = """
