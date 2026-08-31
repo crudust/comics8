@@ -27,6 +27,11 @@ enum class Screen {
     SourceManager,
 }
 
+data class ExternalReaderSession(
+    val filePath: String,
+    val returnScreen: Screen,
+)
+
 data class ArtistPickRequest(
     val item: ToonItem,
     val entryEpisodeId: String? = item.entryEpisodeId,
@@ -66,6 +71,7 @@ data class DesktopUiState(
     val imageAspectRatios: Map<Int, Float> = emptyMap(),
     val readerLoading: Boolean = false,
     val readerError: String? = null,
+    val externalReaderSession: ExternalReaderSession? = null,
     val viewMode: ViewMode = ViewMode.DUAL,
     val readDirection: ReadDirection = ReadDirection.RIGHT_TO_LEFT,
     val splitMode: SplitMode = SplitMode.FIT,

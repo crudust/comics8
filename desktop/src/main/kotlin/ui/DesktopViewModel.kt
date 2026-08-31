@@ -12,10 +12,13 @@ import com.comics8.core.model.SplitMode
 import com.comics8.core.model.ToonItem
 import com.comics8.core.model.ViewMode
 import com.comics8.core.source.ProgressDisplay
+import com.comics8.core.source.LocalImageUri
 import com.comics8.core.source.WorkId
 import com.comics8.core.source.js.JsPackStore
 import com.comics8.core.source.local.LibraryScanIndex
+import com.comics8.core.source.local.LocalWorkId
 import com.comics8.core.source.local.LocalSource
+import com.comics8.core.source.local.ZipImageNames
 import com.comics8.core.source.network.NetworkProtocol
 import com.comics8.core.source.network.NetworkSourceConfig
 import com.comics8.core.source.network.NetworkSourceStore
@@ -161,7 +164,9 @@ class DesktopViewModel(
         return when (current.screen) {
             Screen.Reader -> {
                 // 3단계(뷰어) -> 2단계(회차리스트)로 즉시 복귀
-                lastViewedEpisode = current.currentEpisode
+                if (current.externalReaderSession == null) {
+                    lastViewedEpisode = current.currentEpisode
+                }
                 closeReader()
                 true
             }
@@ -1962,6 +1967,7 @@ class DesktopViewModel(
             }
             curr.copy(
                 screen = Screen.Reader,
+                externalReaderSession = null,
                 currentEpisode = episode.copy(isRead = true, readAt = nowMs),
                 episodes = updatedEpisodes,
                 readerImages = emptyList(),
@@ -2036,11 +2042,51 @@ class DesktopViewModel(
         }
     }
 
-    private fun loadReaderImages(episode: EpisodeItem) {
+    fun openExternalArchive(file: File) {
+        val archive = try {
+            file.canonicalFile
+        } catch (_: Exception) {
+            file.absoluteFile
+        }
+        if (!archive.isFile || !ZipImageNames.isZipName(archive.name)) return
+
+        val current = _state.value
+        val returnScreen = current.externalReaderSession?.returnScreen ?: when (current.screen) {
+            Screen.Reader -> Screen.Series
+            else -> current.screen
+        }
+        if (current.externalReaderSession == null) flushPendingPageSave()
+        readerJob?.cancel()
+        DesktopImageCache.cancelPendingPreviews()
+        DesktopImageCache.clear(ImageCacheRole.READER)
+
+        val title = archive.name.substringBeforeLast('.', archive.name)
+        val episode = EpisodeItem(
+            wrId = archive.path,
+            title = title,
+            date = null,
+            thumbUrl = null,
+            href = LocalImageUri.fromFile(archive),
+        )
+        _state.update {
+            it.copy(
+                screen = Screen.Reader,
+                externalReaderSession = ExternalReaderSession(archive.path, returnScreen),
+                currentEpisode = episode,
+                readerImages = emptyList(),
+                imageAspectRatios = emptyMap(),
+                readerLoading = true,
+                readerError = null,
+            )
+        }
+        loadReaderImages(episode, WorkId.local(LocalWorkId.zip(archive)))
+    }
+
+    private fun loadReaderImages(episode: EpisodeItem, resolverWorkId: WorkId? = null) {
         readerJob?.cancel()
         readerJob = scope.launch {
             try {
-                val seriesWorkId = _state.value.series?.workId()
+                val seriesWorkId = resolverWorkId ?: _state.value.series?.workId()
                 val images = repository.loadImages(episode, seriesWorkId)
                 if (images.isEmpty()) {
                     _state.update {
@@ -2167,6 +2213,12 @@ class DesktopViewModel(
 
     fun savePage(page: Int, seenThroughPage: Int = page) {
         val current = _state.value
+        if (current.externalReaderSession != null) {
+            _state.update { state ->
+                state.copy(currentEpisode = state.currentEpisode?.copy(lastReadPage = page))
+            }
+            return
+        }
         val series = current.series ?: return
         val episode = current.currentEpisode ?: return
         val totalImages = current.readerImages.size
@@ -2209,6 +2261,7 @@ class DesktopViewModel(
 
     fun setViewMode(mode: ViewMode) {
         _state.update { it.copy(viewMode = mode) }
+        if (_state.value.externalReaderSession != null) return
         val series = _state.value.series ?: return
         val direction = _state.value.readDirection
         val split = _state.value.splitMode
@@ -2219,6 +2272,7 @@ class DesktopViewModel(
 
     fun setReadDirection(direction: ReadDirection) {
         _state.update { it.copy(readDirection = direction) }
+        if (_state.value.externalReaderSession != null) return
         val series = _state.value.series ?: return
         val mode = _state.value.viewMode
         val split = _state.value.splitMode
@@ -2229,6 +2283,7 @@ class DesktopViewModel(
 
     fun setSplitMode(mode: SplitMode) {
         _state.update { it.copy(splitMode = mode) }
+        if (_state.value.externalReaderSession != null) return
         val series = _state.value.series ?: return
         val modeVal = _state.value.viewMode
         val direction = _state.value.readDirection
@@ -2245,6 +2300,26 @@ class DesktopViewModel(
     }
 
     fun closeReader() {
+        val externalSession = _state.value.externalReaderSession
+        if (externalSession != null) {
+            pageSaveJob?.cancel()
+            pageSaveJob = null
+            pendingPageSave = null
+            readerJob?.cancel()
+            DesktopImageCache.clear(ImageCacheRole.READER)
+            _state.update {
+                it.copy(
+                    screen = externalSession.returnScreen,
+                    externalReaderSession = null,
+                    currentEpisode = null,
+                    readerImages = emptyList(),
+                    imageAspectRatios = emptyMap(),
+                    readerLoading = false,
+                    readerError = null,
+                )
+            }
+            return
+        }
         flushPendingPageSave()
         readerJob?.cancel()
         DesktopImageCache.clear(ImageCacheRole.READER)

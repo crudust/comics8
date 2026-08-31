@@ -85,6 +85,7 @@ private val DarkColors = darkColorScheme(
 fun main() {
     System.setProperty("apple.awt.application.appearance", "system")
     System.setProperty("apple.laf.useScreenMenuBar", "true")
+    DesktopOpenFileEvents.install()
 
     application {
         val jsPackStore = remember { JsPackStore.desktopDefault() }
@@ -156,7 +157,9 @@ fun main() {
         }
         val viewModel = remember { DesktopViewModel(repository, jsPackStore, networkSourceStore) }
         DisposableEffect(viewModel) {
+            val openFileRegistration = DesktopOpenFileEvents.listen(viewModel::openExternalArchive)
             onDispose {
+                openFileRegistration.close()
                 viewModel.close()
                 repository.close()
                 downloadManager.close()

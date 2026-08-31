@@ -49,6 +49,8 @@ compose.desktop {
                 bundleID = "com.comics8.desktop"
                 dockName = "Comics8"
                 iconFile.set(project.file("src/main/resources/icon.icns"))
+                fileAssociation("application/zip", "zip", "ZIP comic archive")
+                fileAssociation("application/vnd.comicbook+zip", "cbz", "Comic Book ZIP archive")
             }
             windows {
                 menuGroup = "Comics8"
