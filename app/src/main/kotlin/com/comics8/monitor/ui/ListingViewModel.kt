@@ -11,10 +11,12 @@ import com.comics8.core.model.AppUpdateState
 import com.comics8.core.model.ArtistRef
 import com.comics8.core.model.BrowseTab
 import com.comics8.core.model.EpisodeItem
+import com.comics8.core.model.EpisodeSortOrder
 import com.comics8.core.model.ProgressDisplayMode
 import com.comics8.core.model.ReadDirection
 import com.comics8.core.model.ReaderDomain
 import com.comics8.core.model.RepositoryTransforms
+import com.comics8.core.model.sortedWithOrder
 import com.comics8.core.model.SplitMode
 import com.comics8.core.model.ToonItem
 import com.comics8.core.model.ViewMode
@@ -80,6 +82,7 @@ data class ListingUiState(
     val screen: Screen = Screen.Browse,
     val series: ToonItem? = null,
     val episodes: List<EpisodeItem> = emptyList(),
+    val episodeSortOrder: EpisodeSortOrder = EpisodeSortOrder.NAME_ASC,
     val episodePage: Int = 1,
     val episodeLastPage: Int = 1,
     val episodeLoading: Boolean = false,
@@ -284,6 +287,16 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         _state.update { it.copy(appLanguage = language) }
     }
 
+    fun setEpisodeSortOrder(order: EpisodeSortOrder) {
+        sourceSettings.setEpisodeSortOrder(order)
+        _state.update { current ->
+            current.copy(
+                episodeSortOrder = order,
+                episodes = current.episodes.sortedWithOrder(order),
+            )
+        }
+    }
+
     private val _state = MutableStateFlow(
         ListingUiState(
             appLanguage = try {
@@ -308,6 +321,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             notificationEnabled = sourceSettings.globalNotificationEnabled(),
             notificationIntervalMinutes = sourceSettings.notificationIntervalMinutes(),
             hasNotificationPermission = androidx.core.app.NotificationManagerCompat.from(application).areNotificationsEnabled(),
+            episodeSortOrder = sourceSettings.episodeSortOrder(),
         ),
     )
     val state: StateFlow<ListingUiState> = _state.asStateFlow()
@@ -2525,13 +2539,14 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 com.comics8.core.model.EpisodePage(emptyList(), page, 1)
             }
             val hasLocal = local.items.isNotEmpty()
+            val sortOrder = _state.value.episodeSortOrder
             _state.update {
                 it.copy(
                     episodeLoading = !hasLocal && (it.episodes.isEmpty() || !asRefresh),
                     episodeError = null,
                     episodePage = if (hasLocal) 1 else page,
                     episodeLastPage = if (hasLocal) 1 else it.episodeLastPage,
-                    episodes = if (hasLocal) local.items else it.episodes,
+                    episodes = if (hasLocal) local.items.sortedWithOrder(sortOrder) else it.episodes,
                     refreshing = asRefresh,
                     showPageJump = false,
                 )
@@ -2543,7 +2558,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 val result = repository.loadEpisodes(item, page)
                 _state.update {
                     it.copy(
-                        episodes = result.items,
+                        episodes = result.items.sortedWithOrder(it.episodeSortOrder),
                         episodePage = result.currentPage,
                         episodeLastPage = result.lastPage,
                         episodeLoading = false,

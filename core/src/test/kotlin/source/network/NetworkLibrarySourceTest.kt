@@ -228,6 +228,21 @@ class NetworkLibrarySourceTest {
         }
     }
 
+    @Test
+    fun loadEpisodesPopulatesMtimeAndFormattedDate() = runBlocking {
+        val image = "page-data".toByteArray()
+        val zip = zipBytes("001.jpg", image)
+        val epochMs = 1718755200000L
+        val backend = MutableFs(zip, epochMs)
+        val config = testConfig("network-sort-test")
+        val source = NetworkLibrarySource(config, backend)
+        val listing = source.loadListing("LIBRARY", 1, ThrowingHttp)
+        val episodes = source.loadEpisodes(listing.items.single(), 1, ThrowingHttp)
+        val episode = episodes.items.single()
+        assertThat(episode.mtime).isEqualTo(epochMs)
+        assertThat(episode.date).isNotNull()
+    }
+
     private class FakeFs(private val zip: ByteArray, private val rootModifiedAt: Long = 0L) : NetworkFileSystem {
         var channelOpens = 0
         var listCalls = 0

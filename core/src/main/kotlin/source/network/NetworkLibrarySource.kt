@@ -81,12 +81,14 @@ class NetworkLibrarySource(
         val current = page.coerceIn(1, pageCount(work.episodes.size))
         return EpisodePage(
             work.episodes.drop((current - 1) * PAGE_SIZE).take(PAGE_SIZE).map { episode ->
+                val mtime = episode.revision.modifiedAtEpochMs.takeIf { it > 0L }
                 EpisodeItem(
                     wrId = encodeEpisode(episode),
                     title = episode.title,
-                    date = null,
+                    date = mtime?.let { com.comics8.core.model.UpdateDates.formatEpoch(it) },
                     thumbUrl = firstImageUrl(episode, EPISODE_THUMB_PX),
                     href = NetworkImageUri.encode(id, episode.path),
+                    mtime = mtime,
                 )
             },
             current,

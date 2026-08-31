@@ -4,10 +4,12 @@ import com.comics8.core.image.ImageCacheRole
 import com.comics8.core.model.ArtistRef
 import com.comics8.core.model.BrowseTab
 import com.comics8.core.model.EpisodeItem
+import com.comics8.core.model.EpisodeSortOrder
 import com.comics8.core.model.ProgressDisplayMode
 import com.comics8.core.model.ReadDirection
 import com.comics8.core.model.ReaderDomain
 import com.comics8.core.model.RepositoryTransforms
+import com.comics8.core.model.sortedWithOrder
 import com.comics8.core.model.SplitMode
 import com.comics8.core.model.ToonItem
 import com.comics8.core.model.ViewMode
@@ -78,6 +80,16 @@ class DesktopViewModel(
         _state.update { it.copy(appLanguage = language) }
     }
 
+    fun setEpisodeSortOrder(order: EpisodeSortOrder) {
+        DesktopSourcePrefs.setEpisodeSortOrder(order)
+        _state.update { current ->
+            current.copy(
+                episodeSortOrder = order,
+                episodes = current.episodes.sortedWithOrder(order),
+            )
+        }
+    }
+
     private val _state = MutableStateFlow(
         DesktopUiState(
             appLanguage = try {
@@ -86,6 +98,7 @@ class DesktopViewModel(
             } catch (_: Exception) {
                 AppLanguage.AUTO
             },
+            episodeSortOrder = DesktopSourcePrefs.episodeSortOrder(),
         ),
     )
     val state: StateFlow<DesktopUiState> = _state.asStateFlow()
@@ -1087,11 +1100,12 @@ class DesktopViewModel(
                 com.comics8.core.model.EpisodePage(emptyList(), page, 1)
             }
             val hasLocal = local.items.isNotEmpty()
+            val sortOrder = _state.value.episodeSortOrder
             _state.update {
                 it.copy(
                     episodeLoading = !hasLocal,
                     episodeError = null,
-                    episodes = if (hasLocal) local.items else it.episodes,
+                    episodes = if (hasLocal) local.items.sortedWithOrder(sortOrder) else it.episodes,
                     episodePage = if (hasLocal) 1 else it.episodePage,
                     episodeLastPage = if (hasLocal) 1 else it.episodeLastPage,
                 )
@@ -1103,7 +1117,7 @@ class DesktopViewModel(
                 val result = repository.loadEpisodes(item, page)
                 _state.update {
                     it.copy(
-                        episodes = result.items,
+                        episodes = result.items.sortedWithOrder(it.episodeSortOrder),
                         episodePage = result.currentPage,
                         episodeLastPage = result.lastPage,
                         episodeLoading = false,

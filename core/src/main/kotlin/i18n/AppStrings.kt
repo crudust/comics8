@@ -94,6 +94,12 @@ interface AppStrings {
     fun episodeItemCount(count: Int): String
     val sortOldestFirst: String
     val sortNewestFirst: String
+    val sortNameAsc: String
+    val sortNameDesc: String
+    val sortDateDesc: String
+    val sortDateAsc: String
+    val labelEpisodeSortOrder: String
+    val actionSortEpisodes: String
 
     // 5. Reader & Viewer
     val viewModeScroll: String

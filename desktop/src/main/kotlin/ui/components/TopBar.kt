@@ -75,6 +75,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.comics8.core.source.SourceRegistry
+import com.comics8.core.model.EpisodeSortOrder
 import com.comics8.core.model.ReadDirection
 import com.comics8.core.model.SplitMode
 import com.comics8.core.model.ViewMode
@@ -243,6 +244,92 @@ fun TopBar(
                             imageVector = Icons.Default.Download,
                             contentDescription = strings.titleOfflineDownload,
                             tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+                var showSortMenu by remember { mutableStateOf(false) }
+                Box {
+                    IconButton(onClick = { showSortMenu = true }) {
+                        Icon(
+                            imageVector = Icons.Default.SwapVert,
+                            contentDescription = strings.actionSortEpisodes,
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showSortMenu,
+                        onDismissRequest = { showSortMenu = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Text(strings.sortNameAsc)
+                                    if (state.episodeSortOrder == EpisodeSortOrder.NAME_ASC) {
+                                        Spacer(Modifier.width(8.dp))
+                                        Icon(Icons.Default.Check, contentDescription = null, Modifier.size(16.dp))
+                                    }
+                                }
+                            },
+                            onClick = {
+                                viewModel.setEpisodeSortOrder(EpisodeSortOrder.NAME_ASC)
+                                showSortMenu = false
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Text(strings.sortNameDesc)
+                                    if (state.episodeSortOrder == EpisodeSortOrder.NAME_DESC) {
+                                        Spacer(Modifier.width(8.dp))
+                                        Icon(Icons.Default.Check, contentDescription = null, Modifier.size(16.dp))
+                                    }
+                                }
+                            },
+                            onClick = {
+                                viewModel.setEpisodeSortOrder(EpisodeSortOrder.NAME_DESC)
+                                showSortMenu = false
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Text(strings.sortDateDesc)
+                                    if (state.episodeSortOrder == EpisodeSortOrder.DATE_DESC) {
+                                        Spacer(Modifier.width(8.dp))
+                                        Icon(Icons.Default.Check, contentDescription = null, Modifier.size(16.dp))
+                                    }
+                                }
+                            },
+                            onClick = {
+                                viewModel.setEpisodeSortOrder(EpisodeSortOrder.DATE_DESC)
+                                showSortMenu = false
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Text(strings.sortDateAsc)
+                                    if (state.episodeSortOrder == EpisodeSortOrder.DATE_ASC) {
+                                        Spacer(Modifier.width(8.dp))
+                                        Icon(Icons.Default.Check, contentDescription = null, Modifier.size(16.dp))
+                                    }
+                                }
+                            },
+                            onClick = {
+                                viewModel.setEpisodeSortOrder(EpisodeSortOrder.DATE_ASC)
+                                showSortMenu = false
+                            },
                         )
                     }
                 }
