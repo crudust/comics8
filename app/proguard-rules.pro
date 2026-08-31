@@ -11,3 +11,4 @@
 # SMBJ optional desktop-only authentication/event-filter integrations. Comics8 uses NTLM or anonymous SMB.
 -dontwarn javax.el.**
 -dontwarn org.ietf.jgss.**
+-dontwarn org.jetbrains.annotations.**
