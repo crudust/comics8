@@ -10,12 +10,10 @@ internal object DesktopOpenFileEvents {
     private var listener: ((File) -> Unit)? = null
 
     fun install() {
-        runCatching {
-            if (!Desktop.isDesktopSupported()) return@runCatching
-            val desktop = Desktop.getDesktop()
-            if (!desktop.isSupported(Desktop.Action.APP_OPEN_FILE)) return@runCatching
-            desktop.setOpenFileHandler { event -> accept(event.files) }
-        }
+        if (!Desktop.isDesktopSupported()) return
+        val desktop = Desktop.getDesktop()
+        if (!desktop.isSupported(Desktop.Action.APP_OPEN_FILE)) return
+        desktop.setOpenFileHandler { event -> accept(event.files) }
     }
 
     fun listen(onOpenFile: (File) -> Unit): AutoCloseable {
@@ -25,7 +23,7 @@ internal object DesktopOpenFileEvents {
                 while (pending.isNotEmpty()) add(pending.removeFirst())
             }
         }
-        queued.forEach(::dispatch)
+        queued.forEach(onOpenFile)
         return AutoCloseable {
             synchronized(lock) {
                 if (listener === onOpenFile) listener = null
@@ -40,12 +38,7 @@ internal object DesktopOpenFileEvents {
                 if (callback == null) pending.addLast(file)
                 callback
             }
-            current?.let { callback -> runCatching { callback(file) } }
+            current?.invoke(file)
         }
-    }
-
-    private fun dispatch(file: File) {
-        val current = synchronized(lock) { listener }
-        current?.let { callback -> runCatching { callback(file) } }
     }
 }

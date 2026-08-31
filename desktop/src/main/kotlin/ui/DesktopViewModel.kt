@@ -14,13 +14,13 @@ import com.comics8.core.model.SplitMode
 import com.comics8.core.model.ToonItem
 import com.comics8.core.model.ViewMode
 import com.comics8.core.source.ProgressDisplay
-import com.comics8.core.source.LocalImageUri
 import com.comics8.core.source.WorkId
 import com.comics8.core.source.js.JsPackStore
 import com.comics8.core.source.local.LibraryScanIndex
-import com.comics8.core.source.local.LocalWorkId
 import com.comics8.core.source.local.LocalSource
+import com.comics8.core.source.local.ZipArchive
 import com.comics8.core.source.local.ZipImageNames
+import com.comics8.core.source.local.ZipImageUri
 import com.comics8.core.source.network.NetworkProtocol
 import com.comics8.core.source.network.NetworkSourceConfig
 import com.comics8.core.source.network.NetworkSourceStore
@@ -54,6 +54,13 @@ import java.io.File
 
 import com.comics8.core.i18n.AppLanguage
 import java.util.prefs.Preferences
+
+private data class ExternalReaderSession(
+    val returnScreen: Screen,
+    val viewMode: ViewMode,
+    val readDirection: ReadDirection,
+    val splitMode: SplitMode,
+)
 
 class DesktopViewModel(
     val repository: DesktopToonRepository,
@@ -110,6 +117,7 @@ class DesktopViewModel(
     private var suggestJob: Job? = null
     private var pageSaveJob: Job? = null
     private var pendingPageSave: Triple<WorkId, String, Int>? = null
+    private var externalReaderSession: ExternalReaderSession? = null
 
     private val catalogCache = mutableMapOf<BrowseTab, List<ToonItem>>()
     private val catalogPages = mutableMapOf<BrowseTab, Pair<Int, Int>>()
@@ -177,7 +185,7 @@ class DesktopViewModel(
         return when (current.screen) {
             Screen.Reader -> {
                 // 3단계(뷰어) -> 2단계(회차리스트)로 즉시 복귀
-                if (current.externalReaderSession == null) {
+                if (externalReaderSession == null) {
                     lastViewedEpisode = current.currentEpisode
                 }
                 closeReader()
@@ -1981,7 +1989,6 @@ class DesktopViewModel(
             }
             curr.copy(
                 screen = Screen.Reader,
-                externalReaderSession = null,
                 currentEpisode = episode.copy(isRead = true, readAt = nowMs),
                 episodes = updatedEpisodes,
                 readerImages = emptyList(),
@@ -2057,20 +2064,22 @@ class DesktopViewModel(
     }
 
     fun openExternalArchive(file: File) {
-        val archive = try {
-            file.canonicalFile
-        } catch (_: Exception) {
-            file.absoluteFile
-        }
+        val archive = file.toPath().toAbsolutePath().normalize().toFile()
         if (!archive.isFile || !ZipImageNames.isZipName(archive.name)) return
 
         val current = _state.value
-        val returnScreen = current.externalReaderSession?.returnScreen ?: when (current.screen) {
-            Screen.Reader -> Screen.Series
-            else -> current.screen
+        if (externalReaderSession == null) {
+            if (current.screen == Screen.Reader) {
+                flushPendingPageSave()
+                repository.syncManager?.triggerDebouncedPush()
+            }
+            externalReaderSession = ExternalReaderSession(
+                returnScreen = if (current.screen == Screen.Reader) Screen.Series else current.screen,
+                viewMode = current.viewMode,
+                readDirection = current.readDirection,
+                splitMode = current.splitMode,
+            )
         }
-        if (current.externalReaderSession == null) flushPendingPageSave()
-        readerJob?.cancel()
         DesktopImageCache.cancelPendingPreviews()
         DesktopImageCache.clear(ImageCacheRole.READER)
 
@@ -2080,12 +2089,11 @@ class DesktopViewModel(
             title = title,
             date = null,
             thumbUrl = null,
-            href = LocalImageUri.fromFile(archive),
+            href = archive.toURI().toString(),
         )
         _state.update {
             it.copy(
                 screen = Screen.Reader,
-                externalReaderSession = ExternalReaderSession(archive.path, returnScreen),
                 currentEpisode = episode,
                 readerImages = emptyList(),
                 imageAspectRatios = emptyMap(),
@@ -2093,15 +2101,25 @@ class DesktopViewModel(
                 readerError = null,
             )
         }
-        loadReaderImages(episode, WorkId.local(LocalWorkId.zip(archive)))
+        loadReaderImages(episode) {
+            withContext(Dispatchers.IO) {
+                ZipArchive(archive).use { zip ->
+                    zip.imageEntries().map { entry -> ZipImageUri.encode(archive, entry) }
+                }
+            }
+        }
     }
 
-    private fun loadReaderImages(episode: EpisodeItem, resolverWorkId: WorkId? = null) {
+    private fun loadReaderImages(episode: EpisodeItem) {
+        val workId = _state.value.series?.workId()
+        loadReaderImages(episode) { repository.loadImages(episode, workId) }
+    }
+
+    private fun loadReaderImages(episode: EpisodeItem, resolveImages: suspend () -> List<String>) {
         readerJob?.cancel()
         readerJob = scope.launch {
             try {
-                val seriesWorkId = resolverWorkId ?: _state.value.series?.workId()
-                val images = repository.loadImages(episode, seriesWorkId)
+                val images = resolveImages()
                 if (images.isEmpty()) {
                     _state.update {
                         it.copy(
@@ -2227,7 +2245,7 @@ class DesktopViewModel(
 
     fun savePage(page: Int, seenThroughPage: Int = page) {
         val current = _state.value
-        if (current.externalReaderSession != null) {
+        if (externalReaderSession != null) {
             _state.update { state ->
                 state.copy(currentEpisode = state.currentEpisode?.copy(lastReadPage = page))
             }
@@ -2275,7 +2293,7 @@ class DesktopViewModel(
 
     fun setViewMode(mode: ViewMode) {
         _state.update { it.copy(viewMode = mode) }
-        if (_state.value.externalReaderSession != null) return
+        if (externalReaderSession != null) return
         val series = _state.value.series ?: return
         val direction = _state.value.readDirection
         val split = _state.value.splitMode
@@ -2286,7 +2304,7 @@ class DesktopViewModel(
 
     fun setReadDirection(direction: ReadDirection) {
         _state.update { it.copy(readDirection = direction) }
-        if (_state.value.externalReaderSession != null) return
+        if (externalReaderSession != null) return
         val series = _state.value.series ?: return
         val mode = _state.value.viewMode
         val split = _state.value.splitMode
@@ -2297,7 +2315,7 @@ class DesktopViewModel(
 
     fun setSplitMode(mode: SplitMode) {
         _state.update { it.copy(splitMode = mode) }
-        if (_state.value.externalReaderSession != null) return
+        if (externalReaderSession != null) return
         val series = _state.value.series ?: return
         val modeVal = _state.value.viewMode
         val direction = _state.value.readDirection
@@ -2314,22 +2332,22 @@ class DesktopViewModel(
     }
 
     fun closeReader() {
-        val externalSession = _state.value.externalReaderSession
+        val externalSession = externalReaderSession
         if (externalSession != null) {
-            pageSaveJob?.cancel()
-            pageSaveJob = null
-            pendingPageSave = null
+            externalReaderSession = null
             readerJob?.cancel()
             DesktopImageCache.clear(ImageCacheRole.READER)
             _state.update {
                 it.copy(
                     screen = externalSession.returnScreen,
-                    externalReaderSession = null,
                     currentEpisode = null,
                     readerImages = emptyList(),
                     imageAspectRatios = emptyMap(),
                     readerLoading = false,
                     readerError = null,
+                    viewMode = externalSession.viewMode,
+                    readDirection = externalSession.readDirection,
+                    splitMode = externalSession.splitMode,
                 )
             }
             return
