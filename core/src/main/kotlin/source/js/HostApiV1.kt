@@ -125,7 +125,11 @@ internal class HostApiV1Impl(
     lateinit var sourceObj: Scriptable
 
     private data class CacheEntry(val value: Any?, val expiresAt: Long)
-    private val lruCache = ConcurrentHashMap<String, CacheEntry>()
+    private val cacheLock = Any()
+    private val lruCache = object : LinkedHashMap<String, CacheEntry>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CacheEntry>?): Boolean =
+            size > MAX_CACHE_ENTRIES
+    }
 
     override fun fetch(spec: HostFetchSpec): HostFetchResult =
         withHostQuery(listOf(spec.url)) { fetchOnce(spec) }
@@ -340,16 +344,16 @@ internal class HostApiV1Impl(
         return out
     }
 
-    override fun cacheGet(key: String): Any? {
+    override fun cacheGet(key: String): Any? = synchronized(cacheLock) {
         val entry = lruCache[key] ?: return null
         if (System.currentTimeMillis() >= entry.expiresAt) {
             lruCache.remove(key)
             return null
         }
-        return entry.value
+        entry.value
     }
 
-    override fun cachePut(key: String, value: Any?, ttlMs: Long) {
+    override fun cachePut(key: String, value: Any?, ttlMs: Long) = synchronized(cacheLock) {
         val expiresAt = System.currentTimeMillis() + ttlMs.coerceAtLeast(1000L)
         lruCache[key] = CacheEntry(value, expiresAt)
     }
@@ -567,6 +571,7 @@ internal class HostApiV1Impl(
     }
 
     companion object {
+        const val MAX_CACHE_ENTRIES = 512
         const val FETCH_CONCURRENCY = 6
         val BACKOFF_MS = listOf(250L, 1_000L, 4_000L)
         private val JS_IMG_ARRAY_RE = Regex("""(?:var|let|const)\s+(?:img_list|img_list_2|data_list|arr_img|images|toon_images)\s*=\s*\[([\s\S]*?)\]""", RegexOption.IGNORE_CASE)

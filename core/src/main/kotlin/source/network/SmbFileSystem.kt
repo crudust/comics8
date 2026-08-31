@@ -1,5 +1,6 @@
 package com.comics8.core.source.network
 
+import com.comics8.core.source.FileRevision
 import com.hierynomus.msdtyp.AccessMask
 import com.hierynomus.msfscc.FileAttributes
 import com.hierynomus.mssmb2.SMB2CreateDisposition
@@ -37,8 +38,7 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
                     info.fileAttributes,
                     FileAttributes.FILE_ATTRIBUTE_DIRECTORY,
                 ),
-                size = info.endOfFile,
-                modifiedAt = info.lastWriteTime.toEpochMillis(),
+                revision = FileRevision(info.endOfFile, info.lastWriteTime.toEpochMillis()),
             )
         }
     }
@@ -49,14 +49,16 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
             path = NetworkSourceConfig.normalizePath(path),
             name = path.substringAfterLast('/').ifBlank { config.path.substringAfterLast('/').ifBlank { config.share } },
             directory = info.standardInformation.isDirectory,
-            size = info.standardInformation.endOfFile,
-            modifiedAt = info.basicInformation.lastWriteTime.toEpochMillis(),
+            revision = FileRevision(
+                info.standardInformation.endOfFile,
+                info.basicInformation.lastWriteTime.toEpochMillis(),
+            ),
         )
     }
 
-    override fun open(path: String): InputStream = ChannelInputStream(openChannel(path))
+    override fun open(path: String): InputStream = ChannelInputStream(openFile(path).channel)
 
-    override fun openChannel(path: String, knownSize: Long): SeekableByteChannel {
+    override fun openFile(path: String): OpenedNetworkFile {
         val handles = handles()
         return try {
             val file = handles.share.openFile(
@@ -67,8 +69,12 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
                 SMB2CreateDisposition.FILE_OPEN,
                 EnumSet.of(SMB2CreateOptions.FILE_NON_DIRECTORY_FILE, SMB2CreateOptions.FILE_RANDOM_ACCESS),
             )
-            val size = if (knownSize >= 0L) knownSize else file.fileInformation.standardInformation.endOfFile
-            SmbChannel(file, size)
+            val info = file.fileInformation
+            val revision = FileRevision(
+                info.standardInformation.endOfFile,
+                info.basicInformation.lastWriteTime.toEpochMillis(),
+            )
+            OpenedNetworkFile(SmbChannel(file, revision.sizeBytes), revision)
         } catch (e: Exception) {
             invalidate(handles)
             throw e
@@ -266,4 +272,3 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
             .build()
     }
 }
-

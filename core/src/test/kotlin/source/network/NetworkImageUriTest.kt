@@ -1,17 +1,17 @@
 package com.comics8.core.source.network
 
+import com.comics8.core.source.FileRevision
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 
 class NetworkImageUriTest {
     @Test
-    fun roundTripsLazyPreviewMetadata() {
+    fun roundTripsPreviewRevision() {
         val url = NetworkImageUri.encode(
             sourceId = "network-test",
             path = "series/book.cbz",
-            size = 1_000_000_000L,
             preview = NetworkImageUri.PreviewKind.ZIP_FIRST,
-            modifiedAt = 1234L,
+            revision = FileRevision(1_000_000_000L, 1234L, "book-v1"),
             thumbnailPx = 320,
         )
 
@@ -19,9 +19,8 @@ class NetworkImageUriTest {
             NetworkImageUri.Ref(
                 sourceId = "network-test",
                 path = "series/book.cbz",
-                size = 1_000_000_000L,
                 preview = NetworkImageUri.PreviewKind.ZIP_FIRST,
-                modifiedAt = 1234L,
+                revision = FileRevision(1_000_000_000L, 1234L, "book-v1"),
                 thumbnailPx = 320,
             ),
         )

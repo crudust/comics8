@@ -1,5 +1,6 @@
 package com.comics8.core.source.local
 
+import com.comics8.core.source.FileRevision
 import com.comics8.core.source.network.NetworkImageUri
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
@@ -22,9 +23,8 @@ class PreviewImageResolverTest {
         val uri = NetworkImageUri.encode(
             sourceId = "network-smb-1",
             path = "folder/manga.zip",
-            size = 1000L,
             preview = NetworkImageUri.PreviewKind.ZIP_FIRST,
-            modifiedAt = 12345L,
+            revision = FileRevision(1000L, 12345L),
             thumbnailPx = 192,
         )
         val spec = PreviewImageResolver.resolve(uri)
@@ -32,8 +32,7 @@ class PreviewImageResolverTest {
         assertThat(spec).isNotNull()
         assertThat(spec!!.thumbnailPx).isEqualTo(192)
         assertThat(spec.key.path).isEqualTo("network-smb-1|folder/manga.zip|ZIP_FIRST")
-        assertThat(spec.key.mtimeEpochMs).isEqualTo(12345L)
-        assertThat(spec.key.sizeBytes).isEqualTo(1000L)
+        assertThat(spec.key.revision).isEqualTo(FileRevision(1000L, 12345L))
     }
 
     @Test

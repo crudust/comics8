@@ -46,6 +46,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.comics8.core.image.ImageCacheRole
 import com.comics8.core.model.BrowseTab
 import com.comics8.core.model.ToonItem
 import com.comics8.core.source.SourceRegistry
@@ -273,6 +274,7 @@ fun ToonCard(
                 ),
         ) {
             DesktopAsyncImage(
+                cacheRole = ImageCacheRole.GRID,
                 url = item.thumbUrl,
                 contentDescription = item.title,
                 contentScale = ContentScale.Crop,

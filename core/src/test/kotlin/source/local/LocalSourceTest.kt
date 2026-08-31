@@ -110,12 +110,8 @@ class LocalSourceTest {
     }
 
     private fun sourceFor(roots: List<File>): LocalSource {
-        val dir = createTempDirectory("local-thumbs").toFile()
-        dir.deleteOnExit()
-        val encoder = ThumbEncoder { bytes, _, _ -> bytes }
         return LocalSource(
             roots = { roots },
-            thumbs = CoverThumbCache(dir, encoder),
         )
     }
 

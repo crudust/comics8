@@ -34,6 +34,8 @@ import androidx.compose.ui.unit.dp
 import com.comics8.core.model.CropRect
 import com.comics8.core.model.ImageHalf
 import com.comics8.core.model.computeContentCropRect
+import com.comics8.core.image.ImageCacheRole
+import com.comics8.core.image.ImageMemoryPolicy
 import com.comics8.core.network.ImageFallbacks
 import com.comics8.core.network.ImageReferer
 import com.comics8.core.source.LocalImageUri
@@ -49,12 +51,15 @@ import com.comics8.core.source.local.ZipImageUri
 import com.comics8.core.source.network.NetworkImageUri
 import com.comics8.core.source.network.NetworkSourceRuntime
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 
@@ -69,7 +74,6 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicLong
 
 object AwtThumbEncoder : ThumbEncoder {
@@ -109,17 +113,47 @@ object AwtThumbEncoder : ThumbEncoder {
 }
 
 object DesktopImageCache {
-    private const val MEMORY_MAX_ENTRIES = 192
+    private const val MEMORY_MAX_BYTES = 304L * 1024L * 1024L
     private const val DISPLAY_LONG_EDGE = 2048
     private const val DISK_HARD_LIMIT_BYTES = 500L * 1024 * 1024
     private const val DISK_TARGET_BYTES = 400L * 1024 * 1024
-    private val previewSlots = Semaphore(4, true)
-    private val remoteSlots = Semaphore(12, true)
+    private val pipelineSlots = Semaphore(3)
 
     private val memoryLock = Any()
-    private val memoryCache = object : LinkedHashMap<String, ImageBitmap>(64, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ImageBitmap>?): Boolean =
-            size > MEMORY_MAX_ENTRIES
+    private data class CachedBitmap(val bitmap: ImageBitmap, val sizeBytes: Long)
+
+    private class MemoryBucket(private val maxBytes: Long) {
+        private val entries = LinkedHashMap<String, CachedBitmap>(16, 0.75f, true)
+        private var sizeBytes = 0L
+
+        fun get(url: String): ImageBitmap? = entries[url]?.bitmap
+        fun contains(url: String): Boolean = entries.containsKey(url)
+
+        fun put(url: String, bitmap: ImageBitmap) {
+            val bitmapBytes = bitmap.width.toLong() * bitmap.height.toLong() * 4L
+            entries.remove(url)?.let { sizeBytes -= it.sizeBytes }
+            if (bitmapBytes > maxBytes) return
+            entries[url] = CachedBitmap(bitmap, bitmapBytes)
+            sizeBytes += bitmapBytes
+            val iterator = entries.entries.iterator()
+            while (sizeBytes > maxBytes && iterator.hasNext()) {
+                sizeBytes -= iterator.next().value.sizeBytes
+                iterator.remove()
+            }
+        }
+
+        fun remove(url: String) {
+            entries.remove(url)?.let { sizeBytes -= it.sizeBytes }
+        }
+
+        fun clear() {
+            entries.clear()
+            sizeBytes = 0L
+        }
+    }
+    private val memoryBudgets = ImageMemoryPolicy.partition(MEMORY_MAX_BYTES)
+    private val memoryCaches = ImageCacheRole.entries.associateWith { role ->
+        MemoryBucket(memoryBudgets[role])
     }
     private val diskCacheDir = File(System.getProperty("user.home"), ".comics8/cache").apply { mkdirs() }
     private val estimatedDiskBytes = AtomicLong(
@@ -145,77 +179,26 @@ object DesktopImageCache {
     @Volatile
     lateinit var registry: SourceRegistry
 
-    fun get(url: String): ImageBitmap? {
+    fun get(role: ImageCacheRole, url: String): ImageBitmap? {
         if (url.isBlank()) return null
         synchronized(memoryLock) {
-            return memoryCache[url]
+            return memoryCaches.getValue(role).get(url)
         }
     }
 
-    private val dimensionCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Int, Int>>()
-
-    fun getDimensions(url: String): Pair<Int, Int>? {
-        if (url.isBlank()) return null
-        dimensionCache[url]?.let { return it }
-        get(url)?.let {
-            val dim = Pair(it.width, it.height)
-            dimensionCache[url] = dim
-            return dim
-        }
-        return null
-    }
-
-    fun probeDimensions(url: String): Pair<Int, Int>? {
-        if (url.isBlank()) return null
-        getDimensions(url)?.let { return it }
-        return try {
-            val hash = hashUrl(url)
-            val cachedFile = File(diskCacheDir, "$hash.img")
-            val localFile = LocalImageUri.toFile(url)
-            val zipRef = ZipImageUri.parse(url)
-
-            val bytes = if (localFile != null && localFile.isFile && localFile.length() > 0L) {
-                localFile.readBytes()
-            } else if (cachedFile.isFile && cachedFile.length() > 0L) {
-                cachedFile.readBytes()
-            } else if (zipRef != null) {
-                ZipArchive(zipRef.zip).use { archive ->
-                    archive.open(zipRef.entry).use { it.readBytes() }
-                }
-            } else {
-                null
-            }
-
-            if (bytes != null && bytes.isNotEmpty()) {
-                Image.makeFromEncoded(bytes).use { img ->
-                    val dim = Pair(img.width, img.height)
-                    dimensionCache[url] = dim
-                    dim
-                }
-            } else {
-                null
-            }
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    private fun putMemory(url: String, bitmap: ImageBitmap) {
+    private fun containsMemory(role: ImageCacheRole, url: String): Boolean {
         synchronized(memoryLock) {
-            memoryCache[url] = bitmap
-            dimensionCache[url] = Pair(bitmap.width, bitmap.height)
-        }
-    }
-
-    private fun containsMemory(url: String): Boolean {
-        synchronized(memoryLock) {
-            return memoryCache.containsKey(url)
+            return memoryCaches.getValue(role).contains(url)
         }
     }
 
     private val loadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val inFlightLock = Any()
-    private val inFlightRequests = HashMap<String, Deferred<ImageBitmap?>>()
+    private data class RequestKey(val role: ImageCacheRole, val url: String)
+    private data class InFlightRequest(val id: Long, val deferred: Deferred<ImageBitmap?>)
+    private val inFlightRequests = HashMap<RequestKey, InFlightRequest>()
+    private val requestIds = AtomicLong(0L)
+    private val roleGenerations = LongArray(ImageCacheRole.entries.size)
 
     private fun hashUrl(url: String): String {
         val digest = MessageDigest.getInstance("MD5").digest(url.toByteArray())
@@ -253,9 +236,24 @@ object DesktopImageCache {
         loadScope.cancel()
         synchronized(inFlightLock) { inFlightRequests.clear() }
         synchronized(memoryLock) {
-            memoryCache.clear()
-            dimensionCache.clear()
+            memoryCaches.values.forEach(MemoryBucket::clear)
         }
+    }
+
+    fun clear(role: ImageCacheRole) {
+        val pending = synchronized(inFlightLock) {
+            roleGenerations[role.ordinal]++
+            val matching = inFlightRequests
+                .filterKeys { it.role == role }
+                .values
+                .map { it.deferred }
+            inFlightRequests.keys.removeAll { it.role == role }
+            synchronized(memoryLock) {
+                memoryCaches.getValue(role).clear()
+            }
+            matching
+        }
+        pending.forEach { it.cancel() }
     }
 
     internal fun readImageBytes(url: String, forceRetry: Boolean = false): ByteArray? {
@@ -267,7 +265,7 @@ object DesktopImageCache {
         }
         val localFile = LocalImageUri.toFile(url)
         val zipRef = ZipImageUri.parse(url)
-        val previewSpec = PreviewImageResolver.resolve(url)
+        val previewSpec = PreviewImageResolver.resolve(url, refreshNetworkRevision = true)
         val networkRef = NetworkImageUri.parse(url)
         return if (localFile != null && localFile.isFile && localFile.length() > 0L) {
             try {
@@ -285,14 +283,10 @@ object DesktopImageCache {
             }
         } else if (previewSpec != null) {
             try {
-                previewSlots.acquire()
-                try {
-                    coverThumbs.getOrCreate(previewSpec.key, previewSpec.thumbnailPx, forceRetry = forceRetry) {
-                        previewSpec.readSourceBytes()
-                    }.readBytes()
-                } finally {
-                    previewSlots.release()
+                coverThumbs.getOrCreate(previewSpec.key, previewSpec.thumbnailPx, forceRetry = forceRetry) {
+                    previewSpec.readSourceBytes()
                 }
+                    .readBytes()
             } catch (_: Exception) {
                 null
             }
@@ -336,7 +330,6 @@ object DesktopImageCache {
         if (ZipImageUri.parse(url) != null) return null
         if (NetworkImageUri.parse(url) != null) return null
 
-        remoteSlots.acquire()
         try {
             val request = Request.Builder()
                 .url(url)
@@ -356,8 +349,6 @@ object DesktopImageCache {
             return null
         } catch (_: Exception) {
             return null
-        } finally {
-            remoteSlots.release()
         }
     }
 
@@ -366,49 +357,61 @@ object DesktopImageCache {
             val iterator = inFlightRequests.entries.iterator()
             while (iterator.hasNext()) {
                 val entry = iterator.next()
-                val url = entry.key
+                val url = entry.key.url
                 if (PreviewImageResolver.resolve(url) != null || NetworkImageUri.parse(url)?.preview != null) {
-                    entry.value.cancel()
+                    entry.value.deferred.cancel()
                     iterator.remove()
                 }
             }
         }
     }
 
-    suspend fun loadImage(url: String, forceRetry: Boolean = false): ImageBitmap? {
+    suspend fun loadImage(role: ImageCacheRole, url: String, forceRetry: Boolean = false): ImageBitmap? {
         if (url.isBlank()) return null
         if (!forceRetry) {
-            get(url)?.let { return it }
+            get(role, url)?.let { return it }
         } else {
-            synchronized(memoryLock) { memoryCache.remove(url) }
+            synchronized(memoryLock) { memoryCaches.getValue(role).remove(url) }
         }
 
         val deferred = synchronized(inFlightLock) {
+            val key = RequestKey(role, url)
             if (!forceRetry) {
-                get(url)?.let { return it }
+                get(role, url)?.let { return it }
             }
             if (forceRetry) {
-                inFlightRequests.remove(url)
+                inFlightRequests.remove(key)?.deferred?.cancel()
             } else {
-                inFlightRequests[url]?.let { return@synchronized it }
+                inFlightRequests[key]?.let { return@synchronized it.deferred }
             }
 
-            val def = loadScope.async {
+            val generation = roleGenerations[role.ordinal]
+            val requestId = requestIds.incrementAndGet()
+            val def = loadScope.async(start = CoroutineStart.LAZY) {
                 try {
                     if (!isActive) return@async null
-                    val bytes = readImageBytes(url, forceRetry = forceRetry)
-                    if (bytes != null && bytes.isNotEmpty()) {
-                        val bitmap = decodeForDisplay(bytes)
-                        if (bitmap != null) {
-                            putMemory(url, bitmap)
-                            bitmap
+                    pipelineSlots.withPermit {
+                        if (!isActive) return@async null
+                        val bytes = readImageBytes(url, forceRetry = forceRetry)
+                        if (bytes != null && bytes.isNotEmpty()) {
+                            val bitmap = decodeForDisplay(bytes)
+                            if (bitmap != null) {
+                                synchronized(inFlightLock) {
+                                    if (roleGenerations[role.ordinal] == generation && isActive) {
+                                        synchronized(memoryLock) {
+                                            memoryCaches.getValue(role).put(url, bitmap)
+                                        }
+                                    }
+                                }
+                                bitmap
+                            } else {
+                                val hash = hashUrl(url)
+                                File(diskCacheDir, "$hash.img").delete()
+                                null
+                            }
                         } else {
-                            val hash = hashUrl(url)
-                            File(diskCacheDir, "$hash.img").delete()
                             null
                         }
-                    } else {
-                        null
                     }
                 } catch (_: Exception) {
                     null
@@ -416,11 +419,14 @@ object DesktopImageCache {
                     null
                 } finally {
                     synchronized(inFlightLock) {
-                        inFlightRequests.remove(url)
+                        if (inFlightRequests[key]?.id == requestId) {
+                            inFlightRequests.remove(key)
+                        }
                     }
                 }
             }
-            inFlightRequests[url] = def
+            inFlightRequests[key] = InFlightRequest(requestId, def)
+            def.start()
             def
         }
 
@@ -462,10 +468,10 @@ object DesktopImageCache {
         }
     }
 
-    suspend fun preload(urls: List<String>) = withContext(Dispatchers.IO) {
+    suspend fun preload(role: ImageCacheRole, urls: List<String>) = withContext(Dispatchers.IO) {
         for (url in urls) {
-            if (url.isNotBlank() && !containsMemory(url)) {
-                loadImage(url)
+            if (url.isNotBlank() && !containsMemory(role, url)) {
+                loadImage(role, url)
             }
         }
     }
@@ -500,6 +506,7 @@ object DesktopImageCache {
 @Composable
 fun DesktopAsyncImage(
     url: String,
+    cacheRole: ImageCacheRole,
     contentDescription: String? = null,
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Fit,
@@ -510,19 +517,19 @@ fun DesktopAsyncImage(
     onLoaded: ((ImageBitmap) -> Unit)? = null,
 ) {
     // Check synchronous memory cache first
-    val cachedBitmap = remember(url) { DesktopImageCache.get(url) }
-    var displayedBitmap by remember(url) { mutableStateOf(cachedBitmap) }
-    var loading by remember(url) { mutableStateOf(cachedBitmap == null) }
+    val cachedBitmap = remember(cacheRole, url) { DesktopImageCache.get(cacheRole, url) }
+    var displayedBitmap by remember(cacheRole, url) { mutableStateOf(cachedBitmap) }
+    var loading by remember(cacheRole, url) { mutableStateOf(cachedBitmap == null) }
 
     val retryKey = if (displayedBitmap == null) refreshEpoch else 0L
 
-    LaunchedEffect(url, retryKey) {
+    LaunchedEffect(cacheRole, url, retryKey) {
         if (url.isBlank()) {
             displayedBitmap = null
             loading = false
             return@LaunchedEffect
         }
-        val memoryHit = DesktopImageCache.get(url)
+        val memoryHit = DesktopImageCache.get(cacheRole, url)
         if (memoryHit != null) {
             displayedBitmap = memoryHit
             loading = false
@@ -530,7 +537,7 @@ fun DesktopAsyncImage(
         } else {
             loading = true
             val force = retryKey > 0L
-            val loaded = DesktopImageCache.loadImage(url, forceRetry = force)
+            val loaded = DesktopImageCache.loadImage(cacheRole, url, forceRetry = force)
             displayedBitmap = loaded
             loading = false
             if (loaded != null) {
@@ -633,7 +640,7 @@ fun DesktopAsyncImage(
             LaunchedEffect(localRetry) {
                 if (localRetry > 0) {
                     loading = true
-                    val loaded = DesktopImageCache.loadImage(url, forceRetry = true)
+                    val loaded = DesktopImageCache.loadImage(cacheRole, url, forceRetry = true)
                     displayedBitmap = loaded
                     loading = false
                     if (loaded != null) {

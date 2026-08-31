@@ -1,5 +1,6 @@
 package com.comics8.core.source.local
 
+import com.comics8.core.source.FileRevision
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 import kotlin.io.path.createTempDirectory
@@ -15,7 +16,9 @@ class LibraryScanIndexTest {
                 title = "Book",
                 path = "/book.cbz",
                 kind = "ZIP",
-                episodes = listOf(IndexedLibraryEpisode("/book.cbz", "Book", true, 123L, 456L)),
+                episodes = listOf(
+                    IndexedLibraryEpisode("/book.cbz", "Book", true, FileRevision(123L, 456L, "book-v1")),
+                ),
             ),
         )
 

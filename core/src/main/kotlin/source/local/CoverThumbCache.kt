@@ -1,11 +1,13 @@
 package com.comics8.core.source.local
 
+import com.comics8.core.source.FileRevision
 import java.io.File
 import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CancellationException
 import java.util.concurrent.locks.ReentrantLock
 
-data class ThumbKey(val path: String, val mtimeEpochMs: Long, val sizeBytes: Long)
+data class ThumbKey(val path: String, val revision: FileRevision)
 
 class CoverThumbCache(
     private val dir: File,
@@ -20,6 +22,7 @@ class CoverThumbCache(
     private val evictionLock = Any()
     private val creationCounter = java.util.concurrent.atomic.AtomicInteger(0)
     private val sha256Digest = ThreadLocal.withInitial { MessageDigest.getInstance("SHA-256") }
+    private val failures = ConcurrentHashMap<String, Long>()
 
     init {
         require(maxSizeBytes > 0L) { "maxSizeBytes must be positive" }
@@ -28,15 +31,7 @@ class CoverThumbCache(
     }
 
     fun clearFailures() {
-        val files = dir.listFiles()?.filter(File::isFile) ?: return
-        files.filter { it.extension == "fail" }.forEach(File::delete)
-    }
-
-    fun clearFailure(key: ThumbKey, requestedLongEdgePx: Int = longEdgePx) {
-        val size = requestedLongEdgePx.coerceIn(64, 1024)
-        val dest = fileFor(key, size)
-        val failed = File(dir, "${dest.name}.fail")
-        failed.delete()
+        failures.clear()
     }
 
     fun fileFor(key: ThumbKey, requestedLongEdgePx: Int = longEdgePx): File =
@@ -68,20 +63,19 @@ class CoverThumbCache(
         forceRetry: Boolean,
         decodeFull: () -> ByteArray,
     ): File {
-        val failed = File(dir, "${dest.name}.fail")
         val part = File(dir, "${dest.name}.part")
         if (!forceRetry && dest.isFile && dest.length() > 0L) {
             dest.setLastModified(System.currentTimeMillis())
             return dest
         }
         if (forceRetry) {
-            failed.delete()
-        } else if (failed.isFile) {
-            val currentMarker = runCatching { failed.readText(Charsets.UTF_8) == FAILURE_MARKER }.getOrDefault(false)
-            if (currentMarker && System.currentTimeMillis() - failed.lastModified() < FAILURE_TTL_MS) {
+            failures.remove(dest.name)
+        } else {
+            val retryAt = failures[dest.name]
+            if (retryAt != null && System.currentTimeMillis() < retryAt) {
                 error("thumbnail generation recently failed")
             }
-            failed.delete()
+            if (retryAt != null) failures.remove(dest.name, retryAt)
         }
         dir.mkdirs()
         try {
@@ -92,7 +86,7 @@ class CoverThumbCache(
                 part.copyTo(dest, overwrite = true)
                 part.delete()
             }
-            failed.delete()
+            failures.remove(dest.name)
             if (creationCounter.incrementAndGet() % evictionInterval == 0) {
                 synchronized(evictionLock) { evictIfNeeded(dest) }
             }
@@ -100,7 +94,7 @@ class CoverThumbCache(
         } catch (e: Exception) {
             part.delete()
             if (!e.isCancellation()) {
-                runCatching { failed.writeText(FAILURE_MARKER, Charsets.UTF_8) }
+                failures[dest.name] = System.currentTimeMillis() + FAILURE_TTL_MS
             }
             throw e
         }
@@ -110,10 +104,7 @@ class CoverThumbCache(
 
     private fun evictIfNeeded(keep: File?) {
         val allFiles = dir.listFiles()?.filter(File::isFile) ?: return
-        allFiles.filter {
-            it.extension == "jpg" || it.extension == "part" ||
-                it.extension == "fail" && System.currentTimeMillis() - it.lastModified() >= FAILURE_TTL_MS
-        }.forEach(File::delete)
+        allFiles.filter { it.extension == "jpg" || it.extension == "part" }.forEach(File::delete)
         val files = allFiles.filter { it.extension == "webp" }
         var total = files.sumOf(File::length)
         if (total <= maxSizeBytes) return
@@ -126,7 +117,8 @@ class CoverThumbCache(
     }
 
     private fun hash(key: ThumbKey, requestedLongEdgePx: Int): String {
-        val raw = "${key.path}|${key.mtimeEpochMs}|${key.sizeBytes}|$requestedLongEdgePx"
+        val raw = "${key.path}|${key.revision.sizeBytes}|${key.revision.modifiedAtEpochMs}|" +
+            "${key.revision.entityTag.orEmpty()}|$requestedLongEdgePx"
         val md = sha256Digest.get()
         md.reset()
         val digest = md.digest(raw.toByteArray(Charsets.UTF_8))
@@ -135,7 +127,6 @@ class CoverThumbCache(
 
     companion object {
         private const val FAILURE_TTL_MS = 30L * 1000L
-        private const val FAILURE_MARKER = "v2"
     }
 }
 

@@ -1,5 +1,6 @@
 package com.comics8.core.source.local
 
+import com.comics8.core.source.FileRevision
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -9,8 +10,7 @@ data class IndexedLibraryEpisode(
     val path: String,
     val title: String,
     val zip: Boolean,
-    val size: Long = 0L,
-    val modifiedAt: Long = 0L,
+    val revision: FileRevision,
 )
 
 data class IndexedLibraryWork(
@@ -69,7 +69,7 @@ class LibraryScanIndex(
     }
 
     companion object {
-        private const val VERSION = 1
+        private const val VERSION = 2
 
         fun signature(lines: Iterable<String>): String {
             val digest = MessageDigest.getInstance("SHA-256")
@@ -94,8 +94,13 @@ private fun IndexedLibraryWork.toJson(): JSONObject = JSONObject()
                     .put("path", episode.path)
                     .put("title", episode.title)
                     .put("zip", episode.zip)
-                    .put("size", episode.size)
-                    .put("modifiedAt", episode.modifiedAt),
+                    .put(
+                        "revision",
+                        JSONObject()
+                            .put("sizeBytes", episode.revision.sizeBytes)
+                            .put("modifiedAtEpochMs", episode.revision.modifiedAtEpochMs)
+                            .put("entityTag", episode.revision.entityTag),
+                    ),
             )
         }
     })
@@ -110,8 +115,13 @@ private fun JSONObject.toIndexedWork(): IndexedLibraryWork {
                     path = episode.getString("path"),
                     title = episode.getString("title"),
                     zip = episode.getBoolean("zip"),
-                    size = episode.optLong("size"),
-                    modifiedAt = episode.optLong("modifiedAt"),
+                    revision = episode.getJSONObject("revision").let { revision ->
+                        FileRevision(
+                            revision.getLong("sizeBytes"),
+                            revision.getLong("modifiedAtEpochMs"),
+                            revision.optString("entityTag").ifBlank { null },
+                        )
+                    },
                 ),
             )
         }

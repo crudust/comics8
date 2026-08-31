@@ -15,6 +15,7 @@ import com.comics8.desktop.data.DesktopSyncState
 import com.comics8.desktop.data.ReadHistoryRecord
 
 import com.comics8.core.i18n.AppLanguage
+import com.comics8.desktop.ui.settings.SettingsCategory
 
 enum class Screen {
     Browse,
@@ -72,6 +73,7 @@ data class DesktopUiState(
     val historyItems: List<ReadHistoryRecord> = emptyList(),
     val readCounts: Map<String, Int> = emptyMap(),
     val historyLoading: Boolean = false,
+    val selectedSettingsCategory: SettingsCategory? = null,
     val showSyncDialog: Boolean = false,
     val syncState: DesktopSyncState = DesktopSyncState(),
     val networkSettings: com.comics8.core.model.NetworkSettings = com.comics8.core.model.NetworkSettings(),

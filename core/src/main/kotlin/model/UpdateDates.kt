@@ -61,4 +61,9 @@ object UpdateDates {
 
     private fun formatMd(month: Int, day: Int): String =
         "%02d.%02d".format(month, day)
+
+    fun formatEpoch(millis: Long, pattern: String = "yy.MM.dd"): String {
+        val sdf = java.text.SimpleDateFormat(pattern, java.util.Locale.getDefault())
+        return sdf.format(java.util.Date(millis))
+    }
 }

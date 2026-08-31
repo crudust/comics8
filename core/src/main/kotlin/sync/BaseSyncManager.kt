@@ -310,7 +310,7 @@ open class BaseSyncManager(
                 .build()
 
             val json = client.newCall(req).execute().use { resp ->
-                // Fallback to legacy syncPull if delta is not supported
+                // Fallback to full syncPull if delta is not supported
                 if (resp.code == 404) return@use null
 
                 if (!resp.isSuccessful) {

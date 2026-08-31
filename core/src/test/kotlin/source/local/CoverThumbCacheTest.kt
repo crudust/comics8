@@ -1,5 +1,6 @@
 package com.comics8.core.source.local
 
+import com.comics8.core.source.FileRevision
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 import java.io.File
@@ -7,7 +8,7 @@ import kotlin.io.path.createTempDirectory
 
 class CoverThumbCacheTest {
     @Test
-    fun hashesPathMtimeSizeAndWritesEncoderBytes() {
+    fun hashesPathAndRevisionAndWritesEncoderBytes() {
         val dir = createTempDirectory("thumbs").toFile()
         dir.deleteOnExit()
         val received = mutableListOf<Triple<ByteArray, Int, Int>>()
@@ -16,7 +17,7 @@ class CoverThumbCacheTest {
             "webp-out".toByteArray()
         }
         val cache = CoverThumbCache(dir, encoder, longEdgePx = 320, quality = 80)
-        val key = ThumbKey("/comics/cover.jpg", mtimeEpochMs = 100L, sizeBytes = 12L)
+        val key = ThumbKey("/comics/cover.jpg", FileRevision(12L, 100L))
         val created = cache.getOrCreate(key) { "full-image".toByteArray() }
 
         assertThat(created.name).matches("[0-9a-f]{64}\\.webp")
@@ -33,7 +34,7 @@ class CoverThumbCacheTest {
     }
 
     @Test
-    fun regeneratesWhenMtimeOrSizeChanges() {
+    fun regeneratesWhenRevisionChanges() {
         val dir = createTempDirectory("thumbs-miss").toFile()
         dir.deleteOnExit()
         var encodes = 0
@@ -42,9 +43,9 @@ class CoverThumbCacheTest {
             bytes
         }
         val cache = CoverThumbCache(dir, encoder)
-        cache.getOrCreate(ThumbKey("/a.jpg", 1L, 1L)) { byteArrayOf(1) }
-        cache.getOrCreate(ThumbKey("/a.jpg", 2L, 1L)) { byteArrayOf(2) }
-        cache.getOrCreate(ThumbKey("/a.jpg", 2L, 9L)) { byteArrayOf(3) }
+        cache.getOrCreate(ThumbKey("/a.jpg", FileRevision(1L, 1L))) { byteArrayOf(1) }
+        cache.getOrCreate(ThumbKey("/a.jpg", FileRevision(1L, 2L))) { byteArrayOf(2) }
+        cache.getOrCreate(ThumbKey("/a.jpg", FileRevision(9L, 2L))) { byteArrayOf(3) }
         assertThat(encodes).isEqualTo(3)
         assertThat(dir.listFiles { f -> f.extension == "webp" }!!.size).isEqualTo(3)
     }
@@ -57,7 +58,7 @@ class CoverThumbCacheTest {
             sizes += size
             byteArrayOf(size.toByte())
         })
-        val key = ThumbKey("/cover.jpg", 1L, 1L)
+        val key = ThumbKey("/cover.jpg", FileRevision(1L, 1L))
 
         val grid = cache.getOrCreate(key, 320) { byteArrayOf(1) }
         val episode = cache.getOrCreate(key, 192) { byteArrayOf(1) }
@@ -71,7 +72,7 @@ class CoverThumbCacheTest {
         val dir = createTempDirectory("thumbs-cancel").toFile()
         var attempts = 0
         val cache = CoverThumbCache(dir, ThumbEncoder { bytes, _, _ -> bytes })
-        val key = ThumbKey("/cancelled.jpg", 1L, 1L)
+        val key = ThumbKey("/cancelled.jpg", FileRevision(1L, 1L))
 
         val cancelled = runCatching {
             cache.getOrCreate(key) {
@@ -101,11 +102,11 @@ class CoverThumbCacheTest {
             targetSizeBytes = 6L,
             evictionInterval = 1,
         )
-        val first = cache.getOrCreate(ThumbKey("/first", 1L, 1L)) { ByteArray(4) { 1 } }
+        val first = cache.getOrCreate(ThumbKey("/first", FileRevision(1L, 1L))) { ByteArray(4) { 1 } }
         first.setLastModified(1L)
-        val second = cache.getOrCreate(ThumbKey("/second", 1L, 1L)) { ByteArray(4) { 2 } }
+        val second = cache.getOrCreate(ThumbKey("/second", FileRevision(1L, 1L))) { ByteArray(4) { 2 } }
         second.setLastModified(2L)
-        val third = cache.getOrCreate(ThumbKey("/third", 1L, 1L)) { ByteArray(4) { 3 } }
+        val third = cache.getOrCreate(ThumbKey("/third", FileRevision(1L, 1L))) { ByteArray(4) { 3 } }
 
         assertThat(first.exists()).isFalse()
         assertThat(second.exists()).isFalse()
@@ -118,7 +119,7 @@ class CoverThumbCacheTest {
         dir.deleteOnExit()
         var attempts = 0
         val cache = CoverThumbCache(dir, ThumbEncoder { bytes, _, _ -> bytes })
-        val key = ThumbKey("/failing.jpg", 1L, 1L)
+        val key = ThumbKey("/failing.jpg", FileRevision(1L, 1L))
 
         runCatching {
             cache.getOrCreate(key) {
@@ -128,7 +129,7 @@ class CoverThumbCacheTest {
         }
         assertThat(attempts).isEqualTo(1)
 
-        // Second attempt fails immediately due to .fail marker
+        // A repeated attempt is suppressed during the in-memory failure TTL.
         val immediateFail = runCatching {
             cache.getOrCreate(key) {
                 attempts++
@@ -156,7 +157,7 @@ class CoverThumbCacheTest {
         dir.deleteOnExit()
         var attempts = 0
         val cache = CoverThumbCache(dir, ThumbEncoder { bytes, _, _ -> bytes })
-        val key = ThumbKey("/force.jpg", 1L, 1L)
+        val key = ThumbKey("/force.jpg", FileRevision(1L, 1L))
 
         runCatching {
             cache.getOrCreate(key) {
@@ -183,4 +184,3 @@ class CoverThumbCacheTest {
         assertThat(text).contains("SHA-256")
     }
 }
-

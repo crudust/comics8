@@ -13,7 +13,7 @@ data class PreviewImageSpec(
 }
 
 object PreviewImageResolver {
-    fun resolve(url: String): PreviewImageSpec? {
+    fun resolve(url: String, refreshNetworkRevision: Boolean = false): PreviewImageSpec? {
         if (url.isBlank()) return null
         val localRef = LocalPreviewUri.parse(url)
         val networkRef = NetworkImageUri.parse(url)
@@ -24,12 +24,20 @@ object PreviewImageResolver {
             ?: 320
 
         val key = if (localRef != null) {
-            ThumbKey("local|${localRef.path}|${localRef.kind}", localRef.modifiedAt, localRef.size)
-        } else {
             ThumbKey(
-                "${networkRef!!.sourceId}|${networkRef.path}|${networkRef.preview}",
-                networkRef.modifiedAt,
-                networkRef.size,
+                "local|${localRef.path}|${localRef.kind}",
+                com.comics8.core.source.FileRevision(localRef.size, localRef.modifiedAt),
+            )
+        } else {
+            val revision = if (refreshNetworkRevision) {
+                NetworkSourceRuntime.currentRevision(networkRef!!.sourceId, networkRef.path)
+                    ?: networkRef.revision
+            } else {
+                networkRef!!.revision
+            }
+            ThumbKey(
+                "${networkRef.sourceId}|${networkRef.path}|${networkRef.preview}",
+                revision,
             )
         }
 

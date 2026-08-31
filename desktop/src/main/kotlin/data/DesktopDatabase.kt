@@ -145,246 +145,8 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
 
     private fun initTables() {
         withConnection { conn ->
-            val version = userVersion(conn)
-            if (version < 1) {
-                rebuildIfLegacy(conn)
-                conn.createStatement().use { it.execute("PRAGMA user_version = 1") }
-            }
+            conn.createStatement().use { it.execute("PRAGMA user_version = 1") }
             createCurrentTables(conn)
-        }
-    }
-
-    private fun tableExists(conn: Connection, name: String): Boolean {
-        conn.prepareStatement(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-        ).use { stmt ->
-            stmt.setString(1, name)
-            stmt.executeQuery().use { rs -> return rs.next() }
-        }
-    }
-
-    private fun hasColumn(conn: Connection, table: String, column: String): Boolean {
-        conn.createStatement().use { stmt ->
-            stmt.executeQuery("PRAGMA table_info($table)").use { rs ->
-                while (rs.next()) {
-                    if (rs.getString("name") == column) return true
-                }
-            }
-        }
-        return false
-    }
-
-    private fun rebuildIfLegacy(conn: Connection) {
-        val previous = conn.autoCommit
-        conn.autoCommit = false
-        try {
-            rebuildIfLegacyUnlocked(conn)
-            conn.commit()
-        } catch (e: Exception) {
-            conn.rollback()
-            throw e
-        } finally {
-            conn.autoCommit = previous
-        }
-    }
-
-    private fun rebuildIfLegacyUnlocked(conn: Connection) {
-        val eleven = WorkId.DEFAULT_SOURCE
-        if (tableExists(conn, "favorites") && !hasColumn(conn, "favorites", "sourceId")) {
-            conn.createStatement().use { stmt ->
-                stmt.execute("DROP TABLE IF EXISTS favorites_new")
-                stmt.execute(
-                    """
-                    CREATE TABLE favorites_new (
-                        sourceId TEXT NOT NULL,
-                        toonId TEXT NOT NULL,
-                        title TEXT,
-                        thumbUrl TEXT,
-                        href TEXT,
-                        genre TEXT,
-                        updatedAt TEXT,
-                        savedAt INTEGER,
-                        PRIMARY KEY (sourceId, toonId)
-                    )
-                    """.trimIndent(),
-                )
-                stmt.execute(
-                    """
-                    INSERT INTO favorites_new (sourceId, toonId, title, thumbUrl, href, genre, updatedAt, savedAt)
-                    SELECT '$eleven', id, title, thumbUrl, href, genre, updatedAt, savedAt FROM favorites
-                    """.trimIndent(),
-                )
-                stmt.execute("DROP TABLE favorites")
-                stmt.execute("ALTER TABLE favorites_new RENAME TO favorites")
-            }
-        }
-        if (tableExists(conn, "seen_toons") && !hasColumn(conn, "seen_toons", "sourceId")) {
-            conn.createStatement().use { stmt ->
-                stmt.execute("DROP TABLE IF EXISTS seen_toons_new")
-                stmt.execute(
-                    """
-                    CREATE TABLE seen_toons_new (
-                        sourceId TEXT NOT NULL,
-                        toonId TEXT NOT NULL,
-                        title TEXT,
-                        updatedAt TEXT,
-                        firstSeenAt INTEGER,
-                        lastSeenAt INTEGER,
-                        notifiedKey TEXT,
-                        PRIMARY KEY (sourceId, toonId)
-                    )
-                    """.trimIndent(),
-                )
-                stmt.execute(
-                    """
-                    INSERT INTO seen_toons_new (sourceId, toonId, title, updatedAt, firstSeenAt, lastSeenAt, notifiedKey)
-                    SELECT '$eleven', id, title, updatedAt, firstSeenAt, lastSeenAt, notifiedKey FROM seen_toons
-                    """.trimIndent(),
-                )
-                stmt.execute("DROP TABLE seen_toons")
-                stmt.execute("ALTER TABLE seen_toons_new RENAME TO seen_toons")
-            }
-        }
-        if (tableExists(conn, "seen_toons")) {
-            conn.createStatement().use { stmt ->
-                stmt.execute(
-                    "UPDATE seen_toons SET notifiedKey = '$eleven:' || notifiedKey WHERE notifiedKey NOT LIKE '%:%'",
-                )
-            }
-        }
-        if (tableExists(conn, "reader_settings") && !hasColumn(conn, "reader_settings", "sourceId")) {
-            conn.createStatement().use { stmt ->
-                stmt.execute("DROP TABLE IF EXISTS reader_settings_new")
-                stmt.execute(
-                    """
-                    CREATE TABLE reader_settings_new (
-                        sourceId TEXT NOT NULL,
-                        toonId TEXT NOT NULL,
-                        viewMode TEXT,
-                        readDirection TEXT,
-                        updatedAt INTEGER,
-                        PRIMARY KEY (sourceId, toonId)
-                    )
-                    """.trimIndent(),
-                )
-                stmt.execute(
-                    """
-                    INSERT INTO reader_settings_new (sourceId, toonId, viewMode, readDirection, updatedAt)
-                    SELECT '$eleven', toonId, viewMode, readDirection, updatedAt FROM reader_settings
-                    """.trimIndent(),
-                )
-                stmt.execute("DROP TABLE reader_settings")
-                stmt.execute("ALTER TABLE reader_settings_new RENAME TO reader_settings")
-            }
-        }
-        if (tableExists(conn, "read_history") && !hasColumn(conn, "read_history", "sourceId")) {
-            conn.createStatement().use { stmt ->
-                stmt.execute("DROP TABLE IF EXISTS read_history_new")
-                stmt.execute(
-                    """
-                    CREATE TABLE read_history_new (
-                        sourceId TEXT NOT NULL,
-                        toonId TEXT NOT NULL,
-                        toonTitle TEXT,
-                        toonThumbUrl TEXT,
-                        toonHref TEXT,
-                        lastWrId TEXT,
-                        lastEpisodeTitle TEXT,
-                        lastEpisodeHref TEXT,
-                        lastReadOrder INTEGER,
-                        totalEpisodes INTEGER,
-                        lastReadAt INTEGER,
-                        nextWrId TEXT,
-                        nextEpisodeTitle TEXT,
-                        nextEpisodeHref TEXT,
-                        hasNew INTEGER DEFAULT 0,
-                        PRIMARY KEY (sourceId, toonId)
-                    )
-                    """.trimIndent(),
-                )
-                stmt.execute(
-                    """
-                    INSERT INTO read_history_new (
-                        sourceId, toonId, toonTitle, toonThumbUrl, toonHref, lastWrId, lastEpisodeTitle,
-                        lastEpisodeHref, lastReadOrder, totalEpisodes, lastReadAt, nextWrId, nextEpisodeTitle,
-                        nextEpisodeHref, hasNew
-                    )
-                    SELECT '$eleven', toonId, toonTitle, toonThumbUrl, toonHref, lastWrId, lastEpisodeTitle,
-                        lastEpisodeHref, lastReadOrder, totalEpisodes, lastReadAt, nextWrId, nextEpisodeTitle,
-                        nextEpisodeHref, hasNew FROM read_history
-                    """.trimIndent(),
-                )
-                stmt.execute("DROP TABLE read_history")
-                stmt.execute("ALTER TABLE read_history_new RENAME TO read_history")
-            }
-        }
-        if (tableExists(conn, "read_episodes") && !hasColumn(conn, "read_episodes", "sourceId")) {
-            conn.createStatement().use { stmt ->
-                stmt.execute("DROP TABLE IF EXISTS read_episodes_new")
-                stmt.execute(
-                    """
-                    CREATE TABLE read_episodes_new (
-                        sourceId TEXT NOT NULL,
-                        toonId TEXT NOT NULL,
-                        wrId TEXT NOT NULL,
-                        readAt INTEGER,
-                        lastPage INTEGER DEFAULT 0,
-                        PRIMARY KEY (sourceId, toonId, wrId)
-                    )
-                    """.trimIndent(),
-                )
-                stmt.execute(
-                    """
-                    INSERT INTO read_episodes_new (sourceId, toonId, wrId, readAt, lastPage)
-                    SELECT '$eleven', toonId, wrId, readAt, lastPage FROM read_episodes
-                    """.trimIndent(),
-                )
-                stmt.execute("DROP TABLE read_episodes")
-                stmt.execute("ALTER TABLE read_episodes_new RENAME TO read_episodes")
-            }
-        }
-        if (tableExists(conn, "downloaded_episodes") && !hasColumn(conn, "downloaded_episodes", "sourceId")) {
-            conn.createStatement().use { stmt ->
-                stmt.execute("DROP TABLE IF EXISTS downloaded_episodes_new")
-                stmt.execute(
-                    """
-                    CREATE TABLE downloaded_episodes_new (
-                        sourceId TEXT NOT NULL,
-                        toonId TEXT NOT NULL,
-                        wrId TEXT NOT NULL,
-                        toonTitle TEXT,
-                        toonThumbUrl TEXT,
-                        toonHref TEXT,
-                        episodeTitle TEXT,
-                        episodeHref TEXT,
-                        imageCount INTEGER,
-                        totalBytes INTEGER,
-                        downloadedAt INTEGER,
-                        localDirPath TEXT,
-                        PRIMARY KEY (sourceId, toonId, wrId)
-                    )
-                    """.trimIndent(),
-                )
-                stmt.execute(
-                    """
-                    INSERT INTO downloaded_episodes_new (
-                        sourceId, toonId, wrId, toonTitle, toonThumbUrl, toonHref, episodeTitle, episodeHref,
-                        imageCount, totalBytes, downloadedAt, localDirPath
-                    )
-                    SELECT '$eleven', toonId, wrId, toonTitle, toonThumbUrl, toonHref, episodeTitle, episodeHref,
-                        imageCount, totalBytes, downloadedAt, localDirPath FROM downloaded_episodes
-                    """.trimIndent(),
-                )
-                stmt.execute("DROP TABLE downloaded_episodes")
-                stmt.execute("ALTER TABLE downloaded_episodes_new RENAME TO downloaded_episodes")
-            }
-        }
-        if (tableExists(conn, "tombstones")) {
-            conn.createStatement().use { stmt ->
-                stmt.execute(
-                    "UPDATE tombstones SET entityId = '$eleven:' || entityId WHERE entityId NOT LIKE '%:%'",
-                )
-            }
         }
     }
 
@@ -435,9 +197,6 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
                 )
                 """.trimIndent(),
             )
-            if (!hasColumn(conn, "reader_settings", "splitMode")) {
-                stmt.execute("ALTER TABLE reader_settings ADD COLUMN splitMode TEXT DEFAULT 'FIT'")
-            }
             stmt.execute("CREATE INDEX IF NOT EXISTS index_reader_settings_updatedAt ON reader_settings(updatedAt)")
             stmt.execute(
                 """
@@ -653,14 +412,16 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
         val toonIds = ids.map { it.toonId }.distinct()
         val list = mutableListOf<FavoriteRecord>()
         withConnection { conn ->
-            val placeholders = toonIds.joinToString(",") { "?" }
-            conn.prepareStatement("SELECT * FROM favorites WHERE toonId IN ($placeholders)").use { stmt ->
-                toonIds.forEachIndexed { index, id -> stmt.setString(index + 1, id) }
-                val rs = stmt.executeQuery()
-                while (rs.next()) {
-                    val record = favoriteFrom(rs)
-                    if (record.workId().storageKey() in wanted) {
-                        list.add(record)
+            for (chunk in toonIds.chunked(400)) {
+                val placeholders = chunk.joinToString(",") { "?" }
+                conn.prepareStatement("SELECT * FROM favorites WHERE toonId IN ($placeholders)").use { stmt ->
+                    chunk.forEachIndexed { index, id -> stmt.setString(index + 1, id) }
+                    val rs = stmt.executeQuery()
+                    while (rs.next()) {
+                        val record = favoriteFrom(rs)
+                        if (record.workId().storageKey() in wanted) {
+                            list.add(record)
+                        }
                     }
                 }
             }
@@ -752,15 +513,17 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
         val toonIds = ids.map { it.toonId }.distinct()
         val map = mutableMapOf<String, SeenRecord>()
         withConnection { conn ->
-            val placeholders = toonIds.joinToString(",") { "?" }
-            conn.prepareStatement("SELECT * FROM seen_toons WHERE toonId IN ($placeholders)").use { stmt ->
-                toonIds.forEachIndexed { index, id -> stmt.setString(index + 1, id) }
-                val rs = stmt.executeQuery()
-                while (rs.next()) {
-                    val record = seenFrom(rs)
-                    val key = record.workId().storageKey()
-                    if (key in wanted) {
-                        map[key] = record
+            for (chunk in toonIds.chunked(400)) {
+                val placeholders = chunk.joinToString(",") { "?" }
+                conn.prepareStatement("SELECT * FROM seen_toons WHERE toonId IN ($placeholders)").use { stmt ->
+                    chunk.forEachIndexed { index, id -> stmt.setString(index + 1, id) }
+                    val rs = stmt.executeQuery()
+                    while (rs.next()) {
+                        val record = seenFrom(rs)
+                        val key = record.workId().storageKey()
+                        if (key in wanted) {
+                            map[key] = record
+                        }
                     }
                 }
             }
@@ -823,14 +586,16 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
         val toonIds = ids.map { it.toonId }.distinct()
         val list = mutableListOf<ReadHistoryRecord>()
         withConnection { conn ->
-            val placeholders = toonIds.joinToString(",") { "?" }
-            conn.prepareStatement("SELECT * FROM read_history WHERE toonId IN ($placeholders)").use { stmt ->
-                toonIds.forEachIndexed { index, id -> stmt.setString(index + 1, id) }
-                val rs = stmt.executeQuery()
-                while (rs.next()) {
-                    val record = historyFrom(rs)
-                    if (record.workId().storageKey() in wanted) {
-                        list.add(record)
+            for (chunk in toonIds.chunked(400)) {
+                val placeholders = chunk.joinToString(",") { "?" }
+                conn.prepareStatement("SELECT * FROM read_history WHERE toonId IN ($placeholders)").use { stmt ->
+                    chunk.forEachIndexed { index, id -> stmt.setString(index + 1, id) }
+                    val rs = stmt.executeQuery()
+                    while (rs.next()) {
+                        val record = historyFrom(rs)
+                        if (record.workId().storageKey() in wanted) {
+                            list.add(record)
+                        }
                     }
                 }
             }
@@ -1010,21 +775,23 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
         val toonIds = workIds.map { it.toonId }.distinct()
         val counts = mutableMapOf<String, Int>()
         withConnection { conn ->
-            val placeholders = toonIds.joinToString(",") { "?" }
-            conn.prepareStatement(
-                """
-                SELECT sourceId, toonId, COUNT(*)
-                FROM read_episodes
-                WHERE toonId IN ($placeholders)
-                GROUP BY sourceId, toonId
-                """.trimIndent(),
-            ).use { stmt ->
-                toonIds.forEachIndexed { index, id -> stmt.setString(index + 1, id) }
-                val rs = stmt.executeQuery()
-                while (rs.next()) {
-                    val key = "${rs.getString(1)}:${rs.getString(2)}"
-                    if (key in wanted) {
-                        counts[key] = rs.getInt(3)
+            for (chunk in toonIds.chunked(400)) {
+                val placeholders = chunk.joinToString(",") { "?" }
+                conn.prepareStatement(
+                    """
+                    SELECT sourceId, toonId, COUNT(*)
+                    FROM read_episodes
+                    WHERE toonId IN ($placeholders)
+                    GROUP BY sourceId, toonId
+                    """.trimIndent(),
+                ).use { stmt ->
+                    chunk.forEachIndexed { index, id -> stmt.setString(index + 1, id) }
+                    val rs = stmt.executeQuery()
+                    while (rs.next()) {
+                        val key = "${rs.getString(1)}:${rs.getString(2)}"
+                        if (key in wanted) {
+                            counts[key] = rs.getInt(3)
+                        }
                     }
                 }
             }

@@ -123,3 +123,24 @@ fun formatNotificationInterval(minutes: Long, strings: AppStrings): String = whe
     else -> "${minutes}m"
 }
 
+fun formatRelativeTime(
+    timestamp: Long,
+    strings: AppStrings,
+    nowMs: Long = System.currentTimeMillis(),
+): String {
+    if (timestamp <= 0) return ""
+    val diff = (nowMs - timestamp).coerceAtLeast(0)
+    val seconds = diff / 1000
+    val minutes = seconds / 60
+    val hours = minutes / 60
+    val days = hours / 24
+
+    return when {
+        minutes < 1 -> strings.timeJustNow
+        minutes < 60 -> strings.timeMinutesAgo(minutes)
+        hours < 24 -> strings.timeHoursAgo(hours)
+        days < 7 -> strings.timeDaysAgo(days)
+        else -> com.comics8.core.model.UpdateDates.formatEpoch(timestamp, "yyyy.MM.dd")
+    }
+}
+

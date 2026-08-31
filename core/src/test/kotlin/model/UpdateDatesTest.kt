@@ -41,4 +41,12 @@ class UpdateDatesTest {
         assertThat(UpdateDates.toListingDate("26.08.16")).isEqualTo("08.16")
         assertThat(UpdateDates.toListingDate("8.5")).isEqualTo("08.05")
     }
+
+    @Test
+    fun formatEpochFormatsMillisToDateString() {
+        // 2026-08-30 00:00:00 UTC = 1788048000000 ms approx
+        val millis = 1788048000000L
+        assertThat(UpdateDates.formatEpoch(millis, "yyyy")).isEqualTo("2026")
+        assertThat(UpdateDates.formatEpoch(millis)).isNotEmpty()
+    }
 }

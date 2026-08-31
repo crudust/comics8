@@ -1,5 +1,6 @@
 package com.comics8.core.source.network
 
+import com.comics8.core.source.FileRevision
 import java.io.Closeable
 import java.io.InputStream
 import java.nio.ByteBuffer
@@ -9,15 +10,19 @@ data class NetworkNode(
     val path: String,
     val name: String,
     val directory: Boolean,
-    val size: Long = 0L,
-    val modifiedAt: Long = 0L,
+    val revision: FileRevision,
+)
+
+data class OpenedNetworkFile(
+    val channel: SeekableByteChannel,
+    val revision: FileRevision,
 )
 
 interface NetworkFileSystem : Closeable {
     fun list(path: String = ""): List<NetworkNode>
     fun stat(path: String = ""): NetworkNode? = null
     fun open(path: String): InputStream
-    fun openChannel(path: String, knownSize: Long = -1L): SeekableByteChannel
+    fun openFile(path: String): OpenedNetworkFile
     fun test() {
         list("")
     }

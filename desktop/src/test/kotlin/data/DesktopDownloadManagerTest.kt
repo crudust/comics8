@@ -18,7 +18,7 @@ import kotlin.io.path.createTempDirectory
 
 class DesktopDownloadManagerTest {
     @Test
-    fun migrateMovesLegacyDirAndUpdatesLocalDirPath() = runBlocking {
+    fun getLocalEpisodeImagesResolvesPopulatedDir() = runBlocking {
         val root = createTempDirectory("desk-dl").toFile()
         root.deleteOnExit()
         val downloads = File(root, "downloads").apply { mkdirs() }
@@ -26,13 +26,13 @@ class DesktopDownloadManagerTest {
             isSourceEnabled = { true }
             installedIds = { setOf(WorkId.DEFAULT_SOURCE) }
         }
-        val legacy = DownloadLayout.legacyEpisodeDir(downloads, "123", "999")
-        legacy.mkdirs()
-        File(legacy, "0001.jpg").writeText("img")
+        val workId = WorkId.eleven("123")
+        val dir = DownloadLayout.episodeDir(downloads, workId, "999").apply { mkdirs() }
+        File(dir, "0001.jpg").writeText("img")
         db.saveDownloadedEpisode(
             DownloadedEpisodeRecord(
-                sourceId = WorkId.DEFAULT_SOURCE,
-                toonId = "123",
+                sourceId = workId.sourceId,
+                toonId = workId.toonId,
                 wrId = "999",
                 toonTitle = "원피스",
                 toonThumbUrl = "t",
@@ -42,7 +42,7 @@ class DesktopDownloadManagerTest {
                 imageCount = 1,
                 totalBytes = 3,
                 downloadedAt = 1L,
-                localDirPath = legacy.absolutePath,
+                localDirPath = dir.absolutePath,
             ),
         )
 
@@ -52,65 +52,10 @@ class DesktopDownloadManagerTest {
             baseDir = downloads,
             sources = SourceRegistry.forTests(),
         )
-        manager.migrateLegacyDownloads()
 
-        val neu = DownloadLayout.episodeDir(downloads, WorkId.eleven("123"), "999")
-        assertThat(File(neu, "0001.jpg").readText()).isEqualTo("img")
-        assertThat(legacy.exists()).isFalse()
-        val stored = db.getDownloadedEpisode(WorkId.eleven("123"), "999")
-        assertThat(stored?.localDirPath).isEqualTo(neu.absolutePath)
-        val images = manager.getLocalEpisodeImages(WorkId.eleven("123"), "999")
+        val images = manager.getLocalEpisodeImages(workId, "999")
         assertThat(images).isNotNull()
         assertThat(images!!.single()).endsWith("/0001.jpg")
-    }
-
-    @Test
-    fun incompleteDestDoesNotRewriteLocalDirPath() = runBlocking {
-        val root = createTempDirectory("desk-partial").toFile()
-        root.deleteOnExit()
-        val downloads = File(root, "downloads").apply { mkdirs() }
-        val db = DesktopDatabase(File(root, "comics8.db")).apply {
-            isSourceEnabled = { true }
-            installedIds = { setOf(WorkId.DEFAULT_SOURCE) }
-        }
-        val workId = WorkId.eleven("123")
-        val dest = DownloadLayout.episodeDir(downloads, workId, "999")
-        dest.mkdirs()
-        File(dest, "0001.jpg").writeText("partial")
-        val legacy = DownloadLayout.legacyEpisodeDir(downloads, "123", "999")
-        legacy.mkdirs()
-        File(legacy, "0001.jpg").writeText("1")
-        File(legacy, "0002.jpg").writeText("2")
-        db.saveDownloadedEpisode(
-            DownloadedEpisodeRecord(
-                sourceId = WorkId.DEFAULT_SOURCE,
-                toonId = "123",
-                wrId = "999",
-                toonTitle = "원피스",
-                toonThumbUrl = "t",
-                toonHref = "h",
-                episodeTitle = "1화",
-                episodeHref = "e",
-                imageCount = 2,
-                totalBytes = 2,
-                downloadedAt = 1L,
-                localDirPath = legacy.absolutePath,
-            ),
-        )
-
-        val manager = DesktopDownloadManager(
-            db,
-            ToonClient(isProxyEnabled = false, sources = emptyLocator()),
-            baseDir = downloads,
-            sources = SourceRegistry.forTests(),
-        )
-        manager.migrateLegacyDownloads()
-
-        val stored = db.getDownloadedEpisode(workId, "999")
-        assertThat(stored?.localDirPath).isEqualTo(legacy.absolutePath)
-        assertThat(File(legacy, "0002.jpg").exists()).isTrue()
-        val images = manager.getLocalEpisodeImages(workId, "999")
-        assertThat(images).hasSize(2)
     }
 
     @Test
@@ -139,9 +84,8 @@ class DesktopDownloadManagerTest {
             DownloadLayout.episodeDir(downloads, WorkId.local(series.id), episode.wrId).exists(),
         ).isFalse()
 
-        val thumbs = CoverThumbCache(File(root, "thumbs"), ThumbEncoder { bytes, _, _ -> bytes })
         val loaded = SourceRegistry(
-            listOf(LocalSource(roots = { emptyList() }, thumbs = thumbs)),
+            listOf(LocalSource(roots = { emptyList() })),
         )
         enqueueLocal(downloads, File(root, "loaded.db"), loaded)
         assertThat(File(downloads, WorkId.LOCAL_SOURCE).exists()).isFalse()
