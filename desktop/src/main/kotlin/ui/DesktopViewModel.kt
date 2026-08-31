@@ -1,5 +1,6 @@
 package com.comics8.desktop.ui
 
+import com.comics8.core.image.ImageCacheRole
 import com.comics8.core.model.ArtistRef
 import com.comics8.core.model.BrowseTab
 import com.comics8.core.model.EpisodeItem
@@ -96,7 +97,6 @@ class DesktopViewModel(
 
     private val catalogCache = mutableMapOf<BrowseTab, List<ToonItem>>()
     private val catalogPages = mutableMapOf<BrowseTab, Pair<Int, Int>>()
-    private val thumbCache = com.comics8.desktop.ui.util.DesktopImageCache.coverThumbs
 
     private val toonTotalCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
     private val toonLastPageCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
@@ -801,7 +801,6 @@ class DesktopViewModel(
         registry.add(
             LocalSource(
                 roots = { DesktopSourcePrefs.libraryRoots().map { File(it) } },
-                thumbs = thumbCache,
                 index = LibraryScanIndex(
                     File(System.getProperty("user.home"), ".comics8/cache/library-index/local.json"),
                 ),
@@ -1935,6 +1934,7 @@ class DesktopViewModel(
 
     fun openEpisode(episode: EpisodeItem) {
         DesktopImageCache.cancelPendingPreviews()
+        DesktopImageCache.clear(ImageCacheRole.READER)
         val current = _state.value
         val series = current.series
         if (series != null) {
@@ -2069,7 +2069,7 @@ class DesktopViewModel(
                     (targetPage + 3).coerceAtMost(images.size),
                 )
                 scope.launch(Dispatchers.IO) {
-                    DesktopImageCache.preload(preloadUrls)
+                    DesktopImageCache.preload(ImageCacheRole.READER, preloadUrls)
                 }
             } catch (e: Exception) {
                 if (e is CancellationException) return@launch
@@ -2247,6 +2247,7 @@ class DesktopViewModel(
     fun closeReader() {
         flushPendingPageSave()
         readerJob?.cancel()
+        DesktopImageCache.clear(ImageCacheRole.READER)
         val current = _state.value
         lastViewedEpisode = current.currentEpisode
         _state.update {

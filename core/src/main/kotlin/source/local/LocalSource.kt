@@ -17,7 +17,6 @@ import java.io.File
 
 class LocalSource(
     private val roots: () -> List<File>,
-    @Suppress("UNUSED_PARAMETER") thumbs: CoverThumbCache,
     private val scan: LibraryScanner = LibraryScanner(),
     private val index: LibraryScanIndex? = null,
 ) : ComicSource {
@@ -118,8 +117,10 @@ class LocalSource(
                 path = LocalWorkId.canonical(episode.path),
                 title = episode.title,
                 zip = episode.kind == LocalEpisodeKind.ZIP,
-                size = episode.path.length(),
-                modifiedAt = episode.path.lastModified(),
+                revision = com.comics8.core.source.FileRevision(
+                    episode.path.length(),
+                    episode.path.lastModified(),
+                ),
             )
         },
     )

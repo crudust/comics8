@@ -71,6 +71,7 @@ import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.comics8.core.image.ImageCacheRole
 import com.comics8.core.model.DualSpread
 import com.comics8.core.model.ImageHalf
 import com.comics8.core.model.ReadDirection
@@ -344,6 +345,7 @@ private fun ReaderScrollView(
         ) {
             itemsIndexed(state.readerImages, key = { idx, url -> "$idx-$url" }) { index, url ->
                 DesktopAsyncImage(
+                    cacheRole = ImageCacheRole.READER,
                     url = url,
                     contentDescription = strings.labelPageNumber(index + 1),
                     contentScale = ContentScale.FillWidth,
@@ -461,7 +463,7 @@ private fun ReaderSingleView(
                     state.readerImages.getOrNull(slice.imageIndex)
                 }
             }
-            com.comics8.desktop.ui.util.DesktopImageCache.preload(preloadUrls)
+            com.comics8.desktop.ui.util.DesktopImageCache.preload(ImageCacheRole.READER, preloadUrls)
         }
     }
 
@@ -539,6 +541,7 @@ private fun ReaderSingleView(
     ) {
         if (currentImage != null) {
             DesktopAsyncImage(
+                cacheRole = ImageCacheRole.READER,
                 url = currentImage,
                 half = currentHalf,
                 contentDescription = strings.labelPageNumber(currentPage + 1),
@@ -787,7 +790,7 @@ private fun ReaderDualView(
                     null -> {}
                 }
             }
-            com.comics8.desktop.ui.util.DesktopImageCache.preload(preloadUrls)
+            com.comics8.desktop.ui.util.DesktopImageCache.preload(ImageCacheRole.READER, preloadUrls)
         }
     }
 
@@ -876,6 +879,7 @@ private fun ReaderDualView(
                             contentAlignment = Alignment.Center,
                         ) {
                             DesktopAsyncImage(
+                                cacheRole = ImageCacheRole.READER,
                                 url = url,
                                 contentDescription = strings.labelPageNumber(spread.index + 1),
                                 contentScale = ContentScale.Fit,
@@ -907,6 +911,7 @@ private fun ReaderDualView(
                                 val url = state.readerImages.getOrNull(spread.index)
                                 if (url != null) {
                                     DesktopAsyncImage(
+                                        cacheRole = ImageCacheRole.READER,
                                         url = url,
                                         contentDescription = strings.labelPageNumber(spread.index + 1),
                                         contentScale = ContentScale.Fit,
@@ -928,6 +933,7 @@ private fun ReaderDualView(
                                 val url = state.readerImages.getOrNull(spread.index)
                                 if (url != null) {
                                     DesktopAsyncImage(
+                                        cacheRole = ImageCacheRole.READER,
                                         url = url,
                                         contentDescription = strings.labelPageNumber(spread.index + 1),
                                         contentScale = ContentScale.Fit,
@@ -964,6 +970,7 @@ private fun ReaderDualView(
                         val url = state.readerImages.getOrNull(leftIndex)
                         if (url != null) {
                             DesktopAsyncImage(
+                                cacheRole = ImageCacheRole.READER,
                                 url = url,
                                 contentDescription = strings.labelPageNumber(leftIndex + 1),
                                 contentScale = ContentScale.Fit,
@@ -985,6 +992,7 @@ private fun ReaderDualView(
                         val url = state.readerImages.getOrNull(rightIndex)
                         if (url != null) {
                             DesktopAsyncImage(
+                                cacheRole = ImageCacheRole.READER,
                                 url = url,
                                 contentDescription = strings.labelPageNumber(rightIndex + 1),
                                 contentScale = ContentScale.Fit,

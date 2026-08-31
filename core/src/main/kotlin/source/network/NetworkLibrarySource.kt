@@ -5,6 +5,7 @@ import com.comics8.core.model.EpisodePage
 import com.comics8.core.model.ListingPage
 import com.comics8.core.model.ToonItem
 import com.comics8.core.source.ComicSource
+import com.comics8.core.source.FileRevision
 import com.comics8.core.source.NotificationMode
 import com.comics8.core.source.RequestPolicy
 import com.comics8.core.source.SearchQuery
@@ -15,9 +16,7 @@ import com.comics8.core.source.local.NaturalSort
 import com.comics8.core.source.local.IndexedLibraryEpisode
 import com.comics8.core.source.local.IndexedLibraryWork
 import com.comics8.core.source.local.LibraryScanIndex
-import com.comics8.core.source.local.ZipArchive
 import com.comics8.core.source.local.ZipImageNames
-import org.apache.commons.compress.archivers.zip.ZipFile
 import java.util.Base64
 
 class NetworkLibrarySource(
@@ -58,7 +57,7 @@ class NetworkLibrarySource(
         val allWorks = scan()
         val works = when (catalogId.uppercase()) {
             "LATEST" -> allWorks.sortedByDescending { work ->
-                work.episodes.maxOfOrNull { it.modifiedAt } ?: 0L
+                work.episodes.maxOfOrNull { it.revision.modifiedAtEpochMs } ?: 0L
             }
             else -> allWorks
         }
@@ -76,8 +75,6 @@ class NetworkLibrarySource(
         if (needle.isEmpty()) return emptyList()
         return scan().filter { it.title.contains(needle, ignoreCase = true) }.map(::toItem)
     }
-
-    @Volatile private var memoryCache: List<NetworkWork>? = null
 
     override suspend fun loadEpisodes(item: ToonItem, page: Int, http: SourceHttp): EpisodePage {
         val work = workFor(item.id) ?: return EpisodePage(emptyList(), 1, 1)
@@ -104,19 +101,30 @@ class NetworkLibrarySource(
     ): List<String> {
         val ref = decodeEpisode(episode.wrId) ?: return emptyList()
         return if (ref.zip) {
-            zipEntries(ref.path, ref.size).map {
-                NetworkImageUri.encode(id, ref.path, it, ref.size, modifiedAt = ref.modifiedAt)
+            val archive = zipEntries(ref.path)
+            archive.entries.map {
+                NetworkImageUri.encode(
+                    sourceId = id,
+                    path = ref.path,
+                    zipEntry = it,
+                    revision = archive.revision,
+                )
             }
         } else {
             backend.list(ref.path)
                 .filter { !it.directory && ZipImageNames.isImageEntry(it.name) }
                 .sortedWith(compareBy(NaturalSort) { it.name })
-                .map { NetworkImageUri.encode(id, it.path) }
+                .map {
+                    NetworkImageUri.encode(
+                        sourceId = id,
+                        path = it.path,
+                        revision = it.revision,
+                    )
+                }
         }
     }
 
     private fun workFor(workId: String): NetworkWork? {
-        memoryCache?.firstOrNull { it.id == workId }?.let { return it }
         val parsed = parseWorkId(workId) ?: return scan().firstOrNull { it.id == workId }
         val work = when (parsed.kind) {
             WorkKind.SERIES -> {
@@ -124,8 +132,7 @@ class NetworkLibrarySource(
                     path = parsed.path,
                     name = parsed.path.substringAfterLast('/').ifBlank { config.name },
                     directory = true,
-                    size = 0L,
-                    modifiedAt = 0L,
+                    revision = FileRevision.UNKNOWN,
                 )
                 classifyFolder(node)
             }
@@ -136,7 +143,7 @@ class NetworkLibrarySource(
                     id = workId,
                     title = name,
                     path = parsed.path,
-                    episodes = listOf(NetworkEpisode(parsed.path, name, zip = false, stat?.size ?: 0L, stat?.modifiedAt ?: 0L)),
+                    episodes = listOf(NetworkEpisode(parsed.path, name, zip = false, stat?.revision ?: FileRevision.UNKNOWN)),
                 )
             }
             WorkKind.ZIP -> {
@@ -146,7 +153,7 @@ class NetworkLibrarySource(
                     id = workId,
                     title = stem(name),
                     path = parsed.path,
-                    episodes = listOf(NetworkEpisode(parsed.path, stem(name), zip = true, stat?.size ?: 0L, stat?.modifiedAt ?: 0L)),
+                    episodes = listOf(NetworkEpisode(parsed.path, stem(name), zip = true, stat?.revision ?: FileRevision.UNKNOWN)),
                 )
             }
         }
@@ -167,27 +174,23 @@ class NetworkLibrarySource(
 
     private fun scan(): List<NetworkWork> {
         val stamp = runCatching { backend.stat("") }.getOrNull()
-        val statSignature = stamp?.takeIf { it.modifiedAt > 0L }?.let { node ->
+        val statSignature = stamp?.takeIf { it.revision.modifiedAtEpochMs > 0L }?.let { node ->
             LibraryScanIndex.signature(
-                listOf("${config.protocol}|${config.path}|${node.size}|${node.modifiedAt}"),
+                listOf("${config.protocol}|${config.path}|${node.revision}"),
             )
         }
         if (statSignature != null) {
             index?.load(statSignature)?.let { cached ->
-                val loaded = cached.map(::fromIndexed)
-                memoryCache = loaded
-                return loaded
+                return cached.map(::fromIndexed)
             }
         }
         val root = backend.list("").sortedWith(compareBy(NaturalSort) { it.name })
         val signature = statSignature ?: LibraryScanIndex.signature(root.map { node ->
-            "${node.path}|${node.name}|${node.directory}|${node.size}|${node.modifiedAt}"
+            "${node.path}|${node.name}|${node.directory}|${node.revision}"
         })
         if (statSignature == null) {
             index?.load(signature)?.let { cached ->
-                val loaded = cached.map(::fromIndexed)
-                memoryCache = loaded
-                return loaded
+                return cached.map(::fromIndexed)
             }
         }
         val works = ArrayList<NetworkWork>()
@@ -200,7 +203,6 @@ class NetworkLibrarySource(
             }
         }
         index?.save(signature, works.map(::toIndexed))
-        memoryCache = works
         return works
     }
 
@@ -210,7 +212,12 @@ class NetworkLibrarySource(
         path = work.path,
         kind = "NETWORK",
         episodes = work.episodes.map { episode ->
-            IndexedLibraryEpisode(episode.path, episode.title, episode.zip, episode.size, episode.modifiedAt)
+            IndexedLibraryEpisode(
+                episode.path,
+                episode.title,
+                episode.zip,
+                episode.revision,
+            )
         },
     )
 
@@ -219,7 +226,12 @@ class NetworkLibrarySource(
         title = work.title,
         path = work.path,
         episodes = work.episodes.map { episode ->
-            NetworkEpisode(episode.path, episode.title, episode.zip, episode.size, episode.modifiedAt)
+            NetworkEpisode(
+                episode.path,
+                episode.title,
+                episode.zip,
+                episode.revision,
+            )
         },
     )
 
@@ -228,8 +240,8 @@ class NetworkLibrarySource(
         val zips = children.filter { !it.directory && ZipImageNames.isZipName(it.name) }
         val subDirs = children.filter { it.directory }
         if (zips.isNotEmpty() || subDirs.isNotEmpty()) {
-            val episodes = zips.map { NetworkEpisode(it.path, stem(it.name), zip = true, it.size, it.modifiedAt) } +
-                subDirs.map { NetworkEpisode(it.path, it.name, zip = false, it.size, it.modifiedAt) }
+            val episodes = zips.map { NetworkEpisode(it.path, stem(it.name), zip = true, it.revision) } +
+                subDirs.map { NetworkEpisode(it.path, it.name, zip = false, it.revision) }
             return NetworkWork(
                 id = "series:${dir.path}",
                 title = dir.name,
@@ -242,7 +254,7 @@ class NetworkLibrarySource(
                 id = "dir:${dir.path}",
                 title = dir.name,
                 path = dir.path,
-                episodes = listOf(NetworkEpisode(dir.path, dir.name, zip = false, 0L, dir.modifiedAt)),
+                episodes = listOf(NetworkEpisode(dir.path, dir.name, zip = false, dir.revision)),
             )
         }
         return null
@@ -252,7 +264,7 @@ class NetworkLibrarySource(
         id = "zip:${file.path}",
         title = stem(file.name),
         path = file.path,
-        episodes = listOf(NetworkEpisode(file.path, stem(file.name), zip = true, file.size, file.modifiedAt)),
+        episodes = listOf(NetworkEpisode(file.path, stem(file.name), zip = true, file.revision)),
     )
 
     private fun toItem(work: NetworkWork): ToonItem = ToonItem(
@@ -267,9 +279,8 @@ class NetworkLibrarySource(
         NetworkImageUri.encode(
             sourceId = id,
             path = episode.path,
-            size = episode.size,
             preview = NetworkImageUri.PreviewKind.ZIP_FIRST,
-            modifiedAt = episode.modifiedAt,
+            revision = episode.revision,
             thumbnailPx = thumbnailPx,
         )
     } else {
@@ -277,26 +288,23 @@ class NetworkLibrarySource(
             sourceId = id,
             path = episode.path,
             preview = NetworkImageUri.PreviewKind.FOLDER_FIRST,
-            modifiedAt = episode.modifiedAt,
+            revision = episode.revision,
             thumbnailPx = thumbnailPx,
         )
     }
 
-    private fun zipEntries(path: String, knownSize: Long = -1L): List<String> =
-        NetworkSourceRuntime.zipImageEntries(id, path, knownSize)
+    private fun zipEntries(path: String): NetworkArchiveIndex =
+        NetworkSourceRuntime.zipImageEntries(id, path)
 
     private fun encodeEpisode(episode: NetworkEpisode): String {
-        val payload = "${if (episode.zip) 'z' else 'd'}\n${episode.size}\n${episode.modifiedAt}\n${episode.path}"
+        val payload = "${if (episode.zip) 'z' else 'd'}\n${episode.path}"
         return Base64.getUrlEncoder().withoutPadding().encodeToString(payload.toByteArray())
     }
 
     private fun decodeEpisode(value: String): NetworkEpisodeRef? = runCatching {
-        val decoded = String(Base64.getUrlDecoder().decode(value)).split('\n', limit = 4)
-        if (decoded.size >= 4) {
-            NetworkEpisodeRef(decoded[3], decoded[0] == "z", decoded[1].toLong(), decoded[2].toLong())
-        } else {
-            NetworkEpisodeRef(decoded[2], decoded[0] == "z", decoded[1].toLong(), 0L)
-        }
+        val decoded = String(Base64.getUrlDecoder().decode(value)).split('\n', limit = 2)
+        require(decoded.size == 2) { "invalid network episode id" }
+        NetworkEpisodeRef(decoded[1], decoded[0] == "z")
     }.getOrNull()
 
     private fun stem(name: String): String = name.substringBeforeLast('.', name)
@@ -314,11 +322,10 @@ class NetworkLibrarySource(
         val path: String,
         val title: String,
         val zip: Boolean,
-        val size: Long,
-        val modifiedAt: Long,
+        val revision: FileRevision,
     )
 
-    private data class NetworkEpisodeRef(val path: String, val zip: Boolean, val size: Long, val modifiedAt: Long)
+    private data class NetworkEpisodeRef(val path: String, val zip: Boolean)
 
     companion object {
         private const val PAGE_SIZE = 100

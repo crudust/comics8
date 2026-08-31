@@ -84,9 +84,8 @@ class DesktopDownloadManagerTest {
             DownloadLayout.episodeDir(downloads, WorkId.local(series.id), episode.wrId).exists(),
         ).isFalse()
 
-        val thumbs = CoverThumbCache(File(root, "thumbs"), ThumbEncoder { bytes, _, _ -> bytes })
         val loaded = SourceRegistry(
-            listOf(LocalSource(roots = { emptyList() }, thumbs = thumbs)),
+            listOf(LocalSource(roots = { emptyList() })),
         )
         enqueueLocal(downloads, File(root, "loaded.db"), loaded)
         assertThat(File(downloads, WorkId.LOCAL_SOURCE).exists()).isFalse()

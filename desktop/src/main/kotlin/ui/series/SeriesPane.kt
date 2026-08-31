@@ -39,6 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.comics8.core.image.ImageCacheRole
 import com.comics8.core.model.EpisodeItem
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
@@ -208,6 +209,7 @@ fun EpisodeCard(
                 val thumbUrl = episode.thumbUrl
                 if (thumbUrl != null) {
                     DesktopAsyncImage(
+                        cacheRole = ImageCacheRole.EPISODE,
                         url = thumbUrl,
                         contentDescription = episode.title,
                         contentScale = ContentScale.Crop,

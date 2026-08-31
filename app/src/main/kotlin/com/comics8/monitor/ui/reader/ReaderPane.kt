@@ -58,6 +58,8 @@ import androidx.compose.ui.graphics.drawscope.translate
 import coil.compose.AsyncImagePainter
 import coil.compose.SubcomposeAsyncImage
 import coil.compose.SubcomposeAsyncImageContent
+import com.comics8.core.image.ImageCacheRole
+import com.comics8.monitor.data.local.imageCacheRole
 import com.comics8.core.model.CropRect
 import com.comics8.core.model.DualSpread
 import com.comics8.core.model.ImageHalf
@@ -413,9 +415,10 @@ private fun ReaderSinglePagePane(
             val targetUrl = state.readerImages.getOrNull(nextSlice.imageIndex) ?: continue
             val request = coil.request.ImageRequest.Builder(context)
                 .data(targetUrl)
+                .imageCacheRole(ImageCacheRole.READER, targetUrl)
                 .size(maxEdge)
                 .build()
-            imageLoader.enqueue(request)
+            imageLoader.execute(request)
         }
     }
 
@@ -726,20 +729,32 @@ private fun ReaderDualPagePane(
             when (nextSpread) {
                 is DualSpread.Single -> {
                     state.readerImages.getOrNull(nextSpread.index)?.let { url ->
-                        imageLoader.enqueue(
-                            coil.request.ImageRequest.Builder(context).data(url).size(maxEdge).build(),
+                        imageLoader.execute(
+                            coil.request.ImageRequest.Builder(context)
+                                .data(url)
+                                .imageCacheRole(ImageCacheRole.READER, url)
+                                .size(maxEdge)
+                                .build(),
                         )
                     }
                 }
                 is DualSpread.Dual -> {
                     state.readerImages.getOrNull(nextSpread.firstIndex)?.let { url ->
-                        imageLoader.enqueue(
-                            coil.request.ImageRequest.Builder(context).data(url).size(maxEdge).build(),
+                        imageLoader.execute(
+                            coil.request.ImageRequest.Builder(context)
+                                .data(url)
+                                .imageCacheRole(ImageCacheRole.READER, url)
+                                .size(maxEdge)
+                                .build(),
                         )
                     }
                     state.readerImages.getOrNull(nextSpread.secondIndex)?.let { url ->
-                        imageLoader.enqueue(
-                            coil.request.ImageRequest.Builder(context).data(url).size(maxEdge).build(),
+                        imageLoader.execute(
+                            coil.request.ImageRequest.Builder(context)
+                                .data(url)
+                                .imageCacheRole(ImageCacheRole.READER, url)
+                                .size(maxEdge)
+                                .build(),
                         )
                     }
                 }
@@ -1155,20 +1170,15 @@ private fun ReaderImage(
     val context = LocalContext.current
     var retryKey by remember(model) { mutableStateOf(0) }
     val imageModel = remember(model, half, retryKey) {
-        if (half == ImageHalf.FULL) {
-            if (retryKey == 0) model else {
-                coil.request.ImageRequest.Builder(context)
-                    .data(model)
-                    .memoryCachePolicy(coil.request.CachePolicy.WRITE_ONLY)
-                    .build()
-            }
-        } else if (model is coil.request.ImageRequest) {
+        if (model is coil.request.ImageRequest) {
             model
         } else {
             coil.request.ImageRequest.Builder(context)
                 .data(model)
-                .allowHardware(false)
+                .imageCacheRole(ImageCacheRole.READER, model)
+                .size(coil.size.Size(1200, 1800))
                 .apply {
+                    if (half != ImageHalf.FULL) allowHardware(false)
                     if (retryKey > 0) memoryCachePolicy(coil.request.CachePolicy.WRITE_ONLY)
                 }
                 .build()

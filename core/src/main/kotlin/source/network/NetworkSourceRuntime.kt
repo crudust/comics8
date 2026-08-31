@@ -1,10 +1,10 @@
 package com.comics8.core.source.network
 
+import com.comics8.core.source.FileRevision
 import com.comics8.core.source.local.ZipArchive
 import com.comics8.core.source.local.NaturalSort
 import com.comics8.core.source.local.ZipImageNames
 import org.apache.commons.compress.archivers.zip.ZipFile
-import java.io.FilterInputStream
 import java.io.IOException
 import java.io.InputStream
 import java.nio.channels.SeekableByteChannel
@@ -14,13 +14,19 @@ object NetworkSourceRuntime {
     private val backends = ConcurrentHashMap<String, NetworkFileSystem>()
 
     fun register(sourceId: String, backend: NetworkFileSystem) {
-        backends.put(sourceId, backend)?.let { runCatching { it.close() } }
+        backends.put(sourceId, backend)?.takeIf { it !== backend }?.let { previous ->
+            NetworkZipPool.removeForSource(sourceId)
+            runCatching { previous.close() }
+        }
     }
 
     fun remove(sourceId: String) {
         backends.remove(sourceId)?.let { runCatching { it.close() } }
         NetworkZipPool.removeForSource(sourceId)
     }
+
+    fun currentRevision(sourceId: String, path: String): FileRevision? =
+        backends[sourceId]?.let { backend -> runCatching { backend.stat(path)?.revision }.getOrNull() }
 
     fun open(url: String): InputStream {
         val ref = NetworkImageUri.parse(url) ?: throw IOException("잘못된 네트워크 이미지 주소입니다")
@@ -43,36 +49,72 @@ object NetworkSourceRuntime {
         val isFirst = ref.preview == NetworkImageUri.PreviewKind.ZIP_FIRST
         val entryName = ref.zipEntry.orEmpty()
         return try {
-            val session = NetworkZipPool.getOrCreate(ref.sourceId, ref.path, ref.size, backend)
-            if (isFirst) session.firstImageBytes() else session.readEntry(entryName)
+            NetworkZipPool.withSession(ref.sourceId, ref.path, backend, ref.revision) { session ->
+                if (isFirst) session.firstImageBytes() else session.readEntry(entryName)
+            }
         } catch (firstError: Exception) {
             // 실패 시 캐시된 세션을 무효화하고 1회 재시도
             NetworkZipPool.invalidate(ref.sourceId, ref.path)
-            val freshSession = NetworkZipPool.getOrCreate(ref.sourceId, ref.path, ref.size, backend)
-            if (isFirst) freshSession.firstImageBytes() else freshSession.readEntry(entryName)
+            NetworkZipPool.withSession(ref.sourceId, ref.path, backend, ref.revision) { session ->
+                if (isFirst) session.firstImageBytes() else session.readEntry(entryName)
+            }
         }
     }
 
-    fun zipImageEntries(sourceId: String, path: String, size: Long = -1L): List<String> {
+    fun zipImageEntries(sourceId: String, path: String): NetworkArchiveIndex {
         val backend = backends[sourceId] ?: throw IOException("등록되지 않은 네트워크 저장소입니다")
         return try {
-            val session = NetworkZipPool.getOrCreate(sourceId, path, size, backend)
-            session.listImageEntries()
+            NetworkZipPool.withSession(sourceId, path, backend) { session ->
+                NetworkArchiveIndex(session.listImageEntries(), session.revision)
+            }
         } catch (firstError: Exception) {
             NetworkZipPool.invalidate(sourceId, path)
-            val freshSession = NetworkZipPool.getOrCreate(sourceId, path, size, backend)
-            freshSession.listImageEntries()
+            NetworkZipPool.withSession(sourceId, path, backend) { session ->
+                NetworkArchiveIndex(session.listImageEntries(), session.revision)
+            }
         }
     }
 }
 
+data class NetworkArchiveIndex(
+    val entries: List<String>,
+    val revision: FileRevision,
+)
+
 internal class NetworkZipSession(
-    val key: String,
+    val revision: FileRevision,
     private val channel: SeekableByteChannel,
     private val zip: ZipFile,
 ) : AutoCloseable {
     private val lock = Any()
+    private val lifecycleLock = Any()
+    private var users = 0
+    private var retired = false
+    private var closed = false
+    private var cachedImageEntries: List<String>? = null
     @Volatile var lastAccess: Long = System.currentTimeMillis()
+
+    fun acquire(): Boolean = synchronized(lifecycleLock) {
+        if (retired) return false
+        users++
+        true
+    }
+
+    fun release() {
+        val shouldClose = synchronized(lifecycleLock) {
+            users--
+            (retired && users == 0 && !closed).also { if (it) closed = true }
+        }
+        if (shouldClose) closeResources()
+    }
+
+    fun retire() {
+        val shouldClose = synchronized(lifecycleLock) {
+            retired = true
+            (users == 0 && !closed).also { if (it) closed = true }
+        }
+        if (shouldClose) closeResources()
+    }
 
     fun readEntry(entryName: String): ByteArray = synchronized(lock) {
         lastAccess = System.currentTimeMillis()
@@ -91,6 +133,7 @@ internal class NetworkZipSession(
 
     fun listImageEntries(): List<String> = synchronized(lock) {
         lastAccess = System.currentTimeMillis()
+        cachedImageEntries?.let { return it }
         val entries = zip.entries
         val imageNames = ArrayList<String>()
         while (entries.hasMoreElements()) {
@@ -102,7 +145,7 @@ internal class NetworkZipSession(
             }
         }
         imageNames.sortWith(NaturalSort)
-        imageNames
+        imageNames.toList().also { cachedImageEntries = it }
     }
 
     private fun findEntry(requested: String): org.apache.commons.compress.archivers.zip.ZipArchiveEntry? {
@@ -119,7 +162,9 @@ internal class NetworkZipSession(
         return null
     }
 
-    override fun close() {
+    override fun close() = retire()
+
+    private fun closeResources() {
         synchronized(lock) {
             runCatching { zip.close() }
             runCatching { channel.close() }
@@ -131,62 +176,154 @@ internal object NetworkZipPool {
     private const val MAX_SESSIONS = 8
     private const val TTL_MS = 2 * 60 * 1000L
     private val lock = Any()
-    private val sessions = LinkedHashMap<String, NetworkZipSession>(MAX_SESSIONS, 0.75f, true)
+    private data class Key(val sourceId: String, val path: String, val revision: FileRevision)
+    private data class PathKey(val sourceId: String, val path: String)
 
-    fun getOrCreate(sourceId: String, path: String, size: Long, backend: NetworkFileSystem): NetworkZipSession = synchronized(lock) {
-        cleanupExpired()
-        val key = "$sourceId|$path"
-        sessions[key]?.let {
-            it.lastAccess = System.currentTimeMillis()
-            return it
-        }
-        while (sessions.size >= MAX_SESSIONS) {
-            val oldest = sessions.keys.firstOrNull() ?: break
-            sessions.remove(oldest)?.close()
-        }
-        val channel = backend.openChannel(path, size)
-        val zip = try {
-            ZipFile.builder().setSeekableByteChannel(channel).get()
-        } catch (e: Exception) {
-            channel.close()
-            throw e
-        }
-        val session = NetworkZipSession(key, channel, zip)
-        sessions[key] = session
-        return session
-    }
+    private val sessions = LinkedHashMap<Key, NetworkZipSession>(MAX_SESSIONS, 0.75f, true)
+    private val creationLocks = Array(16) { Any() }
 
-    fun invalidate(sourceId: String, path: String) = synchronized(lock) {
-        val key = "$sourceId|$path"
-        sessions.remove(key)?.close()
-    }
-
-    fun removeForSource(sourceId: String) = synchronized(lock) {
-        val prefix = "$sourceId|"
-        val iterator = sessions.entries.iterator()
-        while (iterator.hasNext()) {
-            val entry = iterator.next()
-            if (entry.key.startsWith(prefix)) {
-                entry.value.close()
-                iterator.remove()
+    fun <T> withSession(
+        sourceId: String,
+        path: String,
+        backend: NetworkFileSystem,
+        revisionHint: FileRevision = FileRevision.UNKNOWN,
+        block: (NetworkZipSession) -> T,
+    ): T {
+        while (true) {
+            val session = getOrCreate(sourceId, path, backend, revisionHint)
+            if (!session.acquire()) continue
+            try {
+                return block(session)
+            } finally {
+                session.release()
             }
         }
     }
 
-    fun clear() = synchronized(lock) {
-        sessions.values.forEach { it.close() }
-        sessions.clear()
+    private fun getOrCreate(
+        sourceId: String,
+        path: String,
+        backend: NetworkFileSystem,
+        revisionHint: FileRevision,
+    ): NetworkZipSession {
+        val observedRevision = revisionHint.takeIf { it != FileRevision.UNKNOWN }
+            ?: runCatching { backend.stat(path)?.revision }.getOrNull()
+        if (observedRevision != null) {
+            cached(Key(sourceId, path, observedRevision))?.let { return it }
+        }
+
+        val pathKey = PathKey(sourceId, path)
+        val creationLock = creationLocks[(pathKey.hashCode() and Int.MAX_VALUE) % creationLocks.size]
+        return synchronized(creationLock) create@{
+            val currentRevision = revisionHint.takeIf { it != FileRevision.UNKNOWN }
+                ?: runCatching { backend.stat(path)?.revision }.getOrNull()
+            if (currentRevision != null) {
+                cached(Key(sourceId, path, currentRevision))?.let { return@create it }
+            }
+
+            val opened = backend.openFile(path)
+            val channel = opened.channel
+            val key = Key(sourceId, path, opened.revision)
+            cached(key)?.let { existing ->
+                channel.close()
+                return@create existing
+            }
+
+            val zip = try {
+                ZipFile.builder().setSeekableByteChannel(channel).get()
+            } catch (e: Exception) {
+                channel.close()
+                throw e
+            }
+            val created = NetworkZipSession(opened.revision, channel, zip)
+            val retired = ArrayList<NetworkZipSession>()
+            val selected = synchronized(lock) {
+                sessions[key]?.also { existing ->
+                    retired += created
+                    existing.lastAccess = System.currentTimeMillis()
+                } ?: run {
+                    retired += removeExpiredLocked()
+                    while (sessions.size >= MAX_SESSIONS) {
+                        val oldest = sessions.keys.firstOrNull() ?: break
+                        sessions.remove(oldest)?.let(retired::add)
+                    }
+                    sessions[key] = created
+                    created
+                }
+            }
+            retired.forEach(NetworkZipSession::retire)
+            selected
+        }
     }
 
-    private fun cleanupExpired() {
+    private fun cached(key: Key): NetworkZipSession? {
         val now = System.currentTimeMillis()
+        var expired: NetworkZipSession? = null
+        val cached = synchronized(lock) {
+            val session = sessions[key] ?: return@synchronized null
+            if (now - session.lastAccess > TTL_MS) {
+                sessions.remove(key)
+                expired = session
+                null
+            } else {
+                session.lastAccess = now
+                session
+            }
+        }
+        expired?.retire()
+        return cached
+    }
+
+    fun invalidate(sourceId: String, path: String) {
+        val retired = synchronized(lock) {
+            val removed = ArrayList<NetworkZipSession>()
+            val iterator = sessions.entries.iterator()
+            while (iterator.hasNext()) {
+                val entry = iterator.next()
+                if (entry.key.sourceId == sourceId && entry.key.path == path) {
+                    removed += entry.value
+                    iterator.remove()
+                }
+            }
+            removed
+        }
+        retired.forEach(NetworkZipSession::retire)
+    }
+
+    fun removeForSource(sourceId: String) {
+        val retired = synchronized(lock) {
+            val removed = ArrayList<NetworkZipSession>()
+            val iterator = sessions.entries.iterator()
+            while (iterator.hasNext()) {
+                val entry = iterator.next()
+                if (entry.key.sourceId == sourceId) {
+                    removed += entry.value
+                    iterator.remove()
+                }
+            }
+            removed
+        }
+        retired.forEach(NetworkZipSession::retire)
+    }
+
+    fun clear() {
+        val retired = synchronized(lock) {
+            sessions.values.toList().also { sessions.clear() }
+        }
+        retired.forEach(NetworkZipSession::retire)
+    }
+
+    private fun removeExpiredLocked(): List<NetworkZipSession> {
+        val now = System.currentTimeMillis()
+        val removed = ArrayList<NetworkZipSession>()
         val iterator = sessions.entries.iterator()
         while (iterator.hasNext()) {
             val entry = iterator.next()
             if (now - entry.value.lastAccess > TTL_MS) {
-                entry.value.close()
+                removed += entry.value
                 iterator.remove()
             }
         }
+        return removed
     }
 }

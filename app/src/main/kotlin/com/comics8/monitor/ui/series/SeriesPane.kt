@@ -42,6 +42,8 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.CachePolicy
 import coil.request.ImageRequest
+import com.comics8.core.image.ImageCacheRole
+import com.comics8.monitor.data.local.imageCacheRole
 import com.comics8.core.model.EpisodeItem
 import com.comics8.monitor.ui.theme.LocalStrings
 import com.comics8.monitor.ui.ListingUiState
@@ -185,15 +187,16 @@ fun EpisodeRow(
                 val retryKey = if (isError) refreshEpoch else 0L
                 val context = LocalContext.current
                 val imageModel = remember(thumbUrl, retryKey) {
-                    if (retryKey > 0L) {
-                        ImageRequest.Builder(context)
-                            .data(thumbUrl)
-                            .memoryCachePolicy(CachePolicy.WRITE_ONLY)
-                            .diskCachePolicy(CachePolicy.WRITE_ONLY)
-                            .build()
-                    } else {
-                        thumbUrl
-                    }
+                    ImageRequest.Builder(context)
+                        .data(thumbUrl)
+                        .imageCacheRole(ImageCacheRole.EPISODE, thumbUrl)
+                        .apply {
+                            if (retryKey > 0L) {
+                                memoryCachePolicy(CachePolicy.WRITE_ONLY)
+                                diskCachePolicy(CachePolicy.WRITE_ONLY)
+                            }
+                        }
+                        .build()
                 }
                 AsyncImage(
                     model = imageModel,

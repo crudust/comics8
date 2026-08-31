@@ -7,6 +7,8 @@ import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
+import com.comics8.core.image.ImageCacheRole
+import com.comics8.core.image.ImageMemoryPolicy
 import com.comics8.core.source.SourceLocator
 import com.comics8.core.source.SourcePrefs
 import com.comics8.core.source.SourceRegistry
@@ -22,6 +24,7 @@ import com.comics8.monitor.data.AndroidSourcePrefs
 import com.comics8.monitor.data.DownloadManager
 import com.comics8.monitor.data.SyncManager
 import com.comics8.monitor.data.ToonRepository
+import com.comics8.monitor.data.local.AndroidImageMemoryCache
 import com.comics8.monitor.data.local.AppDatabase
 import com.comics8.monitor.data.local.BitmapThumbEncoder
 import com.comics8.monitor.data.local.SafLibraryMirror
@@ -51,6 +54,11 @@ class ComicsApp : Application(), ImageLoaderFactory {
 
     private lateinit var toonClient: ToonClient
     private lateinit var sourceRegistry: SourceRegistry
+    private lateinit var imageMemoryCache: AndroidImageMemoryCache
+
+    fun clearImageMemory(role: ImageCacheRole) {
+        if (::imageMemoryCache.isInitialized) imageMemoryCache.clear(role)
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -94,7 +102,6 @@ class ComicsApp : Application(), ImageLoaderFactory {
         registry.add(
             LocalSource(
                 roots = { libraryMirror.materialize(sourcePrefs.libraryRoots()) },
-                thumbs = coverThumbs,
                 index = LibraryScanIndex(File(cacheDir, "library-index/local.json")),
             ),
         )
@@ -136,6 +143,8 @@ class ComicsApp : Application(), ImageLoaderFactory {
 
     override fun newImageLoader(): ImageLoader {
         val http = ToonClient.newImageHttpClient(toonClient.httpClient, sourceRegistry)
+        val totalMemoryBytes = MemoryCache.Builder(this).maxSizePercent(0.25).build().maxSize.toLong()
+        imageMemoryCache = AndroidImageMemoryCache(this, ImageMemoryPolicy.partition(totalMemoryBytes))
         return ImageLoader.Builder(this)
             .okHttpClient(http)
             .components {
@@ -143,9 +152,7 @@ class ComicsApp : Application(), ImageLoaderFactory {
                 add(NetworkImageFetcher.Factory(coverThumbs))
             }
             .crossfade(true)
-            .memoryCache {
-                MemoryCache.Builder(this).maxSizePercent(0.25).build()
-            }
+            .memoryCache { imageMemoryCache }
             .diskCache {
                 DiskCache.Builder()
                     .directory(cacheDir.resolve("images"))

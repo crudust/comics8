@@ -152,12 +152,8 @@ class DownloadManagerTest {
             .build()
         try {
             val downloads = File(context.filesDir, "dl-local-${System.nanoTime()}").apply { mkdirs() }
-            val thumbs = CoverThumbCache(
-                File(context.cacheDir, "thumbs-local-${System.nanoTime()}"),
-                ThumbEncoder { bytes, _, _ -> bytes },
-            )
             val registry = SourceRegistry(
-                listOf(LocalSource(roots = { emptyList() }, thumbs = thumbs)),
+                listOf(LocalSource(roots = { emptyList() })),
             )
             val manager = DownloadManager(
                 context,

@@ -6,6 +6,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.comics8.core.image.ImageCacheRole
 import com.comics8.core.model.AppUpdateState
 import com.comics8.core.model.ArtistRef
 import com.comics8.core.model.BrowseTab
@@ -1076,7 +1077,6 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         registry.add(
             LocalSource(
                 roots = { libraryMirror.materialize(sourceSettings.libraryRoots()) },
-                thumbs = coverThumbs,
                 index = LibraryScanIndex(java.io.File(app.cacheDir, "library-index/local.json")),
             ),
         )
@@ -2113,6 +2113,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun openEpisode(episode: EpisodeItem) {
+        app.clearImageMemory(ImageCacheRole.READER)
         val current = _state.value
         val series = current.series
         if (series != null) {
@@ -2237,6 +2238,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
     fun closeReader() {
         readerJob?.cancel()
+        app.clearImageMemory(ImageCacheRole.READER)
         val current = _state.value
         lastViewedEpisode = current.currentEpisode
         flushPendingPageSave(current)

@@ -22,3 +22,8 @@
 - **Cross-Platform Data Boundaries**:
   - `BackupWireCodec` owns the local backup JSON v2 wire format and legacy-compatible decoding; Android Room and Desktop SQLite layers only map their persistence records to and from wire DTOs.
   - `RepositoryTransforms` owns pure source ordering, episode enrichment/counting, listing flags, and persisted reader-setting parsing. Platform repositories retain database, filesystem, network, and coroutine ownership.
+- **Image Memory Contract** (`core/image/ImageMemoryPolicy.kt`):
+  - Every decoded UI image is classified as `GRID`, `EPISODE`, or `READER`; caches are bounded by estimated decoded bytes, never entry count.
+  - `ImageMemoryPolicy` partitions each platform's chosen total budget into GRID 32%, EPISODE 5%, and READER 63%. Android Coil and Desktop Skia own their platform cache implementations.
+  - GRID survives reader navigation, EPISODE uses its own small LRU, and READER is cleared on episode change and reader exit.
+  - Clearing READER also cancels or invalidates in-flight reader loads. Encoded disk caches remain intact so reopening does not force a network download.
