@@ -41,6 +41,46 @@ class DesktopImageCacheTest {
         assertThat(DesktopImageCache.readImageBytes(url)).isEqualTo(ONE_PIXEL_PNG)
     }
 
+    @Test
+    fun decodesAvifImage() {
+        val file = File("/tmp/test_001.avif")
+        if (file.exists()) {
+            val bytes = file.readBytes()
+            val avif = org.glavo.avif.AvifImage.read(bytes)
+            val frame = avif.firstFrame()
+            assertThat(frame.width()).isEqualTo(2036)
+            assertThat(frame.height()).isEqualTo(2880)
+
+            val w = frame.width()
+            val h = frame.height()
+            val argb = frame.intPixels()
+            val rgba = ByteArray(w * h * 4)
+            var srcIdx = 0
+            var dstIdx = 0
+            while (srcIdx < argb.size) {
+                val pixel = argb[srcIdx++]
+                rgba[dstIdx++] = ((pixel ushr 16) and 0xFF).toByte()
+                rgba[dstIdx++] = ((pixel ushr 8) and 0xFF).toByte()
+                rgba[dstIdx++] = (pixel and 0xFF).toByte()
+                rgba[dstIdx++] = ((pixel ushr 24) and 0xFF).toByte()
+            }
+            val info = org.jetbrains.skia.ImageInfo(
+                width = w,
+                height = h,
+                colorType = org.jetbrains.skia.ColorType.RGBA_8888,
+                alphaType = org.jetbrains.skia.ColorAlphaType.UNPREMUL,
+            )
+            val skiaImage = org.jetbrains.skia.Image.makeRaster(info, rgba, w * 4)
+            assertThat(skiaImage).isNotNull()
+            assertThat(skiaImage.width).isEqualTo(2036)
+            assertThat(skiaImage.height).isEqualTo(2880)
+            skiaImage.close()
+
+            val webp = com.comics8.desktop.ui.util.AwtThumbEncoder.webp(bytes, 320, 80)
+            assertThat(webp).isNotEmpty()
+        }
+    }
+
     companion object {
         private val ONE_PIXEL_PNG = byteArrayOf(
             0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,

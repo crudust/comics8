@@ -26,6 +26,7 @@ import com.comics8.monitor.data.SyncManager
 import com.comics8.monitor.data.ToonRepository
 import com.comics8.monitor.data.local.AndroidImageMemoryCache
 import com.comics8.monitor.data.local.AppDatabase
+import com.comics8.monitor.data.local.AvifCoilDecoder
 import com.comics8.monitor.data.local.BitmapThumbEncoder
 import com.comics8.monitor.data.local.SafLibraryMirror
 import com.comics8.monitor.data.local.ZipImageFetcher
@@ -148,6 +149,7 @@ class ComicsApp : Application(), ImageLoaderFactory {
         return ImageLoader.Builder(this)
             .okHttpClient(http)
             .components {
+                add(AvifCoilDecoder.Factory())
                 add(ZipImageFetcher.Factory())
                 add(NetworkImageFetcher.Factory(coverThumbs))
             }

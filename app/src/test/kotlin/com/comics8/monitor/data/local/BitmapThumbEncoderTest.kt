@@ -45,4 +45,15 @@ class BitmapThumbEncoderTest {
         assertThat(decoded.width).isEqualTo(40)
         assertThat(decoded.height).isEqualTo(30)
     }
+
+    @Test
+    fun encodesAvifToWebpThumbnail() {
+        val file = java.io.File("/tmp/test_001.avif")
+        if (file.exists()) {
+            val webp = BitmapThumbEncoder.webp(file.readBytes(), longEdgePx = 320, quality = 80)
+            assertThat(webp.size).isGreaterThan(0)
+            val decoded = BitmapFactory.decodeByteArray(webp, 0, webp.size)
+            assertThat(decoded).isNotNull()
+        }
+    }
 }

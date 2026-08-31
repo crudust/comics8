@@ -12,18 +12,24 @@ object BitmapThumbEncoder : ThumbEncoder {
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         val srcW = bounds.outWidth
         val srcH = bounds.outHeight
-        if (srcW <= 0 || srcH <= 0) error("decode failed")
-        val longEdge = maxOf(srcW, srcH)
-        var sample = 1
-        while (sample < 32 && longEdge / (sample * 2) >= longEdgePx) {
-            sample *= 2
+        val decoded = if (srcW > 0 && srcH > 0) {
+            val longEdge = maxOf(srcW, srcH)
+            var sample = 1
+            while (sample < 32 && longEdge / (sample * 2) >= longEdgePx) {
+                sample *= 2
+            }
+            BitmapFactory.decodeByteArray(
+                bytes,
+                0,
+                bytes.size,
+                BitmapFactory.Options().apply { inSampleSize = sample },
+            )
+        } else {
+            null
+        } ?: run {
+            val avif = com.comics8.core.image.AvifDecoder.decode(bytes) ?: error("decode failed")
+            Bitmap.createBitmap(avif.argbPixels, avif.width, avif.height, Bitmap.Config.ARGB_8888)
         }
-        val decoded = BitmapFactory.decodeByteArray(
-            bytes,
-            0,
-            bytes.size,
-            BitmapFactory.Options().apply { inSampleSize = sample },
-        ) ?: error("decode failed")
         var scaled: Bitmap? = null
         try {
             val dw = decoded.width
