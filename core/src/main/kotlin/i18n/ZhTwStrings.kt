@@ -94,6 +94,12 @@ object ZhTwStrings : AppStrings {
     override fun episodeItemCount(count: Int): String = "共 ${count}話"
     override val sortOldestFirst: String = "正序（從第一話開始）"
     override val sortNewestFirst: String = "倒序（從最新話開始）"
+    override val sortNameAsc: String = "名稱遞增"
+    override val sortNameDesc: String = "名稱遞減"
+    override val sortDateDesc: String = "修改時間（最新）"
+    override val sortDateAsc: String = "修改時間（最早）"
+    override val labelEpisodeSortOrder: String = "預設章節排序"
+    override val actionSortEpisodes: String = "章節排序"
 
     // 5. Reader & Viewer
     override val viewModeScroll: String = "條漫模式 (垂直滾動)"

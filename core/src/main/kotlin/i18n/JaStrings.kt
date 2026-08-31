@@ -94,6 +94,12 @@ object JaStrings : AppStrings {
     override fun episodeItemCount(count: Int): String = "全 ${count}話"
     override val sortOldestFirst: String = "第1話から"
     override val sortNewestFirst: String = "最新話から"
+    override val sortNameAsc: String = "名前 昇順"
+    override val sortNameDesc: String = "名前 降順"
+    override val sortDateDesc: String = "更新日時 新しい順"
+    override val sortDateAsc: String = "更新日時 古い順"
+    override val labelEpisodeSortOrder: String = "エピソードの並び順"
+    override val actionSortEpisodes: String = "並び替え"
 
     // 5. Reader & Viewer
     override val viewModeScroll: String = "縦スクロール (Webtoon)"

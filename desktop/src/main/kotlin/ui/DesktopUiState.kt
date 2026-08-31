@@ -2,6 +2,7 @@ package com.comics8.desktop.ui
 
 import com.comics8.core.model.BrowseTab
 import com.comics8.core.model.EpisodeItem
+import com.comics8.core.model.EpisodeSortOrder
 import com.comics8.core.model.ReadDirection
 import com.comics8.core.model.ReaderDomain
 import com.comics8.core.model.SplitMode
@@ -51,6 +52,7 @@ data class DesktopUiState(
     val screen: Screen = Screen.Browse,
     val series: ToonItem? = null,
     val episodes: List<EpisodeItem> = emptyList(),
+    val episodeSortOrder: EpisodeSortOrder = EpisodeSortOrder.NAME_ASC,
     val episodePage: Int = 1,
     val episodeLastPage: Int = 1,
     val episodeLoading: Boolean = false,

@@ -1,5 +1,6 @@
 package com.comics8.core.source
 
+import com.comics8.core.model.EpisodeSortOrder
 import com.comics8.core.model.ProgressDisplayMode
 import org.json.JSONArray
 
@@ -8,6 +9,7 @@ object SourcePrefs {
     const val INSTALLED_KEY = "sources.installed"
     const val INSTALL_MIGRATED_KEY = "sources.install_migrated"
     const val LIBRARY_ROOTS_KEY = "local.library_roots"
+    const val EPISODE_SORT_ORDER_KEY = "pref_episode_sort_order"
 
     fun enabledKey(sourceId: String): String = "sources.$sourceId.enabled"
 
@@ -113,6 +115,8 @@ interface SourceSettings {
     fun isNotificationEnabled(sourceId: String): Boolean = true
     fun setNotificationEnabled(sourceId: String, enabled: Boolean) {}
     fun implementationOverride(sourceId: String): String? = null
+    fun episodeSortOrder(): EpisodeSortOrder = EpisodeSortOrder.NAME_ASC
+    fun setEpisodeSortOrder(order: EpisodeSortOrder) {}
 }
 
 interface SourcePreferenceStore {
@@ -184,6 +188,12 @@ class StoredSourceSettings(
 
     override fun setNotificationEnabled(sourceId: String, enabled: Boolean) =
         store.putBoolean(SourcePrefs.notificationKey(sourceId), enabled)
+
+    override fun episodeSortOrder(): EpisodeSortOrder =
+        EpisodeSortOrder.fromKey(raw(SourcePrefs.EPISODE_SORT_ORDER_KEY))
+
+    override fun setEpisodeSortOrder(order: EpisodeSortOrder) =
+        store.putString(SourcePrefs.EPISODE_SORT_ORDER_KEY, order.key)
 
     private fun raw(key: String): String? =
         SourcePrefs.storedActiveRaw(store.contains(key), store.getString(key))

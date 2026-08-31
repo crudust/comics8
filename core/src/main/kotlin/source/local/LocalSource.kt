@@ -71,12 +71,14 @@ class LocalSource(
         val work = workFor(item.id) ?: return EpisodePage(emptyList(), 1, 1)
         val current = page.coerceIn(1, pageCount(work.episodes.size))
         val episodes = work.episodes.drop((current - 1) * PAGE_SIZE).take(PAGE_SIZE).map { episode ->
+            val mtime = episode.path.lastModified().takeIf { it > 0L }
             EpisodeItem(
                 wrId = episode.wrId,
                 title = episode.title,
-                date = null,
+                date = mtime?.let { com.comics8.core.model.UpdateDates.formatEpoch(it) },
                 thumbUrl = episodeThumb(episode),
                 href = LocalImageUri.fromFile(episode.path),
+                mtime = mtime,
             )
         }
         return EpisodePage(items = episodes, currentPage = current, lastPage = pageCount(work.episodes.size))

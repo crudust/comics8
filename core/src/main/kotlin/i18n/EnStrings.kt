@@ -94,6 +94,12 @@ object EnStrings : AppStrings {
     override fun episodeItemCount(count: Int): String = "Total $count chapters"
     override val sortOldestFirst: String = "Oldest First"
     override val sortNewestFirst: String = "Newest First"
+    override val sortNameAsc: String = "Name Ascending"
+    override val sortNameDesc: String = "Name Descending"
+    override val sortDateDesc: String = "Newest Modified"
+    override val sortDateAsc: String = "Oldest Modified"
+    override val labelEpisodeSortOrder: String = "Default Episode Sort"
+    override val actionSortEpisodes: String = "Sort Episodes"
 
     // 5. Reader & Viewer
     override val viewModeScroll: String = "Webtoon (Scroll)"

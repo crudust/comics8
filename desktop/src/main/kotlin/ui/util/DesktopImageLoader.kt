@@ -64,12 +64,16 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 
 import okhttp3.Request
+import org.jetbrains.skia.ColorAlphaType
+import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.EncodedImageFormat
 import org.jetbrains.skia.Image
+import org.jetbrains.skia.ImageInfo
 import org.jetbrains.skia.Rect
 import org.jetbrains.skia.SamplingMode
 import org.jetbrains.skia.Surface
 import java.io.File
+import java.io.InputStream
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
@@ -79,7 +83,8 @@ import java.util.concurrent.atomic.AtomicLong
 object AwtThumbEncoder : ThumbEncoder {
     override fun webp(bytes: ByteArray, longEdgePx: Int, quality: Int): ByteArray {
         val q = quality.coerceIn(1, 100)
-        Image.makeFromEncoded(bytes).use { src ->
+        val src = decodeToSkiaImage(bytes) ?: error("decode failed")
+        src.use {
             val w = src.width.coerceAtLeast(1)
             val h = src.height.coerceAtLeast(1)
             val longEdge = maxOf(w, h)
@@ -110,6 +115,38 @@ object AwtThumbEncoder : ThumbEncoder {
         val data = encodeToData(EncodedImageFormat.WEBP, quality) ?: error("webp encode failed")
         return data.use { it.bytes }
     }
+}
+
+internal fun decodeToSkiaImage(bytes: ByteArray): Image? {
+    return try {
+        Image.makeFromEncoded(bytes)
+    } catch (_: Throwable) {
+        decodeAvifToSkiaImage(bytes)
+    }
+}
+
+internal fun decodeAvifToSkiaImage(bytes: ByteArray): Image? {
+    val decoded = com.comics8.core.image.AvifDecoder.decode(bytes) ?: return null
+    val w = decoded.width
+    val h = decoded.height
+    val argb = decoded.argbPixels
+    val rgba = ByteArray(w * h * 4)
+    var srcIdx = 0
+    var dstIdx = 0
+    while (srcIdx < argb.size) {
+        val pixel = argb[srcIdx++]
+        rgba[dstIdx++] = ((pixel ushr 16) and 0xFF).toByte()
+        rgba[dstIdx++] = ((pixel ushr 8) and 0xFF).toByte()
+        rgba[dstIdx++] = (pixel and 0xFF).toByte()
+        rgba[dstIdx++] = ((pixel ushr 24) and 0xFF).toByte()
+    }
+    val info = ImageInfo(
+        width = w,
+        height = h,
+        colorType = ColorType.RGBA_8888,
+        alphaType = ColorAlphaType.UNPREMUL,
+    )
+    return Image.makeRaster(info, rgba, w * 4)
 }
 
 object DesktopImageCache {
@@ -440,7 +477,8 @@ object DesktopImageCache {
 
     private fun decodeForDisplay(bytes: ByteArray): ImageBitmap? {
         return try {
-            Image.makeFromEncoded(bytes).use { src ->
+            val src = decodeToSkiaImage(bytes) ?: return null
+            src.use {
                 val w = src.width.coerceAtLeast(1)
                 val h = src.height.coerceAtLeast(1)
                 val longEdge = maxOf(w, h)

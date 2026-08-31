@@ -74,4 +74,22 @@ class SourcePrefsTest {
         assertThat(SourcePrefs.parseIdList(encoded)).containsExactlyElementsIn(paths).inOrder()
         assertThat(SourcePrefs.LIBRARY_ROOTS_KEY).isEqualTo("local.library_roots")
     }
+
+    @Test
+    fun episodeSortOrderRoundTrip() {
+        val store = object : SourcePreferenceStore {
+            val map = mutableMapOf<String, Any>()
+            override fun contains(key: String) = key in map
+            override fun getString(key: String) = map[key] as? String
+            override fun putString(key: String, value: String) { map[key] = value }
+            override fun remove(key: String) { map.remove(key) }
+            override fun getBoolean(key: String, default: Boolean) = (map[key] as? Boolean) ?: default
+            override fun putBoolean(key: String, value: Boolean) { map[key] = value }
+        }
+        val settings = StoredSourceSettings(store)
+        assertThat(settings.episodeSortOrder()).isEqualTo(com.comics8.core.model.EpisodeSortOrder.NAME_ASC)
+        settings.setEpisodeSortOrder(com.comics8.core.model.EpisodeSortOrder.DATE_DESC)
+        assertThat(settings.episodeSortOrder()).isEqualTo(com.comics8.core.model.EpisodeSortOrder.DATE_DESC)
+        assertThat(store.getString(SourcePrefs.EPISODE_SORT_ORDER_KEY)).isEqualTo("date_desc")
+    }
 }

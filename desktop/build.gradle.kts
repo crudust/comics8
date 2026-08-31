@@ -43,12 +43,14 @@ compose.desktop {
                 "jdk.unsupported",
             )
             packageName = "Comics8"
-            packageVersion = "1.2.6"
+            packageVersion = "1.2.7"
             description = "Comics8 Monitor Desktop"
             macOS {
                 bundleID = "com.comics8.desktop"
                 dockName = "Comics8"
                 iconFile.set(project.file("src/main/resources/icon.icns"))
+                fileAssociation("application/zip", "zip", "ZIP comic archive")
+                fileAssociation("application/vnd.comicbook+zip", "cbz", "Comic Book ZIP archive")
             }
             windows {
                 menuGroup = "Comics8"

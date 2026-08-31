@@ -19,6 +19,7 @@ dependencies {
     api(libs.rhino)
     api(libs.smbj)
     api(libs.commons.compress)
+    api(libs.javif)
 
     testImplementation(libs.junit)
     testImplementation(libs.truth)
