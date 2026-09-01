@@ -99,7 +99,7 @@ class ToonClientFetchTest {
             isProxyEnabled = true,
             sources = testLocator(),
         )
-        val text = client.fetch("http://103.204.13.68:8904/bbs/board.php")
+        val text = client.fetch("https://11toon.com/bbs/board.php")
         assertThat(text).isEqualTo("direct-ok")
     }
 
@@ -194,14 +194,14 @@ class ToonClientFetchTest {
     }
 
     companion object {
-        private const val PROXY_TARGET = "http://103.204.13.68:8904/bbs/board.php"
+        private const val PROXY_TARGET = "https://11toon.com/bbs/board.php"
 
         private fun testLocator(): SourceLocator = SourceLocator {
             SourceRegistry(
                 listOf(
                     StubComicSource(
                         id = "proxied",
-                        ownedHost = hostSuffixes("103.204.13.68"),
+                        ownedHost = hostSuffixes("11toon.com"),
                         proxy = true,
                     ),
                 ),

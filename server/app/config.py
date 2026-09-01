@@ -46,12 +46,13 @@ class Settings(BaseSettings):
     MAX_SYNC_ITEMS_PER_USER: int = 100_000
     MAX_SYNC_TEXT_LENGTH: int = 8_192
     # Proxy settings
-    DEFAULT_REFERER: str = "http://103.204.13.68:8904"
+    DEFAULT_REFERER: str = ""
     PROXY_TIMEOUT_SECONDS: int = 20
     MAX_PROXY_REDIRECTS: int = 5
-    MAX_PROXY_RESPONSE_BYTES: int = 75 * 1024 * 1024
+    MAX_PROXY_RESPONSE_BYTES: int = 2 * 1024 * 1024
     MAX_PROXY_CONCURRENT_REQUESTS: int = 16
-    MAX_PROXY_STREAM_SECONDS: int = 60
+    MAX_PROXY_STREAM_SECONDS: int = 30
+    PROXY_RATE_LIMIT_PER_MINUTE: int = 120
     DEFAULT_PROXY_UA: str = (
         "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/126.0.0.0 Mobile Safari/537.36"

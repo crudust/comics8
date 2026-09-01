@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from collections import defaultdict, deque
+from dataclasses import dataclass
 import ipaddress
 import logging
-import re
 import socket
-from dataclasses import dataclass
+import threading
+import time
 from typing import AsyncGenerator
 from urllib.parse import urljoin, urlparse
 import httpx
@@ -17,20 +19,45 @@ from app.sync import SyncIdentity, get_existing_sync_user
 logger = logging.getLogger("comics8.proxy")
 router = APIRouter(tags=["Proxy"])
 
-_EXACT_PROXY_HOSTS = {
-    "hitomi.la",
-    "tn.hitomi.la",
-    "11toon.com",
-    "11toon7.com",
-    "11toon8.com",
-    "www.11toon.com",
-    "www.11toon7.com",
-    "www.11toon8.com",
-    "103.204.13.68",
-}
-_PL_HOST_RE = re.compile(r"(www\.)?pl\d{4}\.com\Z")
-_TOON_HOST_RE = re.compile(r"(www\.)?11toon\d*\.com\Z")
 PROXY_REDIRECT_STATUSES = {301, 302, 303, 307, 308}
+
+# Allowed MIME types for web page and API scraping / parsing
+_ALLOWED_CONTENT_TYPES = {
+    "text/html",
+    "text/plain",
+    "text/xml",
+    "text/javascript",
+    "text/css",
+    "application/json",
+    "application/xml",
+    "application/xhtml+xml",
+    "application/javascript",
+    "application/x-javascript",
+}
+
+
+class ProxyRateLimiter:
+    """Thread-safe in-memory sliding window rate limiter per sync user."""
+
+    def __init__(self, limit_per_minute: int = 120, window_seconds: float = 60.0):
+        self.limit = limit_per_minute
+        self.window = window_seconds
+        self._records: dict[str, deque[float]] = defaultdict(deque)
+        self._lock = threading.Lock()
+
+    def acquire(self, key: str) -> bool:
+        if self.limit <= 0:
+            return True
+        now = time.monotonic()
+        with self._lock:
+            q = self._records[key]
+            cutoff = now - self.window
+            while q and q[0] <= cutoff:
+                q.popleft()
+            if len(q) >= self.limit:
+                return False
+            q.append(now)
+            return True
 
 
 @dataclass(frozen=True)
@@ -52,23 +79,15 @@ def create_proxy_semaphore() -> asyncio.Semaphore:
     return asyncio.Semaphore(get_settings().MAX_PROXY_CONCURRENT_REQUESTS)
 
 
-def is_allowed_proxy_host(host: str | None) -> bool:
-    if not host:
-        return False
-    normalized = host.lower().strip().strip(".")
-    if not normalized:
-        return False
-    if normalized in _EXACT_PROXY_HOSTS:
+def create_proxy_rate_limiter() -> ProxyRateLimiter:
+    return ProxyRateLimiter(get_settings().PROXY_RATE_LIMIT_PER_MINUTE)
+
+
+def is_allowed_content_type(content_type_header: str | None) -> bool:
+    if not content_type_header:
         return True
-    if normalized.endswith(".gold-usergeneratedcontent.net"):
-        return True
-    if normalized == "hitomi.la" or normalized.endswith(".hitomi.la"):
-        return True
-    if _TOON_HOST_RE.fullmatch(normalized):
-        return True
-    if _PL_HOST_RE.fullmatch(normalized):
-        return True
-    return False
+    mime = content_type_header.split(";")[0].strip().lower()
+    return mime in _ALLOWED_CONTENT_TYPES or mime.startswith("text/")
 
 
 def allowed_proxy_url(url: str | None) -> bool:
@@ -76,12 +95,12 @@ def allowed_proxy_url(url: str | None) -> bool:
         return False
     try:
         parsed = urlparse(url)
-        if parsed.scheme not in ("http", "https") or not is_allowed_proxy_host(parsed.hostname):
+        if parsed.scheme not in ("http", "https"):
+            return False
+        if not parsed.hostname:
             return False
         port = parsed.port or (443 if parsed.scheme == "https" else 80)
-        if parsed.hostname == "103.204.13.68" and parsed.scheme == "http" and port == 8904:
-            return True
-        return (parsed.scheme, port) in {("http", 80), ("https", 443)}
+        return port in (80, 443)
     except Exception:
         return False
 
@@ -106,7 +125,7 @@ async def resolve_proxy_target(url: str) -> ResolvedProxyTarget:
     parsed = urlparse(url)
     host = parsed.hostname
     if not allowed_proxy_url(url) or not host or parsed.username or parsed.password:
-        raise PermissionError("Host not allowed")
+        raise PermissionError("Host or URL scheme/port not allowed")
     try:
         port = parsed.port or (443 if parsed.scheme == "https" else 80)
     except ValueError as exc:
@@ -138,7 +157,18 @@ async def resolve_proxy_target(url: str) -> ResolvedProxyTarget:
     )
 
 
+def default_referer_for_url(url: str) -> str:
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}/"
+    except Exception:
+        pass
+    return ""
+
+
 def build_proxy_forward_headers(
+    url: str,
     incoming_headers: dict[str, str],
     referer_param: str | None = None,
     include_accept: bool = True,
@@ -151,13 +181,16 @@ def build_proxy_forward_headers(
         "Accept-Encoding": "identity",
     }
     if include_accept:
-        headers["Accept"] = incoming_headers.get("accept", "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8")
+        headers["Accept"] = incoming_headers.get(
+            "accept",
+            "text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.9,*/*;q=0.8",
+        )
         headers["Accept-Language"] = incoming_headers.get("accept-language", "ko-KR,ko;q=0.9,en;q=0.8")
 
     referer = (
         (referer_param or "").strip()
         or (incoming_headers.get("referer") or "").strip()
-        or settings.DEFAULT_REFERER
+        or default_referer_for_url(url)
     )
     if referer:
         headers["Referer"] = referer
@@ -181,7 +214,7 @@ def passthrough_proxy_headers(resp_headers: httpx.Headers | dict[str, str]) -> d
     return out
 
 
-async def handle_proxy_request(request: Request, is_head: bool = False):
+async def handle_proxy_request(request: Request, user_id: str | None = None, is_head: bool = False):
     settings = get_settings()
     url_param = request.query_params.get("url", "").strip()
     referer_param = request.query_params.get("referer", "").strip()
@@ -202,11 +235,24 @@ async def handle_proxy_request(request: Request, is_head: bool = False):
             return RawResponse(status_code=403)
         return JSONResponse(
             status_code=403,
-            content={"error": "Forbidden", "message": "Host not allowed"},
+            content={"error": "Forbidden", "message": "Host or URL scheme/port not allowed"},
         )
+
+    # Rate limiting
+    if user_id:
+        rate_limiter = getattr(request.app.state, "proxy_rate_limiter", None)
+        if rate_limiter is not None and not rate_limiter.acquire(user_id):
+            if is_head:
+                return RawResponse(status_code=429, headers={"Retry-After": "30"})
+            return JSONResponse(
+                status_code=429,
+                headers={"Retry-After": "30"},
+                content={"error": "TooManyRequests", "message": "Proxy rate limit exceeded"},
+            )
 
     incoming_headers = {k.lower(): v for k, v in request.headers.items()}
     req_headers = build_proxy_forward_headers(
+        url=url_param,
         incoming_headers=incoming_headers,
         referer_param=referer_param,
         include_accept=not is_head,
@@ -215,11 +261,21 @@ async def handle_proxy_request(request: Request, is_head: bool = False):
     current_url = url_param
     method = "HEAD" if is_head else "GET"
 
-    client: httpx.AsyncClient = request.app.state.proxy_client
-    semaphore: asyncio.Semaphore = request.app.state.proxy_semaphore
+    client: httpx.AsyncClient = getattr(request.app.state, "proxy_client", None)
+    own_client = False
+    if client is None:
+        client = create_proxy_client()
+        own_client = True
+
+    semaphore: asyncio.Semaphore = getattr(request.app.state, "proxy_semaphore", None)
+    if semaphore is None:
+        semaphore = create_proxy_semaphore()
+
     try:
         await asyncio.wait_for(semaphore.acquire(), timeout=0.1)
     except TimeoutError:
+        if own_client:
+            await client.aclose()
         return RawResponse(status_code=503) if is_head else JSONResponse(
             status_code=503,
             content={"error": "ServiceUnavailable", "message": "Proxy is at capacity"},
@@ -246,6 +302,8 @@ async def handle_proxy_request(request: Request, is_head: bool = False):
                 if redirect_count >= settings.MAX_PROXY_REDIRECTS:
                     await resp.aclose()
                     release_semaphore()
+                    if own_client:
+                        await client.aclose()
                     return RawResponse(status_code=502) if is_head else JSONResponse(
                         status_code=502,
                         content={"error": "BadGateway", "message": "Too many redirects"},
@@ -255,9 +313,11 @@ async def handle_proxy_request(request: Request, is_head: bool = False):
                 await resp.aclose()
                 if nxt is None:
                     release_semaphore()
+                    if own_client:
+                        await client.aclose()
                     if is_head:
                         return RawResponse(status_code=403)
-                    return JSONResponse(status_code=403, content={"error": "Forbidden", "message": "Host not allowed"})
+                    return JSONResponse(status_code=403, content={"error": "Forbidden", "message": "Redirect target not allowed"})
                 if resp.status_code == 303:
                     method = "GET"
                 current_url = nxt
@@ -266,9 +326,28 @@ async def handle_proxy_request(request: Request, is_head: bool = False):
 
         if resp is None:
             release_semaphore()
+            if own_client:
+                await client.aclose()
             if is_head:
                 return RawResponse(status_code=502)
             return JSONResponse(status_code=502, content={"error": "BadGateway", "message": "Proxy request failed"})
+
+        # Content-Type validation: only text / document / json data allowed
+        content_type = resp.headers.get("content-type")
+        if not is_allowed_content_type(content_type):
+            await resp.aclose()
+            release_semaphore()
+            if own_client:
+                await client.aclose()
+            if is_head:
+                return RawResponse(status_code=415)
+            return JSONResponse(
+                status_code=415,
+                content={
+                    "error": "UnsupportedMediaType",
+                    "message": f"Content-Type '{content_type}' is not supported by proxy (documents/data only)",
+                },
+            )
 
         out_headers = passthrough_proxy_headers(resp.headers)
         out_headers["Access-Control-Allow-Origin"] = "*"
@@ -279,6 +358,8 @@ async def handle_proxy_request(request: Request, is_head: bool = False):
                 if int(content_length) > settings.MAX_PROXY_RESPONSE_BYTES:
                     await resp.aclose()
                     release_semaphore()
+                    if own_client:
+                        await client.aclose()
                     return RawResponse(status_code=413) if is_head else JSONResponse(
                         status_code=413,
                         content={"error": "ContentTooLarge", "message": "Proxy response is too large"},
@@ -290,6 +371,8 @@ async def handle_proxy_request(request: Request, is_head: bool = False):
             status_code = resp.status_code
             await resp.aclose()
             release_semaphore()
+            if own_client:
+                await client.aclose()
             return RawResponse(status_code=status_code, headers=out_headers)
 
         async def stream_content() -> AsyncGenerator[bytes, None]:
@@ -304,6 +387,8 @@ async def handle_proxy_request(request: Request, is_head: bool = False):
             finally:
                 await resp.aclose()
                 release_semaphore()
+                if own_client:
+                    await client.aclose()
 
         return StreamingResponse(
             stream_content(),
@@ -315,11 +400,15 @@ async def handle_proxy_request(request: Request, is_head: bool = False):
         if resp is not None:
             await resp.aclose()
         release_semaphore()
+        if own_client:
+            await client.aclose()
         raise
     except PermissionError as exc:
         if resp is not None:
             await resp.aclose()
         release_semaphore()
+        if own_client:
+            await client.aclose()
         if is_head:
             return RawResponse(status_code=403)
         return JSONResponse(status_code=403, content={"error": "Forbidden", "message": str(exc)})
@@ -327,6 +416,8 @@ async def handle_proxy_request(request: Request, is_head: bool = False):
         if resp is not None:
             await resp.aclose()
         release_semaphore()
+        if own_client:
+            await client.aclose()
         if is_head:
             return RawResponse(status_code=504)
         return JSONResponse(
@@ -337,6 +428,8 @@ async def handle_proxy_request(request: Request, is_head: bool = False):
         if resp is not None:
             await resp.aclose()
         release_semaphore()
+        if own_client:
+            await client.aclose()
         logger.error(f"Proxy error for {url_param}: {e}")
         if is_head:
             return RawResponse(status_code=502)
@@ -352,9 +445,9 @@ async def handle_proxy_request(request: Request, is_head: bool = False):
 @router.get("/api/comics8/proxy/proxy")
 async def proxy_get(
     request: Request,
-    _identity: SyncIdentity = Depends(get_existing_sync_user),
+    identity: SyncIdentity = Depends(get_existing_sync_user),
 ):
-    return await handle_proxy_request(request, is_head=False)
+    return await handle_proxy_request(request, user_id=identity.user_id, is_head=False)
 
 
 @router.head("/proxy")
@@ -363,6 +456,7 @@ async def proxy_get(
 @router.head("/api/comics8/proxy/proxy")
 async def proxy_head(
     request: Request,
-    _identity: SyncIdentity = Depends(get_existing_sync_user),
+    identity: SyncIdentity = Depends(get_existing_sync_user),
 ):
-    return await handle_proxy_request(request, is_head=True)
+    return await handle_proxy_request(request, user_id=identity.user_id, is_head=True)
+

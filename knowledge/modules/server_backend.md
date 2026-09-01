@@ -18,8 +18,8 @@
   - Handles client device pairing (6-digit numeric codes or UUID sync keys).
   - High-throughput full / incremental bidirectional synchronization powered by PostgreSQL native batch UPSERT (`pg_insert ... ON CONFLICT DO UPDATE`) with atomic Last-Write-Wins (LWW) resolution and bulk tombstone management.
 - **`app/proxy.py`**:
-  - Server-side image and API reverse proxy for bypassing ISP blocking, Cloudflare challenges, and regional geo-restrictions.
-  - Access requires a master key backed by a materialized sync account. Allowlisted names are resolved and pinned to public IP addresses for each hop; redirects repeat that validation. Concurrent requests and streamed response bytes are bounded server-side.
+  - Server-side document/data reverse proxy for bypassing ISP blocking, Cloudflare challenges, and regional geo-restrictions on scraped web pages and APIs.
+  - Access requires a master key backed by a materialized sync account with sliding-window rate limiting. Standard HTTP/HTTPS ports (80, 443) are resolved and pinned to public IP addresses for each hop to prevent SSRF and DNS rebinding; redirects repeat that validation. Content types are strictly constrained to documents and data (`text/*`, `application/json`, `application/xml`), with single payload caps (2MB) and bounded concurrency.
 - **`app/billing.py`**:
   - Manages Google Play subscription verification, acknowledgement, persistence, and per-user Pro status queries.
   - Missing or failed Google credentials always fail closed; synthetic billing responses exist only in test fixtures.

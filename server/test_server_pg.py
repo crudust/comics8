@@ -490,7 +490,7 @@ async def test_proxy_reuses_application_client(client: AsyncClient, monkeypatch)
     def upstream(_request: httpx.Request) -> httpx.Response:
         nonlocal upstream_calls
         upstream_calls += 1
-        return httpx.Response(200, headers={"Content-Type": "image/jpeg"})
+        return httpx.Response(200, headers={"Content-Type": "text/html; charset=utf-8"}, content=b"<html>hello</html>")
 
     headers = {"X-Sync-Key": "C8-PROXY-REUSE"}
     created = await client.post(
@@ -510,7 +510,7 @@ async def test_proxy_reuses_application_client(client: AsyncClient, monkeypatch)
         for _ in range(2):
             response = await client.head(
                 "/proxy",
-                params={"url": "https://tn.hitomi.la/image.jpg"},
+                params={"url": "https://custom-site.org/page.html"},
                 headers=headers,
             )
             assert response.status_code == 200
@@ -743,37 +743,44 @@ async def test_billing_unavailable_does_not_create_user(client: AsyncClient, tes
 # =============================================================================
 
 @pytest.mark.asyncio
-async def test_proxy_host_validation(client: AsyncClient):
+async def test_proxy_host_and_port_validation(client: AsyncClient, monkeypatch):
     headers = {"X-Sync-Key": "C8-PROXY-HOST"}
     created = await client.post(
         "/sync", headers=headers,
         json={"favorites": [{"sourceId": "eleven", "id": "proxy-host"}]},
     )
     assert created.status_code == 200
-    # Disallowed host should return 403
-    forbidden_resp = await client.get(
-        "/proxy?url=http://malicious-site.example.com/image.jpg", headers=headers
-    )
-    assert forbidden_resp.status_code == 403
 
-    # Invalid URL should return 400
+    # Non-HTTP/HTTPS schemes return 400
     bad_resp = await client.get("/proxy?url=ftp://something", headers=headers)
     assert bad_resp.status_code == 400
 
+    # Non-standard ports return 403
     forbidden_port = await client.get(
-        "/proxy", params={"url": "http://hitomi.la:22/"}, headers=headers
+        "/proxy", params={"url": "http://custom-site.org:22/"}, headers=headers
     )
     assert forbidden_port.status_code == 403
+
+    # Private / Local IP resolution returns 403
+    monkeypatch.setattr(
+        proxy_module.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [(2, 1, 6, "", ("127.0.0.1", 80))],
+    )
+    forbidden_local = await client.get(
+        "/proxy", params={"url": "http://internal-router.local/"}, headers=headers
+    )
+    assert forbidden_local.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_proxy_requires_materialized_sync_account(client: AsyncClient):
     missing = await client.get(
-        "/proxy", params={"url": "https://tn.hitomi.la/image.jpg"}
+        "/proxy", params={"url": "https://custom-site.org/page.html"}
     )
     unknown = await client.get(
         "/proxy",
-        params={"url": "https://tn.hitomi.la/image.jpg"},
+        params={"url": "https://custom-site.org/page.html"},
         headers={"X-Sync-Key": "C8-PROXY-NO-DATA"},
     )
     assert missing.status_code == 401
@@ -784,14 +791,14 @@ async def test_proxy_requires_materialized_sync_account(client: AsyncClient):
 async def test_proxy_pins_public_dns_and_preserves_https_identity(client: AsyncClient, monkeypatch):
     seen_request: httpx.Request | None = None
 
-    class ImageStream(httpx.AsyncByteStream):
+    class DocStream(httpx.AsyncByteStream):
         async def __aiter__(self):
-            yield b"image"
+            yield b"<html>doc content</html>"
 
     def upstream(request: httpx.Request) -> httpx.Response:
         nonlocal seen_request
         seen_request = request
-        return httpx.Response(200, headers={"Content-Type": "image/jpeg"}, stream=ImageStream())
+        return httpx.Response(200, headers={"Content-Type": "text/html; charset=utf-8"}, stream=DocStream())
 
     monkeypatch.setattr(
         proxy_module.socket,
@@ -809,14 +816,45 @@ async def test_proxy_pins_public_dns_and_preserves_https_identity(client: AsyncC
     app.state.proxy_semaphore = asyncio.Semaphore(16)
     try:
         response = await client.get(
-            "/proxy", params={"url": "https://tn.hitomi.la/image.jpg"}, headers=headers
+            "/proxy", params={"url": "https://custom-manga.org/chapter/1"}, headers=headers
         )
         assert response.status_code == 200
-        assert response.content == b"image"
+        assert response.content == b"<html>doc content</html>"
         assert seen_request is not None
         assert seen_request.url.host == "1.1.1.1"
-        assert seen_request.headers["host"] == "tn.hitomi.la"
-        assert seen_request.extensions["sni_hostname"] == "tn.hitomi.la"
+        assert seen_request.headers["host"] == "custom-manga.org"
+        assert seen_request.extensions["sni_hostname"] == "custom-manga.org"
+    finally:
+        await shared_client.aclose()
+        del app.state.proxy_client
+        del app.state.proxy_semaphore
+
+
+@pytest.mark.asyncio
+async def test_proxy_rejects_unsupported_media_types(client: AsyncClient, monkeypatch):
+    def upstream(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers={"Content-Type": "image/jpeg"}, content=b"\xff\xd8\xff")
+
+    headers = {"X-Sync-Key": "C8-PROXY-MIME"}
+    created = await client.post(
+        "/sync", headers=headers,
+        json={"favorites": [{"sourceId": "eleven", "id": "proxy-mime"}]},
+    )
+    assert created.status_code == 200
+
+    monkeypatch.setattr(
+        proxy_module.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [(2, 1, 6, "", ("1.1.1.1", 443))],
+    )
+    shared_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    app.state.proxy_client = shared_client
+    app.state.proxy_semaphore = asyncio.Semaphore(16)
+    try:
+        response = await client.get(
+            "/proxy", params={"url": "https://custom-site.org/image.jpg"}, headers=headers
+        )
+        assert response.status_code == 415
     finally:
         await shared_client.aclose()
         del app.state.proxy_client
@@ -830,7 +868,11 @@ async def test_proxy_rejects_private_dns_and_oversized_response(client: AsyncCli
     def upstream(_request: httpx.Request) -> httpx.Response:
         nonlocal upstream_calls
         upstream_calls += 1
-        return httpx.Response(200, headers={"Content-Length": "11"}, content=b"hello world")
+        return httpx.Response(
+            200,
+            headers={"Content-Length": "11", "Content-Type": "text/html"},
+            content=b"hello world",
+        )
 
     headers = {"X-Sync-Key": "C8-PROXY-PRIVATE"}
     created = await client.post(
@@ -848,7 +890,7 @@ async def test_proxy_rejects_private_dns_and_oversized_response(client: AsyncCli
             lambda *_args, **_kwargs: [(2, 1, 6, "", ("127.0.0.1", 443))],
         )
         rejected = await client.get(
-            "/proxy", params={"url": "https://tn.hitomi.la/image.jpg"}, headers=headers
+            "/proxy", params={"url": "https://custom-site.org/page.html"}, headers=headers
         )
         assert rejected.status_code == 403
         assert upstream_calls == 0
@@ -863,10 +905,10 @@ async def test_proxy_rejects_private_dns_and_oversized_response(client: AsyncCli
         settings.MAX_PROXY_RESPONSE_BYTES = 10
         try:
             head = await client.head(
-                "/proxy", params={"url": "https://tn.hitomi.la/image.jpg"}, headers=headers
+                "/proxy", params={"url": "https://custom-site.org/page.html"}, headers=headers
             )
             oversized = await client.get(
-                "/proxy", params={"url": "https://tn.hitomi.la/image.jpg"}, headers=headers
+                "/proxy", params={"url": "https://custom-site.org/page.html"}, headers=headers
             )
             assert head.status_code == 200
             assert oversized.status_code == 413
@@ -899,7 +941,11 @@ async def test_proxy_stops_chunked_response_at_byte_limit(monkeypatch):
     )
     shared_client = httpx.AsyncClient(
         transport=httpx.MockTransport(
-            lambda _request: httpx.Response(200, stream=stream)
+            lambda _request: httpx.Response(
+                200,
+                headers={"Content-Type": "text/html"},
+                stream=stream,
+            )
         )
     )
     semaphore = asyncio.Semaphore(1)
@@ -912,7 +958,7 @@ async def test_proxy_stops_chunked_response_at_byte_limit(monkeypatch):
         "type": "http",
         "method": "GET",
         "path": "/proxy",
-        "query_string": b"url=https%3A%2F%2Ftn.hitomi.la%2Fimage.jpg",
+        "query_string": b"url=https%3A%2F%2Fcustom-site.org%2Fpage.html",
         "headers": [],
         "app": app,
     })
@@ -951,7 +997,7 @@ async def test_proxy_cancellation_releases_capacity(monkeypatch):
         "type": "http",
         "method": "GET",
         "path": "/proxy",
-        "query_string": b"url=https%3A%2F%2Ftn.hitomi.la%2Fimage.jpg",
+        "query_string": b"url=https%3A%2F%2Fcustom-site.org%2Fpage.html",
         "headers": [],
         "app": app,
     })
@@ -991,7 +1037,10 @@ async def test_proxy_revalidates_redirect_dns(client: AsyncClient, monkeypatch):
     def upstream(_request: httpx.Request) -> httpx.Response:
         nonlocal upstream_calls
         upstream_calls += 1
-        return httpx.Response(302, headers={"Location": "https://hitomi.la/private"})
+        return httpx.Response(
+            302,
+            headers={"Location": "https://custom-site.org/private", "Content-Type": "text/html"},
+        )
 
     monkeypatch.setattr(proxy_module.socket, "getaddrinfo", resolve)
     shared_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
@@ -999,7 +1048,7 @@ async def test_proxy_revalidates_redirect_dns(client: AsyncClient, monkeypatch):
     app.state.proxy_semaphore = asyncio.Semaphore(16)
     try:
         response = await client.get(
-            "/proxy", params={"url": "https://tn.hitomi.la/image.jpg"}, headers=headers
+            "/proxy", params={"url": "https://custom-site.org/page.html"}, headers=headers
         )
         assert response.status_code == 403
         assert dns_calls == 2
@@ -1008,6 +1057,46 @@ async def test_proxy_revalidates_redirect_dns(client: AsyncClient, monkeypatch):
         await shared_client.aclose()
         del app.state.proxy_client
         del app.state.proxy_semaphore
+
+
+@pytest.mark.asyncio
+async def test_proxy_rate_limiting(client: AsyncClient, monkeypatch):
+    headers = {"X-Sync-Key": "C8-PROXY-RATE-LIMIT"}
+    created = await client.post(
+        "/sync", headers=headers,
+        json={"favorites": [{"sourceId": "eleven", "id": "proxy-rate"}]},
+    )
+    assert created.status_code == 200
+
+    monkeypatch.setattr(
+        proxy_module.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [(2, 1, 6, "", ("1.1.1.1", 443))],
+    )
+    shared_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda _req: httpx.Response(200, headers={"Content-Type": "text/html"}, stream=httpx.ByteStream(b"ok"))
+        )
+    )
+    app.state.proxy_client = shared_client
+    app.state.proxy_semaphore = asyncio.Semaphore(16)
+    app.state.proxy_rate_limiter = proxy_module.ProxyRateLimiter(limit_per_minute=2)
+    try:
+        # First 2 requests pass
+        r1 = await client.get("/proxy", params={"url": "https://custom-site.org/1"}, headers=headers)
+        assert r1.status_code == 200
+        r2 = await client.get("/proxy", params={"url": "https://custom-site.org/2"}, headers=headers)
+        assert r2.status_code == 200
+
+        # 3rd request hits 429
+        r3 = await client.get("/proxy", params={"url": "https://custom-site.org/3"}, headers=headers)
+        assert r3.status_code == 429
+        assert r3.headers.get("Retry-After") == "30"
+    finally:
+        await shared_client.aclose()
+        del app.state.proxy_client
+        del app.state.proxy_semaphore
+        del app.state.proxy_rate_limiter
 
 
 @pytest.mark.asyncio
@@ -1024,7 +1113,7 @@ async def test_proxy_returns_503_when_concurrency_is_full(client: AsyncClient):
     app.state.proxy_semaphore = asyncio.Semaphore(0)
     try:
         response = await client.get(
-            "/proxy", params={"url": "https://tn.hitomi.la/image.jpg"}, headers=headers
+            "/proxy", params={"url": "https://custom-site.org/page.html"}, headers=headers
         )
         assert response.status_code == 503
     finally:

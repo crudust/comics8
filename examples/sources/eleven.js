@@ -1,5 +1,5 @@
 // Sample 11toon parser for in-app import. Not bundled in the APK or server.
-var ORIGIN = "http://103.204.13.68:8904";
+var ORIGIN = "https://11toon.com";
 var COVER_HOST = "https://11toon8.com";
 var KNOWN_DOMAINS = [
   "pl4050.com",
@@ -181,7 +181,7 @@ var source = {
 
   ownsHost: function (h) {
     var hostName = String(h || "").toLowerCase();
-    return /^(www\.)?11toon\d*\.com$/.test(hostName) || /^(www\.)?pl\d{4}\.com$/.test(hostName) || hostName === "103.204.13.68";
+    return /^(www\.)?11toon\d*\.com$/.test(hostName) || /^(www\.)?pl\d{4}\.com$/.test(hostName);
   },
 
   coverUrl: coverUrl

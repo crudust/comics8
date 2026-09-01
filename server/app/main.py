@@ -12,7 +12,12 @@ from fastapi.responses import FileResponse, JSONResponse, Response as RawRespons
 from app.billing import router as billing_router
 from app.config import get_settings
 from app.database import close_db, init_db
-from app.proxy import create_proxy_client, create_proxy_semaphore, router as proxy_router
+from app.proxy import (
+    create_proxy_client,
+    create_proxy_rate_limiter,
+    create_proxy_semaphore,
+    router as proxy_router,
+)
 from app.pubsub_worker import start_pubsub_worker, stop_pubsub_worker
 from app.sync import router as sync_router
 
@@ -40,6 +45,7 @@ async def lifespan(app: FastAPI):
 
     app.state.proxy_client = create_proxy_client()
     app.state.proxy_semaphore = create_proxy_semaphore()
+    app.state.proxy_rate_limiter = create_proxy_rate_limiter()
 
     try:
         yield

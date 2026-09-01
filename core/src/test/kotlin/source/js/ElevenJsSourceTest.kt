@@ -68,14 +68,13 @@ class ElevenJsSourceTest {
     }
 
     @Test
-    fun ownsHostMatchesElevenDomainsAndOriginIp() {
+    fun ownsHostMatchesElevenDomains() {
         val source = loadEleven()
         assertThat(source.ownsHost("11toon8.com")).isTrue()
         assertThat(source.ownsHost("www.11toon.com")).isTrue()
         assertThat(source.ownsHost("11toon.com")).isTrue()
         assertThat(source.ownsHost("www.pl4050.com")).isTrue()
         assertThat(source.ownsHost("pl3040.com")).isTrue()
-        assertThat(source.ownsHost("103.204.13.68")).isTrue()
         assertThat(source.ownsHost("evil.example.com")).isFalse()
         assertThat(source.ownsHost("pl405.com")).isFalse()
         assertThat(source.ownsHost("11toon8.net")).isFalse()
@@ -392,7 +391,7 @@ class ElevenJsSourceTest {
     }
 
     companion object {
-        private const val ORIGIN = "http://103.204.13.68:8904"
+        private const val ORIGIN = "https://11toon.com"
 
         private fun enc(value: String): String =
             URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20")
