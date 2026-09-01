@@ -26,7 +26,7 @@ object ReaderDomain {
         page.coerceIn(1, lastPage.coerceAtLeast(1))
 
     fun initialImagePage(lastReadPage: Int, totalImages: Int): Int? =
-        if (totalImages <= 0) null else lastReadPage.coerceIn(0, totalImages - 1)
+        if (totalImages <= 0) null else ReaderProgress.startPageOnOpen(lastReadPage).coerceIn(0, totalImages - 1)
 
     fun predictedEpisodePage(
         totalEpisodes: Int,

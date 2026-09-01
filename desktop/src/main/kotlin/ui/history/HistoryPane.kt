@@ -98,7 +98,6 @@ fun HistoryPane(
                         item = item,
                         progressText = state.progressLabel(item),
                         onOpenSeries = { viewModel.openSeriesFromHistory(item) },
-                        onReopen = { viewModel.reopenHistoryEpisode(item) },
                         onContinue = { viewModel.continueHistoryEpisode(item) },
                         onDelete = { viewModel.deleteHistory(item.workId()) },
                     )
@@ -113,7 +112,6 @@ fun HistoryItemCard(
     item: ReadHistoryRecord,
     progressText: String,
     onOpenSeries: () -> Unit,
-    onReopen: () -> Unit,
     onContinue: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
@@ -192,25 +190,6 @@ fun HistoryItemCard(
                         Spacer(Modifier.width(4.dp))
                         Text(
                             text = strings.actionTableOfContents,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    }
-
-                    FilledTonalButton(
-                        onClick = onReopen,
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                        modifier = Modifier.height(32.dp),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp),
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            text = strings.actionReopenEpisode,
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.SemiBold,
                         )

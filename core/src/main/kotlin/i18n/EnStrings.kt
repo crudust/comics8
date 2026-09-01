@@ -177,7 +177,6 @@ object EnStrings : AppStrings {
     override val actionViewEpisodes: String = "View Chapters"
     override val emptyHistory: String = "No recently read comics."
     override val actionClearAllHistory: String = "Clear All History"
-    override val actionReopenEpisode: String = "Reread"
     override val timeJustNow: String = "Just now"
     override fun timeMinutesAgo(minutes: Long): String = "$minutes min ago"
     override fun timeHoursAgo(hours: Long): String = "$hours hr ago"
