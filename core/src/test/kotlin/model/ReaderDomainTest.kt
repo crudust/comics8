@@ -81,4 +81,45 @@ class ReaderDomainTest {
         assertThat(ReaderDomain.imageAspectRatio(0, 800)).isNull()
         assertThat(ReaderDomain.imageAspectRatio(800, 0)).isNull()
     }
+
+    @Test
+    fun episodePositionAndNavigationRemainConsistentRegardlessOfUiSortOrder() {
+        val rawEpisodes = listOf(
+            EpisodeItem(wrId = "300", title = "3화", date = "2026-03-01", thumbUrl = null, href = "ep/3"),
+            EpisodeItem(wrId = "200", title = "2화", date = "2026-02-01", thumbUrl = null, href = "ep/2"),
+            EpisodeItem(wrId = "100", title = "1화", date = "2026-01-01", thumbUrl = null, href = "ep/1"),
+        )
+        val rawIds = rawEpisodes.map(EpisodeItem::wrId)
+
+        val uiSortedEpisodes = rawEpisodes.sortedWithOrder(EpisodeSortOrder.NAME_ASC)
+        assertThat(uiSortedEpisodes.map { it.title }).containsExactly("1화", "2화", "3화").inOrder()
+
+        val pos1 = ReaderDomain.episodePosition(
+            episodeIds = rawIds,
+            currentEpisodeId = "100",
+            currentPage = 1,
+            lastPage = 1,
+            knownLastPageCount = 3,
+            knownTotalCount = 3,
+        )
+        assertThat(pos1.readOrder).isEqualTo(1)
+        assertThat(pos1.totalEpisodes).isEqualTo(3)
+        assertThat(pos1.nextEpisodeIndex?.let { rawIds[it] }).isEqualTo("200")
+
+        val pos3 = ReaderDomain.episodePosition(
+            episodeIds = rawIds,
+            currentEpisodeId = "300",
+            currentPage = 1,
+            lastPage = 1,
+            knownLastPageCount = 3,
+            knownTotalCount = 3,
+        )
+        assertThat(pos3.readOrder).isEqualTo(3)
+        assertThat(pos3.totalEpisodes).isEqualTo(3)
+        assertThat(pos3.nextEpisodeIndex).isNull()
+
+        val navFrom1 = ReaderDomain.newerEpisode(currentIndex = 2, itemCount = 3, currentPage = 1)
+        assertThat(navFrom1).isEqualTo(ReaderDomain.EpisodeNavigation.InCurrentPage(1))
+        assertThat(rawIds[(navFrom1 as ReaderDomain.EpisodeNavigation.InCurrentPage).index]).isEqualTo("200")
+    }
 }

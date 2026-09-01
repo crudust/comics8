@@ -81,6 +81,7 @@ data class ListingUiState(
     val error: String? = null,
     val screen: Screen = Screen.Browse,
     val series: ToonItem? = null,
+    val rawEpisodes: List<EpisodeItem> = emptyList(),
     val episodes: List<EpisodeItem> = emptyList(),
     val episodeSortOrder: EpisodeSortOrder = EpisodeSortOrder.DEFAULT,
     val episodePage: Int = 1,
@@ -149,14 +150,14 @@ data class ListingUiState(
         }
 
     val currentEpisodeIndex: Int
-        get() = currentEpisode?.let { ep -> episodes.indexOfFirst { it.wrId == ep.wrId } } ?: -1
+        get() = currentEpisode?.let { ep -> (rawEpisodes.ifEmpty { episodes }).indexOfFirst { it.wrId == ep.wrId } } ?: -1
 
     val hasNextEpisode: Boolean
-        get() = ReaderDomain.newerEpisode(currentEpisodeIndex, episodes.size, episodePage) !=
+        get() = ReaderDomain.newerEpisode(currentEpisodeIndex, (rawEpisodes.ifEmpty { episodes }).size, episodePage) !=
             ReaderDomain.EpisodeNavigation.None
 
     val hasPrevEpisode: Boolean
-        get() = ReaderDomain.olderEpisode(currentEpisodeIndex, episodes.size, episodePage, episodeLastPage) !=
+        get() = ReaderDomain.olderEpisode(currentEpisodeIndex, (rawEpisodes.ifEmpty { episodes }).size, episodePage, episodeLastPage) !=
             ReaderDomain.EpisodeNavigation.None
 
     fun progressLabel(history: ReadHistory): String =
@@ -292,7 +293,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         _state.update { current ->
             current.copy(
                 episodeSortOrder = order,
-                episodes = current.episodes.sortedWithOrder(order),
+                episodes = (current.rawEpisodes.ifEmpty { current.episodes }).sortedWithOrder(order),
             )
         }
     }
@@ -454,7 +455,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 // 2단계(회차리스트) -> 3단계(뷰어)로 이동
                 val targetEp = lastViewedEpisode
                     ?: current.seriesHistory?.let { h -> current.episodes.firstOrNull { it.wrId == h.lastWrId } }
-                    ?: current.episodes.lastOrNull() // 1화
+                    ?: (current.rawEpisodes.ifEmpty { current.episodes }).lastOrNull() // 1화
                     ?: current.episodes.firstOrNull()
                 if (targetEp != null) {
                     openEpisode(targetEp)
@@ -670,6 +671,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 screen = Screen.Browse,
                 tab = dest,
                 series = null,
+                rawEpisodes = emptyList(),
                 episodes = emptyList(),
                 currentEpisode = null,
                 readerImages = emptyList(),
@@ -710,6 +712,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 loading = cached == null,
                 screen = Screen.Browse,
                 series = null,
+                rawEpisodes = emptyList(),
                 episodes = emptyList(),
                 error = null,
                 searchQuery = null,
@@ -1180,6 +1183,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 searchSuggestions = emptyList(),
                 screen = Screen.Browse,
                 series = null,
+                rawEpisodes = emptyList(),
                 episodes = emptyList(),
                 items = emptyList(),
                 error = null,
@@ -1297,6 +1301,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 screen = Screen.Series,
                 series = item,
                 seriesHistory = null,
+                rawEpisodes = emptyList(),
                 episodes = emptyList(),
                 episodePage = 1,
                 episodeLastPage = 1,
@@ -1385,8 +1390,9 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         val current = _state.value
         val series = current.series ?: return
         val lastPage = current.episodeLastPage
+        val raw = current.rawEpisodes.ifEmpty { current.episodes }
         if (lastPage <= 1) {
-            val firstEp = current.episodes.lastOrNull()
+            val firstEp = raw.lastOrNull()
             if (firstEp != null) {
                 openEpisode(firstEp)
             } else {
@@ -1395,7 +1401,8 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                         val result = repository.loadEpisodes(series, 1)
                         _state.update {
                             it.copy(
-                                episodes = result.items,
+                                rawEpisodes = result.items,
+                                episodes = result.items.sortedWithOrder(it.episodeSortOrder),
                                 episodePage = result.currentPage,
                                 episodeLastPage = result.lastPage,
                             )
@@ -1411,7 +1418,8 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                     val result = repository.loadEpisodes(series, lastPage)
                     _state.update {
                         it.copy(
-                            episodes = result.items,
+                            rawEpisodes = result.items,
+                            episodes = result.items.sortedWithOrder(it.episodeSortOrder),
                             episodePage = result.currentPage,
                             episodeLastPage = result.lastPage,
                         )
@@ -1439,6 +1447,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 screen = Screen.Browse,
                 series = null,
                 seriesHistory = null,
+                rawEpisodes = emptyList(),
                 episodes = emptyList(),
                 episodeError = null,
                 showPageJump = false,
@@ -1959,6 +1968,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             it.copy(
                 screen = Screen.Series,
                 series = toon,
+                rawEpisodes = emptyList(),
                 episodes = emptyList(),
                 episodeLoading = true,
                 highlightedEpisodeId = item.lastWrId,
@@ -1990,7 +2000,8 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
                 _state.update {
                     it.copy(
-                        episodes = epPage.items,
+                        rawEpisodes = epPage.items,
+                        episodes = epPage.items.sortedWithOrder(it.episodeSortOrder),
                         episodePage = actualPage,
                         episodeLastPage = epPage.lastPage,
                         episodeLoading = false,
@@ -2037,6 +2048,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             it.copy(
                 screen = Screen.Series,
                 series = toon,
+                rawEpisodes = emptyList(),
                 episodes = emptyList(),
                 episodeLoading = true,
                 highlightedEpisodeId = item.lastWrId,
@@ -2064,7 +2076,8 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
                 _state.update {
                     it.copy(
-                        episodes = epPage.items,
+                        rawEpisodes = epPage.items,
+                        episodes = epPage.items.sortedWithOrder(it.episodeSortOrder),
                         episodePage = actualPage,
                         episodeLastPage = epPage.lastPage,
                         episodeLoading = false,
@@ -2078,7 +2091,8 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                             val prevEpPage = repository.loadEpisodes(toon, actualPage - 1)
                             _state.update {
                                 it.copy(
-                                    episodes = prevEpPage.items,
+                                    rawEpisodes = prevEpPage.items,
+                                    episodes = prevEpPage.items.sortedWithOrder(it.episodeSortOrder),
                                     episodePage = actualPage - 1,
                                     episodeLastPage = prevEpPage.lastPage,
                                 )
@@ -2136,10 +2150,10 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         }
         lastViewedEpisode = episode
         val nowMs = System.currentTimeMillis()
-        val episodes = current.episodes
+        val rawEpisodes = current.rawEpisodes.ifEmpty { current.episodes }
         val seriesKey = series?.workId()?.storageKey().orEmpty()
         val position = ReaderDomain.episodePosition(
-            episodeIds = episodes.map(EpisodeItem::wrId),
+            episodeIds = rawEpisodes.map(EpisodeItem::wrId),
             currentEpisodeId = episode.wrId,
             currentPage = current.episodePage,
             lastPage = current.episodeLastPage,
@@ -2147,15 +2161,19 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             knownTotalCount = toonTotalCounts[seriesKey],
             pageSize = series?.let { repository.sourceOrNull(it.sourceId)?.episodePageSize } ?: 100,
         )
-        val nextEp = position.nextEpisodeIndex?.let(episodes::get)
+        val nextEp = position.nextEpisodeIndex?.let(rawEpisodes::get)
 
         _state.update { curr ->
+            val updatedRaw = curr.rawEpisodes.map {
+                if (it.wrId == episode.wrId) it.copy(isRead = true, readAt = nowMs) else it
+            }
             val updatedEpisodes = curr.episodes.map {
                 if (it.wrId == episode.wrId) it.copy(isRead = true, readAt = nowMs) else it
             }
             curr.copy(
                 screen = Screen.Reader,
                 currentEpisode = episode.copy(isRead = true, readAt = nowMs),
+                rawEpisodes = updatedRaw,
                 episodes = updatedEpisodes,
                 readerImages = emptyList(),
                 readerLoading = true,
@@ -2295,12 +2313,13 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 repository.saveEpisodePage(series.workId(), currentEp.wrId, 0)
             }
         }
+        val rawEpisodes = current.rawEpisodes.ifEmpty { current.episodes }
         when (val navigation = ReaderDomain.newerEpisode(
             currentIndex = current.currentEpisodeIndex,
-            itemCount = current.episodes.size,
+            itemCount = rawEpisodes.size,
             currentPage = current.episodePage,
         )) {
-            is ReaderDomain.EpisodeNavigation.InCurrentPage -> openEpisode(current.episodes[navigation.index])
+            is ReaderDomain.EpisodeNavigation.InCurrentPage -> openEpisode(rawEpisodes[navigation.index])
             is ReaderDomain.EpisodeNavigation.LoadPage -> if (series != null) {
                 viewModelScope.launch {
                     navigateToEpisodePage(series, navigation.page, navigation.edge)
@@ -2313,13 +2332,14 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     fun openPrevEpisode() {
         val current = _state.value
         val series = current.series
+        val rawEpisodes = current.rawEpisodes.ifEmpty { current.episodes }
         when (val navigation = ReaderDomain.olderEpisode(
             currentIndex = current.currentEpisodeIndex,
-            itemCount = current.episodes.size,
+            itemCount = rawEpisodes.size,
             currentPage = current.episodePage,
             lastPage = current.episodeLastPage,
         )) {
-            is ReaderDomain.EpisodeNavigation.InCurrentPage -> openEpisode(current.episodes[navigation.index])
+            is ReaderDomain.EpisodeNavigation.InCurrentPage -> openEpisode(rawEpisodes[navigation.index])
             is ReaderDomain.EpisodeNavigation.LoadPage -> if (series != null) {
                 viewModelScope.launch {
                     navigateToEpisodePage(series, navigation.page, navigation.edge)
@@ -2360,7 +2380,8 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
 
             _state.update {
                 it.copy(
-                    episodes = result.items,
+                    rawEpisodes = result.items,
+                    episodes = result.items.sortedWithOrder(it.episodeSortOrder),
                     episodePage = result.currentPage,
                     episodeLastPage = result.lastPage,
                 )
@@ -2546,6 +2567,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                     episodeError = null,
                     episodePage = if (hasLocal) 1 else page,
                     episodeLastPage = if (hasLocal) 1 else it.episodeLastPage,
+                    rawEpisodes = if (hasLocal) local.items else it.rawEpisodes,
                     episodes = if (hasLocal) local.items.sortedWithOrder(sortOrder) else it.episodes,
                     refreshing = asRefresh,
                     showPageJump = false,
@@ -2558,6 +2580,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 val result = repository.loadEpisodes(item, page)
                 _state.update {
                     it.copy(
+                        rawEpisodes = result.items,
                         episodes = result.items.sortedWithOrder(it.episodeSortOrder),
                         episodePage = result.currentPage,
                         episodeLastPage = result.lastPage,
