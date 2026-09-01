@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/License-GPL%20v3-blue.svg" alt="License: GPL v3">
+  <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT">
   <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Android-green.svg" alt="Platforms">
   <img src="https://img.shields.io/badge/Kotlin-JVM%2017-purple.svg" alt="Kotlin JVM 17">
   <img src="https://img.shields.io/badge/UI-Compose%20Multiplatform-orange.svg" alt="Compose Multiplatform">
@@ -93,4 +93,4 @@ To import a plugin into Comics8 Desktop:
 
 ## 📄 License
 
-This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
