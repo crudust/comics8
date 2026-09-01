@@ -44,6 +44,7 @@ fun GeneralSettingsPane(
                 options = EpisodeSortOrder.entries,
                 optionLabel = { order ->
                     when (order) {
+                        EpisodeSortOrder.DEFAULT -> strings.sortDefault
                         EpisodeSortOrder.NAME_ASC -> strings.sortNameAsc
                         EpisodeSortOrder.NAME_DESC -> strings.sortNameDesc
                         EpisodeSortOrder.DATE_DESC -> strings.sortDateDesc

@@ -265,6 +265,24 @@ fun TopBar(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier.fillMaxWidth(),
                                 ) {
+                                    Text(strings.sortDefault)
+                                    if (state.episodeSortOrder == EpisodeSortOrder.DEFAULT) {
+                                        Spacer(Modifier.width(8.dp))
+                                        Icon(Icons.Default.Check, contentDescription = null, Modifier.size(16.dp))
+                                    }
+                                }
+                            },
+                            onClick = {
+                                viewModel.setEpisodeSortOrder(EpisodeSortOrder.DEFAULT)
+                                showSortMenu = false
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
                                     Text(strings.sortNameAsc)
                                     if (state.episodeSortOrder == EpisodeSortOrder.NAME_ASC) {
                                         Spacer(Modifier.width(8.dp))

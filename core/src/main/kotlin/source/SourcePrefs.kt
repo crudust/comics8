@@ -115,7 +115,7 @@ interface SourceSettings {
     fun isNotificationEnabled(sourceId: String): Boolean = true
     fun setNotificationEnabled(sourceId: String, enabled: Boolean) {}
     fun implementationOverride(sourceId: String): String? = null
-    fun episodeSortOrder(): EpisodeSortOrder = EpisodeSortOrder.NAME_ASC
+    fun episodeSortOrder(): EpisodeSortOrder = EpisodeSortOrder.DEFAULT
     fun setEpisodeSortOrder(order: EpisodeSortOrder) {}
 }
 

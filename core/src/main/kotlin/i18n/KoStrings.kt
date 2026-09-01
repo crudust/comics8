@@ -94,6 +94,7 @@ object KoStrings : AppStrings {
     override fun episodeItemCount(count: Int): String = "총 ${count}화"
     override val sortOldestFirst: String = "첫화부터"
     override val sortNewestFirst: String = "최신화부터"
+    override val sortDefault: String = "기본 (소스 순서)"
     override val sortNameAsc: String = "이름 오름차순"
     override val sortNameDesc: String = "이름 내림차순"
     override val sortDateDesc: String = "최신 수정순"
