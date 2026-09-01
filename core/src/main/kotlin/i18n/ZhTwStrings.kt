@@ -177,7 +177,6 @@ object ZhTwStrings : AppStrings {
     override val actionViewEpisodes: String = "檢視章節"
     override val emptyHistory: String = "尚無最近閱讀紀錄。"
     override val actionClearAllHistory: String = "清除所有紀錄"
-    override val actionReopenEpisode: String = "重新閱讀"
     override val timeJustNow: String = "剛剛"
     override fun timeMinutesAgo(minutes: Long): String = "${minutes}分鐘前"
     override fun timeHoursAgo(hours: Long): String = "${hours}小時前"

@@ -177,7 +177,6 @@ object ZhCnStrings : AppStrings {
     override val actionViewEpisodes: String = "查看章节"
     override val emptyHistory: String = "暂无最近阅读记录。"
     override val actionClearAllHistory: String = "清空全部历史"
-    override val actionReopenEpisode: String = "重读"
     override val timeJustNow: String = "刚刚"
     override fun timeMinutesAgo(minutes: Long): String = "${minutes}分钟前"
     override fun timeHoursAgo(hours: Long): String = "${hours}小时前"

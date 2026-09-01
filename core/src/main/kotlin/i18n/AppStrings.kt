@@ -175,7 +175,6 @@ interface AppStrings {
     val actionViewEpisodes: String
     val emptyHistory: String
     val actionClearAllHistory: String
-    val actionReopenEpisode: String
     val timeJustNow: String
     fun timeMinutesAgo(minutes: Long): String
     fun timeHoursAgo(hours: Long): String

@@ -177,7 +177,6 @@ object JaStrings : AppStrings {
     override val actionViewEpisodes: String = "話一覧を見る"
     override val emptyHistory: String = "閲覧履歴がありません。"
     override val actionClearAllHistory: String = "履歴をすべて削除"
-    override val actionReopenEpisode: String = "もう一度読む"
     override val timeJustNow: String = "たった今"
     override fun timeMinutesAgo(minutes: Long): String = "${minutes}分前"
     override fun timeHoursAgo(hours: Long): String = "${hours}時間前"

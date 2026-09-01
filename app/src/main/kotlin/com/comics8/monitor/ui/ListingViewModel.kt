@@ -1375,15 +1375,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             openFirstEpisode()
             return
         }
-        viewModelScope.launch {
-            val readEp = repository.getReadEpisode(series.workId(), hist.lastWrId)
-            val lastSavedPage = readEp?.lastPage ?: 0
-            if (lastSavedPage > 0) {
-                reopenHistoryEpisode(hist, startPage = lastSavedPage)
-            } else {
-                continueHistoryEpisode(hist)
-            }
-        }
+        continueHistoryEpisode(hist)
     }
 
     fun openFirstEpisode() {
@@ -1956,82 +1948,6 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun reopenHistoryEpisode(item: ReadHistory, startPage: Int = 0) {
-        val toon = item.toToonItem()
-        if (_state.value.screen == Screen.History) {
-            previousScreenBeforeSeries = Screen.History
-        }
-        episodeJob?.cancel()
-        readerJob?.cancel()
-        val targetMode = resolveTargetViewMode()
-        _state.update {
-            it.copy(
-                screen = Screen.Series,
-                series = toon,
-                rawEpisodes = emptyList(),
-                episodes = emptyList(),
-                episodeLoading = true,
-                highlightedEpisodeId = item.lastWrId,
-                readerLoading = true,
-                readerError = null,
-                readerImages = emptyList(),
-                viewMode = targetMode,
-                readDirection = globalReadDirection,
-            )
-        }
-        viewModelScope.launch {
-            try {
-                val pageToFetch = if (startPage == 0) {
-                    val readEp = repository.getReadEpisode(item.workId(), item.lastWrId)
-                    readEp?.lastPage ?: 0
-                } else startPage
-
-                val predictedPage = ReaderDomain.predictedEpisodePage(item.totalEpisodes, item.lastReadOrder)
-
-                var epPage = repository.loadEpisodes(toon, predictedPage)
-                var targetEp = epPage.items.firstOrNull { it.wrId == item.lastWrId }
-                var actualPage = predictedPage
-
-                if (targetEp == null && predictedPage != 1) {
-                    epPage = repository.loadEpisodes(toon, 1)
-                    targetEp = epPage.items.firstOrNull { it.wrId == item.lastWrId }
-                    actualPage = 1
-                }
-
-                _state.update {
-                    it.copy(
-                        rawEpisodes = epPage.items,
-                        episodes = epPage.items.sortedWithOrder(it.episodeSortOrder),
-                        episodePage = actualPage,
-                        episodeLastPage = epPage.lastPage,
-                        episodeLoading = false,
-                    )
-                }
-
-                val epToOpen = (targetEp ?: EpisodeItem(
-                    wrId = item.lastWrId,
-                    title = item.lastEpisodeTitle,
-                    date = null,
-                    thumbUrl = null,
-                    href = item.lastEpisodeHref,
-                    lastReadPage = pageToFetch,
-                )).copy(lastReadPage = pageToFetch)
-                openEpisode(epToOpen)
-            } catch (_: Exception) {
-                _state.update { it.copy(episodeLoading = false) }
-                val fallback = EpisodeItem(
-                    wrId = item.lastWrId,
-                    title = item.lastEpisodeTitle,
-                    date = null,
-                    thumbUrl = null,
-                    href = item.lastEpisodeHref,
-                    lastReadPage = startPage,
-                )
-                openEpisode(fallback)
-            }
-        }
-    }
-
     fun openSeriesFromHistory(item: ReadHistory) {
         openSeries(item.toToonItem())
     }
@@ -2061,8 +1977,10 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         }
         viewModelScope.launch {
             try {
-                val nextOrder = item.lastReadOrder + 1
-                val predictedPage = ReaderDomain.predictedEpisodePage(item.totalEpisodes, nextOrder)
+                val readEp = repository.getReadEpisode(item.workId(), item.lastWrId)
+                val isCompleted = readEp == null || com.comics8.core.model.ReaderProgress.isCompleted(readEp.lastPage)
+                val targetOrder = if (isCompleted) item.lastReadOrder + 1 else item.lastReadOrder
+                val predictedPage = ReaderDomain.predictedEpisodePage(item.totalEpisodes, targetOrder)
 
                 var epPage = repository.loadEpisodes(toon, predictedPage)
                 var lastIdx = epPage.items.indexOfFirst { it.wrId == item.lastWrId }
@@ -2084,46 +2002,60 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                     )
                 }
 
-                val nextEp = when {
-                    lastIdx > 0 -> epPage.items[lastIdx - 1]
-                    lastIdx == 0 && actualPage > 1 -> {
-                        try {
-                            val prevEpPage = repository.loadEpisodes(toon, actualPage - 1)
-                            _state.update {
-                                it.copy(
-                                    rawEpisodes = prevEpPage.items,
-                                    episodes = prevEpPage.items.sortedWithOrder(it.episodeSortOrder),
-                                    episodePage = actualPage - 1,
-                                    episodeLastPage = prevEpPage.lastPage,
-                                )
-                            }
-                            prevEpPage.items.lastOrNull() ?: epPage.items[0]
-                        } catch (_: Exception) {
-                            epPage.items[0]
-                        }
-                    }
-                    lastIdx == 0 -> epPage.items[0]
-                    else -> {
-                        if (!item.nextWrId.isNullOrBlank()) {
-                            epPage.items.firstOrNull { it.wrId == item.nextWrId } ?: epPage.items.firstOrNull()
-                        } else {
-                            epPage.items.firstOrNull()
-                        }
-                    }
-                }
-
-                if (nextEp != null) {
-                    openEpisode(nextEp)
+                if (!isCompleted) {
+                    val targetEp = (if (lastIdx >= 0) epPage.items[lastIdx] else null)
+                        ?: EpisodeItem(
+                            wrId = item.lastWrId,
+                            title = item.lastEpisodeTitle,
+                            date = null,
+                            thumbUrl = null,
+                            href = item.lastEpisodeHref,
+                            lastReadPage = readEp?.lastPage ?: 0,
+                        )
+                    val resumePage = com.comics8.core.model.ReaderProgress.startPageOnOpen(readEp?.lastPage ?: 0)
+                    openEpisode(targetEp.copy(lastReadPage = resumePage))
                 } else {
-                    val fallback = EpisodeItem(
-                        wrId = item.lastWrId,
-                        title = item.lastEpisodeTitle,
-                        date = null,
-                        thumbUrl = null,
-                        href = item.lastEpisodeHref,
-                        lastReadPage = 0,
-                    )
-                    openEpisode(fallback)
+                    val nextEp = when {
+                        lastIdx > 0 -> epPage.items[lastIdx - 1]
+                        lastIdx == 0 && actualPage > 1 -> {
+                            try {
+                                val prevEpPage = repository.loadEpisodes(toon, actualPage - 1)
+                                _state.update {
+                                    it.copy(
+                                        rawEpisodes = prevEpPage.items,
+                                        episodes = prevEpPage.items.sortedWithOrder(it.episodeSortOrder),
+                                        episodePage = actualPage - 1,
+                                        episodeLastPage = prevEpPage.lastPage,
+                                    )
+                                }
+                                prevEpPage.items.lastOrNull() ?: epPage.items[0]
+                            } catch (_: Exception) {
+                                epPage.items[0]
+                            }
+                        }
+                        lastIdx == 0 -> epPage.items[0]
+                        else -> {
+                            if (!item.nextWrId.isNullOrBlank()) {
+                                epPage.items.firstOrNull { it.wrId == item.nextWrId } ?: epPage.items.firstOrNull()
+                            } else {
+                                epPage.items.firstOrNull()
+                            }
+                        }
+                    }
+
+                    if (nextEp != null) {
+                        openEpisode(nextEp.copy(lastReadPage = 0))
+                    } else {
+                        val fallback = EpisodeItem(
+                            wrId = item.lastWrId,
+                            title = item.lastEpisodeTitle,
+                            date = null,
+                            thumbUrl = null,
+                            href = item.lastEpisodeHref,
+                            lastReadPage = 0,
+                        )
+                        openEpisode(fallback)
+                    }
                 }
             } catch (_: Exception) {
                 _state.update { it.copy(episodeLoading = false) }
@@ -2163,6 +2095,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         )
         val nextEp = position.nextEpisodeIndex?.let(rawEpisodes::get)
 
+        val startPage = com.comics8.core.model.ReaderProgress.startPageOnOpen(episode.lastReadPage)
         _state.update { curr ->
             val updatedRaw = curr.rawEpisodes.map {
                 if (it.wrId == episode.wrId) it.copy(isRead = true, readAt = nowMs) else it
@@ -2172,7 +2105,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             }
             curr.copy(
                 screen = Screen.Reader,
-                currentEpisode = episode.copy(isRead = true, readAt = nowMs),
+                currentEpisode = episode.copy(isRead = true, readAt = nowMs, lastReadPage = startPage),
                 rawEpisodes = updatedRaw,
                 episodes = updatedEpisodes,
                 readerImages = emptyList(),
@@ -2299,8 +2232,13 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         if (pending == null) return
         val series = current.series ?: return
         val episode = current.currentEpisode ?: return
+        val totalImages = current.readerImages.size
+        val targetPage = com.comics8.core.model.ReaderProgress.persistPage(
+            page = episode.lastReadPage,
+            totalImages = totalImages,
+        )
         viewModelScope.launch {
-            repository.saveEpisodePage(series.workId(), episode.wrId, episode.lastReadPage)
+            repository.saveEpisodePage(series.workId(), episode.wrId, targetPage)
         }
     }
 
@@ -2309,8 +2247,11 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         val series = current.series
         val currentEp = current.currentEpisode
         if (series != null && currentEp != null) {
+            val totalImages = current.readerImages.size
+            val lastPage = if (totalImages > 0) totalImages - 1 else currentEp.lastReadPage
+            val completedPage = com.comics8.core.model.ReaderProgress.encodePage(lastPage, completed = true)
             viewModelScope.launch {
-                repository.saveEpisodePage(series.workId(), currentEp.wrId, 0)
+                repository.saveEpisodePage(series.workId(), currentEp.wrId, completedPage)
             }
         }
         val rawEpisodes = current.rawEpisodes.ifEmpty { current.episodes }

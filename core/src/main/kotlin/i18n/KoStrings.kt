@@ -177,7 +177,6 @@ object KoStrings : AppStrings {
     override val actionViewEpisodes: String = "회차 보기"
     override val emptyHistory: String = "최근 읽은 만화가 없습니다."
     override val actionClearAllHistory: String = "기록 전체 삭제"
-    override val actionReopenEpisode: String = "다시보기"
     override val timeJustNow: String = "방금 전"
     override fun timeMinutesAgo(minutes: Long): String = "${minutes}분 전"
     override fun timeHoursAgo(hours: Long): String = "${hours}시간 전"
