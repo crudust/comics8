@@ -167,6 +167,7 @@ dependencies {
 
     implementation(libs.coil.compose)
     implementation(libs.documentfile)
+    implementation(libs.fragment)
 
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
