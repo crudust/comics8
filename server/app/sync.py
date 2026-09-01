@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import asyncio
+from collections import OrderedDict, deque
 import hashlib
+import json
 import logging
-import random
 import re
+import secrets
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, select, tuple_
+from pydantic import BaseModel, Field, ValidationError
+from sqlalchemy import delete, func, select, text, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.database import get_db
@@ -29,6 +33,22 @@ logger = logging.getLogger("comics8.sync")
 router = APIRouter(tags=["Sync"])
 
 _PREFETCH_CHUNK_SIZE = 400
+_SUPPORTED_TOMBSTONE_TYPES = {"FAVORITE", "HISTORY", "EPISODE"}
+_SYNC_BUCKETS = ("favorites", "history", "readEpisodes", "readerSettings", "tombstones")
+_SYNC_STRING_LIMITS = {
+    "sourceId": 32,
+    "id": 128,
+    "toonId": 128,
+    "wrId": 128,
+    "entityId": 255,
+    "entityType": 16,
+}
+
+
+@dataclass(frozen=True)
+class SyncIdentity:
+    user_id: str
+    sync_key: str
 
 
 async def _prefetch_entities(
@@ -61,6 +81,16 @@ def get_safe_user_id(key: str) -> str:
     if 3 <= len(cleaned) <= 64:
         return cleaned
     return hashlib.sha256(key.strip().encode("utf-8")).hexdigest()[:24]
+
+
+def user_accepts_sync_key(user: User, raw_key: str) -> bool:
+    if user.sync_key is not None:
+        return user.sync_key == raw_key
+    # Rows created before sync_key was persisted remain bound to their canonical user ID.
+    if user.user_id == raw_key:
+        return True
+    cleaned = re.sub(r"[^a-zA-Z0-9_\-]", "", raw_key)
+    return not 3 <= len(cleaned) <= 64 and get_safe_user_id(raw_key) == user.user_id
 
 
 def parse_entity_id(entity_id: str | None) -> tuple[str, str]:
@@ -211,24 +241,17 @@ async def check_user_is_pro(session: AsyncSession, user_id: str) -> bool:
     return res.scalar_one_or_none() is not None
 
 
-# Dependency for extracting and ensuring user
+# Authentication resolves identity only. Durable writes own account creation.
 async def get_sync_user(
-    request: Request,
     authorization: str | None = Header(None),
     x_sync_key: str | None = Header(None, alias="X-Sync-Key"),
-    key: str | None = Query(None),
-    token: str | None = Query(None),
     session: AsyncSession = Depends(get_db),
-) -> tuple[str, str]:
+) -> SyncIdentity:
     raw_key = None
     if authorization and authorization.startswith("Bearer "):
         raw_key = authorization[7:].strip()
     elif x_sync_key:
         raw_key = x_sync_key.strip()
-    elif key:
-        raw_key = key.strip()
-    elif token:
-        raw_key = token.strip()
 
     if not raw_key:
         raise HTTPException(
@@ -238,15 +261,131 @@ async def get_sync_user(
 
     user_id = get_safe_user_id(raw_key)
     user = await session.get(User, user_id)
-    if user is None:
-        user = User(user_id=user_id, sync_key=raw_key)
-        session.add(user)
-        await session.commit()
-    elif user.sync_key != raw_key:
-        user.sync_key = raw_key
-        await session.commit()
+    if user is not None and not user_accepts_sync_key(user, raw_key):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"error": "Unauthorized", "message": "Invalid sync key"},
+        )
 
-    return user_id, raw_key
+    return SyncIdentity(user_id=user_id, sync_key=raw_key)
+
+
+async def get_existing_sync_user(
+    identity: SyncIdentity = Depends(get_sync_user),
+    session: AsyncSession = Depends(get_db),
+) -> SyncIdentity:
+    if await session.get(User, identity.user_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"error": "Unauthorized", "message": "Sync account has no stored data"},
+        )
+    return identity
+
+
+async def ensure_user_for_write(session: AsyncSession, identity: SyncIdentity) -> User:
+    """Create and bind a sync account only for an authorized durable write."""
+    if session.bind is not None and session.bind.dialect.name == "postgresql":
+        lock_id = int.from_bytes(
+            hashlib.sha256(identity.user_id.encode("utf-8")).digest()[:8],
+            "big",
+            signed=True,
+        )
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(:lock_id)"),
+            {"lock_id": lock_id},
+        )
+
+    user = await session.get(User, identity.user_id)
+    if user is not None:
+        if not user_accepts_sync_key(user, identity.sync_key):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"error": "Unauthorized", "message": "Invalid sync key"},
+            )
+        if user.sync_key is None:
+            user.sync_key = identity.sync_key
+            await session.flush()
+        return user
+
+    user = User(user_id=identity.user_id, sync_key=identity.sync_key)
+    session.add(user)
+    await session.flush()
+    return user
+
+
+async def read_bounded_json(request: Request) -> dict[str, Any]:
+    limit = get_settings().MAX_SYNC_REQUEST_BYTES
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > limit:
+                raise HTTPException(status_code=413, detail="Sync request is too large")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid Content-Length")
+
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > limit:
+            raise HTTPException(status_code=413, detail="Sync request is too large")
+    if not body:
+        raise HTTPException(status_code=400, detail="Empty body")
+    try:
+        data = json.loads(body)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {exc}")
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="Sync payload must be an object")
+    request.state.sync_body_bytes = len(body)
+    return data
+
+
+def validate_sync_payload(data: dict[str, Any]) -> None:
+    settings = get_settings()
+    item_count = 0
+    for bucket in _SYNC_BUCKETS:
+        rows = data.get(bucket, [])
+        if not isinstance(rows, list):
+            raise HTTPException(status_code=400, detail=f"'{bucket}' must be an array")
+        item_count += len(rows)
+        if item_count > settings.MAX_SYNC_ITEMS_PER_REQUEST:
+            raise HTTPException(status_code=413, detail="Too many sync items")
+        for row in rows:
+            if not isinstance(row, dict):
+                raise HTTPException(status_code=400, detail=f"'{bucket}' items must be objects")
+            for field, value in row.items():
+                if isinstance(value, str) and len(value) > settings.MAX_SYNC_TEXT_LENGTH:
+                    raise HTTPException(status_code=413, detail="Sync text field is too large")
+                field_limit = _SYNC_STRING_LIMITS.get(field)
+                if field_limit is not None and value is not None:
+                    if not isinstance(value, str):
+                        raise HTTPException(status_code=400, detail=f"'{field}' must be a string")
+                    if len(value) > field_limit:
+                        raise HTTPException(status_code=400, detail=f"'{field}' is too long")
+
+
+async def count_user_sync_items(session: AsyncSession, user_id: str) -> int:
+    models = (UserFavorite, UserHistory, UserReadEpisode, UserReaderSetting, UserTombstone)
+    counts = [
+        await session.scalar(select(func.count()).select_from(model).where(model.user_id == user_id))
+        for model in models
+    ]
+    return sum(int(value or 0) for value in counts)
+
+
+async def enforce_user_storage_limit(
+    session: AsyncSession,
+    user_id: str,
+    previous_count: int,
+) -> None:
+    limit = get_settings().MAX_SYNC_ITEMS_PER_USER
+    if limit <= 0:
+        return
+    await session.flush()
+    current_count = await count_user_sync_items(session, user_id)
+    if current_count > limit and current_count > previous_count:
+        await session.rollback()
+        raise HTTPException(status_code=413, detail="Sync account storage limit reached")
 
 
 # Export full snapshot
@@ -303,6 +442,7 @@ async def import_snapshot_for_user(
     user_id: str,
     data: dict[str, Any],
     now_ms: int,
+    identity: SyncIdentity | None = None,
 ) -> None:
     favorite_rows = [
         f for f in data.get("favorites", [])
@@ -320,6 +460,11 @@ async def import_snapshot_for_user(
         s for s in data.get("readerSettings", [])
         if accept_inbound_row(s) and s.get("toonId")
     ]
+
+    has_rows = any((favorite_rows, history_rows, episode_rows, setting_rows))
+    if identity is not None and has_rows:
+        await ensure_user_for_write(session, identity)
+    previous_count = await count_user_sync_items(session, user_id) if has_rows else 0
 
     favorites = await _prefetch_entities(
         session, UserFavorite, user_id,
@@ -470,6 +615,8 @@ async def import_snapshot_for_user(
             setting.updated_at = up_at
             setting.sync_updated_at = now_ms
 
+    if has_rows:
+        await enforce_user_storage_limit(session, user_id, previous_count)
     await session.commit()
 
 
@@ -479,12 +626,13 @@ async def apply_delta_for_user(
     user_id: str,
     changes: dict[str, Any],
     now_ms: int,
+    identity: SyncIdentity | None = None,
 ) -> None:
     tombstone_rows: list[tuple[dict[str, Any], str, str, str]] = []
     for t in changes.get("tombstones", []):
         entity_type = (t.get("entityType") or "").upper()
         source_id, local_id = parse_entity_id(t.get("entityId", ""))
-        if local_id and source_id != "local":
+        if entity_type in _SUPPORTED_TOMBSTONE_TYPES and local_id and source_id != "local":
             tombstone_rows.append((t, entity_type, source_id, local_id))
 
     favorite_rows = [
@@ -503,6 +651,11 @@ async def apply_delta_for_user(
         s for s in changes.get("readerSettings", [])
         if accept_inbound_row(s) and s.get("toonId")
     ]
+
+    has_rows = any((tombstone_rows, favorite_rows, history_rows, episode_rows, setting_rows))
+    if identity is not None and has_rows:
+        await ensure_user_for_write(session, identity)
+    previous_count = await count_user_sync_items(session, user_id) if has_rows else 0
 
     live_tombstone_keys = {
         ("FAVORITE", f"{row_source_id(f)}:{favorite_local_id(f)}") for f in favorite_rows
@@ -736,6 +889,8 @@ async def apply_delta_for_user(
             setting.updated_at = up_at
             setting.sync_updated_at = now_ms
 
+    if has_rows:
+        await enforce_user_storage_limit(session, user_id, previous_count)
     await session.commit()
 
 
@@ -802,11 +957,10 @@ async def collect_delta_for_user(session: AsyncSession, user_id: str, since: int
 @router.get("/sync")
 @router.get("/api/comics8/sync")
 async def sync_pull(
-    user_info: tuple[str, str] = Depends(get_sync_user),
+    identity: SyncIdentity = Depends(get_sync_user),
     session: AsyncSession = Depends(get_db),
 ):
-    user_id, _ = user_info
-    snapshot = await export_snapshot_for_user(session, user_id)
+    snapshot = await export_snapshot_for_user(session, identity.user_id)
     return JSONResponse(status_code=200, content=snapshot)
 
 
@@ -814,28 +968,22 @@ async def sync_pull(
 @router.post("/api/comics8/sync")
 async def sync_push_snapshot(
     request: Request,
-    user_info: tuple[str, str] = Depends(get_sync_user),
+    identity: SyncIdentity = Depends(get_sync_user),
     session: AsyncSession = Depends(get_db),
 ):
-    user_id, _ = user_info
     now_ms = int(time.time() * 1000)
 
-    try:
-        body_bytes = await request.body()
-        if not body_bytes:
-            raise HTTPException(status_code=400, detail={"error": "BadRequest", "message": "Empty body"})
-        data = await request.json()
-    except Exception as e:
-        raise HTTPException(status_code=400, detail={"error": "BadRequest", "message": str(e)})
+    data = await read_bounded_json(request)
+    validate_sync_payload(data)
 
-    await import_snapshot_for_user(session, user_id, data, now_ms)
-    is_pro = await check_user_is_pro(session, user_id)
+    await import_snapshot_for_user(session, identity.user_id, data, now_ms, identity=identity)
+    is_pro = await check_user_is_pro(session, identity.user_id)
 
     return {
         "status": "success",
         "savedAt": now_ms,
-        "userId": user_id,
-        "sizeBytes": len(body_bytes),
+        "userId": identity.user_id,
+        "sizeBytes": request.state.sync_body_bytes,
         "favorites": len(data.get("favorites", [])),
         "history": len(data.get("history", [])),
         "isPro": is_pro,
@@ -852,72 +1000,99 @@ class DeltaSyncRequest(BaseModel):
 @router.post("/sync/delta")
 @router.post("/api/comics8/sync/delta")
 async def sync_delta(
-    payload: DeltaSyncRequest,
-    user_info: tuple[str, str] = Depends(get_sync_user),
+    request: Request,
+    identity: SyncIdentity = Depends(get_sync_user),
     session: AsyncSession = Depends(get_db),
 ):
-    user_id, _ = user_info
     now_ms = int(time.time() * 1000)
 
     try:
-        await apply_delta_for_user(session, user_id, payload.changes, now_ms)
-        server_changes = await collect_delta_for_user(session, user_id, payload.since)
-        is_pro = await check_user_is_pro(session, user_id)
+        raw_payload = await read_bounded_json(request)
+        try:
+            payload = DeltaSyncRequest.model_validate(raw_payload)
+        except ValidationError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid delta payload: {exc}")
+        validate_sync_payload(payload.changes)
+        await apply_delta_for_user(
+            session, identity.user_id, payload.changes, now_ms, identity=identity
+        )
+        server_changes = await collect_delta_for_user(session, identity.user_id, payload.since)
+        is_pro = await check_user_is_pro(session, identity.user_id)
 
         return {
             "status": "success",
             "serverTime": now_ms,
-            "userId": user_id,
+            "userId": identity.user_id,
             "changes": server_changes,
             "isPro": is_pro,
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Delta sync error for user {user_id}: {e}")
+        logger.error(f"Delta sync error for user {identity.user_id}: {e}")
         raise HTTPException(
             status_code=400,
-            detail={"error": "DeltaSyncError", "message": str(e)},
+            detail={"error": "DeltaSyncError", "message": "Invalid delta sync payload"},
         )
 
 
-# In-memory pairing code map with DB fallback for pairing resilience
-_in_memory_pairs: dict[str, tuple[str, float]] = {}
+_PAIR_RATE_CLIENT_CAPACITY = 10_000
+_pair_confirm_attempts: OrderedDict[str, deque[float]] = OrderedDict()
+_pair_confirm_attempt_lock = asyncio.Lock()
+
+
+async def check_pair_confirm_rate_limit(client_id: str) -> None:
+    settings = get_settings()
+    limit = settings.PAIR_CONFIRM_MAX_ATTEMPTS
+    window = settings.PAIR_CONFIRM_WINDOW_SECONDS
+    if limit <= 0 or window <= 0:
+        return
+
+    now = time.monotonic()
+    cutoff = now - window
+    async with _pair_confirm_attempt_lock:
+        attempts = _pair_confirm_attempts.pop(client_id, deque())
+        while attempts and attempts[0] <= cutoff:
+            attempts.popleft()
+        if len(attempts) >= limit:
+            _pair_confirm_attempts[client_id] = attempts
+            retry_after = max(1, int(attempts[0] + window - now) + 1)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={"success": False, "message": "페어링 시도가 너무 많습니다. 잠시 후 다시 시도해주세요."},
+                headers={"Retry-After": str(retry_after)},
+            )
+        attempts.append(now)
+        _pair_confirm_attempts[client_id] = attempts
+        if len(_pair_confirm_attempts) > _PAIR_RATE_CLIENT_CAPACITY:
+            _pair_confirm_attempts.popitem(last=False)
 
 
 @router.post("/pair/request")
 @router.post("/api/comics8/pair/request")
 async def pair_request(
-    user_info: tuple[str, str] = Depends(get_sync_user),
+    identity: SyncIdentity = Depends(get_existing_sync_user),
     session: AsyncSession = Depends(get_db),
 ):
-    user_id, sync_key = user_info
+    sync_key = identity.sync_key
     settings = get_settings()
     ttl = settings.PAIR_CODE_TTL_SECONDS
-    now_ts = time.time()
     now_dt = datetime.now(timezone.utc)
-    exp_dt = datetime.fromtimestamp(now_ts + ttl, tz=timezone.utc)
+    exp_dt = datetime.fromtimestamp(now_dt.timestamp() + ttl, tz=timezone.utc)
 
-    # Clean in-memory expired
-    for c in list(_in_memory_pairs.keys()):
-        if _in_memory_pairs[c][1] < now_ts or _in_memory_pairs[c][0] == sync_key:
-            del _in_memory_pairs[c]
+    await session.execute(delete(PairingCode).where(PairingCode.expires_at <= now_dt))
+    await session.execute(delete(PairingCode).where(PairingCode.sync_key == sync_key))
 
     # Generate 6-digit code
-    while True:
-        code = f"{random.randint(100000, 999999)}"
-        if code not in _in_memory_pairs:
+    for _ in range(10):
+        code = f"{100000 + secrets.randbelow(900000)}"
+        if await session.get(PairingCode, code) is None:
             break
+    else:
+        raise HTTPException(status_code=503, detail="Unable to allocate pairing code")
 
-    _in_memory_pairs[code] = (sync_key, now_ts + ttl)
-
-    # Also persist to DB
-    try:
-        # Delete old codes for this key
-        await session.execute(delete(PairingCode).where(PairingCode.sync_key == sync_key))
-        p_code = PairingCode(code=code, sync_key=sync_key, expires_at=exp_dt)
-        session.add(p_code)
-        await session.commit()
-    except Exception as e:
-        logger.warning(f"Failed to persist pairing code to DB: {e}")
+    session.add(PairingCode(code=code, sync_key=sync_key, expires_at=exp_dt))
+    await session.commit()
 
     return {
         "success": True,
@@ -933,42 +1108,36 @@ class PairConfirmRequest(BaseModel):
 @router.post("/pair/confirm")
 @router.post("/api/comics8/pair/confirm")
 async def pair_confirm(
+    request: Request,
     payload: PairConfirmRequest,
     session: AsyncSession = Depends(get_db),
 ):
     code = payload.code.strip().replace(" ", "").replace("-", "")
-    if not code:
+    if not re.fullmatch(r"\d{6}", code):
         raise HTTPException(
             status_code=400,
-            detail={"success": False, "message": "페어링 코드를 입력해주세요."},
+            detail={"success": False, "message": "6자리 숫자 페어링 코드를 입력해주세요."},
         )
 
-    now_ts = time.time()
+    client_id = request.client.host if request.client else "unknown"
+    await check_pair_confirm_rate_limit(client_id)
+
     now_dt = datetime.now(timezone.utc)
-    sync_key = None
-
-    # Check in-memory first
-    entry = _in_memory_pairs.pop(code, None)
-    if entry:
-        k, exp = entry
-        if exp >= now_ts:
-            sync_key = k
-
-    # Always delete from DB to prevent re-use
-    stmt = select(PairingCode).where(PairingCode.code == code, PairingCode.expires_at > now_dt)
+    stmt = (
+        delete(PairingCode)
+        .where(PairingCode.code == code, PairingCode.expires_at > now_dt)
+        .returning(PairingCode.sync_key)
+    )
     res = await session.execute(stmt)
-    p_code = res.scalar_one_or_none()
-    if p_code:
-        if not sync_key:
-            sync_key = p_code.sync_key
-        await session.delete(p_code)
-        await session.commit()
+    sync_key = res.scalar_one_or_none()
 
     if not sync_key:
         raise HTTPException(
             status_code=400,
             detail={"success": False, "message": "유효하지 않거나 만료된 페어링 코드입니다."},
         )
+
+    await session.commit()
 
     return {
         "success": True,

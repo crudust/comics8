@@ -20,10 +20,7 @@ class Settings(BaseSettings):
 
     # Database settings
     # Default to asyncpg PostgreSQL; sqlite+aiosqlite can be used in test environments
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL",
-        "postgresql+asyncpg://comics8:comics8password@localhost:5432/comics8",
-    )
+    DATABASE_URL: str
     DB_ECHO: bool = False
     DB_POOL_SIZE: int = 20
     DB_MAX_OVERFLOW: int = 10
@@ -42,11 +39,19 @@ class Settings(BaseSettings):
     SYNC_SCHEMA_CURRENT: int = 2
     SYNC_SCHEMA_HEADER: str = "X-Comics8-Sync-Schema"
     PAIR_CODE_TTL_SECONDS: int = 300
-
+    PAIR_CONFIRM_MAX_ATTEMPTS: int = 10
+    PAIR_CONFIRM_WINDOW_SECONDS: int = 60
+    MAX_SYNC_REQUEST_BYTES: int = 16 * 1024 * 1024
+    MAX_SYNC_ITEMS_PER_REQUEST: int = 10_000
+    MAX_SYNC_ITEMS_PER_USER: int = 100_000
+    MAX_SYNC_TEXT_LENGTH: int = 8_192
     # Proxy settings
     DEFAULT_REFERER: str = "http://103.204.13.68:8904"
     PROXY_TIMEOUT_SECONDS: int = 20
     MAX_PROXY_REDIRECTS: int = 5
+    MAX_PROXY_RESPONSE_BYTES: int = 75 * 1024 * 1024
+    MAX_PROXY_CONCURRENT_REQUESTS: int = 16
+    MAX_PROXY_STREAM_SECONDS: int = 60
     DEFAULT_PROXY_UA: str = (
         "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/126.0.0.0 Mobile Safari/537.36"

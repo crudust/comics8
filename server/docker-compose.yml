@@ -6,10 +6,10 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-comics8}
       POSTGRES_USER: ${POSTGRES_USER:-comics8}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-comics8password}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       PGDATA: /var/lib/postgresql/data
     ports:
-      - "${POSTGRES_PORT:-5433}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
     volumes:
       - ${DATA_DIR:-/home/crudust/comics8-sync/data}/postgres:/var/lib/postgresql/data
       - ./schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
@@ -30,11 +30,20 @@ services:
         condition: service_healthy
     environment:
       PORT: ${PORT:-8905}
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-comics8}:${POSTGRES_PASSWORD:-comics8password}@postgres:5432/${POSTGRES_DB:-comics8}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-comics8}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-comics8}
       DATA_DIR: /app/data
       GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-/app/service-account.json}
       GOOGLE_PLAY_PACKAGE_NAME: ${GOOGLE_PLAY_PACKAGE_NAME:-com.comics8.monitor}
       PUBSUB_SUBSCRIPTION_ID: ${PUBSUB_SUBSCRIPTION_ID:-}
+      MAX_SYNC_REQUEST_BYTES: ${MAX_SYNC_REQUEST_BYTES:-16777216}
+      MAX_SYNC_ITEMS_PER_REQUEST: ${MAX_SYNC_ITEMS_PER_REQUEST:-10000}
+      MAX_SYNC_ITEMS_PER_USER: ${MAX_SYNC_ITEMS_PER_USER:-100000}
+      MAX_SYNC_TEXT_LENGTH: ${MAX_SYNC_TEXT_LENGTH:-8192}
+      PAIR_CONFIRM_MAX_ATTEMPTS: ${PAIR_CONFIRM_MAX_ATTEMPTS:-10}
+      PAIR_CONFIRM_WINDOW_SECONDS: ${PAIR_CONFIRM_WINDOW_SECONDS:-60}
+      MAX_PROXY_RESPONSE_BYTES: ${MAX_PROXY_RESPONSE_BYTES:-78643200}
+      MAX_PROXY_CONCURRENT_REQUESTS: ${MAX_PROXY_CONCURRENT_REQUESTS:-16}
+      MAX_PROXY_STREAM_SECONDS: ${MAX_PROXY_STREAM_SECONDS:-60}
     ports:
       - "${PORT:-8905}:${PORT:-8905}"
     volumes:

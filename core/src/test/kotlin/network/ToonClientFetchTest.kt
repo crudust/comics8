@@ -17,6 +17,33 @@ import org.junit.Test
 
 class ToonClientFetchTest {
     @Test
+    fun serverProxyRequestCarriesSyncIdentity() {
+        var authorization: String? = null
+        val http = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                authorization = chain.request().header("Authorization")
+                Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body("proxied".toResponseBody("text/plain".toMediaType()))
+                    .build()
+            }
+            .build()
+        val client = ToonClient(
+            client = http,
+            proxyBaseUrl = "https://example.test/proxy",
+            isProxyEnabled = true,
+            sources = testLocator(),
+        )
+        client.serverProxySyncKey = "C8-PROXY-AUTH"
+
+        assertThat(client.fetch(PROXY_TARGET)).isEqualTo("proxied")
+        assertThat(authorization).isEqualTo("Bearer C8-PROXY-AUTH")
+    }
+
+    @Test
     fun rangeOnFull200SlicesBodyAndKeepsTotal() {
         val body = ByteArray(4096) { index -> (index % 256).toByte() }
         val http = OkHttpClient.Builder()

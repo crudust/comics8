@@ -4,13 +4,14 @@ import logging
 import os
 from datetime import datetime, timezone
 from typing import Any
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.database import get_db
-from app.models import Subscription, SubscriptionEvent, User
+from app.models import Subscription, SubscriptionEvent
+from app.sync import SyncIdentity, ensure_user_for_write, get_sync_user
 
 logger = logging.getLogger("comics8.billing")
 router = APIRouter(prefix="/api/comics8/subscription", tags=["Billing"])
@@ -27,7 +28,7 @@ def get_android_publisher():
     settings = get_settings()
     cred_path = settings.GOOGLE_APPLICATION_CREDENTIALS
     if not cred_path or not os.path.isfile(cred_path):
-        logger.warning(f"Google application credentials not found at {cred_path}. Running in mock/sandbox billing mode.")
+        logger.warning(f"Google application credentials not found at {cred_path}.")
         return None
 
     try:
@@ -59,47 +60,23 @@ def parse_rfc3339(date_str: str | None) -> datetime | None:
 
 async def verify_google_play_subscription_token(
     purchase_token: str,
-    package_name: str | None = None,
-    product_id: str | None = None,
 ) -> dict[str, Any]:
     """
-    Calls Google Play Developer API purchases.subscriptionsv2.get or returns a valid mock payload in sandbox mode.
+    Calls Google Play Developer API purchases.subscriptionsv2.get.
     """
     settings = get_settings()
-    pkg = package_name or settings.GOOGLE_PLAY_PACKAGE_NAME
     service = get_android_publisher()
 
     if service is None:
-        # Mock / sandbox validation fallback for testing or standalone deployment
-        now = datetime.now(timezone.utc)
-        # Default 30-day mock subscription
-        expiry = datetime.fromtimestamp(now.timestamp() + 30 * 86400, tz=timezone.utc)
-        return {
-            "kind": "androidpublisher#subscriptionPurchaseV2",
-            "startTime": now.isoformat(),
-            "regionCode": "KR",
-            "subscriptionState": "SUBSCRIPTION_STATE_ACTIVE",
-            "latestOrderId": f"GPA.MOCK-{int(now.timestamp())}",
-            "acknowledgementState": "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
-            "lineItems": [
-                {
-                    "productId": product_id or "comics8_pro_monthly",
-                    "expiryTime": expiry.isoformat(),
-                    "autoRenewingPlan": {
-                        "autoRenewEnabled": True,
-                    },
-                    "offerDetails": {
-                        "basePlanId": "monthly",
-                    },
-                }
-            ],
-            "_isMock": True,
-        }
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google Play billing verification is unavailable",
+        )
 
     try:
         # Google Play API subscriptionsv2
         request = service.purchases().subscriptionsv2().get(
-            packageName=pkg,
+            packageName=settings.GOOGLE_PLAY_PACKAGE_NAME,
             token=purchase_token,
         )
         response = request.execute()
@@ -108,17 +85,15 @@ async def verify_google_play_subscription_token(
         logger.error(f"Google Play API subscription verification error: {e}")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Google Play verification failed: {e}",
+            detail="Google Play verification failed",
         )
 
 
 async def acknowledge_google_play_subscription(
     purchase_token: str,
-    package_name: str | None = None,
     product_id: str | None = None,
 ) -> None:
     settings = get_settings()
-    pkg = package_name or settings.GOOGLE_PLAY_PACKAGE_NAME
     service = get_android_publisher()
     if service is None:
         return
@@ -127,7 +102,7 @@ async def acknowledge_google_play_subscription(
         # Older subscriptions endpoint or standard acknowledge
         if product_id:
             service.purchases().subscriptions().acknowledge(
-                packageName=pkg,
+                packageName=settings.GOOGLE_PLAY_PACKAGE_NAME,
                 subscriptionId=product_id,
                 token=purchase_token,
                 body={},
@@ -236,8 +211,6 @@ class SubscriptionVerifyRequest(BaseModel):
     purchaseToken: str = Field(..., description="Google Play purchase token")
     productId: str | None = Field(None, description="Product ID (SKU)")
     basePlanId: str | None = Field(None, description="Base plan ID")
-    packageName: str | None = Field(None, description="App package name")
-    userId: str | None = Field(None, description="Explicit user ID if not in auth header")
 
 
 class SubscriptionStatusResponse(BaseModel):
@@ -246,47 +219,10 @@ class SubscriptionStatusResponse(BaseModel):
     subscription: dict[str, Any] | None = None
 
 
-# Helper to authenticate user from headers
-async def get_current_user_id(
-    authorization: str | None = Header(None),
-    x_sync_key: str | None = Header(None, alias="X-Sync-Key"),
-    key_param: str | None = Query(None, alias="key"),
-    token_param: str | None = Query(None, alias="token"),
-    session: AsyncSession = Depends(get_db),
-) -> str:
-    raw_key = None
-    if authorization and authorization.startswith("Bearer "):
-        raw_key = authorization[7:].strip()
-    elif x_sync_key:
-        raw_key = x_sync_key.strip()
-    elif key_param:
-        raw_key = key_param.strip()
-    elif token_param:
-        raw_key = token_param.strip()
-
-    if not raw_key:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing sync key / authorization token",
-        )
-
-    from app.sync import get_safe_user_id
-    user_id = get_safe_user_id(raw_key)
-
-    # Ensure user exists
-    user = await session.get(User, user_id)
-    if user is None:
-        user = User(user_id=user_id, sync_key=raw_key)
-        session.add(user)
-        await session.commit()
-
-    return user_id
-
-
 @router.post("/verify")
 async def verify_subscription(
     payload: SubscriptionVerifyRequest,
-    user_id: str = Depends(get_current_user_id),
+    identity: SyncIdentity = Depends(get_sync_user),
     session: AsyncSession = Depends(get_db),
 ):
     """
@@ -298,8 +234,6 @@ async def verify_subscription(
 
     play_data = await verify_google_play_subscription_token(
         purchase_token=token,
-        package_name=payload.packageName,
-        product_id=payload.productId,
     )
 
     # Auto acknowledge if pending
@@ -307,13 +241,14 @@ async def verify_subscription(
     if ack_state == "ACKNOWLEDGEMENT_STATE_PENDING_ACKNOWLEDGE":
         await acknowledge_google_play_subscription(
             purchase_token=token,
-            package_name=payload.packageName,
             product_id=payload.productId,
         )
 
+    await ensure_user_for_write(session, identity)
+
     sub = await update_or_create_subscription(
         session=session,
-        user_id=user_id,
+        user_id=identity.user_id,
         purchase_token=token,
         play_data=play_data,
         product_id_hint=payload.productId,
@@ -328,19 +263,20 @@ async def verify_subscription(
         "basePlanId": sub.base_plan_id,
         "expiryTime": sub.expiry_time.isoformat() if sub.expiry_time else None,
         "autoRenewing": sub.auto_renewing,
-        "userId": user_id,
+        "userId": identity.user_id,
     }
 
 
 @router.get("/status", response_model=SubscriptionStatusResponse)
 async def get_subscription_status(
-    user_id: str = Depends(get_current_user_id),
+    identity: SyncIdentity = Depends(get_sync_user),
     session: AsyncSession = Depends(get_db),
 ):
     """
     Returns current subscription status and Pro privilege for the user.
     """
     now = datetime.now(timezone.utc)
+    user_id = identity.user_id
     stmt = (
         select(Subscription)
         .where(

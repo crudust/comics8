@@ -69,7 +69,6 @@ async def process_rtdn_payload(payload: dict[str, Any], session: AsyncSession | 
     try:
         play_data = await verify_google_play_subscription_token(
             purchase_token=purchase_token,
-            product_id=subscription_id,
         )
     except Exception as e:
         logger.error(f"Failed to query Google Play API during RTDN processing: {e}")

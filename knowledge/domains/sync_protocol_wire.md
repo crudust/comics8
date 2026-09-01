@@ -22,6 +22,14 @@ The Sync domain coordinates bidirectional state synchronization across multi-pla
 - **Debounce & Exclusive Locks (`BaseSyncManager.kt`)**:
   - UI reading progress mutations are debounced (typically 1.5s - 3s) before triggering server push to minimize redundant network traffic.
   - `exclusiveSync()` uses an `AtomicBoolean` to prevent concurrent in-flight sync passes.
+- **Server Account Materialization (`server/app/sync.py`)**:
+  - Resolving a master sync key is side-effect free. Reads, empty/invalid sync payloads, pairing requests, and subscription status checks must not create a `users` row.
+  - A user is materialized transactionally only when an accepted sync entity or an authoritatively verified subscription is persisted.
+  - Resource limits follow the owned resource, not a shared signup quota: request bytes and item count are bounded before persistence, and total sync rows are bounded per account while updates and deletions remain possible at the limit.
+  - A non-null stored `sync_key` is immutable through authentication. Alternate raw keys that normalize to the same `user_id` must be rejected rather than rebound.
+- **Credential Transport**:
+  - Long-lived sync keys are accepted only through `Authorization: Bearer` or `X-Sync-Key` headers. Query-string credentials are not part of the wire protocol.
+  - Pairing codes are issued only for materialized accounts and are atomically consumed once from PostgreSQL. Confirmation attempts are bounded per client in the current single-process server topology.
 - **Storage Abstraction (`SyncStorageAdapter.kt`)**:
   - `BaseSyncManager` interacts exclusively through `SyncStorageAdapter`.
   - Android provides `AndroidSyncManager` (backed by Room DB).
