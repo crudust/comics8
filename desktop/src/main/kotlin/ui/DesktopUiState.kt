@@ -52,7 +52,7 @@ data class DesktopUiState(
     val screen: Screen = Screen.Browse,
     val series: ToonItem? = null,
     val episodes: List<EpisodeItem> = emptyList(),
-    val episodeSortOrder: EpisodeSortOrder = EpisodeSortOrder.NAME_ASC,
+    val episodeSortOrder: EpisodeSortOrder = EpisodeSortOrder.DEFAULT,
     val episodePage: Int = 1,
     val episodeLastPage: Int = 1,
     val episodeLoading: Boolean = false,

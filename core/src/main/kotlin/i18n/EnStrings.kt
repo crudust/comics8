@@ -94,6 +94,7 @@ object EnStrings : AppStrings {
     override fun episodeItemCount(count: Int): String = "Total $count chapters"
     override val sortOldestFirst: String = "Oldest First"
     override val sortNewestFirst: String = "Newest First"
+    override val sortDefault: String = "Default (Source)"
     override val sortNameAsc: String = "Name Ascending"
     override val sortNameDesc: String = "Name Descending"
     override val sortDateDesc: String = "Newest Modified"

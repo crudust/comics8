@@ -87,7 +87,7 @@ class SourcePrefsTest {
             override fun putBoolean(key: String, value: Boolean) { map[key] = value }
         }
         val settings = StoredSourceSettings(store)
-        assertThat(settings.episodeSortOrder()).isEqualTo(com.comics8.core.model.EpisodeSortOrder.NAME_ASC)
+        assertThat(settings.episodeSortOrder()).isEqualTo(com.comics8.core.model.EpisodeSortOrder.DEFAULT)
         settings.setEpisodeSortOrder(com.comics8.core.model.EpisodeSortOrder.DATE_DESC)
         assertThat(settings.episodeSortOrder()).isEqualTo(com.comics8.core.model.EpisodeSortOrder.DATE_DESC)
         assertThat(store.getString(SourcePrefs.EPISODE_SORT_ORDER_KEY)).isEqualTo("date_desc")

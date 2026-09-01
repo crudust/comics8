@@ -94,6 +94,7 @@ interface AppStrings {
     fun episodeItemCount(count: Int): String
     val sortOldestFirst: String
     val sortNewestFirst: String
+    val sortDefault: String
     val sortNameAsc: String
     val sortNameDesc: String
     val sortDateDesc: String
