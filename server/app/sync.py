@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import delete, func, select, text, tuple_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.database import get_db
@@ -36,12 +37,12 @@ _PREFETCH_CHUNK_SIZE = 400
 _SUPPORTED_TOMBSTONE_TYPES = {"FAVORITE", "HISTORY", "EPISODE"}
 _SYNC_BUCKETS = ("favorites", "history", "readEpisodes", "readerSettings", "tombstones")
 _SYNC_STRING_LIMITS = {
-    "sourceId": 32,
-    "id": 128,
-    "toonId": 128,
-    "wrId": 128,
-    "entityId": 255,
-    "entityType": 16,
+    "sourceId": 255,
+    "id": 512,
+    "toonId": 512,
+    "wrId": 1024,
+    "entityId": 1024,
+    "entityType": 32,
 }
 
 
@@ -49,31 +50,6 @@ _SYNC_STRING_LIMITS = {
 class SyncIdentity:
     user_id: str
     sync_key: str
-
-
-async def _prefetch_entities(
-    session: AsyncSession,
-    model: type,
-    user_id: str,
-    key_columns: tuple,
-    keys: set[tuple],
-) -> dict[tuple, Any]:
-    """Load request-scoped entities in bounded batches instead of one query per row."""
-    if not keys:
-        return {}
-
-    ordered_keys = list(keys)
-    entities: dict[tuple, Any] = {}
-    for offset in range(0, len(ordered_keys), _PREFETCH_CHUNK_SIZE):
-        chunk = ordered_keys[offset:offset + _PREFETCH_CHUNK_SIZE]
-        stmt = select(model).where(
-            model.user_id == user_id,
-            tuple_(*key_columns).in_(chunk),
-        )
-        result = await session.execute(stmt)
-        for entity in result.scalars():
-            entities[tuple(getattr(entity, column.key) for column in key_columns)] = entity
-    return entities
 
 
 def get_safe_user_id(key: str) -> str:
@@ -466,154 +442,136 @@ async def import_snapshot_for_user(
         await ensure_user_for_write(session, identity)
     previous_count = await count_user_sync_items(session, user_id) if has_rows else 0
 
-    favorites = await _prefetch_entities(
-        session, UserFavorite, user_id,
-        (UserFavorite.source_id, UserFavorite.toon_id),
-        {(row_source_id(f), favorite_local_id(f)) for f in favorite_rows},
-    )
-    histories = await _prefetch_entities(
-        session, UserHistory, user_id,
-        (UserHistory.source_id, UserHistory.toon_id),
-        {(row_source_id(h), h["toonId"]) for h in history_rows},
-    )
-    episodes = await _prefetch_entities(
-        session, UserReadEpisode, user_id,
-        (UserReadEpisode.source_id, UserReadEpisode.toon_id, UserReadEpisode.wr_id),
-        {(row_source_id(ep), ep["toonId"], ep["wrId"]) for ep in episode_rows},
-    )
-    settings = await _prefetch_entities(
-        session, UserReaderSetting, user_id,
-        (UserReaderSetting.source_id, UserReaderSetting.toon_id),
-        {(row_source_id(s), s["toonId"]) for s in setting_rows},
-    )
+    # 1. Favorites Batch UPSERT
+    if favorite_rows:
+        fav_values = [
+            {
+                "user_id": user_id,
+                "source_id": row_source_id(f),
+                "toon_id": favorite_local_id(f),
+                "title": f.get("title", ""),
+                "thumb_url": f.get("thumbUrl", ""),
+                "href": f.get("href", ""),
+                "genre": f.get("genre", ""),
+                "updated_at": f.get("updatedAt"),
+                "saved_at": int(f.get("savedAt") or now_ms),
+                "sync_updated_at": now_ms,
+            }
+            for f in favorite_rows
+        ]
+        stmt = pg_insert(UserFavorite).values(fav_values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[UserFavorite.user_id, UserFavorite.source_id, UserFavorite.toon_id],
+            set_={
+                "title": stmt.excluded.title,
+                "thumb_url": stmt.excluded.thumb_url,
+                "href": stmt.excluded.href,
+                "genre": stmt.excluded.genre,
+                "updated_at": stmt.excluded.updated_at,
+                "saved_at": stmt.excluded.saved_at,
+                "sync_updated_at": stmt.excluded.sync_updated_at,
+            },
+        )
+        await session.execute(stmt)
 
-    # 1. Favorites
-    for f in favorite_rows:
-        source_id = row_source_id(f)
-        toon_id = favorite_local_id(f)
-        saved_at = int(f.get("savedAt") or now_ms)
-        key = (source_id, toon_id)
-        fav = favorites.get(key)
-        if fav is None:
-            fav = UserFavorite(
-                user_id=user_id,
-                source_id=source_id,
-                toon_id=toon_id,
-                title=f.get("title", ""),
-                thumb_url=f.get("thumbUrl", ""),
-                href=f.get("href", ""),
-                genre=f.get("genre", ""),
-                updated_at=f.get("updatedAt"),
-                saved_at=saved_at,
-                sync_updated_at=now_ms,
-            )
-            session.add(fav)
-            favorites[key] = fav
-        else:
-            fav.title = f.get("title", "")
-            fav.thumb_url = f.get("thumbUrl", "")
-            fav.href = f.get("href", "")
-            fav.genre = f.get("genre", "")
-            fav.updated_at = f.get("updatedAt")
-            fav.saved_at = saved_at
-            fav.sync_updated_at = now_ms
+    # 2. History Batch UPSERT
+    if history_rows:
+        hist_values = [
+            {
+                "user_id": user_id,
+                "source_id": row_source_id(h),
+                "toon_id": h.get("toonId"),
+                "toon_title": h.get("toonTitle", ""),
+                "toon_thumb_url": h.get("toonThumbUrl", ""),
+                "toon_href": h.get("toonHref", ""),
+                "last_wr_id": h.get("lastWrId", ""),
+                "last_episode_title": h.get("lastEpisodeTitle", ""),
+                "last_episode_href": h.get("lastEpisodeHref", ""),
+                "last_read_order": int(h.get("lastReadOrder", 1)),
+                "total_episodes": int(h.get("totalEpisodes", 1)),
+                "last_read_at": int(h.get("lastReadAt") or now_ms),
+                "next_wr_id": h.get("nextWrId"),
+                "next_episode_title": h.get("nextEpisodeTitle"),
+                "next_episode_href": h.get("nextEpisodeHref"),
+                "has_new": bool(h.get("hasNew", False)),
+                "sync_updated_at": now_ms,
+            }
+            for h in history_rows
+        ]
+        stmt = pg_insert(UserHistory).values(hist_values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[UserHistory.user_id, UserHistory.source_id, UserHistory.toon_id],
+            set_={
+                "toon_title": stmt.excluded.toon_title,
+                "toon_thumb_url": stmt.excluded.toon_thumb_url,
+                "toon_href": stmt.excluded.toon_href,
+                "last_wr_id": stmt.excluded.last_wr_id,
+                "last_episode_title": stmt.excluded.last_episode_title,
+                "last_episode_href": stmt.excluded.last_episode_href,
+                "last_read_order": stmt.excluded.last_read_order,
+                "total_episodes": stmt.excluded.total_episodes,
+                "last_read_at": stmt.excluded.last_read_at,
+                "next_wr_id": stmt.excluded.next_wr_id,
+                "next_episode_title": stmt.excluded.next_episode_title,
+                "next_episode_href": stmt.excluded.next_episode_href,
+                "has_new": stmt.excluded.has_new,
+                "sync_updated_at": stmt.excluded.sync_updated_at,
+            },
+        )
+        await session.execute(stmt)
 
-    # 2. History
-    for h in history_rows:
-        source_id = row_source_id(h)
-        toon_id = h.get("toonId")
-        last_read_at = int(h.get("lastReadAt") or now_ms)
-        key = (source_id, toon_id)
-        hist = histories.get(key)
-        if hist is None:
-            hist = UserHistory(
-                user_id=user_id,
-                source_id=source_id,
-                toon_id=toon_id,
-                toon_title=h.get("toonTitle", ""),
-                toon_thumb_url=h.get("toonThumbUrl", ""),
-                toon_href=h.get("toonHref", ""),
-                last_wr_id=h.get("lastWrId", ""),
-                last_episode_title=h.get("lastEpisodeTitle", ""),
-                last_episode_href=h.get("lastEpisodeHref", ""),
-                last_read_order=int(h.get("lastReadOrder", 1)),
-                total_episodes=int(h.get("totalEpisodes", 1)),
-                last_read_at=last_read_at,
-                next_wr_id=h.get("nextWrId"),
-                next_episode_title=h.get("nextEpisodeTitle"),
-                next_episode_href=h.get("nextEpisodeHref"),
-                has_new=bool(h.get("hasNew", False)),
-                sync_updated_at=now_ms,
-            )
-            session.add(hist)
-            histories[key] = hist
-        else:
-            hist.toon_title = h.get("toonTitle", "")
-            hist.toon_thumb_url = h.get("toonThumbUrl", "")
-            hist.toon_href = h.get("toonHref", "")
-            hist.last_wr_id = h.get("lastWrId", "")
-            hist.last_episode_title = h.get("lastEpisodeTitle", "")
-            hist.last_episode_href = h.get("lastEpisodeHref", "")
-            hist.last_read_order = int(h.get("lastReadOrder", 1))
-            hist.total_episodes = int(h.get("totalEpisodes", 1))
-            hist.last_read_at = last_read_at
-            hist.next_wr_id = h.get("nextWrId")
-            hist.next_episode_title = h.get("nextEpisodeTitle")
-            hist.next_episode_href = h.get("nextEpisodeHref")
-            hist.has_new = bool(h.get("hasNew", False))
-            hist.sync_updated_at = now_ms
+    # 3. Read Episodes Batch UPSERT
+    if episode_rows:
+        ep_values = [
+            {
+                "user_id": user_id,
+                "source_id": row_source_id(ep),
+                "toon_id": ep.get("toonId"),
+                "wr_id": ep.get("wrId"),
+                "read_at": int(ep.get("readAt") or now_ms),
+                "last_page": int(ep.get("lastPage", 0)),
+                "sync_updated_at": now_ms,
+            }
+            for ep in episode_rows
+        ]
+        stmt = pg_insert(UserReadEpisode).values(ep_values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[UserReadEpisode.user_id, UserReadEpisode.source_id, UserReadEpisode.toon_id, UserReadEpisode.wr_id],
+            set_={
+                "read_at": stmt.excluded.read_at,
+                "last_page": stmt.excluded.last_page,
+                "sync_updated_at": stmt.excluded.sync_updated_at,
+            },
+        )
+        await session.execute(stmt)
 
-    # 3. Read Episodes
-    for ep in episode_rows:
-        source_id = row_source_id(ep)
-        toon_id = ep.get("toonId")
-        wr_id = ep.get("wrId")
-        read_at = int(ep.get("readAt") or now_ms)
-        key = (source_id, toon_id, wr_id)
-        read_ep = episodes.get(key)
-        if read_ep is None:
-            read_ep = UserReadEpisode(
-                user_id=user_id,
-                source_id=source_id,
-                toon_id=toon_id,
-                wr_id=wr_id,
-                read_at=read_at,
-                last_page=int(ep.get("lastPage", 0)),
-                sync_updated_at=now_ms,
-            )
-            session.add(read_ep)
-            episodes[key] = read_ep
-        else:
-            read_ep.read_at = read_at
-            read_ep.last_page = int(ep.get("lastPage", 0))
-            read_ep.sync_updated_at = now_ms
-
-    # 4. Reader Settings
-    for s in setting_rows:
-        source_id = row_source_id(s)
-        toon_id = s.get("toonId")
-        up_at = int(s.get("updatedAt") or now_ms)
-        key = (source_id, toon_id)
-        setting = settings.get(key)
-        if setting is None:
-            setting = UserReaderSetting(
-                user_id=user_id,
-                source_id=source_id,
-                toon_id=toon_id,
-                view_mode=s.get("viewMode", "SINGLE"),
-                read_direction=s.get("readDirection", "RIGHT_TO_LEFT"),
-                split_mode=s.get("splitMode", "FIT"),
-                updated_at=up_at,
-                sync_updated_at=now_ms,
-            )
-            session.add(setting)
-            settings[key] = setting
-        else:
-            setting.view_mode = s.get("viewMode", "SINGLE")
-            setting.read_direction = s.get("readDirection", "RIGHT_TO_LEFT")
-            setting.split_mode = s.get("splitMode", "FIT")
-            setting.updated_at = up_at
-            setting.sync_updated_at = now_ms
+    # 4. Reader Settings Batch UPSERT
+    if setting_rows:
+        set_values = [
+            {
+                "user_id": user_id,
+                "source_id": row_source_id(s),
+                "toon_id": s.get("toonId"),
+                "view_mode": s.get("viewMode", "SINGLE"),
+                "read_direction": s.get("readDirection", "RIGHT_TO_LEFT"),
+                "split_mode": s.get("splitMode", "FIT"),
+                "updated_at": int(s.get("updatedAt") or now_ms),
+                "sync_updated_at": now_ms,
+            }
+            for s in setting_rows
+        ]
+        stmt = pg_insert(UserReaderSetting).values(set_values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[UserReaderSetting.user_id, UserReaderSetting.source_id, UserReaderSetting.toon_id],
+            set_={
+                "view_mode": stmt.excluded.view_mode,
+                "read_direction": stmt.excluded.read_direction,
+                "split_mode": stmt.excluded.split_mode,
+                "updated_at": stmt.excluded.updated_at,
+                "sync_updated_at": stmt.excluded.sync_updated_at,
+            },
+        )
+        await session.execute(stmt)
 
     if has_rows:
         await enforce_user_storage_limit(session, user_id, previous_count)
@@ -657,237 +615,215 @@ async def apply_delta_for_user(
         await ensure_user_for_write(session, identity)
     previous_count = await count_user_sync_items(session, user_id) if has_rows else 0
 
-    live_tombstone_keys = {
-        ("FAVORITE", f"{row_source_id(f)}:{favorite_local_id(f)}") for f in favorite_rows
-    } | {
-        ("HISTORY", f"{row_source_id(h)}:{h['toonId']}") for h in history_rows
-    }
-    all_tombstone_keys = live_tombstone_keys | {
-        (entity_type, f"{source_id}:{local_id}")
-        for _, entity_type, source_id, local_id in tombstone_rows
-    }
-    tombstones = await _prefetch_entities(
-        session, UserTombstone, user_id,
-        (UserTombstone.entity_type, UserTombstone.entity_id),
-        all_tombstone_keys,
-    )
-    favorites = await _prefetch_entities(
-        session, UserFavorite, user_id,
-        (UserFavorite.source_id, UserFavorite.toon_id),
-        {(row_source_id(f), favorite_local_id(f)) for f in favorite_rows},
-    )
-    histories = await _prefetch_entities(
-        session, UserHistory, user_id,
-        (UserHistory.source_id, UserHistory.toon_id),
-        {(row_source_id(h), h["toonId"]) for h in history_rows},
-    )
-    episodes = await _prefetch_entities(
-        session, UserReadEpisode, user_id,
-        (UserReadEpisode.source_id, UserReadEpisode.toon_id, UserReadEpisode.wr_id),
-        {(row_source_id(ep), ep["toonId"], ep["wrId"]) for ep in episode_rows},
-    )
-    settings = await _prefetch_entities(
-        session, UserReaderSetting, user_id,
-        (UserReaderSetting.source_id, UserReaderSetting.toon_id),
-        {(row_source_id(s), s["toonId"]) for s in setting_rows},
-    )
+    # A. Tombstones Batch UPSERT & Deletions
+    if tombstone_rows:
+        tomb_values = [
+            {
+                "user_id": user_id,
+                "entity_type": entity_type,
+                "entity_id": f"{source_id}:{local_id}",
+                "deleted_at": int(t.get("deletedAt", now_ms)),
+            }
+            for t, entity_type, source_id, local_id in tombstone_rows
+        ]
+        t_stmt = pg_insert(UserTombstone).values(tomb_values)
+        t_stmt = t_stmt.on_conflict_do_update(
+            index_elements=[UserTombstone.user_id, UserTombstone.entity_type, UserTombstone.entity_id],
+            set_={
+                "deleted_at": func.greatest(UserTombstone.deleted_at, t_stmt.excluded.deleted_at),
+            },
+        )
+        await session.execute(t_stmt)
 
-    # A. Tombstones
-    delete_keys: dict[str, set[tuple[str, str]]] = {
-        "FAVORITE": set(),
-        "HISTORY": set(),
-        "EPISODE": set(),
-    }
-    for t, e_type, source_id, local_id in tombstone_rows:
-        del_at = int(t.get("deletedAt", now_ms))
-        stored_id = f"{source_id}:{local_id}"
-        tombstone_key = (e_type, stored_id)
-
-        # Upsert tombstone
-        tomb = tombstones.get(tombstone_key)
-        if tomb is None:
-            tomb = UserTombstone(
-                user_id=user_id,
-                entity_type=e_type,
-                entity_id=stored_id,
-                deleted_at=del_at,
-            )
-            session.add(tomb)
-            tombstones[tombstone_key] = tomb
-        else:
-            tomb.deleted_at = max(tomb.deleted_at, del_at)
-
-        if e_type in delete_keys:
-            delete_keys[e_type].add((source_id, local_id))
-
-    delete_specs = (
-        ("FAVORITE", UserFavorite),
-        ("HISTORY", UserHistory),
-        ("EPISODE", UserReadEpisode),
-    )
-    for entity_type, model in delete_specs:
-        keys = delete_keys[entity_type]
-        ordered_keys = list(keys)
-        for offset in range(0, len(ordered_keys), _PREFETCH_CHUNK_SIZE):
-            chunk = ordered_keys[offset:offset + _PREFETCH_CHUNK_SIZE]
-            await session.execute(
-                delete(model).where(
-                    model.user_id == user_id,
-                    tuple_(model.source_id, model.toon_id).in_(chunk),
+        fav_deletes = [(s, loc) for _, et, s, loc in tombstone_rows if et == "FAVORITE"]
+        if fav_deletes:
+            for offset in range(0, len(fav_deletes), _PREFETCH_CHUNK_SIZE):
+                chunk = fav_deletes[offset:offset + _PREFETCH_CHUNK_SIZE]
+                await session.execute(
+                    delete(UserFavorite).where(
+                        UserFavorite.user_id == user_id,
+                        tuple_(UserFavorite.source_id, UserFavorite.toon_id).in_(chunk),
+                    )
                 )
+
+        hist_deletes = [(s, loc) for _, et, s, loc in tombstone_rows if et == "HISTORY"]
+        if hist_deletes:
+            for offset in range(0, len(hist_deletes), _PREFETCH_CHUNK_SIZE):
+                chunk = hist_deletes[offset:offset + _PREFETCH_CHUNK_SIZE]
+                await session.execute(
+                    delete(UserHistory).where(
+                        UserHistory.user_id == user_id,
+                        tuple_(UserHistory.source_id, UserHistory.toon_id).in_(chunk),
+                    )
+                )
+
+        ep_deletes = [(s, loc) for _, et, s, loc in tombstone_rows if et == "EPISODE"]
+        if ep_deletes:
+            for offset in range(0, len(ep_deletes), _PREFETCH_CHUNK_SIZE):
+                chunk = ep_deletes[offset:offset + _PREFETCH_CHUNK_SIZE]
+                await session.execute(
+                    delete(UserReadEpisode).where(
+                        UserReadEpisode.user_id == user_id,
+                        tuple_(UserReadEpisode.source_id, UserReadEpisode.toon_id).in_(chunk),
+                    )
+                )
+
+    # B. Favorites Batch UPSERT (LWW)
+    if favorite_rows:
+        fav_values = [
+            {
+                "user_id": user_id,
+                "source_id": row_source_id(f),
+                "toon_id": favorite_local_id(f),
+                "title": f.get("title", ""),
+                "thumb_url": f.get("thumbUrl", ""),
+                "href": f.get("href", ""),
+                "genre": f.get("genre", ""),
+                "updated_at": f.get("updatedAt"),
+                "saved_at": int(f.get("savedAt", now_ms)),
+                "sync_updated_at": now_ms,
+            }
+            for f in favorite_rows
+        ]
+        stmt = pg_insert(UserFavorite).values(fav_values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[UserFavorite.user_id, UserFavorite.source_id, UserFavorite.toon_id],
+            set_={
+                "title": stmt.excluded.title,
+                "thumb_url": stmt.excluded.thumb_url,
+                "href": stmt.excluded.href,
+                "genre": stmt.excluded.genre,
+                "updated_at": stmt.excluded.updated_at,
+                "saved_at": stmt.excluded.saved_at,
+                "sync_updated_at": stmt.excluded.sync_updated_at,
+            },
+            where=(stmt.excluded.saved_at >= UserFavorite.saved_at),
+        )
+        await session.execute(stmt)
+
+        # Clear obsolete tombstones for resurrected favorites
+        fav_keys = [f"{row_source_id(f)}:{favorite_local_id(f)}" for f in favorite_rows]
+        await session.execute(
+            delete(UserTombstone).where(
+                UserTombstone.user_id == user_id,
+                UserTombstone.entity_type == "FAVORITE",
+                UserTombstone.entity_id.in_(fav_keys),
+                UserTombstone.deleted_at < now_ms,
             )
-    for key in delete_keys["FAVORITE"]:
-        favorites.pop(key, None)
-    for key in delete_keys["HISTORY"]:
-        histories.pop(key, None)
-    if delete_keys["EPISODE"]:
-        episodes = {
-            key: value for key, value in episodes.items()
-            if key[:2] not in delete_keys["EPISODE"]
-        }
+        )
 
-    # B. Favorites
-    for f in favorite_rows:
-        source_id = row_source_id(f)
-        f_id = favorite_local_id(f)
-        saved_at = int(f.get("savedAt", now_ms))
-        key = (source_id, f_id)
-        fav = favorites.get(key)
-        if fav is None:
-            fav = UserFavorite(
-                user_id=user_id,
-                source_id=source_id,
-                toon_id=f_id,
-                title=f.get("title", ""),
-                thumb_url=f.get("thumbUrl", ""),
-                href=f.get("href", ""),
-                genre=f.get("genre", ""),
-                updated_at=f.get("updatedAt"),
-                saved_at=saved_at,
-                sync_updated_at=now_ms,
+    # C. History Batch UPSERT (LWW)
+    if history_rows:
+        hist_values = [
+            {
+                "user_id": user_id,
+                "source_id": row_source_id(h),
+                "toon_id": h.get("toonId"),
+                "toon_title": h.get("toonTitle", ""),
+                "toon_thumb_url": h.get("toonThumbUrl", ""),
+                "toon_href": h.get("toonHref", ""),
+                "last_wr_id": h.get("lastWrId", ""),
+                "last_episode_title": h.get("lastEpisodeTitle", ""),
+                "last_episode_href": h.get("lastEpisodeHref", ""),
+                "last_read_order": int(h.get("lastReadOrder", 1)),
+                "total_episodes": int(h.get("totalEpisodes", 1)),
+                "last_read_at": int(h.get("lastReadAt", now_ms)),
+                "next_wr_id": h.get("nextWrId"),
+                "next_episode_title": h.get("nextEpisodeTitle"),
+                "next_episode_href": h.get("nextEpisodeHref"),
+                "has_new": bool(h.get("hasNew", False)),
+                "sync_updated_at": now_ms,
+            }
+            for h in history_rows
+        ]
+        stmt = pg_insert(UserHistory).values(hist_values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[UserHistory.user_id, UserHistory.source_id, UserHistory.toon_id],
+            set_={
+                "toon_title": stmt.excluded.toon_title,
+                "toon_thumb_url": stmt.excluded.toon_thumb_url,
+                "toon_href": stmt.excluded.toon_href,
+                "last_wr_id": stmt.excluded.last_wr_id,
+                "last_episode_title": stmt.excluded.last_episode_title,
+                "last_episode_href": stmt.excluded.last_episode_href,
+                "last_read_order": stmt.excluded.last_read_order,
+                "total_episodes": stmt.excluded.total_episodes,
+                "last_read_at": stmt.excluded.last_read_at,
+                "next_wr_id": stmt.excluded.next_wr_id,
+                "next_episode_title": stmt.excluded.next_episode_title,
+                "next_episode_href": stmt.excluded.next_episode_href,
+                "has_new": stmt.excluded.has_new,
+                "sync_updated_at": stmt.excluded.sync_updated_at,
+            },
+            where=(stmt.excluded.last_read_at >= UserHistory.last_read_at),
+        )
+        await session.execute(stmt)
+
+        # Clear obsolete tombstones for resurrected history
+        hist_keys = [f"{row_source_id(h)}:{h.get('toonId')}" for h in history_rows]
+        await session.execute(
+            delete(UserTombstone).where(
+                UserTombstone.user_id == user_id,
+                UserTombstone.entity_type == "HISTORY",
+                UserTombstone.entity_id.in_(hist_keys),
+                UserTombstone.deleted_at < now_ms,
             )
-            session.add(fav)
-            favorites[key] = fav
-        elif saved_at >= fav.saved_at:
-            fav.title = f.get("title", "")
-            fav.thumb_url = f.get("thumbUrl", "")
-            fav.href = f.get("href", "")
-            fav.genre = f.get("genre", "")
-            fav.updated_at = f.get("updatedAt")
-            fav.saved_at = saved_at
-            fav.sync_updated_at = now_ms
+        )
 
-        # Delete older tombstone if re-added
-        stored_id = f"{source_id}:{f_id}"
-        tombstone_key = ("FAVORITE", stored_id)
-        tomb = tombstones.get(tombstone_key)
-        if tomb is not None and tomb.deleted_at < saved_at:
-            await session.delete(tomb)
-            tombstones.pop(tombstone_key, None)
+    # D. Read Episodes Batch UPSERT (LWW)
+    if episode_rows:
+        ep_values = [
+            {
+                "user_id": user_id,
+                "source_id": row_source_id(ep),
+                "toon_id": ep.get("toonId"),
+                "wr_id": ep.get("wrId"),
+                "read_at": int(ep.get("readAt", now_ms)),
+                "last_page": int(ep.get("lastPage", 0)),
+                "sync_updated_at": now_ms,
+            }
+            for ep in episode_rows
+        ]
+        stmt = pg_insert(UserReadEpisode).values(ep_values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[UserReadEpisode.user_id, UserReadEpisode.source_id, UserReadEpisode.toon_id, UserReadEpisode.wr_id],
+            set_={
+                "read_at": stmt.excluded.read_at,
+                "last_page": stmt.excluded.last_page,
+                "sync_updated_at": stmt.excluded.sync_updated_at,
+            },
+            where=(stmt.excluded.read_at >= UserReadEpisode.read_at),
+        )
+        await session.execute(stmt)
 
-    # C. History
-    for h in history_rows:
-        source_id = row_source_id(h)
-        toon_id = h.get("toonId")
-        last_read_at = int(h.get("lastReadAt", now_ms))
-        key = (source_id, toon_id)
-        hist = histories.get(key)
-        if hist is None:
-            hist = UserHistory(
-                user_id=user_id,
-                source_id=source_id,
-                toon_id=toon_id,
-                toon_title=h.get("toonTitle", ""),
-                toon_thumb_url=h.get("toonThumbUrl", ""),
-                toon_href=h.get("toonHref", ""),
-                last_wr_id=h.get("lastWrId", ""),
-                last_episode_title=h.get("lastEpisodeTitle", ""),
-                last_episode_href=h.get("lastEpisodeHref", ""),
-                last_read_order=int(h.get("lastReadOrder", 1)),
-                total_episodes=int(h.get("totalEpisodes", 1)),
-                last_read_at=last_read_at,
-                next_wr_id=h.get("nextWrId"),
-                next_episode_title=h.get("nextEpisodeTitle"),
-                next_episode_href=h.get("nextEpisodeHref"),
-                has_new=bool(h.get("hasNew", False)),
-                sync_updated_at=now_ms,
-            )
-            session.add(hist)
-            histories[key] = hist
-        elif last_read_at >= hist.last_read_at:
-            hist.toon_title = h.get("toonTitle", "")
-            hist.toon_thumb_url = h.get("toonThumbUrl", "")
-            hist.toon_href = h.get("toonHref", "")
-            hist.last_wr_id = h.get("lastWrId", "")
-            hist.last_episode_title = h.get("lastEpisodeTitle", "")
-            hist.last_episode_href = h.get("lastEpisodeHref", "")
-            hist.last_read_order = int(h.get("lastReadOrder", 1))
-            hist.total_episodes = int(h.get("totalEpisodes", 1))
-            hist.last_read_at = last_read_at
-            hist.next_wr_id = h.get("nextWrId")
-            hist.next_episode_title = h.get("nextEpisodeTitle")
-            hist.next_episode_href = h.get("nextEpisodeHref")
-            hist.has_new = bool(h.get("hasNew", False))
-            hist.sync_updated_at = now_ms
-
-        stored_id = f"{source_id}:{toon_id}"
-        tombstone_key = ("HISTORY", stored_id)
-        tomb = tombstones.get(tombstone_key)
-        if tomb is not None and tomb.deleted_at < last_read_at:
-            await session.delete(tomb)
-            tombstones.pop(tombstone_key, None)
-
-    # D. Read Episodes
-    for ep in episode_rows:
-        source_id = row_source_id(ep)
-        toon_id = ep.get("toonId")
-        wr_id = ep.get("wrId")
-        read_at = int(ep.get("readAt", now_ms))
-        key = (source_id, toon_id, wr_id)
-        read_ep = episodes.get(key)
-        if read_ep is None:
-            read_ep = UserReadEpisode(
-                user_id=user_id,
-                source_id=source_id,
-                toon_id=toon_id,
-                wr_id=wr_id,
-                read_at=read_at,
-                last_page=int(ep.get("lastPage", 0)),
-                sync_updated_at=now_ms,
-            )
-            session.add(read_ep)
-            episodes[key] = read_ep
-        elif read_at >= read_ep.read_at:
-            read_ep.read_at = read_at
-            read_ep.last_page = int(ep.get("lastPage", 0))
-            read_ep.sync_updated_at = now_ms
-
-    # E. Reader Settings
-    for s in setting_rows:
-        source_id = row_source_id(s)
-        toon_id = s.get("toonId")
-        up_at = int(s.get("updatedAt", now_ms))
-        key = (source_id, toon_id)
-        setting = settings.get(key)
-        if setting is None:
-            setting = UserReaderSetting(
-                user_id=user_id,
-                source_id=source_id,
-                toon_id=toon_id,
-                view_mode=s.get("viewMode", "SINGLE"),
-                read_direction=s.get("readDirection", "RIGHT_TO_LEFT"),
-                split_mode=s.get("splitMode", "FIT"),
-                updated_at=up_at,
-                sync_updated_at=now_ms,
-            )
-            session.add(setting)
-            settings[key] = setting
-        elif up_at >= setting.updated_at:
-            setting.view_mode = s.get("viewMode", "SINGLE")
-            setting.read_direction = s.get("readDirection", "RIGHT_TO_LEFT")
-            setting.split_mode = s.get("splitMode", "FIT")
-            setting.updated_at = up_at
-            setting.sync_updated_at = now_ms
+    # E. Reader Settings Batch UPSERT (LWW)
+    if setting_rows:
+        set_values = [
+            {
+                "user_id": user_id,
+                "source_id": row_source_id(s),
+                "toon_id": s.get("toonId"),
+                "view_mode": s.get("viewMode", "SINGLE"),
+                "read_direction": s.get("readDirection", "RIGHT_TO_LEFT"),
+                "split_mode": s.get("splitMode", "FIT"),
+                "updated_at": int(s.get("updatedAt", now_ms)),
+                "sync_updated_at": now_ms,
+            }
+            for s in setting_rows
+        ]
+        stmt = pg_insert(UserReaderSetting).values(set_values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[UserReaderSetting.user_id, UserReaderSetting.source_id, UserReaderSetting.toon_id],
+            set_={
+                "view_mode": stmt.excluded.view_mode,
+                "read_direction": stmt.excluded.read_direction,
+                "split_mode": stmt.excluded.split_mode,
+                "updated_at": stmt.excluded.updated_at,
+                "sync_updated_at": stmt.excluded.sync_updated_at,
+            },
+            where=(stmt.excluded.updated_at >= UserReaderSetting.updated_at),
+        )
+        await session.execute(stmt)
 
     if has_rows:
         await enforce_user_storage_limit(session, user_id, previous_count)

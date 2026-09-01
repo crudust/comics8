@@ -9,14 +9,14 @@
   - Docker config: `server/docker-compose.yml`.
 - **Database Authority (`server/schema.sql`)**:
   - `schema.sql` is the canonical ground truth for fresh database initialization.
-  - Contains 9 optimized tables covering users, sync state, device pairing, reading history, favorites, and billing.
-  - Database schema changes must update `schema.sql` and provide migration scripts in `server/`.
+  - Contains 9 optimized PostgreSQL 18 tables covering users, sync state, device pairing, reading history, favorites, and billing.
+  - Primary/foreign keys use `TEXT` identifiers to handle unbounded network/SMB UUIDs and Base64 encoded work IDs without truncation.
 
 ## Key Service Boundaries
 
 - **`app/sync.py`**:
   - Handles client device pairing (6-digit numeric codes or UUID sync keys).
-  - Full / incremental bidirectional synchronization for `history`, `favorites`, `bookmarks`, and `settings`.
+  - High-throughput full / incremental bidirectional synchronization powered by PostgreSQL native batch UPSERT (`pg_insert ... ON CONFLICT DO UPDATE`) with atomic Last-Write-Wins (LWW) resolution and bulk tombstone management.
 - **`app/proxy.py`**:
   - Server-side image and API reverse proxy for bypassing ISP blocking, Cloudflare challenges, and regional geo-restrictions.
   - Access requires a master key backed by a materialized sync account. Allowlisted names are resolved and pinned to public IP addresses for each hop; redirects repeat that validation. Concurrent requests and streamed response bytes are bounded server-side.

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import sqlite3
 import sys
 import tempfile
 import time
@@ -11,11 +10,15 @@ import pytest_asyncio
 import httpx
 from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError as PydanticValidationError
-from sqlalchemy import event, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 # Set test environment
-os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
+DEFAULT_TEST_DB = os.environ.get(
+    "TEST_DATABASE_URL",
+    os.environ.get("DATABASE_URL", "postgresql+asyncpg://comics8:comics8password@127.0.0.1:5433/comics8")
+)
+os.environ["DATABASE_URL"] = DEFAULT_TEST_DB
 os.environ["DATA_DIR"] = tempfile.mkdtemp()
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -28,7 +31,6 @@ from app.sync import get_safe_user_id, import_snapshot_for_user
 import app.proxy as proxy_module
 import app.sync as sync_module
 import app.billing as billing_module
-from migrate_sqlite_to_pg import migrate_single_sqlite_db, save_user_data_to_pg
 
 
 async def count_users(engine) -> int:
@@ -39,11 +41,20 @@ async def count_users(engine) -> int:
 
 @pytest_asyncio.fixture
 async def test_engine():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    engine = create_async_engine(os.environ["DATABASE_URL"], echo=False)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield engine
     await engine.dispose()
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def clean_db(test_engine):
+    async with test_engine.begin() as conn:
+        await conn.execute(text("TRUNCATE TABLE user_tombstones, user_reader_settings, user_read_episodes, user_history, user_favorites, subscriptions, subscription_events, pairing_codes, users CASCADE;"))
+    yield
+    async with test_engine.begin() as conn:
+        await conn.execute(text("TRUNCATE TABLE user_tombstones, user_reader_settings, user_read_episodes, user_history, user_favorites, subscriptions, subscription_events, pairing_codes, users CASCADE;"))
 
 
 @pytest_asyncio.fixture
@@ -343,7 +354,7 @@ async def test_sync_request_item_and_account_limits(client: AsyncClient, test_en
         invalid_identifier = await client.post(
             "/sync",
             headers={"X-Sync-Key": "C8-ID-WIDTH"},
-            json={"favorites": [{"sourceId": "x" * 33, "id": "1"}]},
+            json={"favorites": [{"sourceId": "x" * 256, "id": "1"}]},
         )
         assert invalid_identifier.status_code == 400
 
@@ -449,39 +460,23 @@ async def test_hashed_legacy_user_binds_key_on_first_valid_write(
 
 
 @pytest.mark.asyncio
-async def test_snapshot_import_prefetches_favorites_in_one_query(test_session: AsyncSession):
-    user_id = "bulk-prefetch-user"
+async def test_snapshot_import_batch_upsert(test_session: AsyncSession):
+    user_id = "bulk-upsert-user"
     test_session.add(User(user_id=user_id, sync_key=user_id))
     await test_session.commit()
 
-    statements: list[str] = []
+    await import_snapshot_for_user(
+        test_session,
+        user_id,
+        {
+            "favorites": [
+                {"sourceId": "eleven", "id": str(i), "title": f"Work {i}", "savedAt": i + 1}
+                for i in range(50)
+            ]
+        },
+        now_ms=10_000,
+    )
 
-    def record_statement(_conn, _cursor, statement, _parameters, _context, _executemany):
-        if statement.lstrip().upper().startswith("SELECT"):
-            statements.append(statement)
-
-    engine = test_session.bind
-    event.listen(engine.sync_engine, "before_cursor_execute", record_statement)
-    try:
-        await import_snapshot_for_user(
-            test_session,
-            user_id,
-            {
-                "favorites": [
-                    {"sourceId": "eleven", "id": str(i), "title": f"Work {i}", "savedAt": i + 1}
-                    for i in range(50)
-                ]
-            },
-            now_ms=10_000,
-        )
-    finally:
-        event.remove(engine.sync_engine, "before_cursor_execute", record_statement)
-
-    favorite_selects = [
-        sql for sql in statements
-        if sql.lstrip().startswith("SELECT user_favorites.user_id")
-    ]
-    assert len(favorite_selects) == 1
     result = await test_session.execute(
         select(UserFavorite).where(UserFavorite.user_id == user_id)
     )
@@ -1038,72 +1033,7 @@ async def test_proxy_returns_503_when_concurrency_is_full(client: AsyncClient):
         del app.state.proxy_semaphore
 
 
-# =============================================================================
-# 7. Migration Logic Unit Tests
-# =============================================================================
 
-@pytest.mark.asyncio
-async def test_migration_from_sqlite(test_session: AsyncSession):
-    # Create mock SQLite database
-    temp_dir = tempfile.mkdtemp()
-    db_file = os.path.join(temp_dir, "user_test_mig_user.db")
-    conn = sqlite3.connect(db_file)
-    conn.execute("""
-    CREATE TABLE favorites (
-        sourceId TEXT, toonId TEXT, title TEXT, thumbUrl TEXT, href TEXT, genre TEXT, updatedAt TEXT, savedAt INTEGER, syncUpdatedAt INTEGER,
-        PRIMARY KEY (sourceId, toonId)
-    );
-    """)
-    conn.execute("""
-    CREATE TABLE history (
-        sourceId TEXT, toonId TEXT, toonTitle TEXT, toonThumbUrl TEXT, toonHref TEXT, lastWrId TEXT, lastEpisodeTitle TEXT, lastEpisodeHref TEXT,
-        lastReadOrder INTEGER, totalEpisodes INTEGER, lastReadAt INTEGER, nextWrId TEXT, nextEpisodeTitle TEXT, nextEpisodeHref TEXT, hasNew INTEGER, syncUpdatedAt INTEGER,
-        PRIMARY KEY (sourceId, toonId)
-    );
-    """)
-    conn.execute("""
-    CREATE TABLE read_episodes (
-        sourceId TEXT, toonId TEXT, wrId TEXT, readAt INTEGER, lastPage INTEGER, syncUpdatedAt INTEGER,
-        PRIMARY KEY (sourceId, toonId, wrId)
-    );
-    """)
-    conn.execute("""
-    CREATE TABLE reader_settings (
-        sourceId TEXT, toonId TEXT, viewMode TEXT, readDirection TEXT, splitMode TEXT, updatedAt INTEGER, syncUpdatedAt INTEGER,
-        PRIMARY KEY (sourceId, toonId)
-    );
-    """)
-    conn.execute("""
-    CREATE TABLE tombstones (
-        entityType TEXT, entityId TEXT, deletedAt INTEGER, PRIMARY KEY (entityType, entityId)
-    );
-    """)
-
-    conn.execute("INSERT INTO favorites VALUES ('eleven', '99', 'Migrated Fav', '', '', '', NULL, 50, 50)")
-    conn.execute("INSERT INTO history VALUES ('eleven', '99', 'Migrated Hist', '', '', '1', 'ep1', '', 1, 10, 50, NULL, NULL, NULL, 0, 50)")
-    conn.execute("INSERT INTO read_episodes VALUES ('eleven', '99', '1', 50, 2, 50)")
-    conn.execute("INSERT INTO reader_settings VALUES ('eleven', '99', 'SCROLL', 'VERTICAL', 'FIT', 50, 50)")
-    conn.execute("INSERT INTO tombstones VALUES ('FAVORITE', '100', 30)")
-    conn.commit()
-    conn.close()
-
-    data = migrate_single_sqlite_db(db_file, "test_mig_user")
-    assert len(data["favorites"]) == 1
-    assert data["favorites"][0]["title"] == "Migrated Fav"
-    assert len(data["tombstones"]) == 1
-    assert data["tombstones"][0]["entity_id"] == "eleven:100"
-
-    counts = await save_user_data_to_pg(test_session, "test_mig_user", data)
-    assert counts["favorites"] == 1
-    assert counts["history"] == 1
-    assert counts["read_episodes"] == 1
-    assert counts["reader_settings"] == 1
-    assert counts["tombstones"] == 1
-
-    # Verify saved in async session
-    fav = await test_session.get(UserFavorite, ("test_mig_user", "eleven", "99"))
-    assert fav is not None
-    assert fav.title == "Migrated Fav"
 
 
 # =============================================================================

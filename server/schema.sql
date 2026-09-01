@@ -28,14 +28,14 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     purchase_token TEXT,
     product_id VARCHAR(128) NOT NULL,
     base_plan_id VARCHAR(128),
-    status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE', -- ACTIVE, CANCELED, EXPIRED, IN_GRACE_PERIOD, ON_HOLD, PAUSED
+    status VARCHAR(64) NOT NULL DEFAULT 'ACTIVE', -- ACTIVE, CANCELED, EXPIRED, IN_GRACE_PERIOD, ON_HOLD, PAUSED
     is_active BOOLEAN NOT NULL DEFAULT FALSE,
     auto_renewing BOOLEAN NOT NULL DEFAULT TRUE,
     start_time TIMESTAMPTZ,
     expiry_time TIMESTAMPTZ NOT NULL,
     canceled_at TIMESTAMPTZ,
-    payment_state VARCHAR(32),
-    acknowledgement_state VARCHAR(32),
+    payment_state VARCHAR(64),
+    acknowledgement_state VARCHAR(64),
     latest_order_id VARCHAR(255),
     raw_data JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -68,8 +68,8 @@ CREATE INDEX IF NOT EXISTS idx_sub_events_user ON subscription_events(user_id);
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS user_favorites (
     user_id VARCHAR(64) NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-    source_id VARCHAR(32) NOT NULL DEFAULT 'eleven',
-    toon_id VARCHAR(128) NOT NULL,
+    source_id TEXT NOT NULL DEFAULT 'eleven',
+    toon_id TEXT NOT NULL,
     title TEXT NOT NULL DEFAULT '',
     thumb_url TEXT NOT NULL DEFAULT '',
     href TEXT NOT NULL DEFAULT '',
@@ -88,8 +88,8 @@ CREATE INDEX IF NOT EXISTS idx_user_favorites_saved ON user_favorites(user_id, s
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS user_history (
     user_id VARCHAR(64) NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-    source_id VARCHAR(32) NOT NULL DEFAULT 'eleven',
-    toon_id VARCHAR(128) NOT NULL,
+    source_id TEXT NOT NULL DEFAULT 'eleven',
+    toon_id TEXT NOT NULL,
     toon_title TEXT NOT NULL DEFAULT '',
     toon_thumb_url TEXT NOT NULL DEFAULT '',
     toon_href TEXT NOT NULL DEFAULT '',
@@ -115,9 +115,9 @@ CREATE INDEX IF NOT EXISTS idx_user_history_read_at ON user_history(user_id, las
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS user_read_episodes (
     user_id VARCHAR(64) NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-    source_id VARCHAR(32) NOT NULL DEFAULT 'eleven',
-    toon_id VARCHAR(128) NOT NULL,
-    wr_id VARCHAR(128) NOT NULL,
+    source_id TEXT NOT NULL DEFAULT 'eleven',
+    toon_id TEXT NOT NULL,
+    wr_id TEXT NOT NULL,
     read_at BIGINT NOT NULL DEFAULT 0,
     last_page INT NOT NULL DEFAULT 0,
     sync_updated_at BIGINT NOT NULL DEFAULT 0,
@@ -131,8 +131,8 @@ CREATE INDEX IF NOT EXISTS idx_user_read_episodes_sync ON user_read_episodes(use
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS user_reader_settings (
     user_id VARCHAR(64) NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-    source_id VARCHAR(32) NOT NULL DEFAULT 'eleven',
-    toon_id VARCHAR(128) NOT NULL,
+    source_id TEXT NOT NULL DEFAULT 'eleven',
+    toon_id TEXT NOT NULL,
     view_mode VARCHAR(32) NOT NULL DEFAULT 'SINGLE',
     read_direction VARCHAR(32) NOT NULL DEFAULT 'RIGHT_TO_LEFT',
     split_mode VARCHAR(32) NOT NULL DEFAULT 'FIT',
@@ -149,7 +149,7 @@ CREATE INDEX IF NOT EXISTS idx_user_reader_settings_sync ON user_reader_settings
 CREATE TABLE IF NOT EXISTS user_tombstones (
     user_id VARCHAR(64) NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     entity_type VARCHAR(32) NOT NULL,
-    entity_id VARCHAR(255) NOT NULL,
+    entity_id TEXT NOT NULL,
     deleted_at BIGINT NOT NULL DEFAULT 0,
     PRIMARY KEY (user_id, entity_type, entity_id)
 );

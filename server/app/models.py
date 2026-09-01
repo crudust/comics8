@@ -72,7 +72,7 @@ class Subscription(Base):
     __tablename__ = "subscriptions"
 
     id: Mapped[int] = mapped_column(
-        BigInteger().with_variant(Integer, "sqlite"),
+        BigInteger,
         primary_key=True,
         autoincrement=True,
     )
@@ -92,7 +92,7 @@ class Subscription(Base):
     product_id: Mapped[str] = mapped_column(String(128), nullable=False)
     base_plan_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     status: Mapped[str] = mapped_column(
-        String(32),
+        String(64),
         nullable=False,
         default="ACTIVE",
     )  # ACTIVE, CANCELED, EXPIRED, IN_GRACE_PERIOD, ON_HOLD, PAUSED
@@ -105,8 +105,8 @@ class Subscription(Base):
         index=True,
     )
     canceled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    payment_state: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    acknowledgement_state: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    payment_state: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    acknowledgement_state: Mapped[str | None] = mapped_column(String(64), nullable=True)
     latest_order_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     raw_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -132,7 +132,7 @@ class SubscriptionEvent(Base):
     __tablename__ = "subscription_events"
 
     id: Mapped[int] = mapped_column(
-        BigInteger().with_variant(Integer, "sqlite"),
+        BigInteger,
         primary_key=True,
         autoincrement=True,
     )
@@ -166,8 +166,8 @@ class UserFavorite(Base):
         ForeignKey("users.user_id", ondelete="CASCADE"),
         primary_key=True,
     )
-    source_id: Mapped[str] = mapped_column(String(32), primary_key=True, default="eleven")
-    toon_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    source_id: Mapped[str] = mapped_column(Text, primary_key=True, default="eleven")
+    toon_id: Mapped[str] = mapped_column(Text, primary_key=True)
     title: Mapped[str] = mapped_column(Text, nullable=False, default="")
     thumb_url: Mapped[str | None] = mapped_column(Text, nullable=True, default="")
     href: Mapped[str | None] = mapped_column(Text, nullable=True, default="")
@@ -192,8 +192,8 @@ class UserHistory(Base):
         ForeignKey("users.user_id", ondelete="CASCADE"),
         primary_key=True,
     )
-    source_id: Mapped[str] = mapped_column(String(32), primary_key=True, default="eleven")
-    toon_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    source_id: Mapped[str] = mapped_column(Text, primary_key=True, default="eleven")
+    toon_id: Mapped[str] = mapped_column(Text, primary_key=True)
     toon_title: Mapped[str] = mapped_column(Text, nullable=False, default="")
     toon_thumb_url: Mapped[str | None] = mapped_column(Text, nullable=True, default="")
     toon_href: Mapped[str | None] = mapped_column(Text, nullable=True, default="")
@@ -225,9 +225,9 @@ class UserReadEpisode(Base):
         ForeignKey("users.user_id", ondelete="CASCADE"),
         primary_key=True,
     )
-    source_id: Mapped[str] = mapped_column(String(32), primary_key=True, default="eleven")
-    toon_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    wr_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    source_id: Mapped[str] = mapped_column(Text, primary_key=True, default="eleven")
+    toon_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    wr_id: Mapped[str] = mapped_column(Text, primary_key=True)
     read_at: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     last_page: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     sync_updated_at: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, index=True)
@@ -247,8 +247,8 @@ class UserReaderSetting(Base):
         ForeignKey("users.user_id", ondelete="CASCADE"),
         primary_key=True,
     )
-    source_id: Mapped[str] = mapped_column(String(32), primary_key=True, default="eleven")
-    toon_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    source_id: Mapped[str] = mapped_column(Text, primary_key=True, default="eleven")
+    toon_id: Mapped[str] = mapped_column(Text, primary_key=True)
     view_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="SINGLE")
     read_direction: Mapped[str] = mapped_column(String(32), nullable=False, default="RIGHT_TO_LEFT")
     split_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="FIT")
@@ -271,7 +271,7 @@ class UserTombstone(Base):
         primary_key=True,
     )
     entity_type: Mapped[str] = mapped_column(String(32), primary_key=True)
-    entity_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    entity_id: Mapped[str] = mapped_column(Text, primary_key=True)
     deleted_at: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, index=True)
 
     user: Mapped[User] = relationship("User", back_populates="tombstones")
