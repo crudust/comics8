@@ -81,6 +81,7 @@ open class BaseSyncManager(
     private fun applyProxyConfig(serverUrl: String, useProxy: Boolean) {
         toonClient?.proxyBaseUrl = SyncConstants.proxyBaseUrl(serverUrl)
         toonClient?.isProxyEnabled = useProxy
+        toonClient?.serverProxySyncKey = _syncState.value.syncKey
     }
 
     private fun getOrGenerateSyncKey(): String {
@@ -102,6 +103,7 @@ open class BaseSyncManager(
             syncMessage = "새 동기화 키가 발급되었습니다.",
             isSuccess = true,
         )
+        toonClient?.serverProxySyncKey = newKey
         return newKey
     }
 
@@ -116,6 +118,7 @@ open class BaseSyncManager(
                 syncMessage = "동기화 키가 설정되었습니다.",
                 isSuccess = true,
             )
+            toonClient?.serverProxySyncKey = trimmed
         }
     }
 
@@ -129,6 +132,7 @@ open class BaseSyncManager(
             lastSyncedAt = 0L,
             syncMessage = "계정 데이터 복구 중...",
         )
+        toonClient?.serverProxySyncKey = trimmed
         syncPullInternal(isSilent = false)
     }
 
@@ -245,6 +249,7 @@ open class BaseSyncManager(
             storage.setPreference(SyncConstants.KEY_SYNC_KEY, syncKey)
             storage.setPreference(SyncConstants.KEY_LAST_SYNCED_AT, "0")
             _syncState.value = _syncState.value.copy(syncKey = syncKey, lastSyncedAt = 0L, syncMessage = "기기 연결 중...")
+            toonClient?.serverProxySyncKey = syncKey
             val pullRes = syncPullInternal(isSilent = false)
             PairConfirmResult(pullRes.success, syncKey = syncKey, message = if (pullRes.success) "기기 연결 및 데이터 가져오기 완료" else pullRes.message)
         } catch (e: CancellationException) {

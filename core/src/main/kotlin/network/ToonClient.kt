@@ -6,6 +6,7 @@ import com.comics8.core.source.RequestPolicy
 import com.comics8.core.source.SourceHttp
 import com.comics8.core.source.SourceLocator
 import com.comics8.core.sync.SyncConstants
+import com.comics8.core.sync.addComics8SyncHeaders
 import okhttp3.Cache
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -25,6 +26,9 @@ class ToonClient(
     val proxyAuthenticator: DynamicProxyAuthenticator = DynamicProxyAuthenticator(),
     private val sources: SourceLocator,
 ) : SourceHttp {
+
+    @Volatile
+    var serverProxySyncKey: String? = null
 
     constructor(
         proxyBaseUrl: String? = SyncConstants.proxyBaseUrl(),
@@ -168,6 +172,13 @@ class ToonClient(
         }
         for ((key, value) in spec.headers) {
             builder.header(key, value)
+        }
+        val proxyRoot = proxyBaseUrl?.trimEnd('/')
+        val syncKey = serverProxySyncKey?.trim()
+        if (!proxyRoot.isNullOrBlank() && !syncKey.isNullOrBlank() &&
+            (spec.url.startsWith("$proxyRoot?") || spec.url.startsWith("$proxyRoot/"))
+        ) {
+            builder.addComics8SyncHeaders(syncKey)
         }
         if (head) builder.head() else builder.get()
         return builder.build()
