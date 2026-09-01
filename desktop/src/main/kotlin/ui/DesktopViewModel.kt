@@ -92,7 +92,7 @@ class DesktopViewModel(
         _state.update { current ->
             current.copy(
                 episodeSortOrder = order,
-                episodes = current.episodes.sortedWithOrder(order),
+                episodes = (current.rawEpisodes.ifEmpty { current.episodes }).sortedWithOrder(order),
             )
         }
     }
@@ -250,7 +250,7 @@ class DesktopViewModel(
                 // 2단계(회차리스트) -> 3단계(뷰어)로 이동
                 val targetEp = lastViewedEpisode
                     ?: current.seriesHistory?.let { h -> current.episodes.firstOrNull { it.wrId == h.lastWrId } }
-                    ?: current.episodes.lastOrNull() // 1화
+                    ?: (current.rawEpisodes.ifEmpty { current.episodes }).lastOrNull() // 1화
                     ?: current.episodes.firstOrNull()
                 if (targetEp != null) {
                     openEpisode(targetEp)
@@ -463,6 +463,7 @@ class DesktopViewModel(
                 searchQuery = null,
                 searchInput = "",
                 series = null,
+                rawEpisodes = emptyList(),
                 episodes = emptyList(),
                 currentEpisode = null,
                 readerImages = emptyList(),
@@ -1071,6 +1072,7 @@ class DesktopViewModel(
                 screen = Screen.Series,
                 series = item,
                 seriesHistory = null,
+                rawEpisodes = emptyList(),
                 episodes = emptyList(),
                 episodePage = 1,
                 episodeLastPage = 1,
@@ -1113,6 +1115,7 @@ class DesktopViewModel(
                 it.copy(
                     episodeLoading = !hasLocal,
                     episodeError = null,
+                    rawEpisodes = if (hasLocal) local.items else it.rawEpisodes,
                     episodes = if (hasLocal) local.items.sortedWithOrder(sortOrder) else it.episodes,
                     episodePage = if (hasLocal) 1 else it.episodePage,
                     episodeLastPage = if (hasLocal) 1 else it.episodeLastPage,
@@ -1125,6 +1128,7 @@ class DesktopViewModel(
                 val result = repository.loadEpisodes(item, page)
                 _state.update {
                     it.copy(
+                        rawEpisodes = result.items,
                         episodes = result.items.sortedWithOrder(it.episodeSortOrder),
                         episodePage = result.currentPage,
                         episodeLastPage = result.lastPage,
@@ -1304,8 +1308,9 @@ class DesktopViewModel(
         val current = _state.value
         val series = current.series ?: return
         val lastPage = current.episodeLastPage
+        val raw = current.rawEpisodes.ifEmpty { current.episodes }
         if (lastPage <= 1) {
-            val firstEp = current.episodes.lastOrNull()
+            val firstEp = raw.lastOrNull()
             if (firstEp != null) {
                 openEpisode(firstEp)
             } else {
@@ -1314,7 +1319,8 @@ class DesktopViewModel(
                         val result = repository.loadEpisodes(series, 1)
                         _state.update {
                             it.copy(
-                                episodes = result.items,
+                                rawEpisodes = result.items,
+                                episodes = result.items.sortedWithOrder(it.episodeSortOrder),
                                 episodePage = result.currentPage,
                                 episodeLastPage = result.lastPage,
                             )
@@ -1330,7 +1336,8 @@ class DesktopViewModel(
                     val result = repository.loadEpisodes(series, lastPage)
                     _state.update {
                         it.copy(
-                            episodes = result.items,
+                            rawEpisodes = result.items,
+                            episodes = result.items.sortedWithOrder(it.episodeSortOrder),
                             episodePage = result.currentPage,
                             episodeLastPage = result.lastPage,
                         )
@@ -1359,6 +1366,7 @@ class DesktopViewModel(
                 screen = Screen.Browse,
                 series = null,
                 seriesHistory = null,
+                rawEpisodes = emptyList(),
                 episodes = emptyList(),
                 episodeError = null,
                 showPageJump = false,
@@ -1440,7 +1448,7 @@ class DesktopViewModel(
             } catch (_: Exception) {
                 _state.update { current ->
                     current.copy(
-                        downloadCatalog = current.episodes,
+                        downloadCatalog = current.rawEpisodes.ifEmpty { current.episodes },
                         downloadCatalogLoading = false,
                     )
                 }
@@ -1838,7 +1846,8 @@ class DesktopViewModel(
 
                 _state.update {
                     it.copy(
-                        episodes = epPage.items,
+                        rawEpisodes = epPage.items,
+                        episodes = epPage.items.sortedWithOrder(it.episodeSortOrder),
                         episodePage = actualPage,
                         episodeLastPage = epPage.lastPage,
                         episodeLoading = false,
@@ -1880,6 +1889,7 @@ class DesktopViewModel(
             it.copy(
                 screen = Screen.Series,
                 series = toon,
+                rawEpisodes = emptyList(),
                 episodes = emptyList(),
                 episodeLoading = true,
                 highlightedEpisodeId = item.lastWrId,
@@ -1896,7 +1906,8 @@ class DesktopViewModel(
                 val epPage = repository.loadEpisodes(toon, predictedPage)
                 _state.update {
                     it.copy(
-                        episodes = epPage.items,
+                        rawEpisodes = epPage.items,
+                        episodes = epPage.items.sortedWithOrder(it.episodeSortOrder),
                         episodePage = epPage.currentPage,
                         episodeLastPage = epPage.lastPage,
                         episodeLoading = false,
@@ -1911,7 +1922,8 @@ class DesktopViewModel(
                             val prevEpPage = repository.loadEpisodes(toon, epPage.currentPage - 1)
                             _state.update {
                                 it.copy(
-                                    episodes = prevEpPage.items,
+                                    rawEpisodes = prevEpPage.items,
+                                    episodes = prevEpPage.items.sortedWithOrder(it.episodeSortOrder),
                                     episodePage = prevEpPage.currentPage,
                                     episodeLastPage = prevEpPage.lastPage,
                                 )
@@ -1970,10 +1982,10 @@ class DesktopViewModel(
         }
         lastViewedEpisode = episode
         val nowMs = System.currentTimeMillis()
-        val episodes = current.episodes
+        val rawEpisodes = current.rawEpisodes.ifEmpty { current.episodes }
         val seriesKey = series?.workId()?.storageKey().orEmpty()
         val position = ReaderDomain.episodePosition(
-            episodeIds = episodes.map(EpisodeItem::wrId),
+            episodeIds = rawEpisodes.map(EpisodeItem::wrId),
             currentEpisodeId = episode.wrId,
             currentPage = current.episodePage,
             lastPage = current.episodeLastPage,
@@ -1981,15 +1993,19 @@ class DesktopViewModel(
             knownTotalCount = toonTotalCounts[seriesKey],
             pageSize = series?.let { repository.sourceOrNull(it.sourceId)?.episodePageSize } ?: 100,
         )
-        val nextEp = position.nextEpisodeIndex?.let(episodes::get)
+        val nextEp = position.nextEpisodeIndex?.let(rawEpisodes::get)
 
         _state.update { curr ->
+            val updatedRaw = curr.rawEpisodes.map {
+                if (it.wrId == episode.wrId) it.copy(isRead = true, readAt = nowMs) else it
+            }
             val updatedEpisodes = curr.episodes.map {
                 if (it.wrId == episode.wrId) it.copy(isRead = true, readAt = nowMs) else it
             }
             curr.copy(
                 screen = Screen.Reader,
                 currentEpisode = episode.copy(isRead = true, readAt = nowMs),
+                rawEpisodes = updatedRaw,
                 episodes = updatedEpisodes,
                 readerImages = emptyList(),
                 imageAspectRatios = emptyMap(),
@@ -2164,12 +2180,13 @@ class DesktopViewModel(
     fun openNextEpisode() {
         val current = _state.value
         val series = current.series
+        val rawEpisodes = current.rawEpisodes.ifEmpty { current.episodes }
         when (val navigation = ReaderDomain.newerEpisode(
             currentIndex = current.currentEpisodeIndex,
-            itemCount = current.episodes.size,
+            itemCount = rawEpisodes.size,
             currentPage = current.episodePage,
         )) {
-            is ReaderDomain.EpisodeNavigation.InCurrentPage -> openEpisode(current.episodes[navigation.index])
+            is ReaderDomain.EpisodeNavigation.InCurrentPage -> openEpisode(rawEpisodes[navigation.index])
             is ReaderDomain.EpisodeNavigation.LoadPage -> if (series != null) {
                 scope.launch {
                     navigateToEpisodePage(series, navigation.page, navigation.edge)
@@ -2182,13 +2199,14 @@ class DesktopViewModel(
     fun openPrevEpisode() {
         val current = _state.value
         val series = current.series
+        val rawEpisodes = current.rawEpisodes.ifEmpty { current.episodes }
         when (val navigation = ReaderDomain.olderEpisode(
             currentIndex = current.currentEpisodeIndex,
-            itemCount = current.episodes.size,
+            itemCount = rawEpisodes.size,
             currentPage = current.episodePage,
             lastPage = current.episodeLastPage,
         )) {
-            is ReaderDomain.EpisodeNavigation.InCurrentPage -> openEpisode(current.episodes[navigation.index])
+            is ReaderDomain.EpisodeNavigation.InCurrentPage -> openEpisode(rawEpisodes[navigation.index])
             is ReaderDomain.EpisodeNavigation.LoadPage -> if (series != null) {
                 scope.launch {
                     navigateToEpisodePage(series, navigation.page, navigation.edge)
@@ -2229,7 +2247,8 @@ class DesktopViewModel(
 
             _state.update {
                 it.copy(
-                    episodes = result.items,
+                    rawEpisodes = result.items,
+                    episodes = result.items.sortedWithOrder(it.episodeSortOrder),
                     episodePage = result.currentPage,
                     episodeLastPage = result.lastPage,
                 )
