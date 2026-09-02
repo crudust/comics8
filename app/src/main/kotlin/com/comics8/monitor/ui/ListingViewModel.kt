@@ -150,14 +150,14 @@ data class ListingUiState(
         }
 
     val currentEpisodeIndex: Int
-        get() = currentEpisode?.let { ep -> (rawEpisodes.ifEmpty { episodes }).indexOfFirst { it.wrId == ep.wrId } } ?: -1
+        get() = currentEpisode?.let { ep -> (episodes.ifEmpty { rawEpisodes }).indexOfFirst { it.wrId == ep.wrId } } ?: -1
 
     val hasNextEpisode: Boolean
-        get() = ReaderDomain.newerEpisode(currentEpisodeIndex, (rawEpisodes.ifEmpty { episodes }).size, episodePage) !=
+        get() = ReaderDomain.nextEpisode(currentEpisodeIndex, (episodes.ifEmpty { rawEpisodes }).size, episodePage, episodeSortOrder) !=
             ReaderDomain.EpisodeNavigation.None
 
     val hasPrevEpisode: Boolean
-        get() = ReaderDomain.olderEpisode(currentEpisodeIndex, (rawEpisodes.ifEmpty { episodes }).size, episodePage, episodeLastPage) !=
+        get() = ReaderDomain.prevEpisode(currentEpisodeIndex, (episodes.ifEmpty { rawEpisodes }).size, episodePage, episodeLastPage, episodeSortOrder) !=
             ReaderDomain.EpisodeNavigation.None
 
     fun progressLabel(history: ReadHistory): String =
@@ -2273,13 +2273,14 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 repository.saveEpisodePage(series.workId(), currentEp.wrId, completedPage)
             }
         }
-        val rawEpisodes = current.rawEpisodes.ifEmpty { current.episodes }
-        when (val navigation = ReaderDomain.newerEpisode(
+        val epList = current.episodes.ifEmpty { current.rawEpisodes }
+        when (val navigation = ReaderDomain.nextEpisode(
             currentIndex = current.currentEpisodeIndex,
-            itemCount = rawEpisodes.size,
+            itemCount = epList.size,
             currentPage = current.episodePage,
+            sortOrder = current.episodeSortOrder,
         )) {
-            is ReaderDomain.EpisodeNavigation.InCurrentPage -> openEpisode(rawEpisodes[navigation.index])
+            is ReaderDomain.EpisodeNavigation.InCurrentPage -> openEpisode(epList[navigation.index])
             is ReaderDomain.EpisodeNavigation.LoadPage -> if (series != null) {
                 viewModelScope.launch {
                     navigateToEpisodePage(series, navigation.page, navigation.edge)
@@ -2292,14 +2293,15 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     fun openPrevEpisode() {
         val current = _state.value
         val series = current.series
-        val rawEpisodes = current.rawEpisodes.ifEmpty { current.episodes }
-        when (val navigation = ReaderDomain.olderEpisode(
+        val epList = current.episodes.ifEmpty { current.rawEpisodes }
+        when (val navigation = ReaderDomain.prevEpisode(
             currentIndex = current.currentEpisodeIndex,
-            itemCount = rawEpisodes.size,
+            itemCount = epList.size,
             currentPage = current.episodePage,
             lastPage = current.episodeLastPage,
+            sortOrder = current.episodeSortOrder,
         )) {
-            is ReaderDomain.EpisodeNavigation.InCurrentPage -> openEpisode(rawEpisodes[navigation.index])
+            is ReaderDomain.EpisodeNavigation.InCurrentPage -> openEpisode(epList[navigation.index])
             is ReaderDomain.EpisodeNavigation.LoadPage -> if (series != null) {
                 viewModelScope.launch {
                     navigateToEpisodePage(series, navigation.page, navigation.edge)

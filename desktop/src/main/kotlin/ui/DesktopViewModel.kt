@@ -2154,13 +2154,14 @@ class DesktopViewModel(
                 repository.saveEpisodePage(series.workId(), currentEp.wrId, completedPage)
             }
         }
-        val rawEpisodes = current.rawEpisodes.ifEmpty { current.episodes }
-        when (val navigation = ReaderDomain.newerEpisode(
+        val epList = current.episodes.ifEmpty { current.rawEpisodes }
+        when (val navigation = ReaderDomain.nextEpisode(
             currentIndex = current.currentEpisodeIndex,
-            itemCount = rawEpisodes.size,
+            itemCount = epList.size,
             currentPage = current.episodePage,
+            sortOrder = current.episodeSortOrder,
         )) {
-            is ReaderDomain.EpisodeNavigation.InCurrentPage -> openEpisode(rawEpisodes[navigation.index])
+            is ReaderDomain.EpisodeNavigation.InCurrentPage -> openEpisode(epList[navigation.index])
             is ReaderDomain.EpisodeNavigation.LoadPage -> if (series != null) {
                 scope.launch {
                     navigateToEpisodePage(series, navigation.page, navigation.edge)
@@ -2173,14 +2174,15 @@ class DesktopViewModel(
     fun openPrevEpisode() {
         val current = _state.value
         val series = current.series
-        val rawEpisodes = current.rawEpisodes.ifEmpty { current.episodes }
-        when (val navigation = ReaderDomain.olderEpisode(
+        val epList = current.episodes.ifEmpty { current.rawEpisodes }
+        when (val navigation = ReaderDomain.prevEpisode(
             currentIndex = current.currentEpisodeIndex,
-            itemCount = rawEpisodes.size,
+            itemCount = epList.size,
             currentPage = current.episodePage,
             lastPage = current.episodeLastPage,
+            sortOrder = current.episodeSortOrder,
         )) {
-            is ReaderDomain.EpisodeNavigation.InCurrentPage -> openEpisode(rawEpisodes[navigation.index])
+            is ReaderDomain.EpisodeNavigation.InCurrentPage -> openEpisode(epList[navigation.index])
             is ReaderDomain.EpisodeNavigation.LoadPage -> if (series != null) {
                 scope.launch {
                     navigateToEpisodePage(series, navigation.page, navigation.edge)

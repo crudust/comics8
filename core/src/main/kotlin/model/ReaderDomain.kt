@@ -98,23 +98,48 @@ object ReaderDomain {
         )
     }
 
-    fun newerEpisode(currentIndex: Int, itemCount: Int, currentPage: Int): EpisodeNavigation =
-        when {
-            currentIndex in 1 until itemCount -> EpisodeNavigation.InCurrentPage(currentIndex - 1)
-            currentIndex == 0 && currentPage > 1 ->
-                EpisodeNavigation.LoadPage(currentPage - 1, PageEdge.LAST)
-            else -> EpisodeNavigation.None
+    fun nextEpisode(
+        currentIndex: Int,
+        itemCount: Int,
+        currentPage: Int,
+        sortOrder: EpisodeSortOrder = EpisodeSortOrder.DEFAULT,
+    ): EpisodeNavigation {
+        if (currentIndex < 0 || itemCount <= 0) return EpisodeNavigation.None
+        return if (sortOrder.isAscending) {
+            when {
+                currentIndex in 0 until (itemCount - 1) -> EpisodeNavigation.InCurrentPage(currentIndex + 1)
+                else -> EpisodeNavigation.None
+            }
+        } else {
+            when {
+                currentIndex in 1 until itemCount -> EpisodeNavigation.InCurrentPage(currentIndex - 1)
+                currentIndex == 0 && currentPage > 1 ->
+                    EpisodeNavigation.LoadPage(currentPage - 1, PageEdge.LAST)
+                else -> EpisodeNavigation.None
+            }
         }
+    }
 
-    fun olderEpisode(
+    fun prevEpisode(
         currentIndex: Int,
         itemCount: Int,
         currentPage: Int,
         lastPage: Int,
-    ): EpisodeNavigation = when {
-        currentIndex in 0 until (itemCount - 1) -> EpisodeNavigation.InCurrentPage(currentIndex + 1)
-        currentIndex == itemCount - 1 && currentPage < lastPage ->
-            EpisodeNavigation.LoadPage(currentPage + 1, PageEdge.FIRST)
-        else -> EpisodeNavigation.None
+        sortOrder: EpisodeSortOrder = EpisodeSortOrder.DEFAULT,
+    ): EpisodeNavigation {
+        if (currentIndex < 0 || itemCount <= 0) return EpisodeNavigation.None
+        return if (sortOrder.isAscending) {
+            when {
+                currentIndex in 1 until itemCount -> EpisodeNavigation.InCurrentPage(currentIndex - 1)
+                else -> EpisodeNavigation.None
+            }
+        } else {
+            when {
+                currentIndex in 0 until (itemCount - 1) -> EpisodeNavigation.InCurrentPage(currentIndex + 1)
+                currentIndex == itemCount - 1 && currentPage < lastPage ->
+                    EpisodeNavigation.LoadPage(currentPage + 1, PageEdge.FIRST)
+                else -> EpisodeNavigation.None
+            }
+        }
     }
 }

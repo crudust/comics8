@@ -64,14 +64,32 @@ class ReaderDomainTest {
     }
 
     @Test
-    fun episodeNavigationChoosesLocalItemOrAdjacentPageEdge() {
-        assertThat(ReaderDomain.newerEpisode(2, 4, 2))
+    fun episodeNavigationDefaultOrderChoosesLocalItemOrAdjacentPageEdge() {
+        assertThat(ReaderDomain.nextEpisode(2, 4, 2, EpisodeSortOrder.DEFAULT))
             .isEqualTo(ReaderDomain.EpisodeNavigation.InCurrentPage(1))
-        assertThat(ReaderDomain.newerEpisode(0, 4, 2))
+        assertThat(ReaderDomain.nextEpisode(0, 4, 2, EpisodeSortOrder.DEFAULT))
             .isEqualTo(ReaderDomain.EpisodeNavigation.LoadPage(1, ReaderDomain.PageEdge.LAST))
-        assertThat(ReaderDomain.olderEpisode(3, 4, 2, 3))
+        assertThat(ReaderDomain.prevEpisode(3, 4, 2, 3, EpisodeSortOrder.DEFAULT))
             .isEqualTo(ReaderDomain.EpisodeNavigation.LoadPage(3, ReaderDomain.PageEdge.FIRST))
-        assertThat(ReaderDomain.olderEpisode(3, 4, 3, 3))
+        assertThat(ReaderDomain.prevEpisode(3, 4, 3, 3, EpisodeSortOrder.DEFAULT))
+            .isEqualTo(ReaderDomain.EpisodeNavigation.None)
+    }
+
+    @Test
+    fun episodeNavigationAscendingOrderAdvancesDownwards() {
+        // In ascending order: index 0 is first/oldest (e.g. 1화), index 1 is 2화, index 2 is 3화
+        assertThat(ReaderDomain.nextEpisode(0, 3, 1, EpisodeSortOrder.NAME_ASC))
+            .isEqualTo(ReaderDomain.EpisodeNavigation.InCurrentPage(1))
+        assertThat(ReaderDomain.nextEpisode(1, 3, 1, EpisodeSortOrder.NAME_ASC))
+            .isEqualTo(ReaderDomain.EpisodeNavigation.InCurrentPage(2))
+        assertThat(ReaderDomain.nextEpisode(2, 3, 1, EpisodeSortOrder.NAME_ASC))
+            .isEqualTo(ReaderDomain.EpisodeNavigation.None)
+
+        assertThat(ReaderDomain.prevEpisode(2, 3, 1, 1, EpisodeSortOrder.NAME_ASC))
+            .isEqualTo(ReaderDomain.EpisodeNavigation.InCurrentPage(1))
+        assertThat(ReaderDomain.prevEpisode(1, 3, 1, 1, EpisodeSortOrder.NAME_ASC))
+            .isEqualTo(ReaderDomain.EpisodeNavigation.InCurrentPage(0))
+        assertThat(ReaderDomain.prevEpisode(0, 3, 1, 1, EpisodeSortOrder.NAME_ASC))
             .isEqualTo(ReaderDomain.EpisodeNavigation.None)
     }
 
@@ -83,7 +101,7 @@ class ReaderDomainTest {
     }
 
     @Test
-    fun episodePositionAndNavigationRemainConsistentRegardlessOfUiSortOrder() {
+    fun episodePositionAndNavigationRemainConsistentWithAscendingSortOrder() {
         val rawEpisodes = listOf(
             EpisodeItem(wrId = "300", title = "3화", date = "2026-03-01", thumbUrl = null, href = "ep/3"),
             EpisodeItem(wrId = "200", title = "2화", date = "2026-02-01", thumbUrl = null, href = "ep/2"),
@@ -93,7 +111,9 @@ class ReaderDomainTest {
 
         val uiSortedEpisodes = rawEpisodes.sortedWithOrder(EpisodeSortOrder.NAME_ASC)
         assertThat(uiSortedEpisodes.map { it.title }).containsExactly("1화", "2화", "3화").inOrder()
+        val sortedIds = uiSortedEpisodes.map(EpisodeItem::wrId)
 
+        // Raw IDs are used for global position calculation across pages
         val pos1 = ReaderDomain.episodePosition(
             episodeIds = rawIds,
             currentEpisodeId = "100",
@@ -106,20 +126,23 @@ class ReaderDomainTest {
         assertThat(pos1.totalEpisodes).isEqualTo(3)
         assertThat(pos1.nextEpisodeIndex?.let { rawIds[it] }).isEqualTo("200")
 
-        val pos3 = ReaderDomain.episodePosition(
-            episodeIds = rawIds,
-            currentEpisodeId = "300",
+        // UI sorted list navigation
+        val navFrom1 = ReaderDomain.nextEpisode(
+            currentIndex = 0,
+            itemCount = sortedIds.size,
             currentPage = 1,
-            lastPage = 1,
-            knownLastPageCount = 3,
-            knownTotalCount = 3,
+            sortOrder = EpisodeSortOrder.NAME_ASC,
         )
-        assertThat(pos3.readOrder).isEqualTo(3)
-        assertThat(pos3.totalEpisodes).isEqualTo(3)
-        assertThat(pos3.nextEpisodeIndex).isNull()
-
-        val navFrom1 = ReaderDomain.newerEpisode(currentIndex = 2, itemCount = 3, currentPage = 1)
         assertThat(navFrom1).isEqualTo(ReaderDomain.EpisodeNavigation.InCurrentPage(1))
-        assertThat(rawIds[(navFrom1 as ReaderDomain.EpisodeNavigation.InCurrentPage).index]).isEqualTo("200")
+        assertThat(sortedIds[(navFrom1 as ReaderDomain.EpisodeNavigation.InCurrentPage).index]).isEqualTo("200")
+
+        val navFrom2 = ReaderDomain.nextEpisode(
+            currentIndex = 1,
+            itemCount = sortedIds.size,
+            currentPage = 1,
+            sortOrder = EpisodeSortOrder.NAME_ASC,
+        )
+        assertThat(navFrom2).isEqualTo(ReaderDomain.EpisodeNavigation.InCurrentPage(2))
+        assertThat(sortedIds[(navFrom2 as ReaderDomain.EpisodeNavigation.InCurrentPage).index]).isEqualTo("300")
     }
 }
