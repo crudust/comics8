@@ -9,6 +9,9 @@ enum class EpisodeSortOrder(val key: String) {
     DATE_DESC("date_desc"),
     DATE_ASC("date_asc");
 
+    val isAscending: Boolean
+        get() = this == NAME_ASC || this == DATE_ASC
+
     companion object {
         fun fromKey(key: String?): EpisodeSortOrder =
             entries.firstOrNull { it.key == key } ?: DEFAULT

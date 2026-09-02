@@ -113,14 +113,14 @@ data class DesktopUiState(
         }
 
     val currentEpisodeIndex: Int
-        get() = currentEpisode?.let { ep -> (rawEpisodes.ifEmpty { episodes }).indexOfFirst { it.wrId == ep.wrId } } ?: -1
+        get() = currentEpisode?.let { ep -> (episodes.ifEmpty { rawEpisodes }).indexOfFirst { it.wrId == ep.wrId } } ?: -1
 
     val hasNextEpisode: Boolean
-        get() = ReaderDomain.newerEpisode(currentEpisodeIndex, (rawEpisodes.ifEmpty { episodes }).size, episodePage) !=
+        get() = ReaderDomain.nextEpisode(currentEpisodeIndex, (episodes.ifEmpty { rawEpisodes }).size, episodePage, episodeSortOrder) !=
             ReaderDomain.EpisodeNavigation.None
 
     val hasPrevEpisode: Boolean
-        get() = ReaderDomain.olderEpisode(currentEpisodeIndex, (rawEpisodes.ifEmpty { episodes }).size, episodePage, episodeLastPage) !=
+        get() = ReaderDomain.prevEpisode(currentEpisodeIndex, (episodes.ifEmpty { rawEpisodes }).size, episodePage, episodeLastPage, episodeSortOrder) !=
             ReaderDomain.EpisodeNavigation.None
 
     fun progressLabel(history: ReadHistoryRecord): String =
