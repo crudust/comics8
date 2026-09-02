@@ -1,6 +1,7 @@
 package com.comics8.core.i18n
 
 import com.comics8.core.model.BrowseTab
+import com.comics8.core.model.EpisodeSortOrder
 import com.comics8.core.model.PageTapZone
 import com.comics8.core.model.ProgressDisplayMode
 import com.comics8.core.model.ReadDirection
@@ -58,6 +59,14 @@ fun ProgressDisplayMode.displayDescription(strings: AppStrings): String = when (
     ProgressDisplayMode.READ_COUNT -> strings.progressModeReadCountDesc
     ProgressDisplayMode.PERCENTAGE -> strings.progressModePercentageDesc
     ProgressDisplayMode.HIDDEN -> strings.progressModeHiddenDesc
+}
+
+fun EpisodeSortOrder.displayLabel(strings: AppStrings): String = when (this) {
+    EpisodeSortOrder.DEFAULT -> strings.sortDefault
+    EpisodeSortOrder.NAME_ASC -> strings.sortNameAsc
+    EpisodeSortOrder.NAME_DESC -> strings.sortNameDesc
+    EpisodeSortOrder.DATE_DESC -> strings.sortDateDesc
+    EpisodeSortOrder.DATE_ASC -> strings.sortDateAsc
 }
 
 fun SourceType.displayLabel(strings: AppStrings): String = when (this) {

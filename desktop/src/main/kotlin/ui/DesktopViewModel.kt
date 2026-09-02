@@ -88,12 +88,26 @@ class DesktopViewModel(
     }
 
     fun setEpisodeSortOrder(order: EpisodeSortOrder) {
-        DesktopSourcePrefs.setEpisodeSortOrder(order)
+        val targetSourceId = _state.value.series?.sourceId ?: DesktopSourcePrefs.activeSourceId() ?: WorkId.LOCAL_SOURCE
+        setSourceEpisodeSortOrder(targetSourceId, order)
+    }
+
+    fun getSourceEpisodeSortOrder(sourceId: String): EpisodeSortOrder =
+        DesktopSourcePrefs.episodeSortOrder(sourceId)
+
+    fun setSourceEpisodeSortOrder(sourceId: String, order: EpisodeSortOrder) {
+        DesktopSourcePrefs.setEpisodeSortOrder(sourceId, order)
         _state.update { current ->
-            current.copy(
-                episodeSortOrder = order,
-                episodes = (current.rawEpisodes.ifEmpty { current.episodes }).sortedWithOrder(order),
-            )
+            val isCurrentSeriesSource = current.series?.sourceId == sourceId
+            val isCurrentActiveSource = current.series == null && (DesktopSourcePrefs.activeSourceId() ?: WorkId.LOCAL_SOURCE) == sourceId
+            if (isCurrentSeriesSource || isCurrentActiveSource) {
+                current.copy(
+                    episodeSortOrder = order,
+                    episodes = if (isCurrentSeriesSource) (current.rawEpisodes.ifEmpty { current.episodes }).sortedWithOrder(order) else current.episodes,
+                )
+            } else {
+                current
+            }
         }
     }
 
@@ -105,7 +119,7 @@ class DesktopViewModel(
             } catch (_: Exception) {
                 AppLanguage.AUTO
             },
-            episodeSortOrder = DesktopSourcePrefs.episodeSortOrder(),
+            episodeSortOrder = DesktopSourcePrefs.episodeSortOrder(DesktopSourcePrefs.activeSourceId() ?: WorkId.LOCAL_SOURCE),
         ),
     )
     val state: StateFlow<DesktopUiState> = _state.asStateFlow()
@@ -350,6 +364,7 @@ class DesktopViewModel(
                 libraryRoots = DesktopSourcePrefs.libraryRoots(),
                 screen = if (source == null) Screen.Browse else it.screen,
                 series = if (source == null) null else it.series,
+                episodeSortOrder = if (source != null) DesktopSourcePrefs.episodeSortOrder(source.id) else it.episodeSortOrder,
             )
         }
         if (source == null || nextTab == null) return
@@ -1067,6 +1082,7 @@ class DesktopViewModel(
         lastViewedSeries = item
         DesktopImageCache.cancelPendingPreviews()
         episodeJob?.cancel()
+        val sortOrder = DesktopSourcePrefs.episodeSortOrder(item.sourceId)
         _state.update {
             it.copy(
                 screen = Screen.Series,
@@ -1074,6 +1090,7 @@ class DesktopViewModel(
                 seriesHistory = null,
                 rawEpisodes = emptyList(),
                 episodes = emptyList(),
+                episodeSortOrder = sortOrder,
                 episodePage = 1,
                 episodeLastPage = 1,
                 episodeError = null,
@@ -1110,9 +1127,10 @@ class DesktopViewModel(
                 com.comics8.core.model.EpisodePage(emptyList(), page, 1)
             }
             val hasLocal = local.items.isNotEmpty()
-            val sortOrder = _state.value.episodeSortOrder
+            val sortOrder = DesktopSourcePrefs.episodeSortOrder(item.sourceId)
             _state.update {
                 it.copy(
+                    episodeSortOrder = sortOrder,
                     episodeLoading = !hasLocal,
                     episodeError = null,
                     rawEpisodes = if (hasLocal) local.items else it.rawEpisodes,
@@ -1129,7 +1147,7 @@ class DesktopViewModel(
                 _state.update {
                     it.copy(
                         rawEpisodes = result.items,
-                        episodes = result.items.sortedWithOrder(it.episodeSortOrder),
+                        episodes = result.items.sortedWithOrder(sortOrder),
                         episodePage = result.currentPage,
                         episodeLastPage = result.lastPage,
                         episodeLoading = false,
@@ -1805,12 +1823,14 @@ class DesktopViewModel(
         }
         episodeJob?.cancel()
         readerJob?.cancel()
+        val sortOrder = DesktopSourcePrefs.episodeSortOrder(toon.sourceId)
         _state.update {
             it.copy(
                 screen = Screen.Series,
                 series = toon,
                 rawEpisodes = emptyList(),
                 episodes = emptyList(),
+                episodeSortOrder = sortOrder,
                 episodeLoading = true,
                 highlightedEpisodeId = item.lastWrId,
                 readerLoading = true,

@@ -289,12 +289,26 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setEpisodeSortOrder(order: EpisodeSortOrder) {
-        sourceSettings.setEpisodeSortOrder(order)
+        val targetSourceId = _state.value.series?.sourceId ?: _state.value.activeSourceId ?: WorkId.LOCAL_SOURCE
+        setSourceEpisodeSortOrder(targetSourceId, order)
+    }
+
+    fun getSourceEpisodeSortOrder(sourceId: String): EpisodeSortOrder =
+        sourceSettings.episodeSortOrder(sourceId)
+
+    fun setSourceEpisodeSortOrder(sourceId: String, order: EpisodeSortOrder) {
+        sourceSettings.setEpisodeSortOrder(sourceId, order)
         _state.update { current ->
-            current.copy(
-                episodeSortOrder = order,
-                episodes = (current.rawEpisodes.ifEmpty { current.episodes }).sortedWithOrder(order),
-            )
+            val isCurrentSeriesSource = current.series?.sourceId == sourceId
+            val isCurrentActiveSource = current.series == null && (current.activeSourceId ?: WorkId.LOCAL_SOURCE) == sourceId
+            if (isCurrentSeriesSource || isCurrentActiveSource) {
+                current.copy(
+                    episodeSortOrder = order,
+                    episodes = if (isCurrentSeriesSource) (current.rawEpisodes.ifEmpty { current.episodes }).sortedWithOrder(order) else current.episodes,
+                )
+            } else {
+                current
+            }
         }
     }
 
@@ -322,7 +336,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             notificationEnabled = sourceSettings.globalNotificationEnabled(),
             notificationIntervalMinutes = sourceSettings.notificationIntervalMinutes(),
             hasNotificationPermission = androidx.core.app.NotificationManagerCompat.from(application).areNotificationsEnabled(),
-            episodeSortOrder = sourceSettings.episodeSortOrder(),
+            episodeSortOrder = sourceSettings.episodeSortOrder(sourceSettings.activeSourceId() ?: WorkId.LOCAL_SOURCE),
         ),
     )
     val state: StateFlow<ListingUiState> = _state.asStateFlow()
@@ -541,6 +555,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 libraryRoots = sourceSettings.libraryRoots(),
                 screen = if (source == null) Screen.Browse else it.screen,
                 series = if (source == null) null else it.series,
+                episodeSortOrder = if (source != null) sourceSettings.episodeSortOrder(source.id) else it.episodeSortOrder,
             )
         }
         if (source == null || nextTab == null) return
@@ -1296,6 +1311,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         lastViewedSeries = item
         episodeJob?.cancel()
         val targetMode = resolveTargetViewMode()
+        val sortOrder = sourceSettings.episodeSortOrder(item.sourceId)
         _state.update {
             it.copy(
                 screen = Screen.Series,
@@ -1303,6 +1319,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 seriesHistory = null,
                 rawEpisodes = emptyList(),
                 episodes = emptyList(),
+                episodeSortOrder = sortOrder,
                 episodePage = 1,
                 episodeLastPage = 1,
                 episodeError = null,
@@ -1960,12 +1977,14 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         episodeJob?.cancel()
         readerJob?.cancel()
         val targetMode = resolveTargetViewMode()
+        val sortOrder = sourceSettings.episodeSortOrder(toon.sourceId)
         _state.update {
             it.copy(
                 screen = Screen.Series,
                 series = toon,
                 rawEpisodes = emptyList(),
                 episodes = emptyList(),
+                episodeSortOrder = sortOrder,
                 episodeLoading = true,
                 highlightedEpisodeId = item.lastWrId,
                 readerLoading = true,
@@ -2501,9 +2520,10 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 com.comics8.core.model.EpisodePage(emptyList(), page, 1)
             }
             val hasLocal = local.items.isNotEmpty()
-            val sortOrder = _state.value.episodeSortOrder
+            val sortOrder = sourceSettings.episodeSortOrder(item.sourceId)
             _state.update {
                 it.copy(
+                    episodeSortOrder = sortOrder,
                     episodeLoading = !hasLocal && (it.episodes.isEmpty() || !asRefresh),
                     episodeError = null,
                     episodePage = if (hasLocal) 1 else page,

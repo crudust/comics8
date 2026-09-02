@@ -87,9 +87,17 @@ class SourcePrefsTest {
             override fun putBoolean(key: String, value: Boolean) { map[key] = value }
         }
         val settings = StoredSourceSettings(store)
-        assertThat(settings.episodeSortOrder()).isEqualTo(com.comics8.core.model.EpisodeSortOrder.DEFAULT)
-        settings.setEpisodeSortOrder(com.comics8.core.model.EpisodeSortOrder.DATE_DESC)
-        assertThat(settings.episodeSortOrder()).isEqualTo(com.comics8.core.model.EpisodeSortOrder.DATE_DESC)
-        assertThat(store.getString(SourcePrefs.EPISODE_SORT_ORDER_KEY)).isEqualTo("date_desc")
+        val source1 = "source_a"
+        val source2 = "source_b"
+        assertThat(settings.episodeSortOrder(source1)).isEqualTo(com.comics8.core.model.EpisodeSortOrder.DEFAULT)
+        assertThat(settings.episodeSortOrder(source2)).isEqualTo(com.comics8.core.model.EpisodeSortOrder.DEFAULT)
+
+        settings.setEpisodeSortOrder(source1, com.comics8.core.model.EpisodeSortOrder.DATE_DESC)
+        settings.setEpisodeSortOrder(source2, com.comics8.core.model.EpisodeSortOrder.NAME_ASC)
+
+        assertThat(settings.episodeSortOrder(source1)).isEqualTo(com.comics8.core.model.EpisodeSortOrder.DATE_DESC)
+        assertThat(settings.episodeSortOrder(source2)).isEqualTo(com.comics8.core.model.EpisodeSortOrder.NAME_ASC)
+        assertThat(store.getString(SourcePrefs.episodeSortOrderKey(source1))).isEqualTo("date_desc")
+        assertThat(store.getString(SourcePrefs.episodeSortOrderKey(source2))).isEqualTo("name_asc")
     }
 }
