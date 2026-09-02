@@ -199,38 +199,38 @@ private fun ReaderScrollPane(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
     ) {
-        LazyColumn(
-            state = listState,
+        ZoomableBox(
             modifier = Modifier.fillMaxSize(),
+            resetKey = state.currentEpisode?.wrId,
+            onTap = { _, _ -> controlsVisible = !controlsVisible },
         ) {
-            itemsIndexed(state.readerImages, key = { index, url -> "$index-$url" }) { index, imageUrl ->
-                ReaderImage(
-                    model = imageUrl,
-                    contentDescription = strings.labelPageNumber(index + 1),
-                    contentScale = ContentScale.FillWidth,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .wrapContentHeight()
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                        ) {
-                            controlsVisible = !controlsVisible
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                itemsIndexed(state.readerImages, key = { index, url -> "$index-$url" }) { index, imageUrl ->
+                    ReaderImage(
+                        model = imageUrl,
+                        contentDescription = strings.labelPageNumber(index + 1),
+                        contentScale = ContentScale.FillWidth,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .wrapContentHeight(),
+                        onSuccess = { result ->
+                            val w = result.result.drawable.intrinsicWidth
+                            val h = result.result.drawable.intrinsicHeight
+                            if (w > 0 && h > 0) viewModel.recordImageAspectRatio(index, w, h)
                         },
-                    onSuccess = { result ->
-                        val w = result.result.drawable.intrinsicWidth
-                        val h = result.result.drawable.intrinsicHeight
-                        if (w > 0 && h > 0) viewModel.recordImageAspectRatio(index, w, h)
-                    },
-                )
-            }
-            item {
-                ReaderFooter(
-                    state = state,
-                    onPrev = viewModel::openPrevEpisode,
-                    onNext = viewModel::openNextEpisode,
-                    onClose = viewModel::closeReader,
-                )
+                    )
+                }
+                item {
+                    ReaderFooter(
+                        state = state,
+                        onPrev = viewModel::openPrevEpisode,
+                        onNext = viewModel::openNextEpisode,
+                        onClose = viewModel::closeReader,
+                    )
+                }
             }
         }
 
