@@ -73,6 +73,7 @@ import com.comics8.core.i18n.AppStrings
 import com.comics8.core.i18n.displayDescription
 import com.comics8.core.i18n.displayLabel
 import com.comics8.core.i18n.displayTitle
+import com.comics8.core.model.EpisodeSortOrder
 import com.comics8.core.model.ProgressDisplayMode
 import com.comics8.core.source.ComicSource
 import com.comics8.core.source.SourceType
@@ -101,6 +102,10 @@ fun SourceDetailSettingsPane(
 
     var currentProgressMode by remember {
         mutableStateOf(DesktopSourcePrefs.progressDisplayMode(source.id))
+    }
+
+    var currentSortOrder by remember {
+        mutableStateOf(DesktopSourcePrefs.episodeSortOrder(source.id))
     }
 
     // SMB 설정 상태
@@ -347,6 +352,52 @@ fun SourceDetailSettingsPane(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                     }
+                                }
+                            }
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
+
+                            Text(
+                                text = strings.labelEpisodeSortOrder,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+
+                            EpisodeSortOrder.entries.forEach { order ->
+                                val isChecked = order == currentSortOrder
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            currentSortOrder = order
+                                            viewModel.setSourceEpisodeSortOrder(source.id, order)
+                                        }
+                                        .background(
+                                            if (isChecked) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                                            else Color.Transparent,
+                                        )
+                                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                                ) {
+                                    RadioButton(
+                                        selected = isChecked,
+                                        onClick = {
+                                            currentSortOrder = order
+                                            viewModel.setSourceEpisodeSortOrder(source.id, order)
+                                        },
+                                        colors = RadioButtonDefaults.colors(
+                                            selectedColor = MaterialTheme.colorScheme.primary,
+                                            unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        ),
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = order.displayLabel(strings),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = if (isChecked) FontWeight.Bold else FontWeight.Normal,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                    )
                                 }
                             }
                         }
