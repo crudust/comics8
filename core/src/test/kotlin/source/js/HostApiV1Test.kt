@@ -399,6 +399,34 @@ class HostApiV1Test {
             "https://example.com/data/002.webp",
         )
 
+        // 5-1. host.extractImages from script variable with dynamic endpoints (.php, unescaped slashes)
+        val htmlWithDynamicScript = """
+            <html>
+                <script>
+                    var img_list = [
+                        "//www.pl3040.com/kr//01/11447/118280/page1.php",
+                        "https:\/\/cdn.example.com\/v2\/image?id=123",
+                        "//www.pl3040.com/data/captcha.png"
+                    ];
+                </script>
+            </html>
+        """.trimIndent()
+        val jsonDynamicImgs = evalJsonOn(
+            engine,
+            handle,
+            """
+            (function() {
+                return { images: host.extractImages(${jsString(htmlWithDynamicScript)}) };
+            })()
+            """.trimIndent(),
+        )
+        val arrDynamic = jsonDynamicImgs.getJSONArray("images")
+        val dynamicImgList = (0 until arrDynamic.length()).map { arrDynamic.getString(it) }
+        assertThat(dynamicImgList).containsExactly(
+            "https://www.pl3040.com/kr//01/11447/118280/page1.php",
+            "https://cdn.example.com/v2/image?id=123",
+        )
+
         // 6. selectFirst, textOf, attrOf
         val htmlDoc = """
             <div class="item" data-id="999" style="background: url('/thumb.jpg')">
