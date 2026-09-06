@@ -383,10 +383,10 @@ internal class HostApiV1Impl(
             val body = m.groupValues[1]
             val urls = mutableListOf<String>()
             val seen = mutableSetOf<String>()
-            val urlMatches = JS_STRING_URL_RE.findAll(body)
+            val urlMatches = JS_ARRAY_STRING_RE.findAll(body)
             for (um in urlMatches) {
-                val rawUrl = um.groupValues[1].trim()
-                if (rawUrl.isNotBlank() && isComicImageUrl(rawUrl)) {
+                val rawUrl = um.groupValues[1].trim().replace("\\/", "/")
+                if (isValidArrayImageUrl(rawUrl)) {
                     val full = absUrl(rawUrl, baseUri)
                     if (seen.add(full)) urls.add(full)
                 }
@@ -394,6 +394,22 @@ internal class HostApiV1Impl(
             if (urls.isNotEmpty()) result.add(urls)
         }
         return result
+    }
+
+    private fun isValidArrayImageUrl(rawUrl: String): Boolean {
+        if (rawUrl.length < 3) return false
+        if (rawUrl.any { it.isWhitespace() }) return false
+        val lower = rawUrl.lowercase()
+        if (lower.startsWith("javascript:") || lower.startsWith("data:text/")) return false
+        if (isIgnoredImage(rawUrl)) return false
+
+        // URL or path structure
+        if (lower.startsWith("http://") || lower.startsWith("https://") || lower.startsWith("//")) return true
+        if (lower.startsWith("/") || lower.startsWith("./") || lower.startsWith("../")) return true
+        if (lower.contains("/")) return true
+        if (isImageUrl(lower)) return true
+
+        return false
     }
 
     private fun parseImagesFromDom(html: String, baseUri: String): List<String> {
@@ -410,32 +426,58 @@ internal class HostApiV1Impl(
                 img.hasAttr("data-original") -> img.absUrl("data-original").ifBlank { img.attr("data-original") }
                 img.hasAttr("data-lazy") -> img.absUrl("data-lazy").ifBlank { img.attr("data-lazy") }
                 else -> img.absUrl("src").ifBlank { img.attr("src") }
-            }
-            if (raw.isNotBlank() && isComicImageUrl(raw)) {
-                val full = absUrl(raw, baseUri)
-                if (seen.add(full)) urls.add(full)
+            }.trim().replace("\\/", "/")
+            if (raw.isNotBlank()) {
+                val accepted = if (useDoc) {
+                    isComicImageUrl(raw)
+                } else {
+                    !isIgnoredImage(raw) && (isImageUrl(raw) || isValidDomContainerImageUrl(raw))
+                }
+                if (accepted) {
+                    val full = absUrl(raw, baseUri)
+                    if (seen.add(full)) urls.add(full)
+                }
             }
         }
         for (bg in bgNodes) {
-            val extracted = extractBackgroundUrl(bg.attr("style")) ?: continue
-            if (isComicImageUrl(extracted)) {
-                val full = absUrl(extracted, baseUri)
-                if (seen.add(full)) urls.add(full)
+            val extracted = extractBackgroundUrl(bg.attr("style"))?.trim()?.replace("\\/", "/") ?: continue
+            if (extracted.isNotBlank()) {
+                val accepted = if (useDoc) {
+                    isComicImageUrl(extracted)
+                } else {
+                    !isIgnoredImage(extracted) && (isImageUrl(extracted) || isValidDomContainerImageUrl(extracted))
+                }
+                if (accepted) {
+                    val full = absUrl(extracted, baseUri)
+                    if (seen.add(full)) urls.add(full)
+                }
             }
         }
         return urls
     }
 
+    private fun isValidDomContainerImageUrl(rawUrl: String): Boolean {
+        if (rawUrl.length < 3) return false
+        if (rawUrl.startsWith("data:image/", ignoreCase = true)) return true
+        val lower = rawUrl.lowercase()
+        if (lower.startsWith("javascript:") || lower.startsWith("data:text/")) return false
+        return lower.startsWith("http://") || lower.startsWith("https://") || lower.startsWith("//") || lower.startsWith("/")
+    }
+
     private fun isImageUrl(url: String): Boolean {
         val lower = url.lowercase()
         return lower.contains(".jpg") || lower.contains(".jpeg") || lower.contains(".png") ||
-            lower.contains(".webp") || lower.contains(".avif") || lower.contains(".gif")
+            lower.contains(".webp") || lower.contains(".avif") || lower.contains(".gif") ||
+            lower.contains(".bmp")
+    }
+
+    private fun isIgnoredImage(url: String): Boolean {
+        val lower = url.lowercase()
+        return IGNORE_IMAGE_PATTERNS.any { lower.contains(it) }
     }
 
     private fun isComicImageUrl(url: String): Boolean {
-        if (!isImageUrl(url)) return false
-        val lower = url.lowercase()
-        return IGNORE_IMAGE_PATTERNS.none { lower.contains(it) }
+        return isImageUrl(url) && !isIgnoredImage(url)
     }
 
     internal fun checkAborted() {
@@ -575,9 +617,9 @@ internal class HostApiV1Impl(
         const val FETCH_CONCURRENCY = 6
         val BACKOFF_MS = listOf(250L, 1_000L, 4_000L)
         private val JS_IMG_ARRAY_RE = Regex("""(?:var|let|const)\s+(?:img_list|img_list_2|data_list|arr_img|images|toon_images)\s*=\s*\[([\s\S]*?)\]""", RegexOption.IGNORE_CASE)
-        private val JS_STRING_URL_RE = Regex("""["']([^"']+\.(?:jpg|jpeg|png|webp|gif|avif)(?:\?[^"']*)?)["']""", RegexOption.IGNORE_CASE)
+        private val JS_ARRAY_STRING_RE = Regex("""["']([^"'\r\n]+)["']""")
         private val BG_URL_RE = Regex("""url\(\s*(['"]?)(.+?)\1\s*\)""", RegexOption.IGNORE_CASE)
-        private val IGNORE_IMAGE_PATTERNS = listOf("icon-", "favicon", "192x192", "/toonfile/toonres/", "logo", "banner", "avatar")
+        private val IGNORE_IMAGE_PATTERNS = listOf("icon-", "favicon", "192x192", "/toonfile/toonres/", "logo", "banner", "avatar", "captcha")
 
         fun extractBackgroundUrl(style: String?): String? {
             if (style.isNullOrBlank()) return null

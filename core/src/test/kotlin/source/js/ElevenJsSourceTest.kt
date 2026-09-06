@@ -267,6 +267,31 @@ class ElevenJsSourceTest {
     }
 
     @Test
+    fun resolveImagesFromJsArrayWithPhpEndpoints() {
+        runBlocking {
+            val html = """
+                <html>
+                <script>
+                var img_list = [
+                    "//www.pl3040.com/kr//01/11447/118280/3510286587_LouwpG3l_0b56d37d997746f8eda13aeebed2a9b2936a1d93.php",
+                    "//www.pl3040.com/kr//01/11447/118280/3510286587_MY6GgXap_28365cc5644fc416343ca05b99def48f668f7857.php"
+                ];
+                var img_list_2 = [
+                    "//www.pl4050.com/kr//01/11447/118280/3510286587_LouwpG3l_0b56d37d997746f8eda13aeebed2a9b2936a1d93.php?v=ei",
+                    "//www.pl4050.com/kr//01/11447/118280/3510286587_MY6GgXap_28365cc5644fc416343ca05b99def48f668f7857.php?v=ei"
+                ];
+                </script>
+                </html>
+            """.trimIndent()
+            val images = loadEleven().resolveImages(episode(), item(), RecordingHttp(html))
+            assertThat(images).containsExactly(
+                "https://www.pl3040.com/kr//01/11447/118280/3510286587_LouwpG3l_0b56d37d997746f8eda13aeebed2a9b2936a1d93.php",
+                "https://www.pl3040.com/kr//01/11447/118280/3510286587_MY6GgXap_28365cc5644fc416343ca05b99def48f668f7857.php",
+            ).inOrder()
+        }
+    }
+
+    @Test
     fun resolveImagesFromDomElements() {
         runBlocking {
             val html = """
