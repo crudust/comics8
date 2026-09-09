@@ -60,6 +60,7 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
 
     override fun openFile(path: String): OpenedNetworkFile {
         val handles = handles()
+        var openedFile: com.hierynomus.smbj.share.File? = null
         return try {
             val file = handles.share.openFile(
                 remotePath(path),
@@ -69,6 +70,7 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
                 SMB2CreateDisposition.FILE_OPEN,
                 EnumSet.of(SMB2CreateOptions.FILE_NON_DIRECTORY_FILE, SMB2CreateOptions.FILE_RANDOM_ACCESS),
             )
+            openedFile = file
             val info = file.fileInformation
             val revision = FileRevision(
                 info.standardInformation.endOfFile,
@@ -76,6 +78,7 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
             )
             OpenedNetworkFile(SmbChannel(file, revision.sizeBytes), revision)
         } catch (e: Exception) {
+            runCatching { openedFile?.close() }
             invalidate(handles)
             throw e
         }
@@ -157,101 +160,24 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
 
     private class SmbChannel(
         private val file: com.hierynomus.smbj.share.File,
-        private val length: Long,
-    ) : ReadOnlySeekableChannel() {
-        private var blockStart = -1L
-        private var block = ByteArray(0)
+        length: Long,
+    ) : BufferedNetworkChannel(length) {
 
-        override fun size(): Long = synchronized(lock) { length }
-
-        private fun readFileFully(buf: ByteArray, fileOffset: Long, lengthToRead: Int): Int {
+        override fun fetchRange(offset: Long, lengthToRead: Int): ByteArray {
+            val buf = ByteArray(lengthToRead)
             var total = 0
             while (total < lengthToRead) {
                 val toReadNow = minOf(lengthToRead - total, 1024 * 1024)
-                val read = file.read(buf, fileOffset + total, total, toReadNow)
+                val read = file.read(buf, offset + total, total, toReadNow)
                 if (read <= 0) break
                 total += read
             }
-            return total
-        }
-
-        override fun read(dst: ByteBuffer): Int = synchronized(lock) {
-            check(open) { "channel closed" }
-            if (cursor >= length) return -1
-            var total = 0
-            while (dst.hasRemaining() && cursor < length) {
-                val remaining = dst.remaining()
-                if (remaining >= DIRECT_READ_THRESHOLD) {
-                    val toRead = minOf(remaining.toLong(), length - cursor, 1024L * 1024L).toInt()
-                    val bytes = ByteArray(toRead)
-                    val read = readFileFully(bytes, cursor, toRead)
-                    if (read <= 0) {
-                        if (total == 0) throw IOException("SMB 파일 읽기 실패 (위치: $cursor)")
-                        break
-                    }
-                    dst.put(bytes, 0, read)
-                    cursor += read
-                    total += read
-                    blockStart = -1L
-                    block = ByteArray(0)
-                    continue
-                }
-
-                val wantedStart = cursor / BLOCK_SIZE * BLOCK_SIZE
-                if (blockStart != wantedStart) {
-                    loadBlock(wantedStart)
-                }
-                val offset = (cursor - blockStart).toInt()
-                if (offset !in block.indices) {
-                    if (total == 0) throw IOException("SMB 블록 읽기 실패 (위치: $cursor, 블록시작: $blockStart)")
-                    break
-                }
-                val count = minOf(
-                    remaining.toLong(),
-                    (block.size - offset).toLong(),
-                    length - cursor,
-                ).toInt()
-                if (count <= 0) break
-                dst.put(block, offset, count)
-                cursor += count
-                total += count
-            }
-            return if (total == 0 && cursor >= length) -1 else total
-        }
-
-        private fun loadBlock(start: Long) {
-            val toFetch = minOf(BLOCK_SIZE, length - start).toInt()
-            if (toFetch <= 0) {
-                block = ByteArray(0)
-                blockStart = -1L
-                return
-            }
-            val buf = ByteArray(toFetch)
-            val read = readFileFully(buf, start, toFetch)
-            if (read > 0) {
-                block = if (read == toFetch) buf else buf.copyOf(read)
-                blockStart = start
-            } else {
-                block = ByteArray(0)
-                blockStart = -1L
-            }
+            return if (total == lengthToRead) buf else buf.copyOf(total)
         }
 
         override fun close() {
-            synchronized(lock) {
-                if (!open) return
-                open = false
-                block = ByteArray(0)
-                try {
-                    file.close()
-                } catch (_: Exception) {
-                }
-            }
-        }
-
-        companion object {
-            private const val BLOCK_SIZE = 512 * 1024L
-            private const val DIRECT_READ_THRESHOLD = 512 * 1024
+            runCatching { file.close() }
+            super.close()
         }
     }
 

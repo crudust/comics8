@@ -1,6 +1,8 @@
 package com.comics8.core.source.network
 
 import com.comics8.core.source.FileRevision
+import okhttp3.ConnectionPool
+import okhttp3.Dispatcher
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -18,15 +20,18 @@ import java.nio.channels.SeekableByteChannel
 import java.nio.charset.StandardCharsets
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.TimeUnit
 import javax.xml.XMLConstants
 import javax.xml.parsers.DocumentBuilderFactory
 
 class WebDavFileSystem(
     private val config: NetworkSourceConfig,
-    client: OkHttpClient = OkHttpClient(),
+    client: OkHttpClient = DEFAULT_CLIENT,
 ) : NetworkFileSystem {
     private val authHandler = WebDavAuthHandler(config)
     private val client: OkHttpClient = client.newBuilder()
+        .connectionPool(CONNECTION_POOL)
+        .dispatcher(DISPATCHER)
         .addInterceptor(authHandler)
         .authenticator(authHandler)
         .build()
@@ -45,9 +50,8 @@ class WebDavFileSystem(
 
     override fun open(path: String): InputStream {
         val url = urlFor(path)
-        val revision = readRevision(url)
         val response = client.newCall(
-            requestBuilder(url).withRevisionCondition(revision).get().build(),
+            requestBuilder(url).get().build(),
         ).execute()
         if (!response.isSuccessful) {
             val error = httpError(response, "WebDAV 파일을 열 수 없습니다")
@@ -60,8 +64,11 @@ class WebDavFileSystem(
         }
         return object : FilterInputStream(stream) {
             override fun close() {
-                super.close()
-                response.close()
+                try {
+                    super.close()
+                } finally {
+                    response.close()
+                }
             }
         }
     }
@@ -195,42 +202,12 @@ class WebDavFileSystem(
         private val requestBuilder: (String) -> Request.Builder,
         private val url: String,
         private val revision: FileRevision,
-    ) : ReadOnlySeekableChannel() {
-        private val length = revision.sizeBytes
-        private var blockStart = -1L
-        private var block = ByteArray(0)
+    ) : BufferedNetworkChannel(revision.sizeBytes) {
 
-        override fun size(): Long = synchronized(lock) { length }
-
-        override fun read(dst: ByteBuffer): Int = synchronized(lock) {
-            check(open) { "channel closed" }
-            if (cursor >= length) return -1
-            var total = 0
-            while (dst.hasRemaining() && cursor < length) {
-                val wantedStart = cursor / BLOCK_SIZE * BLOCK_SIZE
-                if (blockStart != wantedStart) loadBlock(wantedStart)
-                val offset = (cursor - blockStart).toInt()
-                if (offset !in block.indices) {
-                    if (total == 0) throw IOException("WebDAV 블록 읽기 실패 (위치: $cursor, 블록시작: $blockStart)")
-                    break
-                }
-                val count = minOf(
-                    dst.remaining().toLong(),
-                    (block.size - offset).toLong(),
-                    length - cursor,
-                ).toInt()
-                if (count <= 0) break
-                dst.put(block, offset, count)
-                cursor += count
-                total += count
-            }
-            return if (total == 0 && cursor >= length) -1 else total
-        }
-
-        private fun loadBlock(start: Long) {
-            val end = minOf(length - 1, start + BLOCK_SIZE - 1)
+        override fun fetchRange(offset: Long, lengthToRead: Int): ByteArray {
+            val end = offset + lengthToRead - 1
             val builder = requestBuilder(url)
-                .header("Range", "bytes=$start-$end")
+                .header("Range", "bytes=$offset-$end")
                 .withRevisionCondition(revision)
             val request = builder.get().build()
             client.newCall(request).execute().use { response ->
@@ -240,32 +217,31 @@ class WebDavFileSystem(
                 if (response.code != 206) {
                     throw IOException("WebDAV 서버가 바이트 범위 읽기를 지원하지 않습니다 (HTTP ${response.code})")
                 }
-                block = response.body?.bytes() ?: throw IOException("WebDAV 범위 응답이 비어 있습니다")
-                blockStart = start
+                return response.body?.bytes() ?: throw IOException("WebDAV 범위 응답이 비어 있습니다")
             }
-        }
-
-        override fun close() {
-            synchronized(lock) {
-                open = false
-                block = ByteArray(0)
-            }
-        }
-
-        companion object {
-            private const val BLOCK_SIZE = 512 * 1024L
         }
     }
 
     companion object {
+        private val CONNECTION_POOL = ConnectionPool(32, 5, TimeUnit.MINUTES)
+        private val DISPATCHER = Dispatcher().apply {
+            maxRequests = 64
+            maxRequestsPerHost = 32
+        }
+        private val DEFAULT_CLIENT = OkHttpClient.Builder()
+            .connectionPool(CONNECTION_POOL)
+            .dispatcher(DISPATCHER)
+            .build()
+
         private const val PROPFIND_BODY = """<?xml version="1.0" encoding="utf-8" ?>
 <d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:getetag/></d:prop></d:propfind>"""
     }
 }
 
 private fun Request.Builder.withRevisionCondition(revision: FileRevision): Request.Builder = apply {
-    if (revision.entityTag != null) {
-        header("If-Match", revision.entityTag)
+    val tag = revision.entityTag
+    if (tag != null && !tag.startsWith("W/", ignoreCase = true)) {
+        header("If-Match", tag)
     } else if (revision.modifiedAtEpochMs > 0L) {
         val value = DateTimeFormatter.RFC_1123_DATE_TIME.format(
             java.time.Instant.ofEpochMilli(revision.modifiedAtEpochMs).atZone(java.time.ZoneOffset.UTC),
