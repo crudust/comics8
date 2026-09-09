@@ -1,7 +1,6 @@
 package com.comics8.core.source.network
 
 import com.comics8.core.source.FileRevision
-import okhttp3.Credentials
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -24,8 +23,13 @@ import javax.xml.parsers.DocumentBuilderFactory
 
 class WebDavFileSystem(
     private val config: NetworkSourceConfig,
-    private val client: OkHttpClient = OkHttpClient(),
+    client: OkHttpClient = OkHttpClient(),
 ) : NetworkFileSystem {
+    private val authHandler = WebDavAuthHandler(config)
+    private val client: OkHttpClient = client.newBuilder()
+        .addInterceptor(authHandler)
+        .authenticator(authHandler)
+        .build()
     override fun list(path: String): List<NetworkNode> {
         val requestUrl = urlFor(path, directory = true)
         val request = requestBuilder(requestUrl)
@@ -121,13 +125,7 @@ class WebDavFileSystem(
         return FileRevision(size, modifiedAt, entityTag)
     }
 
-    private fun requestBuilder(url: String): Request.Builder {
-        val builder = Request.Builder().url(url)
-        if (config.username.isNotBlank()) {
-            builder.header("Authorization", Credentials.basic(config.username, config.password))
-        }
-        return builder
-    }
+    private fun requestBuilder(url: String): Request.Builder = Request.Builder().url(url)
 
     private fun urlFor(path: String, directory: Boolean = false): String {
         val base = config.url.trimEnd('/')

@@ -68,6 +68,62 @@ class WebDavFileSystemTest {
         }
     }
 
+    @Test
+    fun handlesDigestAuthenticationChallenge() {
+        val server = MockWebServer()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val auth = request.getHeader("Authorization")
+                if (auth == null || !auth.startsWith("Digest ")) {
+                    return MockResponse()
+                        .setResponseCode(401)
+                        .setHeader(
+                            "WWW-Authenticate",
+                            """Digest realm="test-realm", nonce="mock-nonce-123", qop="auth", algorithm=MD5""",
+                        )
+                }
+                return when (request.method) {
+                    "PROPFIND" -> MockResponse()
+                        .setResponseCode(207)
+                        .setBody(MULTISTATUS)
+                    else -> MockResponse().setResponseCode(404)
+                }
+            }
+        }
+        server.start()
+        try {
+            val config = NetworkSourceConfig(
+                id = "network-dav-digest-test",
+                protocol = NetworkProtocol.WEBDAV,
+                name = "DAV-Digest",
+                url = server.url("/dav/").toString(),
+                username = "me",
+                password = "pw",
+            ).validated()
+            val fs = WebDavFileSystem(config)
+
+            val list = fs.list("")
+            assertThat(list).hasSize(1)
+            assertThat(list.first().name).isEqualTo("book.cbz")
+
+            val requests = generateSequence { server.takeRequest(100, java.util.concurrent.TimeUnit.MILLISECONDS) }
+                .toList()
+            assertThat(requests).hasSize(2)
+            // 첫 번째 요청: Basic auth 또는 미인증
+            // 두 번째 요청: Digest auth
+            val digestRequest = requests[1]
+            val authHeader = checkNotNull(digestRequest.getHeader("Authorization"))
+            assertThat(authHeader).startsWith("Digest ")
+            assertThat(authHeader).contains("""username="me"""")
+            assertThat(authHeader).contains("""realm="test-realm"""")
+            assertThat(authHeader).contains("""nonce="mock-nonce-123"""")
+            assertThat(authHeader).contains("qop=auth")
+            assertThat(authHeader).contains("nc=00000001")
+        } finally {
+            server.shutdown()
+        }
+    }
+
     companion object {
         private const val MULTISTATUS = """<?xml version="1.0" encoding="utf-8"?>
 <d:multistatus xmlns:d="DAV:">
