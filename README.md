@@ -55,7 +55,8 @@ Or download `Comics8-mac.zip` from [GitHub Releases](https://github.com/crudust/
 Download `Comics8-win.zip` from [GitHub Releases](https://github.com/crudust/comics8/releases/latest), extract anywhere, and run `Comics8.exe` (portable, no installation required).
 
 ### Android
-Download `comics8-latest.apk` directly from [GitHub Releases](https://github.com/crudust/comics8/releases/latest) on your mobile device.
+- **Google Play (Closed Beta)**: Join the [Comics8 Testers Google Group](https://groups.google.com/g/comics8-testers) to participate in the closed beta and install via the Google Play Store.
+- **Direct APK**: Download `comics8-latest.apk` directly from [GitHub Releases](https://github.com/crudust/comics8/releases/latest) on your mobile device.
 
 ---
 
