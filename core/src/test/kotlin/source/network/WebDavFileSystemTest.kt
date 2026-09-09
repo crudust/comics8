@@ -124,6 +124,45 @@ class WebDavFileSystemTest {
         }
     }
 
+    @Test
+    fun handlesPercentCharacterInFilenameWithoutDoubleDecoding() {
+        val server = MockWebServer()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = when (request.method) {
+                "PROPFIND" -> MockResponse()
+                    .setResponseCode(207)
+                    .setBody("""<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response><d:href>/dav/</d:href><d:propstat><d:prop><d:collection/></d:prop></d:propstat></d:response>
+  <d:response><d:href>/dav/Kari%20Tomo%20300%25.zip</d:href><d:propstat><d:prop><d:getcontentlength>1234</d:getcontentlength></d:prop></d:propstat></d:response>
+  <d:response><d:href>/dav/120%25%20discount.cbz</d:href><d:propstat><d:prop><d:getcontentlength>5678</d:getcontentlength></d:prop></d:propstat></d:response>
+</d:multistatus>""")
+                else -> MockResponse().setResponseCode(404)
+            }
+        }
+        server.start()
+        try {
+            val config = NetworkSourceConfig(
+                id = "network-dav-percent-test",
+                protocol = NetworkProtocol.WEBDAV,
+                name = "DAV-Percent",
+                url = server.url("/dav/").toString(),
+                username = "me",
+                password = "pw",
+            ).validated()
+            val fs = WebDavFileSystem(config)
+
+            val list = fs.list("")
+            assertThat(list).hasSize(2)
+            assertThat(list.map { it.name }).containsExactly(
+                "Kari Tomo 300%.zip",
+                "120% discount.cbz",
+            )
+        } finally {
+            server.shutdown()
+        }
+    }
+
     companion object {
         private const val MULTISTATUS = """<?xml version="1.0" encoding="utf-8"?>
 <d:multistatus xmlns:d="DAV:">
