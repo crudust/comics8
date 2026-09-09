@@ -118,9 +118,15 @@ internal class WebDavAuthHandler(
             url.encodedPath
         }
 
+        val qopList = challenge.qop?.split(",")?.map { it.trim().lowercase() } ?: emptyList()
+        val useAuthQop = qopList.contains("auth")
+        val isSess = algorithm.contains("sess", ignoreCase = true)
+        val cnonce = if (useAuthQop || isSess) {
+            UUID.randomUUID().toString().replace("-", "").take(16)
+        } else ""
+
         val ha1 = when {
-            algorithm.equals("MD5-sess", ignoreCase = true) || algorithm.equals("SHA-256-sess", ignoreCase = true) -> {
-                val cnonce = UUID.randomUUID().toString().replace("-", "").take(16)
+            isSess -> {
                 val base = hashHex(algorithm, "$username:$realm:$password")
                 hashHex(algorithm, "$base:$nonce:$cnonce")
             }
@@ -129,20 +135,14 @@ internal class WebDavAuthHandler(
 
         val ha2 = hashHex(algorithm, "$method:$uri")
 
-        val qopList = challenge.qop?.split(",")?.map { it.trim().lowercase() } ?: emptyList()
-        val useAuthQop = qopList.contains("auth")
-
         val response: String
         val ncStr: String
-        val cnonce: String
         if (useAuthQop) {
             val nc = ncCounter.incrementAndGet()
             ncStr = "%08x".format(nc)
-            cnonce = UUID.randomUUID().toString().replace("-", "").take(16)
             response = hashHex(algorithm, "$ha1:$nonce:$ncStr:$cnonce:auth:$ha2")
         } else {
             ncStr = ""
-            cnonce = ""
             response = hashHex(algorithm, "$ha1:$nonce:$ha2")
         }
 
@@ -155,6 +155,8 @@ internal class WebDavAuthHandler(
             parts.add("""cnonce="$cnonce"""")
             parts.add("nc=$ncStr")
             parts.add("qop=auth")
+        } else if (isSess) {
+            parts.add("""cnonce="$cnonce"""")
         }
         parts.add("""response="$response"""")
         if (challenge.algorithm != null) {
