@@ -154,9 +154,15 @@ class WebDavFileSystem(
             for (i in 0 until responses.length) {
                 val element = responses.item(i) as? Element ?: continue
                 val href = element.firstText("href") ?: continue
-                val hrefPath = runCatching { URI(href).path }.getOrNull() ?: href
+                val uri = runCatching { URI(href) }.getOrNull()
+                val hrefPath = uri?.path ?: href
                 if (hrefPath.trimEnd('/') == expected) continue
-                val decoded = URLDecoder.decode(hrefPath.trimEnd('/').substringAfterLast('/'), StandardCharsets.UTF_8)
+                val decoded = uri?.path?.trimEnd('/')?.substringAfterLast('/')?.takeIf(String::isNotBlank)
+                    ?: runCatching {
+                        val rawSegment = (uri?.rawPath ?: href).trimEnd('/').substringAfterLast('/')
+                        URLDecoder.decode(rawSegment, StandardCharsets.UTF_8)
+                    }.getOrNull()
+                    ?: (uri?.rawPath ?: href).trimEnd('/').substringAfterLast('/')
                 if (decoded.isBlank()) continue
                 val directory = element.getElementsByTagNameNS("DAV:", "collection").length > 0
                 val size = element.firstText("getcontentlength")?.toLongOrNull() ?: 0L
