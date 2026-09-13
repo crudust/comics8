@@ -121,8 +121,10 @@ git push origin main
 if [[ -n "${COMICS8_MAC_SSH:-}" ]]; then
     echo "🍏 Building macOS app on Mac builder (${COMICS8_MAC_SSH})..."
     rm -f "${MAC_ZIP_PATH}"
-    COMICS8_VERSION_NAME="${VERSION_NAME}" COMICS8_VERSION_CODE="${VERSION_CODE}" \
-        ./scripts/update-mac-app-remote.sh "origin/main" "${MAC_ZIP_PATH}"
+    if ! COMICS8_VERSION_NAME="${VERSION_NAME}" COMICS8_VERSION_CODE="${VERSION_CODE}" \
+        ./scripts/update-mac-app-remote.sh "origin/main" "${MAC_ZIP_PATH}"; then
+        echo "  ⚠️ Mac builder (${COMICS8_MAC_SSH}) is unreachable or build failed. Skipped remote macOS build."
+    fi
 fi
 
 # 4. Sync open-source modules to public repo
