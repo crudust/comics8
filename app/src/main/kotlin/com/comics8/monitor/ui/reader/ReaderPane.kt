@@ -41,6 +41,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -48,9 +50,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.clipRect
@@ -289,26 +298,17 @@ private fun ReaderScrollPane(
 }
 
 @Composable
-private fun ReaderSinglePagePane(
+private fun ReaderPagedLayout(
     state: ListingUiState,
     viewModel: ListingViewModel,
+    pagerState: PagerState,
+    totalPages: Int,
+    isR2L: Boolean,
+    currentRangeText: String,
     modifier: Modifier = Modifier,
+    content: @Composable (page: Int, handleTap: (Offset, IntSize) -> Unit) -> Unit,
 ) {
     val strings = LocalStrings.current
-    val isR2L = state.readDirection == ReadDirection.RIGHT_TO_LEFT
-    val slices = remember(state.readerImages.size, state.imageAspectRatios, state.splitMode, state.readDirection) {
-        buildSinglePageSlices(state.readerImages.size, state.imageAspectRatios, state.splitMode, state.readDirection)
-    }
-    val totalSlices = slices.size.coerceAtLeast(1)
-    val initialPage = remember(state.currentEpisode?.wrId) {
-        val targetPage = state.currentEpisode?.lastReadPage ?: 0
-        val idx = slices.indexOfFirst { it.imageIndex >= targetPage }
-        if (idx >= 0) idx.coerceIn(0, totalSlices - 1) else 0
-    }
-    val pagerState = rememberPagerState(
-        initialPage = initialPage,
-        pageCount = { totalSlices },
-    )
     val scope = rememberCoroutineScope()
     var controlsVisible by remember { mutableStateOf(false) }
     var nextPromptVisible by remember { mutableStateOf(false) }
@@ -326,31 +326,9 @@ private fun ReaderSinglePagePane(
         }
     }
 
-    LaunchedEffect(pagerState.currentPage, slices) {
-        if (state.readerImages.isNotEmpty() && slices.isNotEmpty()) {
-            val slice = slices.getOrNull(pagerState.currentPage)
-            if (slice != null) {
-                viewModel.savePage(slice.imageIndex)
-            }
-        }
-    }
-
-    var restoredWrId by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(state.currentEpisode?.wrId, state.readerImages.isNotEmpty()) {
-        val wrId = state.currentEpisode?.wrId
-        if (wrId != null && wrId != restoredWrId && state.readerImages.isNotEmpty()) {
-            restoredWrId = wrId
-            val target = state.currentEpisode?.lastReadPage ?: 0
-            val idx = slices.indexOfFirst { it.imageIndex >= target }
-            if (idx in 0 until totalSlices && idx != pagerState.currentPage) {
-                pagerState.scrollToPage(idx)
-            }
-        }
-    }
-
     val onAdvance = {
         controlsVisible = false
-        if (pagerState.currentPage < totalSlices - 1) {
+        if (pagerState.currentPage < totalPages - 1) {
             nextPromptVisible = false
             prevPromptVisible = false
             scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
@@ -406,19 +384,94 @@ private fun ReaderSinglePagePane(
         }
     }
 
-    val context = LocalContext.current
-    LaunchedEffect(pagerState.currentPage, slices, state.readerImages) {
-        val imageLoader = coil.Coil.imageLoader(context)
-        val maxEdge = coil.size.Size(1200, 1800)
-        for (offset in 1..2) {
-            val nextSlice = slices.getOrNull(pagerState.currentPage + offset) ?: continue
-            val targetUrl = state.readerImages.getOrNull(nextSlice.imageIndex) ?: continue
-            val request = coil.request.ImageRequest.Builder(context)
-                .data(targetUrl)
-                .imageCacheRole(ImageCacheRole.READER, targetUrl)
-                .size(maxEdge)
-                .build()
-            imageLoader.execute(request)
+    val density = LocalDensity.current
+    val dragThresholdPx = remember(density) { with(density) { 48.dp.toPx() } }
+    val minDragForFlingPx = remember(density) { with(density) { 16.dp.toPx() } }
+    val velocityThresholdPx = remember(density) { with(density) { 300.dp.toPx() } }
+    var accumulatedForwardOverscroll by remember { mutableFloatStateOf(0f) }
+    var accumulatedBackwardOverscroll by remember { mutableFloatStateOf(0f) }
+    var lastEdgeTriggerTime by remember { mutableLongStateOf(0L) }
+
+    val nestedScrollConnection = remember(isR2L, totalPages, pagerState) {
+        object : NestedScrollConnection {
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource,
+            ): Offset {
+                if (source == NestedScrollSource.UserInput) {
+                    val isAtEnd = pagerState.currentPage >= totalPages - 1
+                    val isAtStart = pagerState.currentPage <= 0
+                    val forwardDelta = if (isR2L) available.x else -available.x
+                    val backwardDelta = if (isR2L) -available.x else available.x
+
+                    if (isAtEnd && forwardDelta > 0f) {
+                        accumulatedForwardOverscroll += forwardDelta
+                        accumulatedBackwardOverscroll = 0f
+                    } else if (isAtStart && backwardDelta > 0f) {
+                        accumulatedBackwardOverscroll += backwardDelta
+                        accumulatedForwardOverscroll = 0f
+                    } else if (forwardDelta < 0f && backwardDelta < 0f) {
+                        accumulatedForwardOverscroll = 0f
+                        accumulatedBackwardOverscroll = 0f
+                    }
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                val isAtEnd = pagerState.currentPage >= totalPages - 1
+                val isAtStart = pagerState.currentPage <= 0
+                val forwardVelocity = if (isR2L) available.x else -available.x
+                val backwardVelocity = if (isR2L) -available.x else available.x
+
+                val now = System.currentTimeMillis()
+                val canTrigger = (now - lastEdgeTriggerTime) > 400L
+
+                if (canTrigger) {
+                    val hasForwardDistance = accumulatedForwardOverscroll >= dragThresholdPx
+                    val hasForwardFling =
+                        (accumulatedForwardOverscroll >= minDragForFlingPx) && (forwardVelocity >= velocityThresholdPx)
+
+                    val hasBackwardDistance = accumulatedBackwardOverscroll >= dragThresholdPx
+                    val hasBackwardFling =
+                        (accumulatedBackwardOverscroll >= minDragForFlingPx) && (backwardVelocity >= velocityThresholdPx)
+
+                    if (isAtEnd && (hasForwardDistance || hasForwardFling)) {
+                        lastEdgeTriggerTime = now
+                        accumulatedForwardOverscroll = 0f
+                        accumulatedBackwardOverscroll = 0f
+                        onAdvance()
+                    } else if (isAtStart && (hasBackwardDistance || hasBackwardFling)) {
+                        lastEdgeTriggerTime = now
+                        accumulatedForwardOverscroll = 0f
+                        accumulatedBackwardOverscroll = 0f
+                        onRetreat()
+                    }
+                }
+                accumulatedForwardOverscroll = 0f
+                accumulatedBackwardOverscroll = 0f
+                return Velocity.Zero
+            }
+        }
+    }
+
+    val handleTap: (Offset, IntSize) -> Unit = { tapOffset, size ->
+        val tapX = tapOffset.x
+        val width = size.width.toFloat()
+        val isNextOnLeft = when (state.pageTapZone) {
+            PageTapZone.FOLLOW_DIRECTION -> isR2L
+            PageTapZone.LEFT_NEXT -> true
+            PageTapZone.RIGHT_NEXT -> false
+        }
+        when {
+            tapX < width * 0.35f -> if (isNextOnLeft) onAdvance() else onRetreat()
+            tapX > width * 0.65f -> if (isNextOnLeft) onRetreat() else onAdvance()
+            else -> {
+                controlsVisible = !controlsVisible
+                nextPromptVisible = false
+                prevPromptVisible = false
+            }
         }
     }
 
@@ -431,55 +484,17 @@ private fun ReaderSinglePagePane(
             state = pagerState,
             reverseLayout = isR2L,
             beyondViewportPageCount = 1,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .nestedScroll(nestedScrollConnection),
         ) { page ->
-            val slice = slices.getOrNull(page)
-            val imageUrl = slice?.let { state.readerImages.getOrNull(it.imageIndex) }
-            val half = slice?.half ?: ImageHalf.FULL
-
-            ZoomableBox(
-                modifier = Modifier.fillMaxSize(),
-                resetKey = page,
-                onTap = { tapOffset, size ->
-                    val tapX = tapOffset.x
-                    val width = size.width.toFloat()
-                    val isNextOnLeft = when (state.pageTapZone) {
-                        PageTapZone.FOLLOW_DIRECTION -> isR2L
-                        PageTapZone.LEFT_NEXT -> true
-                        PageTapZone.RIGHT_NEXT -> false
-                    }
-                    when {
-                        tapX < width * 0.35f -> if (isNextOnLeft) onAdvance() else onRetreat()
-                        tapX > width * 0.65f -> if (isNextOnLeft) onRetreat() else onAdvance()
-                        else -> {
-                            controlsVisible = !controlsVisible
-                            nextPromptVisible = false
-                            prevPromptVisible = false
-                        }
-                    }
-                },
-            ) { scale ->
-                ReaderImage(
-                    model = imageUrl,
-                    half = half,
-                    contentDescription = strings.labelPageNumber(page + 1),
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize(),
-                    onSuccess = { result ->
-                        val w = result.result.drawable.intrinsicWidth
-                        val h = result.result.drawable.intrinsicHeight
-                        if (w > 0 && h > 0 && slice != null) {
-                            viewModel.recordImageAspectRatio(slice.imageIndex, w, h)
-                        }
-                    },
-                )
-            }
+            content(page, handleTap)
         }
 
-        // Floating Page Indicator
+        // Floating Page Indicator (Visible when controls are hidden)
         if (!controlsVisible && state.readerImages.isNotEmpty()) {
             Text(
-                text = "${pagerState.currentPage + 1} / $totalSlices",
+                text = currentRangeText,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                 modifier = Modifier
@@ -492,7 +507,7 @@ private fun ReaderSinglePagePane(
             )
         }
 
-        // Boundary Confirmation Prompt
+        // Boundary Confirmation Prompt (Next Episode)
         EpisodeBoundaryPrompt(
             visible = nextPromptVisible,
             title = if (state.hasNextEpisode) strings.promptLastPage else strings.promptLastEpisode,
@@ -507,6 +522,7 @@ private fun ReaderSinglePagePane(
             },
         )
 
+        // Boundary Confirmation Prompt (Prev Episode)
         EpisodeBoundaryPrompt(
             visible = prevPromptVisible,
             title = if (state.hasPrevEpisode) strings.promptFirstPage else strings.promptFirstEpisode,
@@ -543,9 +559,9 @@ private fun ReaderSinglePagePane(
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
             ReaderBottomBar(
-                currentRangeText = "${pagerState.currentPage + 1} / $totalSlices",
+                currentRangeText = currentRangeText,
                 currentPage = pagerState.currentPage + 1,
-                maxPages = totalSlices,
+                maxPages = totalPages,
                 hasPrevEpisode = state.hasPrevEpisode,
                 hasNextEpisode = state.hasNextEpisode,
                 onPageChange = { targetPage ->
@@ -554,6 +570,102 @@ private fun ReaderSinglePagePane(
                 onPrevEp = viewModel::openPrevEpisode,
                 onNextEp = viewModel::openNextEpisode,
                 onClose = viewModel::closeReader,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReaderSinglePagePane(
+    state: ListingUiState,
+    viewModel: ListingViewModel,
+    modifier: Modifier = Modifier,
+) {
+    val strings = LocalStrings.current
+    val isR2L = state.readDirection == ReadDirection.RIGHT_TO_LEFT
+    val slices = remember(state.readerImages.size, state.imageAspectRatios, state.splitMode, state.readDirection) {
+        buildSinglePageSlices(state.readerImages.size, state.imageAspectRatios, state.splitMode, state.readDirection)
+    }
+    val totalSlices = slices.size.coerceAtLeast(1)
+    val initialPage = remember(state.currentEpisode?.wrId) {
+        val targetPage = state.currentEpisode?.lastReadPage ?: 0
+        val idx = slices.indexOfFirst { it.imageIndex >= targetPage }
+        if (idx >= 0) idx.coerceIn(0, totalSlices - 1) else 0
+    }
+    val pagerState = rememberPagerState(
+        initialPage = initialPage,
+        pageCount = { totalSlices },
+    )
+
+    LaunchedEffect(pagerState.currentPage, slices) {
+        if (state.readerImages.isNotEmpty() && slices.isNotEmpty()) {
+            val slice = slices.getOrNull(pagerState.currentPage)
+            if (slice != null) {
+                viewModel.savePage(slice.imageIndex)
+            }
+        }
+    }
+
+    var restoredWrId by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.currentEpisode?.wrId, state.readerImages.isNotEmpty()) {
+        val wrId = state.currentEpisode?.wrId
+        if (wrId != null && wrId != restoredWrId && state.readerImages.isNotEmpty()) {
+            restoredWrId = wrId
+            val target = state.currentEpisode?.lastReadPage ?: 0
+            val idx = slices.indexOfFirst { it.imageIndex >= target }
+            if (idx in 0 until totalSlices && idx != pagerState.currentPage) {
+                pagerState.scrollToPage(idx)
+            }
+        }
+    }
+
+    val context = LocalContext.current
+    LaunchedEffect(pagerState.currentPage, slices, state.readerImages) {
+        val imageLoader = coil.Coil.imageLoader(context)
+        val maxEdge = coil.size.Size(1200, 1800)
+        for (offset in 1..2) {
+            val nextSlice = slices.getOrNull(pagerState.currentPage + offset) ?: continue
+            val targetUrl = state.readerImages.getOrNull(nextSlice.imageIndex) ?: continue
+            val request = coil.request.ImageRequest.Builder(context)
+                .data(targetUrl)
+                .imageCacheRole(ImageCacheRole.READER, targetUrl)
+                .size(maxEdge)
+                .build()
+            imageLoader.execute(request)
+        }
+    }
+
+    ReaderPagedLayout(
+        state = state,
+        viewModel = viewModel,
+        pagerState = pagerState,
+        totalPages = totalSlices,
+        isR2L = isR2L,
+        currentRangeText = "${pagerState.currentPage + 1} / $totalSlices",
+        modifier = modifier,
+    ) { page, handleTap ->
+        val slice = slices.getOrNull(page)
+        val imageUrl = slice?.let { state.readerImages.getOrNull(it.imageIndex) }
+        val half = slice?.half ?: ImageHalf.FULL
+
+        ZoomableBox(
+            modifier = Modifier.fillMaxSize(),
+            resetKey = page,
+            onTap = handleTap,
+        ) { scale ->
+            ReaderImage(
+                model = imageUrl,
+                half = half,
+                contentDescription = strings.labelPageNumber(page + 1),
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize(),
+                onSuccess = { result ->
+                    val w = result.result.drawable.intrinsicWidth
+                    val h = result.result.drawable.intrinsicHeight
+                    if (w > 0 && h > 0 && slice != null) {
+                        viewModel.recordImageAspectRatio(slice.imageIndex, w, h)
+                    }
+                },
             )
         }
     }
@@ -585,22 +697,6 @@ private fun ReaderDualPagePane(
         initialPage = initialSpread,
         pageCount = { totalSpreads },
     )
-    val scope = rememberCoroutineScope()
-    var controlsVisible by remember { mutableStateOf(false) }
-    var nextPromptVisible by remember { mutableStateOf(false) }
-    var prevPromptVisible by remember { mutableStateOf(false) }
-    var promptJob by remember { mutableStateOf<Job?>(null) }
-
-    LaunchedEffect(state.currentEpisode?.wrId, pagerState.currentPage) {
-        nextPromptVisible = false
-        prevPromptVisible = false
-    }
-
-    LaunchedEffect(pagerState.isScrollInProgress) {
-        if (pagerState.isScrollInProgress) {
-            controlsVisible = false
-        }
-    }
 
     LaunchedEffect(pagerState.currentPage, spreads) {
         if (state.readerImages.isNotEmpty() && spreads.isNotEmpty()) {
@@ -662,64 +758,6 @@ private fun ReaderDualPagePane(
         prevSpreads = spreads
     }
 
-    val onAdvance = {
-        controlsVisible = false
-        if (pagerState.currentPage < totalSpreads - 1) {
-            nextPromptVisible = false
-            prevPromptVisible = false
-            scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
-        } else {
-            if (nextPromptVisible) {
-                nextPromptVisible = false
-                if (state.hasNextEpisode) {
-                    viewModel.openNextEpisode()
-                } else {
-                    viewModel.closeReader()
-                }
-            } else {
-                nextPromptVisible = true
-                prevPromptVisible = false
-                promptJob?.cancel()
-                promptJob = scope.launch {
-                    delay(3000)
-                    nextPromptVisible = false
-                }
-            }
-        }
-    }
-
-    val onRetreat = {
-        controlsVisible = false
-        if (pagerState.currentPage > 0) {
-            nextPromptVisible = false
-            prevPromptVisible = false
-            scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) }
-        } else {
-            if (prevPromptVisible) {
-                prevPromptVisible = false
-                if (state.hasPrevEpisode) {
-                    viewModel.openPrevEpisode()
-                } else {
-                    viewModel.closeReader()
-                }
-            } else {
-                prevPromptVisible = true
-                nextPromptVisible = false
-                promptJob?.cancel()
-                promptJob = scope.launch {
-                    delay(3000)
-                    prevPromptVisible = false
-                }
-            }
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        viewModel.readerNavEvents.collect { advance ->
-            if (advance) onAdvance() else onRetreat()
-        }
-    }
-
     val context = LocalContext.current
     LaunchedEffect(pagerState.currentPage, spreads, state.readerImages) {
         val imageLoader = coil.Coil.imageLoader(context)
@@ -775,258 +813,157 @@ private fun ReaderDualPagePane(
         null -> ""
     }
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
-    ) {
-        HorizontalPager(
-            state = pagerState,
-            reverseLayout = isR2L,
-            beyondViewportPageCount = 1,
+    ReaderPagedLayout(
+        state = state,
+        viewModel = viewModel,
+        pagerState = pagerState,
+        totalPages = totalSpreads,
+        isR2L = isR2L,
+        currentRangeText = currentRangeText,
+        modifier = modifier,
+    ) { spreadIdx, handleTap ->
+        ZoomableBox(
             modifier = Modifier.fillMaxSize(),
-        ) { spreadIdx ->
-            ZoomableBox(
-                modifier = Modifier.fillMaxSize(),
-                resetKey = spreadIdx,
-                onTap = { tapOffset, size ->
-                    val tapX = tapOffset.x
-                    val width = size.width.toFloat()
-                    val isNextOnLeft = when (state.pageTapZone) {
-                        PageTapZone.FOLLOW_DIRECTION -> isR2L
-                        PageTapZone.LEFT_NEXT -> true
-                        PageTapZone.RIGHT_NEXT -> false
-                    }
-                    when {
-                        tapX < width * 0.35f -> if (isNextOnLeft) onAdvance() else onRetreat()
-                        tapX > width * 0.65f -> if (isNextOnLeft) onRetreat() else onAdvance()
-                        else -> {
-                            controlsVisible = !controlsVisible
-                            nextPromptVisible = false
-                            prevPromptVisible = false
-                        }
-                    }
-                },
-            ) { scale ->
-                when (val spread = spreads.getOrNull(spreadIdx)) {
-                    is DualSpread.Single -> {
-                        val ratio = state.imageAspectRatios[spread.index]
-                        val isWide = ratio != null && ratio >= 1.0f
+            resetKey = spreadIdx,
+            onTap = handleTap,
+        ) { scale ->
+            when (val spread = spreads.getOrNull(spreadIdx)) {
+                is DualSpread.Single -> {
+                    val ratio = state.imageAspectRatios[spread.index]
+                    val isWide = ratio != null && ratio >= 1.0f
 
-                        if (isWide) {
-                            // Wide 2-page panoramic spread -> Display across full width in center
-                            Box(
+                    if (isWide) {
+                        // Wide 2-page panoramic spread -> Display across full width in center
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            ReaderImage(
+                                model = state.readerImages.getOrNull(spread.index),
+                                contentDescription = strings.labelPageNumber(spread.index + 1),
+                                contentScale = ContentScale.Fit,
                                 modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                ReaderImage(
-                                    model = state.readerImages.getOrNull(spread.index),
-                                    contentDescription = strings.labelPageNumber(spread.index + 1),
-                                    contentScale = ContentScale.Fit,
-                                    modifier = Modifier.fillMaxSize(),
-                                    onSuccess = { result ->
-                                        val w = result.result.drawable.intrinsicWidth
-                                        val h = result.result.drawable.intrinsicHeight
-                                        if (w > 0 && h > 0) {
-                                            viewModel.recordImageAspectRatio(spread.index, w, h)
-                                        }
-                                    },
-                                )
-                            }
-                        } else {
-                            // Isolated single portrait page -> Position in proper half-screen slot (Right for RL, Left for LR) touching center
-                            Row(
-                                modifier = Modifier.fillMaxSize(),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                if (isR2L) {
-                                    Spacer(modifier = Modifier.weight(1f))
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .fillMaxHeight(),
-                                        contentAlignment = Alignment.CenterStart,
-                                    ) {
-                                        ReaderImage(
-                                            model = state.readerImages.getOrNull(spread.index),
-                                            contentDescription = strings.labelPageNumber(spread.index + 1),
-                                            contentScale = ContentScale.Fit,
-                                            alignment = Alignment.CenterStart,
-                                            modifier = Modifier.fillMaxSize(),
-                                            onSuccess = { result ->
-                                                val w = result.result.drawable.intrinsicWidth
-                                                val h = result.result.drawable.intrinsicHeight
-                                                if (w > 0 && h > 0) {
-                                                    viewModel.recordImageAspectRatio(spread.index, w, h)
-                                                }
-                                            },
-                                        )
+                                onSuccess = { result ->
+                                    val w = result.result.drawable.intrinsicWidth
+                                    val h = result.result.drawable.intrinsicHeight
+                                    if (w > 0 && h > 0) {
+                                        viewModel.recordImageAspectRatio(spread.index, w, h)
                                     }
-                                } else {
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .fillMaxHeight(),
-                                        contentAlignment = Alignment.CenterEnd,
-                                    ) {
-                                        ReaderImage(
-                                            model = state.readerImages.getOrNull(spread.index),
-                                            contentDescription = strings.labelPageNumber(spread.index + 1),
-                                            contentScale = ContentScale.Fit,
-                                            alignment = Alignment.CenterEnd,
-                                            modifier = Modifier.fillMaxSize(),
-                                            onSuccess = { result ->
-                                                val w = result.result.drawable.intrinsicWidth
-                                                val h = result.result.drawable.intrinsicHeight
-                                                if (w > 0 && h > 0) {
-                                                    viewModel.recordImageAspectRatio(spread.index, w, h)
-                                                }
-                                            },
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.weight(1f))
-                                }
-                            }
+                                },
+                            )
                         }
-                    }
-                    is DualSpread.Dual -> {
-                        val leftIndex = if (isR2L) spread.secondIndex else spread.firstIndex
-                        val rightIndex = if (isR2L) spread.firstIndex else spread.secondIndex
-
+                    } else {
+                        // Isolated single portrait page -> Position in proper half-screen slot (Right for RL, Left for LR) touching center
                         Row(
                             modifier = Modifier.fillMaxSize(),
                             horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight(),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                ReaderImage(
-                                    model = state.readerImages.getOrNull(leftIndex),
-                                    contentDescription = strings.labelPageNumber(leftIndex + 1),
-                                    contentScale = ContentScale.Fit,
-                                    alignment = Alignment.Center,
-                                    modifier = Modifier.fillMaxSize(),
-                                    onSuccess = { result ->
-                                        val w = result.result.drawable.intrinsicWidth
-                                        val h = result.result.drawable.intrinsicHeight
-                                        if (w > 0 && h > 0) {
-                                            viewModel.recordImageAspectRatio(leftIndex, w, h)
-                                        }
-                                    },
-                                )
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight(),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                ReaderImage(
-                                    model = state.readerImages.getOrNull(rightIndex),
-                                    contentDescription = strings.labelPageNumber(rightIndex + 1),
-                                    contentScale = ContentScale.Fit,
-                                    alignment = Alignment.Center,
-                                    modifier = Modifier.fillMaxSize(),
-                                    onSuccess = { result ->
-                                        val w = result.result.drawable.intrinsicWidth
-                                        val h = result.result.drawable.intrinsicHeight
-                                        if (w > 0 && h > 0) {
-                                            viewModel.recordImageAspectRatio(rightIndex, w, h)
-                                        }
-                                    },
-                                )
+                            if (isR2L) {
+                                Spacer(modifier = Modifier.weight(1f))
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight(),
+                                    contentAlignment = Alignment.CenterStart,
+                                ) {
+                                    ReaderImage(
+                                        model = state.readerImages.getOrNull(spread.index),
+                                        contentDescription = strings.labelPageNumber(spread.index + 1),
+                                        contentScale = ContentScale.Fit,
+                                        alignment = Alignment.CenterStart,
+                                        modifier = Modifier.fillMaxSize(),
+                                        onSuccess = { result ->
+                                            val w = result.result.drawable.intrinsicWidth
+                                            val h = result.result.drawable.intrinsicHeight
+                                            if (w > 0 && h > 0) {
+                                                viewModel.recordImageAspectRatio(spread.index, w, h)
+                                            }
+                                        },
+                                    )
+                                }
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight(),
+                                    contentAlignment = Alignment.CenterEnd,
+                                ) {
+                                    ReaderImage(
+                                        model = state.readerImages.getOrNull(spread.index),
+                                        contentDescription = strings.labelPageNumber(spread.index + 1),
+                                        contentScale = ContentScale.Fit,
+                                        alignment = Alignment.CenterEnd,
+                                        modifier = Modifier.fillMaxSize(),
+                                        onSuccess = { result ->
+                                            val w = result.result.drawable.intrinsicWidth
+                                            val h = result.result.drawable.intrinsicHeight
+                                            if (w > 0 && h > 0) {
+                                                viewModel.recordImageAspectRatio(spread.index, w, h)
+                                            }
+                                        },
+                                    )
+                                }
+                                Spacer(modifier = Modifier.weight(1f))
                             }
                         }
                     }
-                    null -> {}
                 }
+                is DualSpread.Dual -> {
+                    val leftIndex = if (isR2L) spread.secondIndex else spread.firstIndex
+                    val rightIndex = if (isR2L) spread.firstIndex else spread.secondIndex
+
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            ReaderImage(
+                                model = state.readerImages.getOrNull(leftIndex),
+                                contentDescription = strings.labelPageNumber(leftIndex + 1),
+                                contentScale = ContentScale.Fit,
+                                alignment = Alignment.Center,
+                                modifier = Modifier.fillMaxSize(),
+                                onSuccess = { result ->
+                                    val w = result.result.drawable.intrinsicWidth
+                                    val h = result.result.drawable.intrinsicHeight
+                                    if (w > 0 && h > 0) {
+                                        viewModel.recordImageAspectRatio(leftIndex, w, h)
+                                    }
+                                },
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            ReaderImage(
+                                model = state.readerImages.getOrNull(rightIndex),
+                                contentDescription = strings.labelPageNumber(rightIndex + 1),
+                                contentScale = ContentScale.Fit,
+                                alignment = Alignment.Center,
+                                modifier = Modifier.fillMaxSize(),
+                                onSuccess = { result ->
+                                    val w = result.result.drawable.intrinsicWidth
+                                    val h = result.result.drawable.intrinsicHeight
+                                    if (w > 0 && h > 0) {
+                                        viewModel.recordImageAspectRatio(rightIndex, w, h)
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+                null -> {}
             }
-        }
-
-        // Floating Page Indicator
-        if (!controlsVisible && state.readerImages.isNotEmpty()) {
-            Text(
-                text = currentRangeText,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .navigationBarsPadding()
-                    .padding(16.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.65f))
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-            )
-        }
-
-        // Boundary Confirmation Prompt
-        EpisodeBoundaryPrompt(
-            visible = nextPromptVisible,
-            title = if (state.hasNextEpisode) strings.promptLastPage else strings.promptLastEpisode,
-            subtitle = if (state.hasNextEpisode) strings.promptNextEpisodeHint else strings.promptCloseReaderHint,
-            onClick = {
-                nextPromptVisible = false
-                if (state.hasNextEpisode) {
-                    viewModel.openNextEpisode()
-                } else {
-                    viewModel.closeReader()
-                }
-            },
-        )
-
-        EpisodeBoundaryPrompt(
-            visible = prevPromptVisible,
-            title = if (state.hasPrevEpisode) strings.promptFirstPage else strings.promptFirstEpisode,
-            subtitle = if (state.hasPrevEpisode) strings.promptPrevEpisodeHint else strings.promptCloseReaderHint,
-            onClick = {
-                prevPromptVisible = false
-                if (state.hasPrevEpisode) {
-                    viewModel.openPrevEpisode()
-                } else {
-                    viewModel.closeReader()
-                }
-            },
-        )
-
-        // Top Controls Overlay
-        AnimatedVisibility(
-            visible = controlsVisible,
-            enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
-            modifier = Modifier.align(Alignment.TopCenter),
-        ) {
-            TopBar(
-                state = state,
-                viewModel = viewModel,
-                inOverlay = true,
-            )
-        }
-
-        // Bottom Controls Overlay
-        AnimatedVisibility(
-            visible = controlsVisible,
-            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter),
-        ) {
-            ReaderBottomBar(
-                currentRangeText = currentRangeText,
-                currentPage = pagerState.currentPage + 1,
-                maxPages = totalSpreads,
-                hasPrevEpisode = state.hasPrevEpisode,
-                hasNextEpisode = state.hasNextEpisode,
-                onPageChange = { targetSpread ->
-                    scope.launch { pagerState.scrollToPage(targetSpread - 1) }
-                },
-                onPrevEp = viewModel::openPrevEpisode,
-                onNextEp = viewModel::openNextEpisode,
-                onClose = viewModel::closeReader,
-            )
         }
     }
 }
