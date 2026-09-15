@@ -47,20 +47,22 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
-import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
+import kotlin.math.abs
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.translate
@@ -385,73 +387,74 @@ private fun ReaderPagedLayout(
     }
 
     val density = LocalDensity.current
-    val dragThresholdPx = remember(density) { with(density) { 48.dp.toPx() } }
+    val dragThresholdPx = remember(density) { with(density) { 40.dp.toPx() } }
     val minDragForFlingPx = remember(density) { with(density) { 16.dp.toPx() } }
-    val velocityThresholdPx = remember(density) { with(density) { 300.dp.toPx() } }
-    var accumulatedForwardOverscroll by remember { mutableFloatStateOf(0f) }
-    var accumulatedBackwardOverscroll by remember { mutableFloatStateOf(0f) }
+    val velocityThresholdPx = remember(density) { with(density) { 350.dp.toPx() } }
     var lastEdgeTriggerTime by remember { mutableLongStateOf(0L) }
 
-    val nestedScrollConnection = remember(isR2L, totalPages, pagerState) {
-        object : NestedScrollConnection {
-            override fun onPostScroll(
-                consumed: Offset,
-                available: Offset,
-                source: NestedScrollSource,
-            ): Offset {
-                if (source == NestedScrollSource.UserInput) {
-                    val isAtEnd = pagerState.currentPage >= totalPages - 1
-                    val isAtStart = pagerState.currentPage <= 0
-                    val forwardDelta = if (isR2L) available.x else -available.x
-                    val backwardDelta = if (isR2L) -available.x else available.x
+    val edgeSwipeModifier = Modifier.pointerInput(isR2L, totalPages, pagerState) {
+        awaitEachGesture {
+            val down = awaitFirstDown(pass = PointerEventPass.Initial, requireUnconsumed = false)
+            val startPage = pagerState.currentPage
+            val isAtEnd = startPage >= totalPages - 1
+            val isAtStart = startPage <= 0
 
-                    if (isAtEnd && forwardDelta > 0f) {
-                        accumulatedForwardOverscroll += forwardDelta
-                        accumulatedBackwardOverscroll = 0f
-                    } else if (isAtStart && backwardDelta > 0f) {
-                        accumulatedBackwardOverscroll += backwardDelta
-                        accumulatedForwardOverscroll = 0f
-                    } else if (forwardDelta < 0f && backwardDelta < 0f) {
-                        accumulatedForwardOverscroll = 0f
-                        accumulatedBackwardOverscroll = 0f
-                    }
-                }
-                return Offset.Zero
+            if (!isAtEnd && !isAtStart) {
+                do {
+                    val event = awaitPointerEvent(pass = PointerEventPass.Initial)
+                } while (event.changes.any { it.pressed })
+                return@awaitEachGesture
             }
 
-            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
-                val isAtEnd = pagerState.currentPage >= totalPages - 1
-                val isAtStart = pagerState.currentPage <= 0
-                val forwardVelocity = if (isR2L) available.x else -available.x
-                val backwardVelocity = if (isR2L) -available.x else available.x
+            var lastPosition = down.position
+            val velocityTracker = VelocityTracker()
+            velocityTracker.addPosition(down.uptimeMillis, down.position)
 
-                val now = System.currentTimeMillis()
-                val canTrigger = (now - lastEdgeTriggerTime) > 400L
+            var isMultiTouch = false
 
-                if (canTrigger) {
-                    val hasForwardDistance = accumulatedForwardOverscroll >= dragThresholdPx
-                    val hasForwardFling =
-                        (accumulatedForwardOverscroll >= minDragForFlingPx) && (forwardVelocity >= velocityThresholdPx)
-
-                    val hasBackwardDistance = accumulatedBackwardOverscroll >= dragThresholdPx
-                    val hasBackwardFling =
-                        (accumulatedBackwardOverscroll >= minDragForFlingPx) && (backwardVelocity >= velocityThresholdPx)
-
-                    if (isAtEnd && (hasForwardDistance || hasForwardFling)) {
-                        lastEdgeTriggerTime = now
-                        accumulatedForwardOverscroll = 0f
-                        accumulatedBackwardOverscroll = 0f
-                        onAdvance()
-                    } else if (isAtStart && (hasBackwardDistance || hasBackwardFling)) {
-                        lastEdgeTriggerTime = now
-                        accumulatedForwardOverscroll = 0f
-                        accumulatedBackwardOverscroll = 0f
-                        onRetreat()
-                    }
+            do {
+                val event = awaitPointerEvent(pass = PointerEventPass.Initial)
+                if (event.changes.size > 1) {
+                    isMultiTouch = true
                 }
-                accumulatedForwardOverscroll = 0f
-                accumulatedBackwardOverscroll = 0f
-                return Velocity.Zero
+                val change = event.changes.firstOrNull { it.id == down.id } ?: event.changes.firstOrNull()
+                if (change != null) {
+                    lastPosition = change.position
+                    velocityTracker.addPosition(change.uptimeMillis, change.position)
+                }
+            } while (event.changes.any { it.pressed })
+
+            if (isMultiTouch) return@awaitEachGesture
+
+            val netDragX = lastPosition.x - down.position.x
+            val netDragY = lastPosition.y - down.position.y
+
+            if (abs(netDragY) > abs(netDragX)) return@awaitEachGesture
+
+            val endPage = pagerState.currentPage
+            if (endPage != startPage) return@awaitEachGesture
+
+            val velocity = velocityTracker.calculateVelocity()
+            val forwardDrag = if (isR2L) netDragX else -netDragX
+            val backwardDrag = if (isR2L) -netDragX else netDragX
+            val forwardVelocity = if (isR2L) velocity.x else -velocity.x
+            val backwardVelocity = if (isR2L) -velocity.x else velocity.x
+
+            val now = System.currentTimeMillis()
+            if (now - lastEdgeTriggerTime < 400L) return@awaitEachGesture
+
+            val isForwardTriggered = (forwardDrag >= dragThresholdPx) ||
+                (forwardDrag >= minDragForFlingPx && forwardVelocity >= velocityThresholdPx)
+
+            val isBackwardTriggered = (backwardDrag >= dragThresholdPx) ||
+                (backwardDrag >= minDragForFlingPx && backwardVelocity >= velocityThresholdPx)
+
+            if (isAtEnd && isForwardTriggered) {
+                lastEdgeTriggerTime = now
+                onAdvance()
+            } else if (isAtStart && isBackwardTriggered) {
+                lastEdgeTriggerTime = now
+                onRetreat()
             }
         }
     }
@@ -486,7 +489,7 @@ private fun ReaderPagedLayout(
             beyondViewportPageCount = 1,
             modifier = Modifier
                 .fillMaxSize()
-                .nestedScroll(nestedScrollConnection),
+                .then(edgeSwipeModifier),
         ) { page ->
             content(page, handleTap)
         }
