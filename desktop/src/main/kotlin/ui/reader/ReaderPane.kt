@@ -44,7 +44,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -96,7 +95,6 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.IntSize
@@ -361,7 +359,6 @@ private fun ReaderPagedLayout(
     var nextPromptVisible by remember { mutableStateOf(false) }
     var prevPromptVisible by remember { mutableStateOf(false) }
     var promptJob by remember { mutableStateOf<Job?>(null) }
-    var lastBoundaryTriggerTime by remember { mutableLongStateOf(0L) }
 
     LaunchedEffect(state.currentEpisode?.wrId, pagerState.currentPage) {
         nextPromptVisible = false
@@ -452,75 +449,23 @@ private fun ReaderPagedLayout(
         onRegisterActions(onAdvance, onRetreat)
     }
 
-    // Unified Trackpad & Wheel Gesture Recognizer
-    var isScrollLatched by remember { mutableStateOf(false) }
-    var accumulatedScrollX by remember { mutableFloatStateOf(0f) }
-    var accumulatedScrollY by remember { mutableFloatStateOf(0f) }
-    var unlatchJob by remember { mutableStateOf<Job?>(null) }
-    var idleResetJob by remember { mutableStateOf<Job?>(null) }
-
-    LaunchedEffect(pagerState.isScrollInProgress) {
-        if (!pagerState.isScrollInProgress) {
-            accumulatedScrollX = 0f
-            accumulatedScrollY = 0f
-        }
-    }
-
     @OptIn(ExperimentalComposeUiApi::class)
     val desktopScrollModifier = Modifier.onPointerEvent(PointerEventType.Scroll) { event ->
+        if (pagerState.isScrollInProgress) return@onPointerEvent
+
         val deltaX = event.changes.sumOf { it.scrollDelta.x.toDouble() }.toFloat()
         val deltaY = event.changes.sumOf { it.scrollDelta.y.toDouble() }.toFloat()
 
-        if (isScrollLatched || pagerState.isScrollInProgress) {
-            unlatchJob?.cancel()
-            unlatchJob = scope.launch {
-                delay(180)
-                isScrollLatched = false
-                accumulatedScrollX = 0f
-                accumulatedScrollY = 0f
-            }
-            return@onPointerEvent
-        }
-
-        accumulatedScrollX += deltaX
-        accumulatedScrollY += deltaY
-
         val direction = ReaderDomain.resolveScrollDirection(
-            deltaX = accumulatedScrollX,
-            deltaY = accumulatedScrollY,
+            deltaX = deltaX,
+            deltaY = deltaY,
             isR2L = currentIsR2L,
-            threshold = 0.8f,
-        )
+            threshold = 1.0f,
+        ) ?: return@onPointerEvent
 
-        if (direction != null) {
-            val now = System.currentTimeMillis()
-            if (now - lastBoundaryTriggerTime >= 350L) {
-                isScrollLatched = true
-                lastBoundaryTriggerTime = now
-                unlatchJob?.cancel()
-                unlatchJob = scope.launch {
-                    delay(180)
-                    isScrollLatched = false
-                    accumulatedScrollX = 0f
-                    accumulatedScrollY = 0f
-                }
-
-                when (direction) {
-                    ReaderDomain.BoundaryDirection.ADVANCE -> onAdvance()
-                    ReaderDomain.BoundaryDirection.RETREAT -> onRetreat()
-                }
-            }
-            accumulatedScrollX = 0f
-            accumulatedScrollY = 0f
-        } else {
-            idleResetJob?.cancel()
-            idleResetJob = scope.launch {
-                delay(150)
-                if (!isScrollLatched) {
-                    accumulatedScrollX = 0f
-                    accumulatedScrollY = 0f
-                }
-            }
+        when (direction) {
+            ReaderDomain.BoundaryDirection.ADVANCE -> onAdvance()
+            ReaderDomain.BoundaryDirection.RETREAT -> onRetreat()
         }
     }
 
@@ -541,16 +486,15 @@ private fun ReaderPagedLayout(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
+            .background(MaterialTheme.colorScheme.background)
+            .then(desktopScrollModifier),
     ) {
         HorizontalPager(
             state = pagerState,
             userScrollEnabled = false,
             reverseLayout = isR2L,
             beyondViewportPageCount = 1,
-            modifier = Modifier
-                .fillMaxSize()
-                .then(desktopScrollModifier),
+            modifier = Modifier.fillMaxSize(),
         ) { page ->
             Box(
                 modifier = Modifier
