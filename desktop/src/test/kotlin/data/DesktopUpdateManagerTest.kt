@@ -4,6 +4,11 @@ import com.google.common.truth.Truth.assertThat
 import org.junit.Assert.assertThrows
 import org.junit.Test
 import java.io.File
+import java.net.URI
+import java.nio.file.FileSystems
+import java.nio.file.Files
+import java.nio.file.attribute.PosixFilePermission
+import java.nio.file.attribute.PosixFilePermissions
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import kotlin.io.path.createTempDirectory
@@ -47,6 +52,29 @@ class DesktopUpdateManagerTest {
         }
 
         assertThat(File(root, "outside.txt").exists()).isFalse()
+    }
+
+    @Test
+    fun unzipPreservesPosixPermissions() {
+        val root = createTempDirectory("desktop-update-perms").toFile()
+        val archive = File(root, "update.zip")
+        val target = File(root, "target").apply { mkdirs() }
+
+        val env = mapOf("create" to "true")
+        FileSystems.newFileSystem(URI.create("jar:" + archive.toURI()), env).use { zipFs ->
+            val p = zipFs.getPath("/jspawnhelper")
+            Files.writeString(p, "#!/bin/sh\nexit 0\n")
+            Files.setAttribute(p, "zip:permissions", PosixFilePermissions.fromString("rwxr-xr-x"))
+        }
+
+        DesktopUpdateManager.unzip(archive, target)
+
+        val extracted = File(target, "jspawnhelper")
+        assertThat(extracted.exists()).isTrue()
+        if (FileSystems.getDefault().supportedFileAttributeViews().contains("posix")) {
+            val perms = Files.getPosixFilePermissions(extracted.toPath())
+            assertThat(perms).contains(PosixFilePermission.OWNER_EXECUTE)
+        }
     }
 
     private fun writeZip(archive: File, entryName: String, contents: String) {
