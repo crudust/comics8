@@ -4,11 +4,9 @@ import com.google.common.truth.Truth.assertThat
 import org.junit.Assert.assertThrows
 import org.junit.Test
 import java.io.File
-import java.net.URI
 import java.nio.file.FileSystems
 import java.nio.file.Files
 import java.nio.file.attribute.PosixFilePermission
-import java.nio.file.attribute.PosixFilePermissions
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import kotlin.io.path.createTempDirectory
@@ -55,17 +53,12 @@ class DesktopUpdateManagerTest {
     }
 
     @Test
-    fun unzipPreservesPosixPermissions() {
+    fun unzipSetsExecutablePermissionsForKnownBinaries() {
         val root = createTempDirectory("desktop-update-perms").toFile()
         val archive = File(root, "update.zip")
         val target = File(root, "target").apply { mkdirs() }
 
-        val env = mapOf("create" to "true")
-        FileSystems.newFileSystem(URI.create("jar:" + archive.toURI()), env).use { zipFs ->
-            val p = zipFs.getPath("/jspawnhelper")
-            Files.writeString(p, "#!/bin/sh\nexit 0\n")
-            Files.setAttribute(p, "zip:permissions", PosixFilePermissions.fromString("rwxr-xr-x"))
-        }
+        writeZip(archive, "jspawnhelper", "#!/bin/sh\nexit 0\n")
 
         DesktopUpdateManager.unzip(archive, target)
 

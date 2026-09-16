@@ -41,10 +41,9 @@ compose.desktop {
                 "java.security.sasl",
                 "java.management",
                 "jdk.unsupported",
-                "jdk.zipfs",
             )
             packageName = "Comics8"
-            packageVersion = "1.2.24"
+            packageVersion = "1.2.25"
             description = "Comics8 Monitor Desktop"
             macOS {
                 bundleID = "com.comics8.desktop"
