@@ -75,12 +75,14 @@ import com.comics8.core.image.ImageCacheRole
 import com.comics8.core.model.DualSpread
 import com.comics8.core.model.ImageHalf
 import com.comics8.core.model.ReadDirection
+import com.comics8.core.model.ReaderDomain
 import com.comics8.core.model.SinglePageSlice
 import com.comics8.core.model.SplitMode
 import com.comics8.core.model.ViewMode
 import com.comics8.core.model.buildDualSpreads
 import com.comics8.core.model.buildSinglePageSlices
 import com.comics8.desktop.ui.DesktopUiState
+import kotlin.math.abs
 import com.comics8.desktop.ui.DesktopViewModel
 import com.comics8.desktop.ui.components.ErrorPane
 import com.comics8.desktop.ui.components.LoadingPane
@@ -94,17 +96,15 @@ private fun rememberWheelPageScroller(
     onNextPage: () -> Unit,
     onPrevPage: () -> Unit,
     isR2L: Boolean = false,
-    threshold: Float = 0.5f,
-    cooldownMs: Long = 200L,
+    threshold: Float = 1.0f,
 ): Modifier {
     var accumulatedDeltaY by remember { mutableStateOf(0f) }
     var accumulatedDeltaX by remember { mutableStateOf(0f) }
-    var lastTriggerTime by remember { mutableStateOf(0L) }
+    var isLatched by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     var resetJob by remember { mutableStateOf<Job?>(null) }
 
     return Modifier.onPointerEvent(PointerEventType.Scroll) { event ->
-        val now = System.currentTimeMillis()
         var deltaY = 0f
         var deltaX = 0f
         event.changes.forEach { change ->
@@ -116,38 +116,41 @@ private fun rememberWheelPageScroller(
         accumulatedDeltaY += deltaY
         accumulatedDeltaX += deltaX
 
-        // Reset accumulation after 200ms of inactivity
+        // Reset latch and accumulation when user stops swiping and momentum finishes
         resetJob?.cancel()
         resetJob = scope.launch {
             delay(200L)
             accumulatedDeltaY = 0f
             accumulatedDeltaX = 0f
+            isLatched = false
         }
 
-        if (now - lastTriggerTime >= cooldownMs) {
-            // Vertical Wheel / Trackpad Scroll (Down = Next, Up = Prev)
-            if (accumulatedDeltaY >= threshold) {
-                lastTriggerTime = now
-                accumulatedDeltaY = 0f
-                accumulatedDeltaX = 0f
-                onNextPage()
-            } else if (accumulatedDeltaY <= -threshold) {
-                lastTriggerTime = now
-                accumulatedDeltaY = 0f
-                accumulatedDeltaX = 0f
-                onPrevPage()
-            }
-            // Horizontal Trackpad 2-finger swipe
-            else if (accumulatedDeltaX >= threshold) {
-                lastTriggerTime = now
-                accumulatedDeltaY = 0f
-                accumulatedDeltaX = 0f
-                if (isR2L) onPrevPage() else onNextPage()
-            } else if (accumulatedDeltaX <= -threshold) {
-                lastTriggerTime = now
-                accumulatedDeltaY = 0f
-                accumulatedDeltaX = 0f
-                if (isR2L) onNextPage() else onPrevPage()
+        if (!isLatched) {
+            val isHorizontal = abs(accumulatedDeltaX) >= abs(accumulatedDeltaY)
+            if (isHorizontal) {
+                if (accumulatedDeltaX >= threshold) {
+                    isLatched = true
+                    accumulatedDeltaX = 0f
+                    accumulatedDeltaY = 0f
+                    if (isR2L) onPrevPage() else onNextPage()
+                } else if (accumulatedDeltaX <= -threshold) {
+                    isLatched = true
+                    accumulatedDeltaX = 0f
+                    accumulatedDeltaY = 0f
+                    if (isR2L) onNextPage() else onPrevPage()
+                }
+            } else {
+                if (accumulatedDeltaY >= threshold) {
+                    isLatched = true
+                    accumulatedDeltaX = 0f
+                    accumulatedDeltaY = 0f
+                    onNextPage()
+                } else if (accumulatedDeltaY <= -threshold) {
+                    isLatched = true
+                    accumulatedDeltaX = 0f
+                    accumulatedDeltaY = 0f
+                    onPrevPage()
+                }
             }
         }
     }
@@ -474,19 +477,18 @@ private fun ReaderSingleView(
 
     val onAdvance: () -> Unit = {
         controlsVisible = false
-        if (currentPage < totalPages - 1) {
-            nextPromptVisible = false
-            prevPromptVisible = false
-            currentPage++
-        } else {
-            if (nextPromptVisible) {
+        when (val decision = ReaderDomain.resolveBoundaryDecision(
+            currentPage = currentPage,
+            totalPages = totalPages,
+            direction = ReaderDomain.BoundaryDirection.ADVANCE,
+            isPromptActive = nextPromptVisible,
+        )) {
+            is ReaderDomain.BoundaryDecision.PageTurn -> {
                 nextPromptVisible = false
-                if (state.hasNextEpisode) {
-                    viewModel.openNextEpisode()
-                } else {
-                    viewModel.closeReader()
-                }
-            } else {
+                prevPromptVisible = false
+                currentPage = decision.targetPage
+            }
+            is ReaderDomain.BoundaryDecision.ShowPrompt -> {
                 nextPromptVisible = true
                 prevPromptVisible = false
                 promptJob?.cancel()
@@ -495,30 +497,45 @@ private fun ReaderSingleView(
                     nextPromptVisible = false
                 }
             }
+            is ReaderDomain.BoundaryDecision.ConfirmNavigate -> {
+                nextPromptVisible = false
+                if (state.hasNextEpisode) {
+                    viewModel.openNextEpisode()
+                } else {
+                    viewModel.closeReader()
+                }
+            }
         }
     }
 
     val onRetreat: () -> Unit = {
         controlsVisible = false
-        if (currentPage > 0) {
-            nextPromptVisible = false
-            prevPromptVisible = false
-            currentPage--
-        } else {
-            if (prevPromptVisible) {
+        when (val decision = ReaderDomain.resolveBoundaryDecision(
+            currentPage = currentPage,
+            totalPages = totalPages,
+            direction = ReaderDomain.BoundaryDirection.RETREAT,
+            isPromptActive = prevPromptVisible,
+        )) {
+            is ReaderDomain.BoundaryDecision.PageTurn -> {
+                nextPromptVisible = false
                 prevPromptVisible = false
-                if (state.hasPrevEpisode) {
-                    viewModel.openPrevEpisode()
-                } else {
-                    viewModel.closeReader()
-                }
-            } else {
+                currentPage = decision.targetPage
+            }
+            is ReaderDomain.BoundaryDecision.ShowPrompt -> {
                 prevPromptVisible = true
                 nextPromptVisible = false
                 promptJob?.cancel()
                 promptJob = scope.launch {
                     delay(3000)
                     prevPromptVisible = false
+                }
+            }
+            is ReaderDomain.BoundaryDecision.ConfirmNavigate -> {
+                prevPromptVisible = false
+                if (state.hasPrevEpisode) {
+                    viewModel.openPrevEpisode()
+                } else {
+                    viewModel.closeReader()
                 }
             }
         }
@@ -798,19 +815,18 @@ private fun ReaderDualView(
 
     val onAdvance: () -> Unit = {
         controlsVisible = false
-        if (currentSpreadIndex < totalSpreads - 1) {
-            nextPromptVisible = false
-            prevPromptVisible = false
-            currentSpreadIndex++
-        } else {
-            if (nextPromptVisible) {
+        when (val decision = ReaderDomain.resolveBoundaryDecision(
+            currentPage = currentSpreadIndex,
+            totalPages = totalSpreads,
+            direction = ReaderDomain.BoundaryDirection.ADVANCE,
+            isPromptActive = nextPromptVisible,
+        )) {
+            is ReaderDomain.BoundaryDecision.PageTurn -> {
                 nextPromptVisible = false
-                if (state.hasNextEpisode) {
-                    viewModel.openNextEpisode()
-                } else {
-                    viewModel.closeReader()
-                }
-            } else {
+                prevPromptVisible = false
+                currentSpreadIndex = decision.targetPage
+            }
+            is ReaderDomain.BoundaryDecision.ShowPrompt -> {
                 nextPromptVisible = true
                 prevPromptVisible = false
                 promptJob?.cancel()
@@ -819,30 +835,45 @@ private fun ReaderDualView(
                     nextPromptVisible = false
                 }
             }
+            is ReaderDomain.BoundaryDecision.ConfirmNavigate -> {
+                nextPromptVisible = false
+                if (state.hasNextEpisode) {
+                    viewModel.openNextEpisode()
+                } else {
+                    viewModel.closeReader()
+                }
+            }
         }
     }
 
     val onRetreat: () -> Unit = {
         controlsVisible = false
-        if (currentSpreadIndex > 0) {
-            nextPromptVisible = false
-            prevPromptVisible = false
-            currentSpreadIndex--
-        } else {
-            if (prevPromptVisible) {
+        when (val decision = ReaderDomain.resolveBoundaryDecision(
+            currentPage = currentSpreadIndex,
+            totalPages = totalSpreads,
+            direction = ReaderDomain.BoundaryDirection.RETREAT,
+            isPromptActive = prevPromptVisible,
+        )) {
+            is ReaderDomain.BoundaryDecision.PageTurn -> {
+                nextPromptVisible = false
                 prevPromptVisible = false
-                if (state.hasPrevEpisode) {
-                    viewModel.openPrevEpisode()
-                } else {
-                    viewModel.closeReader()
-                }
-            } else {
+                currentSpreadIndex = decision.targetPage
+            }
+            is ReaderDomain.BoundaryDecision.ShowPrompt -> {
                 prevPromptVisible = true
                 nextPromptVisible = false
                 promptJob?.cancel()
                 promptJob = scope.launch {
                     delay(3000)
                     prevPromptVisible = false
+                }
+            }
+            is ReaderDomain.BoundaryDecision.ConfirmNavigate -> {
+                prevPromptVisible = false
+                if (state.hasPrevEpisode) {
+                    viewModel.openPrevEpisode()
+                } else {
+                    viewModel.closeReader()
                 }
             }
         }

@@ -77,6 +77,7 @@ import com.comics8.core.model.ImageHalf
 import com.comics8.core.model.PageTapZone
 import com.comics8.core.model.ReadDirection
 import com.comics8.core.model.SinglePageSlice
+import com.comics8.core.model.ReaderDomain
 import com.comics8.core.model.ViewMode
 import com.comics8.core.model.buildDualSpreads
 import com.comics8.core.model.buildSinglePageSlices
@@ -330,19 +331,18 @@ private fun ReaderPagedLayout(
 
     val onAdvance = {
         controlsVisible = false
-        if (pagerState.currentPage < totalPages - 1) {
-            nextPromptVisible = false
-            prevPromptVisible = false
-            scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
-        } else {
-            if (nextPromptVisible) {
+        when (val decision = ReaderDomain.resolveBoundaryDecision(
+            currentPage = pagerState.currentPage,
+            totalPages = totalPages,
+            direction = ReaderDomain.BoundaryDirection.ADVANCE,
+            isPromptActive = nextPromptVisible,
+        )) {
+            is ReaderDomain.BoundaryDecision.PageTurn -> {
                 nextPromptVisible = false
-                if (state.hasNextEpisode) {
-                    viewModel.openNextEpisode()
-                } else {
-                    viewModel.closeReader()
-                }
-            } else {
+                prevPromptVisible = false
+                scope.launch { pagerState.animateScrollToPage(decision.targetPage) }
+            }
+            is ReaderDomain.BoundaryDecision.ShowPrompt -> {
                 nextPromptVisible = true
                 prevPromptVisible = false
                 promptJob?.cancel()
@@ -351,30 +351,45 @@ private fun ReaderPagedLayout(
                     nextPromptVisible = false
                 }
             }
+            is ReaderDomain.BoundaryDecision.ConfirmNavigate -> {
+                nextPromptVisible = false
+                if (state.hasNextEpisode) {
+                    viewModel.openNextEpisode()
+                } else {
+                    viewModel.closeReader()
+                }
+            }
         }
     }
 
     val onRetreat = {
         controlsVisible = false
-        if (pagerState.currentPage > 0) {
-            nextPromptVisible = false
-            prevPromptVisible = false
-            scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) }
-        } else {
-            if (prevPromptVisible) {
+        when (val decision = ReaderDomain.resolveBoundaryDecision(
+            currentPage = pagerState.currentPage,
+            totalPages = totalPages,
+            direction = ReaderDomain.BoundaryDirection.RETREAT,
+            isPromptActive = prevPromptVisible,
+        )) {
+            is ReaderDomain.BoundaryDecision.PageTurn -> {
+                nextPromptVisible = false
                 prevPromptVisible = false
-                if (state.hasPrevEpisode) {
-                    viewModel.openPrevEpisode()
-                } else {
-                    viewModel.closeReader()
-                }
-            } else {
+                scope.launch { pagerState.animateScrollToPage(decision.targetPage) }
+            }
+            is ReaderDomain.BoundaryDecision.ShowPrompt -> {
                 prevPromptVisible = true
                 nextPromptVisible = false
                 promptJob?.cancel()
                 promptJob = scope.launch {
                     delay(3000)
                     prevPromptVisible = false
+                }
+            }
+            is ReaderDomain.BoundaryDecision.ConfirmNavigate -> {
+                prevPromptVisible = false
+                if (state.hasPrevEpisode) {
+                    viewModel.openPrevEpisode()
+                } else {
+                    viewModel.closeReader()
                 }
             }
         }
