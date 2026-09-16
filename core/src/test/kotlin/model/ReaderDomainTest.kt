@@ -208,4 +208,42 @@ class ReaderDomainTest {
             )
         ).isEqualTo(ReaderDomain.BoundaryDecision.ConfirmNavigate(ReaderDomain.PageEdge.FIRST))
     }
+
+    @Test
+    fun resolveScrollDirectionContract() {
+        // Below threshold returns null
+        assertThat(
+            ReaderDomain.resolveScrollDirection(deltaX = 0.5f, deltaY = 0.2f, isR2L = false, threshold = 0.8f)
+        ).isNull()
+
+        // LTR horizontal trackpad swipe: positive deltaX -> ADVANCE
+        assertThat(
+            ReaderDomain.resolveScrollDirection(deltaX = 1.2f, deltaY = 0.1f, isR2L = false, threshold = 0.8f)
+        ).isEqualTo(ReaderDomain.BoundaryDirection.ADVANCE)
+
+        // LTR horizontal trackpad swipe: negative deltaX -> RETREAT
+        assertThat(
+            ReaderDomain.resolveScrollDirection(deltaX = -1.2f, deltaY = 0.1f, isR2L = false, threshold = 0.8f)
+        ).isEqualTo(ReaderDomain.BoundaryDirection.RETREAT)
+
+        // RTL horizontal trackpad swipe: negative deltaX -> ADVANCE
+        assertThat(
+            ReaderDomain.resolveScrollDirection(deltaX = -1.2f, deltaY = 0.1f, isR2L = true, threshold = 0.8f)
+        ).isEqualTo(ReaderDomain.BoundaryDirection.ADVANCE)
+
+        // RTL horizontal trackpad swipe: positive deltaX -> RETREAT
+        assertThat(
+            ReaderDomain.resolveScrollDirection(deltaX = 1.2f, deltaY = 0.1f, isR2L = true, threshold = 0.8f)
+        ).isEqualTo(ReaderDomain.BoundaryDirection.RETREAT)
+
+        // Vertical mouse wheel / scroll down -> ADVANCE
+        assertThat(
+            ReaderDomain.resolveScrollDirection(deltaX = 0.1f, deltaY = 1.0f, isR2L = false, threshold = 0.8f)
+        ).isEqualTo(ReaderDomain.BoundaryDirection.ADVANCE)
+
+        // Vertical mouse wheel / scroll up -> RETREAT
+        assertThat(
+            ReaderDomain.resolveScrollDirection(deltaX = 0.1f, deltaY = -1.0f, isR2L = false, threshold = 0.8f)
+        ).isEqualTo(ReaderDomain.BoundaryDirection.RETREAT)
+    }
 }
