@@ -30,7 +30,7 @@ export ANDROID_HOME="$ANDROID_SDK_ROOT"
 export PATH="$JAVA_HOME/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
 ```
 
-Android는 에뮬레이터로 돌리지 않습니다. 폰은 인앱 업데이트로 APK를 받습니다. Mac `.app`은 배포 시 SSH로 빌더 Mac의 `/Applications/Comics8.app`을 덮어쓰고, zip은 서버에도 올립니다. 실행 중인 앱은 인앱 업데이트로 받을 수 있습니다.
+Android는 에뮬레이터로 돌리지 않습니다. 폰은 인앱 업데이트로 APK를 받습니다. macOS 앱은 GitHub Actions(`macos-latest`)에서 태그 푸시 시 자동 빌드되어 GitHub Releases에 배포되며, 실행 중인 Mac 앱은 인앱 업데이트로 직접 다운로드받아 갱신됩니다.
 
 ---
 
@@ -110,9 +110,8 @@ Comics8/
 │   └── Dockerfile
 ├── scripts/
 │   ├── build-mac-local.sh          # Mac에서 /Applications 첫 설치
-│   ├── update-mac-app-remote.sh    # Linux→Mac SSH 빌드/설치/zip
 │   ├── run-desktop.sh              # Mac에서 데스크톱 앱 직접 실행
-│   ├── deploy-release.sh           # APK + Mac zip + Win zip 서버 배포
+│   ├── deploy-release.sh           # APK + Mac/Win zip 릴리즈 배포
 │   ├── sync-public-repo.sh         # 오픈소스 공개 레포지토리 동기화
 │   └── deploy.env.example          # ~/.comics8-deploy.env 예시
 ├── knowledge/                  # 도메인/모듈별 지속적 사양 및 아키텍처 불변 규칙 (Internal Only)
@@ -132,9 +131,9 @@ Comics8/
 1. **빌드/테스트 전 환경변수 필수**:
    - `JAVA_HOME`과 `ANDROID_SDK_ROOT`가 셸 세션에 올바르게 잡혀 있어야 `./gradlew`가 정상 동작합니다. Android는 에뮬레이터/`adb`로 실행하지 않습니다.
 2. **릴리즈는 Linux `deploy-release.sh`만 사용**:
-   - 푸시(`origin/main`) 후 배포. Mac 빌더는 GitHub `main`을 받아 `.app`을 만들고 `/Applications`에 덮어쓴 뒤 zip을 서버에 올립니다.
-   - 앱을 실행하지는 않습니다. 이미 켜 둔 앱은 인앱 업데이트로 받습니다.
-   - Mac 코딩 클론(`Documents/Comics8`)은 건드리지 않습니다. 빌드는 `Documents/Mac/Comics8`입니다.
+   - 푸시(`origin/main`) 후 배포. Android APK/AAB와 Windows Zip은 Linux 개발서버에서 로컬 빌드하여 배포합니다.
+   - macOS 앱(`Comics8-mac.zip`)은 GitHub Actions(`macos-latest`)에서 자동 빌드되어 GitHub Releases에 직결 업로드됩니다.
+   - 실행 중인 데스크톱/모바일 앱은 인앱 업데이트로 최신 버전을 다운로드받습니다.
 3. **Room Entity 변경 시 주의**:
    - Room 엔티티나 스키마 수정 시 KSP 코드 생성이 필요하며, DB 버전 업그레이드 시 마이그레이션 전략(`fallbackToDestructiveMigration()` 여부 확인)을 확인해야 합니다.
 4. **테스트 추가 및 검증**:

@@ -35,6 +35,7 @@ fi
 
 # 4. Copy open-source modules
 echo "📁 Copying open-source files..."
+cp -R .github "${WORK_DIR}/"
 cp -R core "${WORK_DIR}/"
 cp -R desktop "${WORK_DIR}/"
 cp -R examples "${WORK_DIR}/"

@@ -5,12 +5,10 @@
 - **Single Release Authority (Linux Server)**:
   - All official releases MUST be initiated from the Linux development server using `./scripts/deploy-release.sh [versionName] [versionCode] [releaseNotes]`.
   - Never run standalone release tags directly from local dev clones without going through the canonical deployment script.
-- **Mac Builder Topology**:
-  - Mac packaging is performed remotely over SSH to the builder Mac via `./scripts/update-mac-app-remote.sh`.
-  - The builder Mac pulls `origin/main` into the dedicated builder clone (`Documents/Mac/Comics8`).
-  - **Never touch the active coding clone (`Documents/Comics8`)** during automated builds.
-  - The resulting `.app` is overwritten into `/Applications/Comics8.app` on the builder Mac, zipped, and uploaded to the server for distribution.
-  - Running apps receive in-app updates; the script does not launch or restart the running app process.
+- **macOS CI Builder Topology (GitHub Actions)**:
+  - macOS packaging is performed autonomously in cloud CI via `.github/workflows/release.yml` on `macos-latest`.
+  - When release tags (`v*`) are pushed to GitHub, GitHub Actions compiles the macOS distributable (`./gradlew :desktop:createDistributable`), packages `release-artifacts/Comics8-mac.zip` preserving symlinks and POSIX attributes, and uploads directly to GitHub Releases.
+  - Zero local SSH builder dependencies; running Mac apps receive in-app updates directly from the GitHub Release CDN.
 - **Windows Portable Zip**:
   - Windows release is packaged as a standalone portable zip via `./gradlew :desktop:packageWindowsZip`.
   - Output artifact: `desktop/build/compose/binaries/main/Comics8-win.zip`.

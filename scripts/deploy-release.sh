@@ -99,7 +99,6 @@ echo "📦 2/5: Building Android Release APK, AAB & Windows Portable Zip..."
 APK_PATH="app/build/outputs/apk/standalone/release/app-standalone-release.apk"
 AAB_PATH="app/build/outputs/bundle/playRelease/app-play-release.aab"
 WIN_ZIP_PATH="desktop/build/compose/binaries/main/Comics8-win.zip"
-MAC_ZIP_PATH="desktop/build/compose/binaries/main/Comics8-mac.zip"
 
 if [ ! -f "$APK_PATH" ]; then
     echo "❌ APK file not found: $APK_PATH"
@@ -116,16 +115,9 @@ git add app/build.gradle.kts desktop/build.gradle.kts desktop/src/main/kotlin/De
 if ! git diff --staged --quiet; then
     git commit -m "chore: Bump version to ${VERSION_NAME} (code ${VERSION_CODE})"
 fi
-git push origin main
-
-if [[ -n "${COMICS8_MAC_SSH:-}" ]]; then
-    echo "🍏 Building macOS app on Mac builder (${COMICS8_MAC_SSH})..."
-    rm -f "${MAC_ZIP_PATH}"
-    if ! COMICS8_VERSION_NAME="${VERSION_NAME}" COMICS8_VERSION_CODE="${VERSION_CODE}" \
-        ./scripts/update-mac-app-remote.sh "origin/main" "${MAC_ZIP_PATH}"; then
-        echo "  ⚠️ Mac builder (${COMICS8_MAC_SSH}) is unreachable or build failed. Skipped remote macOS build."
-    fi
-fi
+TAG_NAME="v${VERSION_NAME}"
+git tag -f "${TAG_NAME}"
+git push origin main "${TAG_NAME}" -f
 
 # 4. Sync open-source modules to public repo
 echo "🔄 4/5: Syncing open-source repository..."
@@ -143,9 +135,6 @@ if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=3 "${SERVER_USER}@${SERVER_
     if [ -f "$WIN_ZIP_PATH" ]; then
         scp "$WIN_ZIP_PATH" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/Comics8-win.zip"
     fi
-    if [ -f "$MAC_ZIP_PATH" ]; then
-        scp "$MAC_ZIP_PATH" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/Comics8-mac.zip"
-    fi
 
     COMICS8_VERSION_NAME="$VERSION_NAME" \
     COMICS8_VERSION_CODE="$VERSION_CODE" \
@@ -153,18 +142,19 @@ if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=3 "${SERVER_USER}@${SERVER_
     python3 - <<'PY' >/tmp/comics8-version.json
 import json, os, sys
 
+tag = f"v{os.environ['COMICS8_VERSION_NAME']}"
 android = {
     "versionCode": int(os.environ["COMICS8_VERSION_CODE"]),
     "versionName": os.environ["COMICS8_VERSION_NAME"],
-    "downloadUrl": "/api/comics8/download/comics8-latest.apk",
+    "downloadUrl": f"https://github.com/crudust/comics8/releases/download/{tag}/comics8-latest.apk",
     "releaseNotes": os.environ["COMICS8_RELEASE_NOTES"],
 }
 desktop = {
     "versionCode": int(os.environ["COMICS8_VERSION_CODE"]),
     "versionName": os.environ["COMICS8_VERSION_NAME"],
-    "downloadUrl": "/api/comics8/download/Comics8-mac.zip",
+    "downloadUrl": f"https://github.com/crudust/comics8/releases/download/{tag}/Comics8-mac.zip",
     "releaseNotes": os.environ["COMICS8_RELEASE_NOTES"],
-    "windowsDownloadUrl": "/api/comics8/download/Comics8-win.zip",
+    "windowsDownloadUrl": f"https://github.com/crudust/comics8/releases/download/{tag}/Comics8-win.zip",
 }
 json.dump({"android": android, "desktop": desktop}, sys.stdout, ensure_ascii=False, indent=2)
 print()
@@ -185,11 +175,7 @@ RELEASE_FILES=("$GITHUB_APK_PATH")
 if [ -f "$WIN_ZIP_PATH" ]; then
     RELEASE_FILES+=("$WIN_ZIP_PATH")
 fi
-if [ -f "$MAC_ZIP_PATH" ]; then
-    RELEASE_FILES+=("$MAC_ZIP_PATH")
-fi
 
-TAG_NAME="v${VERSION_NAME}"
 if gh release view "${TAG_NAME}" --repo crudust/comics8 >/dev/null 2>&1; then
     echo "  ⬆️ Updating assets for release ${TAG_NAME}..."
     gh release upload "${TAG_NAME}" "${RELEASE_FILES[@]}" --clobber --repo crudust/comics8
@@ -213,26 +199,11 @@ for r_tag in $ALL_RELEASES; do
     fi
 done
 
-# Generate Homebrew Cask Formula if Mac zip exists
-if [ -f "$MAC_ZIP_PATH" ]; then
-    MAC_SHA256=$(sha256sum "$MAC_ZIP_PATH" | awk '{print $1}')
-    mkdir -p build/homebrew
-    sed "s/__VERSION__/${VERSION_NAME}/g; s/__SHA256__/${MAC_SHA256}/g" templates/homebrew/comics8.rb > build/homebrew/comics8.rb
-    echo "🍺 Generated Homebrew Cask: build/homebrew/comics8.rb (SHA256: ${MAC_SHA256})"
-
-    if [[ -n "${COMICS8_MAC_SSH:-}" ]]; then
-        ssh -o StrictHostKeyChecking=no "${COMICS8_MAC_SSH}" "mkdir -p \$(brew --repo crudust/tap)/Casks && cat > \$(brew --repo crudust/tap)/Casks/comics8.rb" < build/homebrew/comics8.rb >/dev/null 2>&1 || true
-        echo "🍺 Synced Homebrew Cask to Mac builder tap (crudust/tap)"
-    fi
-fi
-
 echo "=================================================="
 echo "🎉 배포가 성공적으로 완료되었습니다!"
 echo "• GitHub Release: https://github.com/crudust/comics8/releases/tag/${TAG_NAME}"
 echo "• Android APK:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/comics8-latest.apk"
 echo "• Windows Zip:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/Comics8-win.zip"
-if [ -f "$MAC_ZIP_PATH" ]; then
-    echo "• Mac Desktop:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/Comics8-mac.zip"
-fi
+echo "• Mac Desktop:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/Comics8-mac.zip (GitHub Actions)"
 echo "• Play Store AAB: ${AAB_PATH} (로컬 보관, 비공개 Play Console 전용)"
 echo "=================================================="

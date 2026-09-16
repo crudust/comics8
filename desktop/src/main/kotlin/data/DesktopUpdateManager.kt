@@ -109,8 +109,28 @@ object DesktopUpdateManager {
     }
 
     private fun applyMacUpdate(currentPid: Long, extractedDir: File, destApp: File) {
+        // 1. Ensure current running JRE's jspawnhelper is executable so ProcessBuilder.start() won't fail with posix_spawn failed
+        runCatching {
+            val javaHome = System.getProperty("java.home")
+            if (javaHome != null) {
+                val jspawn = File(javaHome, "lib/jspawnhelper")
+                if (jspawn.exists() && !jspawn.canExecute()) {
+                    jspawn.setExecutable(true, false)
+                }
+            }
+        }
+
         val extractedApp = extractedDir.walk().firstOrNull { it.isDirectory && it.name.endsWith(".app") }
             ?: error("압축 파일 내에서 .app 번들을 찾을 수 없습니다.")
+
+        // 2. Ensure extracted binaries and libraries have executable permissions
+        runCatching {
+            extractedApp.walk().forEach { file ->
+                if (file.isFile && (file.name == "Comics8" || file.name == "jspawnhelper" || file.extension in listOf("sh", "dylib", "so") || file.parentFile?.name == "MacOS")) {
+                    file.setExecutable(true, false)
+                }
+            }
+        }
 
         val scriptFile = File(updateDir, "relaunch.sh")
         scriptFile.writeText(
@@ -136,7 +156,7 @@ object DesktopUpdateManager {
             open "${'$'}DEST_APP"
             """.trimIndent()
         )
-        scriptFile.setExecutable(true)
+        scriptFile.setExecutable(true, false)
 
         val logFile = File(updateDir, "relaunch.log")
         ProcessBuilder("/bin/bash", scriptFile.absolutePath)
