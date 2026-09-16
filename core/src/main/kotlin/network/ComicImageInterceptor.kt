@@ -3,6 +3,11 @@ package com.comics8.core.network
 import com.comics8.core.source.SourceRegistry
 import okhttp3.Interceptor
 import okhttp3.Response
+import java.io.IOException
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
+import javax.net.ssl.SSLException
 
 /**
  * Common OkHttp interceptor that handles:
@@ -16,9 +21,30 @@ class ComicImageInterceptor(
 ) : Interceptor {
     companion object {
         const val MAX_FALLBACKS_DEFAULT = 2
+
+        internal fun isUnrecoverableHostError(e: Throwable?): Boolean {
+            var current = e
+            while (current != null) {
+                if (current is SocketTimeoutException) {
+                    return false
+                }
+                if (current is UnknownHostException ||
+                    current is ConnectException ||
+                    current is SSLException
+                ) {
+                    return true
+                }
+                current = current.cause
+            }
+            return false
+        }
     }
 
     override fun intercept(chain: Interceptor.Chain): Response {
+        if (chain.call().isCanceled()) {
+            throw IOException("Canceled")
+        }
+
         val originalRequest = chain.request()
         val originalUrl = originalRequest.url.toString()
 
@@ -50,15 +76,32 @@ class ComicImageInterceptor(
             null
         }
 
+        if (chain.call().isCanceled()) {
+            response?.close()
+            throw firstError ?: IOException("Canceled")
+        }
+
         if (response != null && response.isSuccessful) {
             return response
         }
 
-        val shouldTryFallback = response == null || (!response.isSuccessful && (response.code == 404 || response.code >= 500))
+        val shouldTryFallback = !chain.call().isCanceled() && when {
+            response != null -> response.code == 404 || response.code >= 500
+            firstError != null -> isUnrecoverableHostError(firstError)
+            else -> false
+        }
+
         if (shouldTryFallback) {
             val fallbacks = ImageFallbacks.forUrl(originalUrl, registry).take(maxFallbacks)
             for (fallbackUrl in fallbacks) {
+                if (chain.call().isCanceled()) {
+                    response?.close()
+                    throw firstError ?: IOException("Canceled")
+                }
+
                 response?.close()
+                response = null
+
                 val fallbackReferer = ImageReferer.forUrl(fallbackUrl, registry)
                 val fallbackReq = requestWithHeaders.newBuilder()
                     .url(fallbackUrl)
@@ -75,10 +118,16 @@ class ComicImageInterceptor(
                     firstError = e
                     null
                 }
-                if (retryResp != null && retryResp.isSuccessful) {
-                    return retryResp
+
+                if (chain.call().isCanceled()) {
+                    retryResp?.close()
+                    throw firstError ?: IOException("Canceled")
                 }
+
                 if (retryResp != null) {
+                    if (retryResp.isSuccessful) {
+                        return retryResp
+                    }
                     response = retryResp
                 }
             }
@@ -87,6 +136,6 @@ class ComicImageInterceptor(
         if (response != null) {
             return response
         }
-        throw firstError ?: java.io.IOException("failed to load image: $originalUrl")
+        throw firstError ?: IOException("failed to load image: $originalUrl")
     }
 }
