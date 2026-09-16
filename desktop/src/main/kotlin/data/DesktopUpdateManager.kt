@@ -236,7 +236,7 @@ object DesktopUpdateManager {
         val targetPath = targetDir.toPath().toAbsolutePath().normalize()
         val isPosix = FileSystems.getDefault().supportedFileAttributeViews().contains("posix")
 
-        try {
+        val usedZipFs = runCatching {
             FileSystems.newFileSystem(zipFile.toPath(), null as ClassLoader?).use { zipFs ->
                 val root = zipFs.getPath("/")
                 Files.walk(root).forEach { zipEntry ->
@@ -267,8 +267,32 @@ object DesktopUpdateManager {
                     }
                 }
             }
-        } catch (e: ZipException) {
-            throw IllegalArgumentException("압축 파일에 안전하지 않은 경로가 있거나 손상되었습니다: ${e.message}", e)
+            true
+        }.getOrDefault(false)
+
+        if (!usedZipFs) {
+            java.util.zip.ZipFile(zipFile).use { zip ->
+                val entries = zip.entries()
+                while (entries.hasMoreElements()) {
+                    val entry = entries.nextElement()
+                    val relativePathStr = entry.name.replace('\\', '/')
+                    if (relativePathStr.isEmpty()) continue
+
+                    val outputPath = targetPath.resolve(relativePathStr).normalize()
+                    require(outputPath.startsWith(targetPath)) {
+                        "압축 파일에 안전하지 않은 경로가 있습니다: $relativePathStr"
+                    }
+
+                    if (entry.isDirectory) {
+                        Files.createDirectories(outputPath)
+                    } else {
+                        outputPath.parent?.let { Files.createDirectories(it) }
+                        zip.getInputStream(entry).use { input ->
+                            Files.copy(input, outputPath, StandardCopyOption.REPLACE_EXISTING)
+                        }
+                    }
+                }
+            }
         }
     }
 
