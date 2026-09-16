@@ -145,4 +145,67 @@ class ReaderDomainTest {
         assertThat(navFrom2).isEqualTo(ReaderDomain.EpisodeNavigation.InCurrentPage(2))
         assertThat(sortedIds[(navFrom2 as ReaderDomain.EpisodeNavigation.InCurrentPage).index]).isEqualTo("300")
     }
+
+    @Test
+    fun resolveBoundaryDecisionPagingAndConfirmation() {
+        // Normal page advance within chapter
+        assertThat(
+            ReaderDomain.resolveBoundaryDecision(
+                currentPage = 2,
+                totalPages = 10,
+                direction = ReaderDomain.BoundaryDirection.ADVANCE,
+                isPromptActive = false,
+            )
+        ).isEqualTo(ReaderDomain.BoundaryDecision.PageTurn(3))
+
+        // Normal page retreat within chapter
+        assertThat(
+            ReaderDomain.resolveBoundaryDecision(
+                currentPage = 2,
+                totalPages = 10,
+                direction = ReaderDomain.BoundaryDirection.RETREAT,
+                isPromptActive = false,
+            )
+        ).isEqualTo(ReaderDomain.BoundaryDecision.PageTurn(1))
+
+        // Advance at last page: 1st swipe shows prompt
+        assertThat(
+            ReaderDomain.resolveBoundaryDecision(
+                currentPage = 9,
+                totalPages = 10,
+                direction = ReaderDomain.BoundaryDirection.ADVANCE,
+                isPromptActive = false,
+            )
+        ).isEqualTo(ReaderDomain.BoundaryDecision.ShowPrompt(ReaderDomain.PageEdge.LAST))
+
+        // Advance at last page: 2nd swipe confirms navigation to next episode
+        assertThat(
+            ReaderDomain.resolveBoundaryDecision(
+                currentPage = 9,
+                totalPages = 10,
+                direction = ReaderDomain.BoundaryDirection.ADVANCE,
+                isPromptActive = true,
+            )
+        ).isEqualTo(ReaderDomain.BoundaryDecision.ConfirmNavigate(ReaderDomain.PageEdge.LAST))
+
+        // Retreat at first page: 1st swipe shows prompt
+        assertThat(
+            ReaderDomain.resolveBoundaryDecision(
+                currentPage = 0,
+                totalPages = 10,
+                direction = ReaderDomain.BoundaryDirection.RETREAT,
+                isPromptActive = false,
+            )
+        ).isEqualTo(ReaderDomain.BoundaryDecision.ShowPrompt(ReaderDomain.PageEdge.FIRST))
+
+        // Retreat at first page: 2nd swipe confirms navigation to prev episode
+        assertThat(
+            ReaderDomain.resolveBoundaryDecision(
+                currentPage = 0,
+                totalPages = 10,
+                direction = ReaderDomain.BoundaryDirection.RETREAT,
+                isPromptActive = true,
+            )
+        ).isEqualTo(ReaderDomain.BoundaryDecision.ConfirmNavigate(ReaderDomain.PageEdge.FIRST))
+    }
 }

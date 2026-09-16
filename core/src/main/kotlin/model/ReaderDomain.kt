@@ -16,6 +16,52 @@ object ReaderDomain {
         LAST,
     }
 
+    enum class BoundaryDirection {
+        ADVANCE,
+        RETREAT,
+    }
+
+    sealed interface BoundaryDecision {
+        data class PageTurn(val targetPage: Int) : BoundaryDecision
+        data class ShowPrompt(val edge: PageEdge) : BoundaryDecision
+        data class ConfirmNavigate(val edge: PageEdge) : BoundaryDecision
+    }
+
+    fun resolveBoundaryDecision(
+        currentPage: Int,
+        totalPages: Int,
+        direction: BoundaryDirection,
+        isPromptActive: Boolean,
+    ): BoundaryDecision {
+        val safeTotal = totalPages.coerceAtLeast(1)
+        val safeCurrent = currentPage.coerceIn(0, safeTotal - 1)
+
+        return when (direction) {
+            BoundaryDirection.ADVANCE -> {
+                if (safeCurrent < safeTotal - 1) {
+                    BoundaryDecision.PageTurn(safeCurrent + 1)
+                } else {
+                    if (isPromptActive) {
+                        BoundaryDecision.ConfirmNavigate(PageEdge.LAST)
+                    } else {
+                        BoundaryDecision.ShowPrompt(PageEdge.LAST)
+                    }
+                }
+            }
+            BoundaryDirection.RETREAT -> {
+                if (safeCurrent > 0) {
+                    BoundaryDecision.PageTurn(safeCurrent - 1)
+                } else {
+                    if (isPromptActive) {
+                        BoundaryDecision.ConfirmNavigate(PageEdge.FIRST)
+                    } else {
+                        BoundaryDecision.ShowPrompt(PageEdge.FIRST)
+                    }
+                }
+            }
+        }
+    }
+
     sealed interface EpisodeNavigation {
         data class InCurrentPage(val index: Int) : EpisodeNavigation
         data class LoadPage(val page: Int, val edge: PageEdge) : EpisodeNavigation

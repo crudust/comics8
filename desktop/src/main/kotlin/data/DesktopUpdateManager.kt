@@ -8,10 +8,12 @@ import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.FileSystems
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.PosixFilePermission
 import java.util.concurrent.TimeUnit
-import java.util.zip.ZipInputStream
+import java.util.zip.ZipException
 import kotlin.system.exitProcess
 
 object DesktopUpdateManager {
@@ -130,7 +132,7 @@ object DesktopUpdateManager {
             rm -rf "${'$'}DEST_APP"
             cp -R "${'$'}NEW_APP" "${'$'}DEST_APP"
             xattr -dr com.apple.quarantine "${'$'}DEST_APP" 2>/dev/null || true
-            chmod -R u+x "${'$'}DEST_APP/Contents/MacOS" 2>/dev/null || true
+            chmod -R u+x "${'$'}DEST_APP" 2>/dev/null || true
             open "${'$'}DEST_APP"
             """.trimIndent()
         )
@@ -212,33 +214,41 @@ object DesktopUpdateManager {
 
     internal fun unzip(zipFile: File, targetDir: File) {
         val targetPath = targetDir.toPath().toAbsolutePath().normalize()
-        ZipInputStream(zipFile.inputStream().buffered()).use { zis ->
-            var entry = zis.nextEntry
-            while (entry != null) {
-                val normalizedName = entry.name.replace('\\', '/')
-                val outputPath = targetPath.resolve(normalizedName).normalize()
-                require(outputPath.startsWith(targetPath)) {
-                    "압축 파일에 안전하지 않은 경로가 있습니다: ${entry.name}"
-                }
-                val newFile = outputPath.toFile()
-                if (entry.isDirectory) {
-                    newFile.mkdirs()
-                } else {
-                    newFile.parentFile?.mkdirs()
-                    FileOutputStream(newFile).use { fos ->
-                        zis.copyTo(fos)
+        val isPosix = FileSystems.getDefault().supportedFileAttributeViews().contains("posix")
+
+        try {
+            FileSystems.newFileSystem(zipFile.toPath(), null as ClassLoader?).use { zipFs ->
+                val root = zipFs.getPath("/")
+                Files.walk(root).forEach { zipEntry ->
+                    val relativePathStr = zipEntry.toString().removePrefix("/").replace('\\', '/')
+                    if (relativePathStr.isEmpty()) return@forEach
+
+                    val outputPath = targetPath.resolve(relativePathStr).normalize()
+                    require(outputPath.startsWith(targetPath)) {
+                        "압축 파일에 안전하지 않은 경로가 있습니다: $relativePathStr"
                     }
-                    if (
-                        entry.name.contains("MacOS/") ||
-                        entry.name.contains("/bin/") ||
-                        entry.name.endsWith(".sh")
-                    ) {
-                        newFile.setExecutable(true)
+
+                    if (Files.isDirectory(zipEntry)) {
+                        Files.createDirectories(outputPath)
+                    } else {
+                        outputPath.parent?.let { Files.createDirectories(it) }
+                        Files.copy(zipEntry, outputPath, StandardCopyOption.REPLACE_EXISTING)
+
+                        if (isPosix) {
+                            val perms = runCatching {
+                                @Suppress("UNCHECKED_CAST")
+                                Files.getAttribute(zipEntry, "zip:permissions") as? Set<PosixFilePermission>
+                            }.getOrNull()
+
+                            if (!perms.isNullOrEmpty()) {
+                                runCatching { Files.setPosixFilePermissions(outputPath, perms) }
+                            }
+                        }
                     }
                 }
-                zis.closeEntry()
-                entry = zis.nextEntry
             }
+        } catch (e: ZipException) {
+            throw IllegalArgumentException("압축 파일에 안전하지 않은 경로가 있거나 손상되었습니다: ${e.message}", e)
         }
     }
 
