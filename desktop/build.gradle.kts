@@ -41,6 +41,7 @@ compose.desktop {
                 "java.security.sasl",
                 "java.management",
                 "jdk.unsupported",
+                "jdk.zipfs",
             )
             packageName = "Comics8"
             packageVersion = "1.2.22"
