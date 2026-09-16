@@ -44,7 +44,7 @@ compose.desktop {
                 "jdk.zipfs",
             )
             packageName = "Comics8"
-            packageVersion = "1.2.22"
+            packageVersion = "1.2.23"
             description = "Comics8 Monitor Desktop"
             macOS {
                 bundleID = "com.comics8.desktop"
