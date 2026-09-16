@@ -44,9 +44,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -92,18 +94,12 @@ import com.comics8.desktop.ui.util.DesktopAsyncImage
 
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.PagerDefaults
-import androidx.compose.foundation.pager.PagerSnapDistance
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.IntSize
-import androidx.compose.ui.unit.Velocity
 
 
 @Composable
@@ -353,14 +349,11 @@ private fun ReaderPagedLayout(
     state: DesktopUiState,
     viewModel: DesktopViewModel,
     pagerState: PagerState,
-    totalPages: Int,
     isR2L: Boolean,
     currentRangeText: String,
-    currentPageNumber: Int,
     onRegisterActions: (onAdvance: () -> Unit, onRetreat: () -> Unit) -> Unit,
-    onPageChange: (Int) -> Unit,
     modifier: Modifier = Modifier,
-    content: @Composable (page: Int, handleTap: (Offset, IntSize) -> Unit) -> Unit,
+    content: @Composable (page: Int) -> Unit,
 ) {
     val strings = LocalStrings.current
     val scope = rememberCoroutineScope()
@@ -381,67 +374,75 @@ private fun ReaderPagedLayout(
         }
     }
 
+    val currentIsR2L by rememberUpdatedState(isR2L)
+    val currentNextPromptVisible by rememberUpdatedState(nextPromptVisible)
+    val currentPrevPromptVisible by rememberUpdatedState(prevPromptVisible)
+
     val onAdvance: () -> Unit = {
-        controlsVisible = false
-        when (val decision = ReaderDomain.resolveBoundaryDecision(
-            currentPage = pagerState.currentPage,
-            totalPages = totalPages,
-            direction = ReaderDomain.BoundaryDirection.ADVANCE,
-            isPromptActive = nextPromptVisible,
-        )) {
-            is ReaderDomain.BoundaryDecision.PageTurn -> {
-                nextPromptVisible = false
-                prevPromptVisible = false
-                scope.launch { pagerState.animateScrollToPage(decision.targetPage) }
-            }
-            is ReaderDomain.BoundaryDecision.ShowPrompt -> {
-                nextPromptVisible = true
-                prevPromptVisible = false
-                promptJob?.cancel()
-                promptJob = scope.launch {
-                    delay(3000)
+        if (!pagerState.isScrollInProgress) {
+            controlsVisible = false
+            when (val decision = ReaderDomain.resolveBoundaryDecision(
+                currentPage = pagerState.currentPage,
+                totalPages = pagerState.pageCount,
+                direction = ReaderDomain.BoundaryDirection.ADVANCE,
+                isPromptActive = currentNextPromptVisible,
+            )) {
+                is ReaderDomain.BoundaryDecision.PageTurn -> {
                     nextPromptVisible = false
+                    prevPromptVisible = false
+                    scope.launch { pagerState.animateScrollToPage(decision.targetPage) }
                 }
-            }
-            is ReaderDomain.BoundaryDecision.ConfirmNavigate -> {
-                nextPromptVisible = false
-                if (state.hasNextEpisode) {
-                    viewModel.openNextEpisode()
-                } else {
-                    viewModel.closeReader()
+                is ReaderDomain.BoundaryDecision.ShowPrompt -> {
+                    nextPromptVisible = true
+                    prevPromptVisible = false
+                    promptJob?.cancel()
+                    promptJob = scope.launch {
+                        delay(3000)
+                        nextPromptVisible = false
+                    }
+                }
+                is ReaderDomain.BoundaryDecision.ConfirmNavigate -> {
+                    nextPromptVisible = false
+                    if (state.hasNextEpisode) {
+                        viewModel.openNextEpisode()
+                    } else {
+                        viewModel.closeReader()
+                    }
                 }
             }
         }
     }
 
     val onRetreat: () -> Unit = {
-        controlsVisible = false
-        when (val decision = ReaderDomain.resolveBoundaryDecision(
-            currentPage = pagerState.currentPage,
-            totalPages = totalPages,
-            direction = ReaderDomain.BoundaryDirection.RETREAT,
-            isPromptActive = prevPromptVisible,
-        )) {
-            is ReaderDomain.BoundaryDecision.PageTurn -> {
-                nextPromptVisible = false
-                prevPromptVisible = false
-                scope.launch { pagerState.animateScrollToPage(decision.targetPage) }
-            }
-            is ReaderDomain.BoundaryDecision.ShowPrompt -> {
-                prevPromptVisible = true
-                nextPromptVisible = false
-                promptJob?.cancel()
-                promptJob = scope.launch {
-                    delay(3000)
+        if (!pagerState.isScrollInProgress) {
+            controlsVisible = false
+            when (val decision = ReaderDomain.resolveBoundaryDecision(
+                currentPage = pagerState.currentPage,
+                totalPages = pagerState.pageCount,
+                direction = ReaderDomain.BoundaryDirection.RETREAT,
+                isPromptActive = currentPrevPromptVisible,
+            )) {
+                is ReaderDomain.BoundaryDecision.PageTurn -> {
+                    nextPromptVisible = false
                     prevPromptVisible = false
+                    scope.launch { pagerState.animateScrollToPage(decision.targetPage) }
                 }
-            }
-            is ReaderDomain.BoundaryDecision.ConfirmNavigate -> {
-                prevPromptVisible = false
-                if (state.hasPrevEpisode) {
-                    viewModel.openPrevEpisode()
-                } else {
-                    viewModel.closeReader()
+                is ReaderDomain.BoundaryDecision.ShowPrompt -> {
+                    prevPromptVisible = true
+                    nextPromptVisible = false
+                    promptJob?.cancel()
+                    promptJob = scope.launch {
+                        delay(3000)
+                        prevPromptVisible = false
+                    }
+                }
+                is ReaderDomain.BoundaryDecision.ConfirmNavigate -> {
+                    prevPromptVisible = false
+                    if (state.hasPrevEpisode) {
+                        viewModel.openPrevEpisode()
+                    } else {
+                        viewModel.closeReader()
+                    }
                 }
             }
         }
@@ -451,103 +452,73 @@ private fun ReaderPagedLayout(
         onRegisterActions(onAdvance, onRetreat)
     }
 
-    var isEdgeLatched by remember { mutableStateOf(false) }
-    var isWheelLatched by remember { mutableStateOf(false) }
-    var accumulatedWheelY by remember { mutableStateOf(0f) }
+    // Unified Trackpad & Wheel Gesture Recognizer
+    var isScrollLatched by remember { mutableStateOf(false) }
+    var accumulatedScrollX by remember { mutableFloatStateOf(0f) }
+    var accumulatedScrollY by remember { mutableFloatStateOf(0f) }
+    var unlatchJob by remember { mutableStateOf<Job?>(null) }
+    var idleResetJob by remember { mutableStateOf<Job?>(null) }
 
     LaunchedEffect(pagerState.isScrollInProgress) {
         if (!pagerState.isScrollInProgress) {
-            isEdgeLatched = false
-            isWheelLatched = false
-            accumulatedWheelY = 0f
-        }
-    }
-
-    val nestedScrollConnection = remember(pagerState, totalPages, isR2L) {
-        object : NestedScrollConnection {
-            var accumulatedEdgeDelta = 0f
-
-            override fun onPostScroll(
-                consumed: Offset,
-                available: Offset,
-                source: NestedScrollSource,
-            ): Offset {
-                val currentPage = pagerState.currentPage
-                val isAtEnd = currentPage >= totalPages - 1
-                val isAtStart = currentPage <= 0
-
-                if (!isAtEnd && !isAtStart) {
-                    accumulatedEdgeDelta = 0f
-                    isEdgeLatched = false
-                    return Offset.Zero
-                }
-
-                if (isEdgeLatched) return Offset.Zero
-
-                val deltaX = available.x
-                if (deltaX == 0f) return Offset.Zero
-
-                val forwardDelta = if (isR2L) deltaX else -deltaX
-                val backwardDelta = if (isR2L) -deltaX else deltaX
-
-                if (isAtEnd && forwardDelta > 0f) {
-                    accumulatedEdgeDelta += forwardDelta
-                    if (accumulatedEdgeDelta >= 40f) {
-                        val now = System.currentTimeMillis()
-                        if (now - lastBoundaryTriggerTime >= 400L) {
-                            isEdgeLatched = true
-                            lastBoundaryTriggerTime = now
-                            onAdvance()
-                        }
-                    }
-                } else if (isAtStart && backwardDelta > 0f) {
-                    accumulatedEdgeDelta += backwardDelta
-                    if (accumulatedEdgeDelta >= 40f) {
-                        val now = System.currentTimeMillis()
-                        if (now - lastBoundaryTriggerTime >= 400L) {
-                            isEdgeLatched = true
-                            lastBoundaryTriggerTime = now
-                            onRetreat()
-                        }
-                    }
-                }
-
-                return Offset.Zero
-            }
-
-            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
-                isEdgeLatched = false
-                accumulatedEdgeDelta = 0f
-                return Velocity.Zero
-            }
+            accumulatedScrollX = 0f
+            accumulatedScrollY = 0f
         }
     }
 
     @OptIn(ExperimentalComposeUiApi::class)
-    val verticalWheelModifier = Modifier.onPointerEvent(PointerEventType.Scroll) { event ->
-        val deltaY = event.changes.sumOf { it.scrollDelta.y.toDouble() }.toFloat()
+    val desktopScrollModifier = Modifier.onPointerEvent(PointerEventType.Scroll) { event ->
         val deltaX = event.changes.sumOf { it.scrollDelta.x.toDouble() }.toFloat()
+        val deltaY = event.changes.sumOf { it.scrollDelta.y.toDouble() }.toFloat()
 
-        if (abs(deltaY) > abs(deltaX)) {
-            if (!pagerState.isScrollInProgress && !isWheelLatched) {
-                accumulatedWheelY += deltaY
-                val threshold = 1.0f
-                if (accumulatedWheelY >= threshold) {
-                    val now = System.currentTimeMillis()
-                    if (now - lastBoundaryTriggerTime >= 400L) {
-                        isWheelLatched = true
-                        accumulatedWheelY = 0f
-                        lastBoundaryTriggerTime = now
-                        onAdvance()
-                    }
-                } else if (accumulatedWheelY <= -threshold) {
-                    val now = System.currentTimeMillis()
-                    if (now - lastBoundaryTriggerTime >= 400L) {
-                        isWheelLatched = true
-                        accumulatedWheelY = 0f
-                        lastBoundaryTriggerTime = now
-                        onRetreat()
-                    }
+        if (isScrollLatched || pagerState.isScrollInProgress) {
+            unlatchJob?.cancel()
+            unlatchJob = scope.launch {
+                delay(180)
+                isScrollLatched = false
+                accumulatedScrollX = 0f
+                accumulatedScrollY = 0f
+            }
+            return@onPointerEvent
+        }
+
+        accumulatedScrollX += deltaX
+        accumulatedScrollY += deltaY
+
+        val direction = ReaderDomain.resolveScrollDirection(
+            deltaX = accumulatedScrollX,
+            deltaY = accumulatedScrollY,
+            isR2L = currentIsR2L,
+            threshold = 0.8f,
+        )
+
+        if (direction != null) {
+            val now = System.currentTimeMillis()
+            if (now - lastBoundaryTriggerTime >= 350L) {
+                isScrollLatched = true
+                lastBoundaryTriggerTime = now
+                unlatchJob?.cancel()
+                unlatchJob = scope.launch {
+                    delay(180)
+                    isScrollLatched = false
+                    accumulatedScrollX = 0f
+                    accumulatedScrollY = 0f
+                }
+
+                when (direction) {
+                    ReaderDomain.BoundaryDirection.ADVANCE -> onAdvance()
+                    ReaderDomain.BoundaryDirection.RETREAT -> onRetreat()
+                }
+            }
+            accumulatedScrollX = 0f
+            accumulatedScrollY = 0f
+        } else {
+            idleResetJob?.cancel()
+            idleResetJob = scope.launch {
+                delay(150)
+                if (!isScrollLatched) {
+                    accumulatedScrollX = 0f
+                    accumulatedScrollY = 0f
                 }
             }
         }
@@ -557,8 +528,8 @@ private fun ReaderPagedLayout(
         val tapX = tapOffset.x
         val width = size.width.toFloat()
         when {
-            tapX < width * 0.38f -> if (isR2L) onAdvance() else onRetreat()
-            tapX > width * 0.62f -> if (isR2L) onRetreat() else onAdvance()
+            tapX < width * 0.38f -> if (currentIsR2L) onAdvance() else onRetreat()
+            tapX > width * 0.62f -> if (currentIsR2L) onRetreat() else onAdvance()
             else -> {
                 controlsVisible = !controlsVisible
                 nextPromptVisible = false
@@ -574,18 +545,24 @@ private fun ReaderPagedLayout(
     ) {
         HorizontalPager(
             state = pagerState,
+            userScrollEnabled = false,
             reverseLayout = isR2L,
             beyondViewportPageCount = 1,
-            flingBehavior = PagerDefaults.flingBehavior(
-                state = pagerState,
-                pagerSnapDistance = PagerSnapDistance.atMost(1),
-            ),
             modifier = Modifier
                 .fillMaxSize()
-                .nestedScroll(nestedScrollConnection)
-                .then(verticalWheelModifier),
+                .then(desktopScrollModifier),
         ) { page ->
-            content(page, handleTap)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(page, isR2L) {
+                        detectTapGestures { offset ->
+                            handleTap(offset, size)
+                        }
+                    },
+            ) {
+                content(page)
+            }
         }
 
         // Floating Page Indicator (Visible when controls are hidden)
@@ -656,11 +633,14 @@ private fun ReaderPagedLayout(
         ) {
             ReaderBottomBar(
                 currentRangeText = currentRangeText,
-                currentPage = currentPageNumber,
-                maxPages = totalPages,
+                currentPage = pagerState.currentPage + 1,
+                maxPages = pagerState.pageCount,
                 hasPrevEpisode = state.hasPrevEpisode,
                 hasNextEpisode = state.hasNextEpisode,
-                onPageChange = onPageChange,
+                onPageChange = { targetPage ->
+                    val pageIdx = (targetPage - 1).coerceIn(0, pagerState.pageCount - 1)
+                    scope.launch { pagerState.scrollToPage(pageIdx) }
+                },
                 onPrevEp = viewModel::openPrevEpisode,
                 onNextEp = viewModel::openNextEpisode,
                 onClose = viewModel::closeReader,
@@ -746,47 +726,31 @@ private fun ReaderSingleView(
         state = state,
         viewModel = viewModel,
         pagerState = pagerState,
-        totalPages = totalSlices,
         isR2L = isR2L,
         currentRangeText = "${pagerState.currentPage + 1} / $totalSlices",
-        currentPageNumber = pagerState.currentPage + 1,
         onRegisterActions = onRegisterActions,
-        onPageChange = { targetPage ->
-            val pageIdx = (targetPage - 1).coerceIn(0, totalSlices - 1)
-            scope.launch { pagerState.scrollToPage(pageIdx) }
-        },
         modifier = modifier,
-    ) { page, handleTap ->
+    ) { page ->
         val currentSlice = slices.getOrNull(page)
         val currentImage = currentSlice?.let { state.readerImages.getOrNull(it.imageIndex) }
         val currentHalf = currentSlice?.half ?: ImageHalf.FULL
 
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(Unit) {
-                    detectTapGestures { offset ->
-                        handleTap(offset, size)
+        if (currentImage != null) {
+            DesktopAsyncImage(
+                cacheRole = ImageCacheRole.READER,
+                url = currentImage,
+                half = currentHalf,
+                contentDescription = strings.labelPageNumber(page + 1),
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize(),
+                onLoaded = { bitmap ->
+                    val w = bitmap.width
+                    val h = bitmap.height
+                    if (w > 0 && h > 0) {
+                        viewModel.recordImageAspectRatio(currentSlice.imageIndex, w, h)
                     }
                 },
-        ) {
-            if (currentImage != null) {
-                DesktopAsyncImage(
-                    cacheRole = ImageCacheRole.READER,
-                    url = currentImage,
-                    half = currentHalf,
-                    contentDescription = strings.labelPageNumber(page + 1),
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize(),
-                    onLoaded = { bitmap ->
-                        val w = bitmap.width
-                        val h = bitmap.height
-                        if (w > 0 && h > 0) {
-                            viewModel.recordImageAspectRatio(currentSlice.imageIndex, w, h)
-                        }
-                    },
-                )
-            }
+            )
         }
     }
 }
@@ -880,39 +844,16 @@ private fun ReaderDualView(
         }
     }
 
-    val currentPageNumber = remember(currentSpread) {
-        when (currentSpread) {
-            is DualSpread.Single -> currentSpread.index + 1
-            is DualSpread.Dual -> currentSpread.firstIndex + 1
-            null -> 1
-        }
-    }
-
     ReaderPagedLayout(
         state = state,
         viewModel = viewModel,
         pagerState = pagerState,
-        totalPages = totalSpreads,
         isR2L = isR2L,
         currentRangeText = currentRangeText,
-        currentPageNumber = currentPageNumber,
         onRegisterActions = onRegisterActions,
-        onPageChange = { targetSpread ->
-            val pageIdx = (targetSpread - 1).coerceIn(0, totalSpreads - 1)
-            scope.launch { pagerState.scrollToPage(pageIdx) }
-        },
         modifier = modifier,
-    ) { page, handleTap ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(Unit) {
-                    detectTapGestures { offset ->
-                        handleTap(offset, size)
-                    }
-                },
-        ) {
-            when (val spread = spreads.getOrNull(page)) {
+    ) { page ->
+        when (val spread = spreads.getOrNull(page)) {
                 is DualSpread.Single -> {
                     val ratio = state.imageAspectRatios[spread.index]
                     val isWide = ratio != null && ratio >= 1.0f
@@ -1054,7 +995,6 @@ private fun ReaderDualView(
                 }
                 null -> {}
             }
-        }
     }
 }
 

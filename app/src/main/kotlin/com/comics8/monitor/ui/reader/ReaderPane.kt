@@ -48,6 +48,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -307,7 +308,6 @@ private fun ReaderPagedLayout(
     state: ListingUiState,
     viewModel: ListingViewModel,
     pagerState: PagerState,
-    totalPages: Int,
     isR2L: Boolean,
     currentRangeText: String,
     modifier: Modifier = Modifier,
@@ -331,67 +331,75 @@ private fun ReaderPagedLayout(
         }
     }
 
+    val currentIsR2L by rememberUpdatedState(isR2L)
+    val currentNextPromptVisible by rememberUpdatedState(nextPromptVisible)
+    val currentPrevPromptVisible by rememberUpdatedState(prevPromptVisible)
+
     val onAdvance = {
-        controlsVisible = false
-        when (val decision = ReaderDomain.resolveBoundaryDecision(
-            currentPage = pagerState.currentPage,
-            totalPages = totalPages,
-            direction = ReaderDomain.BoundaryDirection.ADVANCE,
-            isPromptActive = nextPromptVisible,
-        )) {
-            is ReaderDomain.BoundaryDecision.PageTurn -> {
-                nextPromptVisible = false
-                prevPromptVisible = false
-                scope.launch { pagerState.animateScrollToPage(decision.targetPage) }
-            }
-            is ReaderDomain.BoundaryDecision.ShowPrompt -> {
-                nextPromptVisible = true
-                prevPromptVisible = false
-                promptJob?.cancel()
-                promptJob = scope.launch {
-                    delay(3000)
+        if (!pagerState.isScrollInProgress) {
+            controlsVisible = false
+            when (val decision = ReaderDomain.resolveBoundaryDecision(
+                currentPage = pagerState.currentPage,
+                totalPages = pagerState.pageCount,
+                direction = ReaderDomain.BoundaryDirection.ADVANCE,
+                isPromptActive = currentNextPromptVisible,
+            )) {
+                is ReaderDomain.BoundaryDecision.PageTurn -> {
                     nextPromptVisible = false
+                    prevPromptVisible = false
+                    scope.launch { pagerState.animateScrollToPage(decision.targetPage) }
                 }
-            }
-            is ReaderDomain.BoundaryDecision.ConfirmNavigate -> {
-                nextPromptVisible = false
-                if (state.hasNextEpisode) {
-                    viewModel.openNextEpisode()
-                } else {
-                    viewModel.closeReader()
+                is ReaderDomain.BoundaryDecision.ShowPrompt -> {
+                    nextPromptVisible = true
+                    prevPromptVisible = false
+                    promptJob?.cancel()
+                    promptJob = scope.launch {
+                        delay(3000)
+                        nextPromptVisible = false
+                    }
+                }
+                is ReaderDomain.BoundaryDecision.ConfirmNavigate -> {
+                    nextPromptVisible = false
+                    if (state.hasNextEpisode) {
+                        viewModel.openNextEpisode()
+                    } else {
+                        viewModel.closeReader()
+                    }
                 }
             }
         }
     }
 
     val onRetreat = {
-        controlsVisible = false
-        when (val decision = ReaderDomain.resolveBoundaryDecision(
-            currentPage = pagerState.currentPage,
-            totalPages = totalPages,
-            direction = ReaderDomain.BoundaryDirection.RETREAT,
-            isPromptActive = prevPromptVisible,
-        )) {
-            is ReaderDomain.BoundaryDecision.PageTurn -> {
-                nextPromptVisible = false
-                prevPromptVisible = false
-                scope.launch { pagerState.animateScrollToPage(decision.targetPage) }
-            }
-            is ReaderDomain.BoundaryDecision.ShowPrompt -> {
-                prevPromptVisible = true
-                nextPromptVisible = false
-                promptJob?.cancel()
-                promptJob = scope.launch {
-                    delay(3000)
+        if (!pagerState.isScrollInProgress) {
+            controlsVisible = false
+            when (val decision = ReaderDomain.resolveBoundaryDecision(
+                currentPage = pagerState.currentPage,
+                totalPages = pagerState.pageCount,
+                direction = ReaderDomain.BoundaryDirection.RETREAT,
+                isPromptActive = currentPrevPromptVisible,
+            )) {
+                is ReaderDomain.BoundaryDecision.PageTurn -> {
+                    nextPromptVisible = false
                     prevPromptVisible = false
+                    scope.launch { pagerState.animateScrollToPage(decision.targetPage) }
                 }
-            }
-            is ReaderDomain.BoundaryDecision.ConfirmNavigate -> {
-                prevPromptVisible = false
-                if (state.hasPrevEpisode) {
-                    viewModel.openPrevEpisode()
-                } else {
-                    viewModel.closeReader()
+                is ReaderDomain.BoundaryDecision.ShowPrompt -> {
+                    prevPromptVisible = true
+                    nextPromptVisible = false
+                    promptJob?.cancel()
+                    promptJob = scope.launch {
+                        delay(3000)
+                        prevPromptVisible = false
+                    }
+                }
+                is ReaderDomain.BoundaryDecision.ConfirmNavigate -> {
+                    prevPromptVisible = false
+                    if (state.hasPrevEpisode) {
+                        viewModel.openPrevEpisode()
+                    } else {
+                        viewModel.closeReader()
+                    }
                 }
             }
         }
@@ -409,11 +417,11 @@ private fun ReaderPagedLayout(
     val velocityThresholdPx = remember(density) { with(density) { 350.dp.toPx() } }
     var lastEdgeTriggerTime by remember { mutableLongStateOf(0L) }
 
-    val edgeSwipeModifier = Modifier.pointerInput(isR2L, totalPages, pagerState) {
+    val edgeSwipeModifier = Modifier.pointerInput(isR2L, pagerState) {
         awaitEachGesture {
             val down = awaitFirstDown(pass = PointerEventPass.Initial, requireUnconsumed = false)
             val startPage = pagerState.currentPage
-            val isAtEnd = startPage >= totalPages - 1
+            val isAtEnd = startPage >= pagerState.pageCount - 1
             val isAtStart = startPage <= 0
 
             if (!isAtEnd && !isAtStart) {
@@ -480,7 +488,7 @@ private fun ReaderPagedLayout(
         val tapX = tapOffset.x
         val width = size.width.toFloat()
         val isNextOnLeft = when (state.pageTapZone) {
-            PageTapZone.FOLLOW_DIRECTION -> isR2L
+            PageTapZone.FOLLOW_DIRECTION -> currentIsR2L
             PageTapZone.LEFT_NEXT -> true
             PageTapZone.RIGHT_NEXT -> false
         }
@@ -585,7 +593,7 @@ private fun ReaderPagedLayout(
             ReaderBottomBar(
                 currentRangeText = currentRangeText,
                 currentPage = pagerState.currentPage + 1,
-                maxPages = totalPages,
+                maxPages = pagerState.pageCount,
                 hasPrevEpisode = state.hasPrevEpisode,
                 hasNextEpisode = state.hasNextEpisode,
                 onPageChange = { targetPage ->
@@ -663,7 +671,6 @@ private fun ReaderSinglePagePane(
         state = state,
         viewModel = viewModel,
         pagerState = pagerState,
-        totalPages = totalSlices,
         isR2L = isR2L,
         currentRangeText = "${pagerState.currentPage + 1} / $totalSlices",
         modifier = modifier,
@@ -841,7 +848,6 @@ private fun ReaderDualPagePane(
         state = state,
         viewModel = viewModel,
         pagerState = pagerState,
-        totalPages = totalSpreads,
         isR2L = isR2L,
         currentRangeText = currentRangeText,
         modifier = modifier,

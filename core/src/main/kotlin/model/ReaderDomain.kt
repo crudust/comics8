@@ -62,6 +62,24 @@ object ReaderDomain {
         }
     }
 
+    fun resolveScrollDirection(
+        deltaX: Float,
+        deltaY: Float,
+        isR2L: Boolean,
+        threshold: Float = 0.8f,
+    ): BoundaryDirection? {
+        val absX = kotlin.math.abs(deltaX)
+        val absY = kotlin.math.abs(deltaY)
+        if (absX < threshold && absY < threshold) return null
+
+        return if (absX >= absY) {
+            val isForward = if (isR2L) deltaX < 0f else deltaX > 0f
+            if (isForward) BoundaryDirection.ADVANCE else BoundaryDirection.RETREAT
+        } else {
+            if (deltaY > 0f) BoundaryDirection.ADVANCE else BoundaryDirection.RETREAT
+        }
+    }
+
     sealed interface EpisodeNavigation {
         data class InCurrentPage(val index: Int) : EpisodeNavigation
         data class LoadPage(val page: Int, val edge: PageEdge) : EpisodeNavigation

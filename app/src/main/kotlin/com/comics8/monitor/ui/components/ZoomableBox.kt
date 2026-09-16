@@ -13,6 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,6 +36,7 @@ fun ZoomableBox(
     var scale by remember(resetKey) { mutableFloatStateOf(1f) }
     var offset by remember(resetKey) { mutableStateOf(Offset.Zero) }
     var size by remember { mutableStateOf(IntSize.Zero) }
+    val currentOnTap by rememberUpdatedState(onTap)
 
     LaunchedEffect(resetKey) {
         scale = 1f
@@ -94,7 +96,7 @@ fun ZoomableBox(
                     // If it was a clean tap (finger released without dragging)
                     val duration = System.currentTimeMillis() - downTime
                     if (isTap && !isMultiTouch && duration < 600) {
-                        onTap?.invoke(downPos, size)
+                        currentOnTap?.invoke(downPos, size)
                     }
                 }
             },

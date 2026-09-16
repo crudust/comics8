@@ -20,5 +20,9 @@ Governs the comic/webtoon reading canvas across Android and Desktop platforms, i
   - Finished status is flagged when reaching the last page threshold.
 - **Shared Reader Decisions (`ReaderDomain.kt`)**:
   - One-based page clamping, sort-aware episode navigation (`nextEpisode`/`prevEpisode` respecting `EpisodeSortOrder.isAscending`), initial image position,
-    aspect-ratio validation, and dimension-based dual-mode selection are pure `core` decisions.
+    aspect-ratio validation, dimension-based dual-mode selection, and scroll direction resolution (`resolveScrollDirection`) are pure `core` decisions.
   - Platform ViewModels own lifecycle, persistence, repository calls, and UI state mutation only.
+- **Paging Navigation & Gesture Invariant**:
+  - `pagerState.pageCount` is the sole authoritative page count across platforms. Redundant `totalPages` parameters and ad-hoc `maxOf` fallbacks are prohibited.
+  - On Desktop, `HorizontalPager` enforces discrete page turns via `userScrollEnabled = false`. Trackpad swipes and mouse wheel events are latched to prevent OS momentum drift and multi-page skipping.
+
