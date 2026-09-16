@@ -45,7 +45,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -347,70 +346,70 @@ private fun ReaderPagedLayout(
     val currentPrevPromptVisible by rememberUpdatedState(prevPromptVisible)
 
     val onAdvance = {
-        if (!pagerState.isScrollInProgress) {
-            controlsVisible = false
-            when (val decision = ReaderDomain.resolveBoundaryDecision(
-                currentPage = pagerState.currentPage,
-                totalPages = pagerState.pageCount,
-                direction = ReaderDomain.BoundaryDirection.ADVANCE,
-                isPromptActive = currentNextPromptVisible,
-            )) {
-                is ReaderDomain.BoundaryDecision.PageTurn -> {
+        controlsVisible = false
+        when (val decision = ReaderDomain.resolveBoundaryDecision(
+            currentPage = pagerState.currentPage,
+            totalPages = pagerState.pageCount,
+            direction = ReaderDomain.BoundaryDirection.ADVANCE,
+            isPromptActive = currentNextPromptVisible,
+        )) {
+            is ReaderDomain.BoundaryDecision.PageTurn -> {
+                if (!pagerState.isScrollInProgress) {
                     nextPromptVisible = false
                     prevPromptVisible = false
                     scope.launch { pagerState.animateScrollToPage(decision.targetPage) }
                 }
-                is ReaderDomain.BoundaryDecision.ShowPrompt -> {
-                    nextPromptVisible = true
-                    prevPromptVisible = false
-                    promptJob?.cancel()
-                    promptJob = scope.launch {
-                        delay(3000)
-                        nextPromptVisible = false
-                    }
-                }
-                is ReaderDomain.BoundaryDecision.ConfirmNavigate -> {
+            }
+            is ReaderDomain.BoundaryDecision.ShowPrompt -> {
+                nextPromptVisible = true
+                prevPromptVisible = false
+                promptJob?.cancel()
+                promptJob = scope.launch {
+                    delay(3000)
                     nextPromptVisible = false
-                    if (state.hasNextEpisode) {
-                        viewModel.openNextEpisode()
-                    } else {
-                        viewModel.closeReader()
-                    }
+                }
+            }
+            is ReaderDomain.BoundaryDecision.ConfirmNavigate -> {
+                nextPromptVisible = false
+                if (state.hasNextEpisode) {
+                    viewModel.openNextEpisode()
+                } else {
+                    viewModel.closeReader()
                 }
             }
         }
     }
 
     val onRetreat = {
-        if (!pagerState.isScrollInProgress) {
-            controlsVisible = false
-            when (val decision = ReaderDomain.resolveBoundaryDecision(
-                currentPage = pagerState.currentPage,
-                totalPages = pagerState.pageCount,
-                direction = ReaderDomain.BoundaryDirection.RETREAT,
-                isPromptActive = currentPrevPromptVisible,
-            )) {
-                is ReaderDomain.BoundaryDecision.PageTurn -> {
+        controlsVisible = false
+        when (val decision = ReaderDomain.resolveBoundaryDecision(
+            currentPage = pagerState.currentPage,
+            totalPages = pagerState.pageCount,
+            direction = ReaderDomain.BoundaryDirection.RETREAT,
+            isPromptActive = currentPrevPromptVisible,
+        )) {
+            is ReaderDomain.BoundaryDecision.PageTurn -> {
+                if (!pagerState.isScrollInProgress) {
                     nextPromptVisible = false
                     prevPromptVisible = false
                     scope.launch { pagerState.animateScrollToPage(decision.targetPage) }
                 }
-                is ReaderDomain.BoundaryDecision.ShowPrompt -> {
-                    prevPromptVisible = true
-                    nextPromptVisible = false
-                    promptJob?.cancel()
-                    promptJob = scope.launch {
-                        delay(3000)
-                        prevPromptVisible = false
-                    }
-                }
-                is ReaderDomain.BoundaryDecision.ConfirmNavigate -> {
+            }
+            is ReaderDomain.BoundaryDecision.ShowPrompt -> {
+                prevPromptVisible = true
+                nextPromptVisible = false
+                promptJob?.cancel()
+                promptJob = scope.launch {
+                    delay(3000)
                     prevPromptVisible = false
-                    if (state.hasPrevEpisode) {
-                        viewModel.openPrevEpisode()
-                    } else {
-                        viewModel.closeReader()
-                    }
+                }
+            }
+            is ReaderDomain.BoundaryDecision.ConfirmNavigate -> {
+                prevPromptVisible = false
+                if (state.hasPrevEpisode) {
+                    viewModel.openPrevEpisode()
+                } else {
+                    viewModel.closeReader()
                 }
             }
         }
@@ -426,7 +425,6 @@ private fun ReaderPagedLayout(
     val dragThresholdPx = remember(density) { with(density) { 40.dp.toPx() } }
     val minDragForFlingPx = remember(density) { with(density) { 16.dp.toPx() } }
     val velocityThresholdPx = remember(density) { with(density) { 350.dp.toPx() } }
-    var lastEdgeTriggerTime by remember { mutableLongStateOf(0L) }
 
     val edgeSwipeModifier = Modifier.pointerInput(isR2L, pagerState) {
         awaitEachGesture {
@@ -476,9 +474,6 @@ private fun ReaderPagedLayout(
             val forwardVelocity = if (isR2L) velocity.x else -velocity.x
             val backwardVelocity = if (isR2L) -velocity.x else velocity.x
 
-            val now = System.currentTimeMillis()
-            if (now - lastEdgeTriggerTime < 400L) return@awaitEachGesture
-
             val isForwardTriggered = (forwardDrag >= dragThresholdPx) ||
                 (forwardDrag >= minDragForFlingPx && forwardVelocity >= velocityThresholdPx)
 
@@ -486,10 +481,8 @@ private fun ReaderPagedLayout(
                 (backwardDrag >= minDragForFlingPx && backwardVelocity >= velocityThresholdPx)
 
             if (isAtEnd && isForwardTriggered) {
-                lastEdgeTriggerTime = now
                 onAdvance()
             } else if (isAtStart && isBackwardTriggered) {
-                lastEdgeTriggerTime = now
                 onRetreat()
             }
         }
