@@ -28,6 +28,7 @@ import androidx.compose.foundation.pager.PagerSnapDistance
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
@@ -224,13 +225,23 @@ private fun ReaderScrollPane(
                 modifier = Modifier.fillMaxSize(),
             ) {
                 itemsIndexed(state.readerImages, key = { index, url -> "$index-$url" }) { index, imageUrl ->
+                    val ratio = state.imageAspectRatios[index]
+                    val itemModifier = if (ratio != null && ratio > 0f) {
+                        Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(ratio)
+                    } else {
+                        Modifier
+                            .fillMaxWidth()
+                            .defaultMinSize(minHeight = 480.dp)
+                            .wrapContentHeight()
+                    }
                     ReaderImage(
                         model = imageUrl,
                         contentDescription = strings.labelPageNumber(index + 1),
                         contentScale = ContentScale.FillWidth,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .wrapContentHeight(),
+                        modifier = itemModifier,
+                        minPlaceholderHeight = 480.dp,
                         onSuccess = { result ->
                             val w = result.result.drawable.intrinsicWidth
                             val h = result.result.drawable.intrinsicHeight
@@ -651,13 +662,16 @@ private fun ReaderSinglePagePane(
         }
     }
 
+    val currentSlices by rememberUpdatedState(slices)
     val context = LocalContext.current
-    LaunchedEffect(pagerState.currentPage, slices, state.readerImages) {
+    LaunchedEffect(pagerState.currentPage, state.readerImages) {
         val imageLoader = coil.Coil.imageLoader(context)
         val maxEdge = coil.size.Size(1200, 1800)
-        for (offset in 1..2) {
-            val nextSlice = slices.getOrNull(pagerState.currentPage + offset) ?: continue
-            val targetUrl = state.readerImages.getOrNull(nextSlice.imageIndex) ?: continue
+        val targetUrls = (2..3).mapNotNull { offset ->
+            val nextSlice = currentSlices.getOrNull(pagerState.currentPage + offset) ?: return@mapNotNull null
+            state.readerImages.getOrNull(nextSlice.imageIndex)
+        }.distinct()
+        for (targetUrl in targetUrls) {
             val request = coil.request.ImageRequest.Builder(context)
                 .data(targetUrl)
                 .imageCacheRole(ImageCacheRole.READER, targetUrl)
@@ -789,45 +803,28 @@ private fun ReaderDualPagePane(
         prevSpreads = spreads
     }
 
+    val currentSpreads by rememberUpdatedState(spreads)
     val context = LocalContext.current
-    LaunchedEffect(pagerState.currentPage, spreads, state.readerImages) {
+    LaunchedEffect(pagerState.currentPage, state.readerImages) {
         val imageLoader = coil.Coil.imageLoader(context)
         val maxEdge = coil.size.Size(1200, 1800)
-        for (offset in 1..1) {
-            val nextSpread = spreads.getOrNull(pagerState.currentPage + offset)
-            when (nextSpread) {
-                is DualSpread.Single -> {
-                    state.readerImages.getOrNull(nextSpread.index)?.let { url ->
-                        imageLoader.execute(
-                            coil.request.ImageRequest.Builder(context)
-                                .data(url)
-                                .imageCacheRole(ImageCacheRole.READER, url)
-                                .size(maxEdge)
-                                .build(),
-                        )
-                    }
-                }
-                is DualSpread.Dual -> {
-                    state.readerImages.getOrNull(nextSpread.firstIndex)?.let { url ->
-                        imageLoader.execute(
-                            coil.request.ImageRequest.Builder(context)
-                                .data(url)
-                                .imageCacheRole(ImageCacheRole.READER, url)
-                                .size(maxEdge)
-                                .build(),
-                        )
-                    }
-                    state.readerImages.getOrNull(nextSpread.secondIndex)?.let { url ->
-                        imageLoader.execute(
-                            coil.request.ImageRequest.Builder(context)
-                                .data(url)
-                                .imageCacheRole(ImageCacheRole.READER, url)
-                                .size(maxEdge)
-                                .build(),
-                        )
-                    }
-                }
-                null -> {}
+        for (offset in 2..2) {
+            val nextSpread = currentSpreads.getOrNull(pagerState.currentPage + offset) ?: continue
+            val urls = when (nextSpread) {
+                is DualSpread.Single -> listOfNotNull(state.readerImages.getOrNull(nextSpread.index))
+                is DualSpread.Dual -> listOfNotNull(
+                    state.readerImages.getOrNull(nextSpread.firstIndex),
+                    state.readerImages.getOrNull(nextSpread.secondIndex),
+                ).distinct()
+            }
+            for (url in urls) {
+                imageLoader.execute(
+                    coil.request.ImageRequest.Builder(context)
+                        .data(url)
+                        .imageCacheRole(ImageCacheRole.READER, url)
+                        .size(maxEdge)
+                        .build(),
+                )
             }
         }
     }
@@ -1131,6 +1128,7 @@ private fun ReaderImage(
     contentScale: ContentScale = ContentScale.Fit,
     alignment: Alignment = Alignment.Center,
     half: ImageHalf = ImageHalf.FULL,
+    minPlaceholderHeight: androidx.compose.ui.unit.Dp = 480.dp,
     onSuccess: ((AsyncImagePainter.State.Success) -> Unit)? = null,
 ) {
     val strings = LocalStrings.current
@@ -1163,7 +1161,7 @@ private fun ReaderImage(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .defaultMinSize(minHeight = 240.dp),
+                    .defaultMinSize(minHeight = minPlaceholderHeight),
                 contentAlignment = Alignment.Center,
             ) {
                 CircularProgressIndicator(

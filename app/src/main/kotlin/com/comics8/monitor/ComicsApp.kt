@@ -145,7 +145,8 @@ class ComicsApp : Application(), ImageLoaderFactory {
     override fun newImageLoader(): ImageLoader {
         val http = ToonClient.newImageHttpClient(toonClient.httpClient, sourceRegistry)
         val totalMemoryBytes = MemoryCache.Builder(this).maxSizePercent(0.25).build().maxSize.toLong()
-        imageMemoryCache = AndroidImageMemoryCache(this, ImageMemoryPolicy.partition(totalMemoryBytes))
+        val cache = AndroidImageMemoryCache(this, ImageMemoryPolicy.partition(totalMemoryBytes))
+        imageMemoryCache = cache
         return ImageLoader.Builder(this)
             .okHttpClient(http)
             .components {
@@ -154,11 +155,11 @@ class ComicsApp : Application(), ImageLoaderFactory {
                 add(NetworkImageFetcher.Factory(coverThumbs))
             }
             .crossfade(true)
-            .memoryCache { imageMemoryCache }
+            .memoryCache { cache }
             .diskCache {
                 DiskCache.Builder()
                     .directory(cacheDir.resolve("images"))
-                    .maxSizeBytes(200L * 1024L * 1024L)
+                    .maxSizeBytes(250L * 1024L * 1024L)
                     .build()
             }
             .build()

@@ -319,8 +319,13 @@ class ToonClient(
             sources: com.comics8.core.source.SourceRegistry,
         ): OkHttpClient {
             return baseClient.newBuilder()
-                .connectTimeout(5, TimeUnit.SECONDS)
-                .readTimeout(8, TimeUnit.SECONDS)
+                .cache(null)
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(15, TimeUnit.SECONDS)
+                .dispatcher(okhttp3.Dispatcher().apply {
+                    maxRequests = 32
+                    maxRequestsPerHost = 4
+                })
                 .addInterceptor(ComicImageInterceptor(sources))
                 .build()
         }

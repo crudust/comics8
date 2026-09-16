@@ -14,7 +14,8 @@
   - Non-blocking execution requirement: Long-running network or I/O calls must run under `Dispatchers.IO` / `runInterruptible`.
 - **Network Interceptors & DNS**:
   - `FallbackDns`: Custom DNS resolver with Cloudflare/Google DoH fallback for domain resolution resilience.
-  - `ComicImageInterceptor` & `ImageReferer`: Dynamic Referer / User-Agent header injection based on source domain origin.
+  - `ComicImageInterceptor` & `ImageReferer`: Dynamic Referer / User-Agent header injection based on source domain origin. Guards against cancellation (`isCanceled()`), restricts fallbacks to HTTP 404/5xx or unrecoverable host errors, and prevents cascading timeouts on legitimate hosts.
+  - `Image HTTP Client` (`ToonClient.newImageHttpClient`): Unsets OkHttp disk cache (`cache(null)`) so upper layers (Coil / desktop disk cache) retain single-source ownership, applies 15s connect/read timeouts for mobile DNS/TLS negotiation, and limits per-host concurrency to 4 via its dispatcher.
   - `ImageBatchDownload`: Parallel image chunk downloader with rate limiting and retry mechanism.
 - **Dependency Invariant**:
   - `core` MUST NOT depend on Android framework (`android.*`) or Desktop Compose UI (`androidx.compose.*`).
