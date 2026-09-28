@@ -224,6 +224,13 @@ val compileWindowsLauncher by tasks.registering(Exec::class) {
     )
 }
 
+tasks.withType<org.gradle.jvm.tasks.Jar>().configureEach {
+    exclude("META-INF/*.SF")
+    exclude("META-INF/*.DSA")
+    exclude("META-INF/*.RSA")
+    exclude("META-INF/SIG-*")
+}
+
 val packageWindowsPortable = tasks.register<Zip>("packageWindowsZip") {
     group = "compose desktop"
     description = "Packages a clean standalone portable Windows distribution with Comics8.exe and app/ subfolder."
@@ -240,8 +247,9 @@ val packageWindowsPortable = tasks.register<Zip>("packageWindowsZip") {
 
     // Comics8.jar placed inside app/ subfolder
     into("app") {
-        from(layout.buildDirectory.dir("compose/jars")) {
-            include("*.jar")
+        from({
+            tasks.named<org.gradle.jvm.tasks.Jar>("packageUberJarForCurrentOS").get().archiveFile
+        }) {
             rename { "Comics8.jar" }
         }
     }
