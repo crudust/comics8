@@ -30,8 +30,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     wchar_t jarCandidate1[MAX_PATH];
     wchar_t jarCandidate2[MAX_PATH];
 
-    swprintf(jarCandidate1, MAX_PATH, L"%sapp\\Comics8.jar", exePath);
-    swprintf(jarCandidate2, MAX_PATH, L"%sComics8.jar", exePath);
+    swprintf(jarCandidate1, MAX_PATH, L"%lsapp\\Comics8.jar", exePath);
+    swprintf(jarCandidate2, MAX_PATH, L"%lsComics8.jar", exePath);
 
     if (file_exists(jarCandidate1)) {
         wcscpy(jarPath, jarCandidate1);
@@ -46,8 +46,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     wchar_t candidate1[MAX_PATH];
     wchar_t candidate2[MAX_PATH];
 
-    swprintf(candidate1, MAX_PATH, L"%sruntime\\bin\\javaw.exe", exePath);
-    swprintf(candidate2, MAX_PATH, L"%sjre\\bin\\javaw.exe", exePath);
+    swprintf(candidate1, MAX_PATH, L"%lsruntime\\bin\\javaw.exe", exePath);
+    swprintf(candidate2, MAX_PATH, L"%lsjre\\bin\\javaw.exe", exePath);
 
     if (file_exists(candidate1)) {
         wcscpy(javawPath, candidate1);
@@ -59,7 +59,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
     // Build command line
     wchar_t cmdLine[MAX_PATH * 4];
-    swprintf(cmdLine, MAX_PATH * 4, L"\"%s\" -Xmx2048m -jar \"%s\"", javawPath, jarPath);
+    if (pCmdLine && pCmdLine[0] != L'\0') {
+        swprintf(cmdLine, MAX_PATH * 4, L"\"%ls\" -Xmx2048m -jar \"%ls\" %ls", javawPath, jarPath, pCmdLine);
+    } else {
+        swprintf(cmdLine, MAX_PATH * 4, L"\"%ls\" -Xmx2048m -jar \"%ls\"", javawPath, jarPath);
+    }
 
     STARTUPINFOW si;
     PROCESS_INFORMATION pi;
