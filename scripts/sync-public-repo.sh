@@ -7,8 +7,10 @@ set -euo pipefail
 # to a separate clean public repository.
 # ==========================================================
 
+SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TARGET_REPO="${1:-${COMICS8_PUBLIC_REPO_URL:-git@github.com:crudust/comics8.git}}"
 SYNC_BRANCH="${2:-main}"
+CUSTOM_COMMIT_MSG="${3:-}"
 WORK_DIR="/tmp/comics8-public-sync-$$"
 
 echo "=================================================="
@@ -105,7 +107,20 @@ echo "📝 Committing changes..."
     if git diff --staged --quiet; then
         echo "⚡ No changes detected. Public repository is already up-to-date."
     else
-        COMMIT_MSG="sync: Update Comics8 Desktop $(date '+%Y-%m-%d %H:%M:%S')"
+        if [[ -n "${CUSTOM_COMMIT_MSG}" ]]; then
+            COMMIT_MSG="${CUSTOM_COMMIT_MSG}"
+        else
+            DEV_MSG=$(git -C "${SOURCE_DIR}" log -1 --grep="^chore: Bump version" --invert-grep --format="%s" 2>/dev/null || echo "")
+            if [[ -z "${DEV_MSG}" ]]; then
+                DEV_MSG=$(git -C "${SOURCE_DIR}" log -1 --format="%s" 2>/dev/null || echo "")
+            fi
+
+            if [[ -n "${DEV_MSG}" ]]; then
+                COMMIT_MSG="${DEV_MSG}"
+            else
+                COMMIT_MSG="sync: Update Comics8 $(date '+%Y-%m-%d %H:%M:%S')"
+            fi
+        fi
         git commit -m "${COMMIT_MSG}"
         echo "🚀 Pushing to ${TARGET_REPO}..."
         git push -u origin "${SYNC_BRANCH}"
