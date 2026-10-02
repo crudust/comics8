@@ -83,6 +83,21 @@ class ToonRepository(
     suspend fun saveCatalogTotal(workId: WorkId, totalEpisodes: Int, updatedAt: Long = System.currentTimeMillis()) =
         withContext(Dispatchers.IO) {
             toonCatalogDao?.upsertMonotonic(workId, totalEpisodes, updatedAt)
+            if (syncManager != null && totalEpisodes > 0 && sources.syncParticipates(workId.sourceId)) {
+                try {
+                    syncManager.reportCatalog(
+                        listOf(
+                            SyncCatalogWire(
+                                sourceId = workId.sourceId,
+                                toonId = workId.toonId,
+                                totalEpisodes = totalEpisodes,
+                                updatedAt = updatedAt,
+                            )
+                        )
+                    )
+                } catch (_: Exception) {
+                }
+            }
         }
 
     fun source(id: String) = sources.get(id)
@@ -219,6 +234,8 @@ class ToonRepository(
                 mutableMapOf()
             }
 
+            val discoveredUpdates = java.util.Collections.synchronizedList(mutableListOf<SyncCatalogWire>())
+
             // 1. Server-First: Batch query global catalog for items missing from local DB
             val missingFromLocal = workIds.filter { (catalogTotals[it.storageKey()] ?: 0) == 0 }
             if (missingFromLocal.isNotEmpty() && syncManager != null) {
@@ -237,15 +254,17 @@ class ToonRepository(
                         for (entry in catalogEntries) {
                             val key = entry.workId().storageKey()
                             val prev = catalogTotals[key] ?: 0
-                            if (entry.totalEpisodes > prev) {
-                                catalogTotals[key] = entry.totalEpisodes
+                            val prevHist = historyMap[key]?.totalEpisodes ?: 0
+                            val effectiveTotal = maxOf(prev, prevHist, entry.totalEpisodes)
+                            if (effectiveTotal > prev) {
+                                catalogTotals[key] = effectiveTotal
                                 val hist = historyMap[key]
                                 if (hist != null) {
-                                    val safeOrder = hist.lastReadOrder.coerceIn(0, entry.totalEpisodes)
-                                    val hasNew = safeOrder < entry.totalEpisodes
-                                    if (hist.totalEpisodes != entry.totalEpisodes || hist.hasNew != hasNew) {
+                                    val safeOrder = hist.lastReadOrder.coerceIn(0, effectiveTotal)
+                                    val hasNew = safeOrder < effectiveTotal
+                                    if (hist.totalEpisodes != effectiveTotal || hist.hasNew != hasNew) {
                                         val updatedHist = hist.copy(
-                                            totalEpisodes = entry.totalEpisodes,
+                                            totalEpisodes = effectiveTotal,
                                             lastReadOrder = safeOrder,
                                             hasNew = hasNew,
                                         )
@@ -258,10 +277,21 @@ class ToonRepository(
                                 val progressText = formatReadProgress(
                                     entry.sourceId,
                                     historyMap[key]?.lastReadOrder ?: 0,
-                                    entry.totalEpisodes,
+                                    effectiveTotal,
                                     readCount,
                                 )
-                                onUpdated?.invoke(entry.workId(), entry.totalEpisodes, progressText)
+                                onUpdated?.invoke(entry.workId(), effectiveTotal, progressText)
+
+                                if (prevHist > entry.totalEpisodes) {
+                                    discoveredUpdates.add(
+                                        SyncCatalogWire(
+                                            sourceId = entry.sourceId,
+                                            toonId = entry.id,
+                                            totalEpisodes = prevHist,
+                                            updatedAt = System.currentTimeMillis(),
+                                        )
+                                    )
+                                }
                             }
                         }
                     }
@@ -282,87 +312,86 @@ class ToonRepository(
                 shouldSync && activeSyncKeys.add(key)
             }
 
-            if (targets.isEmpty()) return@launch
+            if (targets.isNotEmpty()) {
+                val isListing = items.size > 1
+                var encounteredUpToDate = false
 
-            val isListing = items.size > 1
-            var encounteredUpToDate = false
-            val discoveredUpdates = java.util.Collections.synchronizedList(mutableListOf<SyncCatalogWire>())
-
-            val semaphore = Semaphore(3)
-            val jobs = targets.map { target ->
-                async {
-                    val key = target.workId().storageKey()
-                    try {
-                        semaphore.withPermit {
-                            val needsCatalogNow = (catalogTotals[key] ?: 0) == 0
-                            if (encounteredUpToDate && !needsCatalogNow && !target.isFavorite && historyMap[key]?.hasNew != true) {
-                                return@withPermit
-                            }
-                            val exactTotal = fetchTotalEpisodes(target)
-                            if (exactTotal > 0) {
-                                val prev = catalogTotals[key] ?: 0
-                                val isIncreased = exactTotal > prev
-                                val effectiveTotal = maxOf(prev, exactTotal)
-                                toonCatalogDao?.upsertMonotonic(target.workId(), exactTotal)
-                                catalogTotals[key] = effectiveTotal
-
-                                if (isIncreased) {
-                                    discoveredUpdates.add(
-                                        SyncCatalogWire(
-                                            sourceId = target.sourceId,
-                                            toonId = target.id,
-                                            totalEpisodes = exactTotal,
-                                            updatedAt = System.currentTimeMillis(),
-                                        )
-                                    )
-                                } else {
-                                    if (isListing && !target.isNew && historyMap[key]?.hasNew != true) {
-                                        encounteredUpToDate = true
-                                    }
+                val semaphore = Semaphore(3)
+                val jobs = targets.map { target ->
+                    async {
+                        val key = target.workId().storageKey()
+                        try {
+                            semaphore.withPermit {
+                                val needsCatalogNow = (catalogTotals[key] ?: 0) == 0
+                                if (encounteredUpToDate && !needsCatalogNow && !target.isFavorite && historyMap[key]?.hasNew != true) {
+                                    return@withPermit
                                 }
+                                val exactTotal = fetchTotalEpisodes(target)
+                                if (exactTotal > 0) {
+                                    val prev = catalogTotals[key] ?: 0
+                                    val isIncreased = exactTotal > prev
+                                    val effectiveTotal = maxOf(prev, exactTotal)
+                                    toonCatalogDao?.upsertMonotonic(target.workId(), exactTotal)
+                                    catalogTotals[key] = effectiveTotal
 
-                                val existing = readHistoryDao.get(target.workId())
-                                if (existing != null) {
-                                    val safeOrder = existing.lastReadOrder.coerceIn(0, effectiveTotal)
-                                    val hasNew = safeOrder < effectiveTotal
-                                    if (existing.totalEpisodes != effectiveTotal || existing.hasNew != hasNew) {
-                                        val updated = existing.copy(
-                                            totalEpisodes = effectiveTotal,
-                                            lastReadOrder = safeOrder,
-                                            hasNew = hasNew,
+                                    if (isIncreased) {
+                                        discoveredUpdates.add(
+                                            SyncCatalogWire(
+                                                sourceId = target.sourceId,
+                                                toonId = target.id,
+                                                totalEpisodes = exactTotal,
+                                                updatedAt = System.currentTimeMillis(),
+                                            )
                                         )
-                                        saveHistory(updated)
-                                        historyMap[key] = updated
-                                        val readCounts = countReadEpisodesNow(listOf(target.workId()))
-                                        val readCount = readCounts[key] ?: 0
+                                    } else {
+                                        if (isListing && !target.isNew && historyMap[key]?.hasNew != true) {
+                                            encounteredUpToDate = true
+                                        }
+                                    }
+
+                                    val existing = readHistoryDao.get(target.workId())
+                                    if (existing != null) {
+                                        val safeOrder = existing.lastReadOrder.coerceIn(0, effectiveTotal)
+                                        val hasNew = safeOrder < effectiveTotal
+                                        if (existing.totalEpisodes != effectiveTotal || existing.hasNew != hasNew) {
+                                            val updated = existing.copy(
+                                                totalEpisodes = effectiveTotal,
+                                                lastReadOrder = safeOrder,
+                                                hasNew = hasNew,
+                                            )
+                                            saveHistory(updated)
+                                            historyMap[key] = updated
+                                            val readCounts = countReadEpisodesNow(listOf(target.workId()))
+                                            val readCount = readCounts[key] ?: 0
+                                            val progressText = formatReadProgress(
+                                                target.sourceId,
+                                                updated.lastReadOrder,
+                                                updated.totalEpisodes,
+                                                readCount,
+                                            )
+                                            onUpdated?.invoke(target.workId(), effectiveTotal, progressText)
+                                        }
+                                    } else {
                                         val progressText = formatReadProgress(
                                             target.sourceId,
-                                            updated.lastReadOrder,
-                                            updated.totalEpisodes,
-                                            readCount,
+                                            0,
+                                            effectiveTotal,
+                                            0,
                                         )
-                                        onUpdated?.invoke(target.workId(), effectiveTotal, progressText)
-                                    }
-                                } else {
-                                    val progressText = formatReadProgress(
-                                        target.sourceId,
-                                        0,
-                                        effectiveTotal,
-                                        0,
-                                    )
-                                    if (progressText.isNotBlank()) {
-                                        onUpdated?.invoke(target.workId(), effectiveTotal, progressText)
+                                        if (progressText.isNotBlank()) {
+                                            onUpdated?.invoke(target.workId(), effectiveTotal, progressText)
+                                        }
                                     }
                                 }
                             }
+                        } catch (_: Exception) {
+                        } finally {
+                            activeSyncKeys.remove(key)
                         }
-                    } catch (_: Exception) {
-                    } finally {
-                        activeSyncKeys.remove(key)
                     }
                 }
+                jobs.awaitAll()
             }
-            jobs.awaitAll()
 
             // 3. Instant crowdsource report to server
             if (discoveredUpdates.isNotEmpty() && syncManager != null) {
@@ -752,6 +781,9 @@ class ToonRepository(
         val workId = writableId(history.sourceId, history.toonId) ?: return@withContext
         val stored = if (history.sourceId == workId.sourceId) history else history.copy(sourceId = workId.sourceId)
         readHistoryDao.upsert(stored)
+        if (stored.totalEpisodes > 0) {
+            toonCatalogDao?.upsertMonotonic(workId, stored.totalEpisodes, stored.lastReadAt)
+        }
         database?.tombstoneDao()?.delete("HISTORY", workId.storageKey())
         val nowMs = now()
         val existing = seenByWorkIds(listOf(workId))[workId.storageKey()]

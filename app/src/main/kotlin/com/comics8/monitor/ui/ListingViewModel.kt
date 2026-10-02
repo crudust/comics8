@@ -1751,6 +1751,9 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         val sourceId = current.activeSourceId ?: return
         viewModelScope.launch {
             val updated = repository.refreshProgress(current.items)
+            current.tab?.let { tab ->
+                catalogCache[tab] = updated
+            }
             _state.update { it.copy(items = updated) }
         }
     }
@@ -2109,7 +2112,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             currentPage = current.episodePage,
             lastPage = current.episodeLastPage,
             knownLastPageCount = toonLastPageCounts[seriesKey],
-            knownTotalCount = toonTotalCounts[seriesKey],
+            knownTotalCount = toonTotalCounts[seriesKey] ?: current.seriesHistory?.totalEpisodes?.takeIf { it > 1 },
             pageSize = series?.let { repository.sourceOrNull(it.sourceId)?.episodePageSize } ?: 100,
         )
         val nextEp = position.nextEpisodeIndex?.let(rawEpisodes::get)

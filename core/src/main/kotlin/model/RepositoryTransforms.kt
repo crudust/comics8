@@ -105,7 +105,7 @@ object RepositoryTransforms {
             !item.updatedAt.isNullOrBlank() &&
             seenUpdatedAt(seen) != item.updatedAt
         item.copy(
-            isNew = seenCount > 0 && (seen == null || isUpdated),
+            isNew = item.isNew || (seenCount > 0 && (seen == null || isUpdated)),
             isFavorite = key in favoriteKeys,
             readProgress = formatProgress(item, history, readCountsByKey[key] ?: 0, catalogTotal)?.ifBlank { null },
         )

@@ -1702,6 +1702,9 @@ class DesktopViewModel(
         val current = _state.value
         scope.launch {
             val updated = repository.refreshProgress(current.items)
+            current.tab?.let { tab ->
+                catalogCache[tab] = updated
+            }
             val historyCounts = if (current.historyItems.isNotEmpty()) {
                 countIfNeeded(current.historyItems.map { it.workId() }, sourceId)
             } else emptyMap()
@@ -2058,7 +2061,7 @@ class DesktopViewModel(
             currentPage = current.episodePage,
             lastPage = current.episodeLastPage,
             knownLastPageCount = toonLastPageCounts[seriesKey],
-            knownTotalCount = toonTotalCounts[seriesKey],
+            knownTotalCount = toonTotalCounts[seriesKey] ?: current.seriesHistory?.totalEpisodes?.takeIf { it > 1 },
             pageSize = series?.let { repository.sourceOrNull(it.sourceId)?.episodePageSize } ?: 100,
         )
         val nextEp = position.nextEpisodeIndex?.let(rawEpisodes::get)

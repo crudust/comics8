@@ -540,4 +540,117 @@ class DesktopToonRepositorySyncTest {
 
         repoWithSync.close()
     }
+
+    @Test
+    fun syncEpisodeCountsDoesNotDowngradeLocalHistoryWhenServerIsLower() = runBlocking {
+        val reported = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val okClient = okhttp3.OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val req = chain.request()
+                if (req.url.encodedPath.contains("/catalog/batch")) {
+                    val respJson = org.json.JSONObject().apply {
+                        put("catalog", org.json.JSONArray().apply {
+                            put(org.json.JSONObject().apply {
+                                put("sourceId", "test_source")
+                                put("toonId", "toon_higher_local")
+                                put("totalEpisodes", 50)
+                                put("updatedAt", 1000L)
+                            })
+                        })
+                    }
+                    okhttp3.Response.Builder()
+                        .request(req)
+                        .protocol(okhttp3.Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .body(respJson.toString().toByteArray().toResponseBody("application/json".toMediaType()))
+                        .build()
+                } else if (req.url.encodedPath.contains("/catalog/report")) {
+                    reported.add(req.body?.let {
+                        val buffer = okio.Buffer()
+                        it.writeTo(buffer)
+                        buffer.readUtf8()
+                    }.orEmpty())
+                    okhttp3.Response.Builder()
+                        .request(req)
+                        .protocol(okhttp3.Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .body("{\"status\":\"ok\"}".toByteArray().toResponseBody("application/json".toMediaType()))
+                        .build()
+                } else {
+                    okhttp3.Response.Builder()
+                        .request(req)
+                        .protocol(okhttp3.Protocol.HTTP_1_1)
+                        .code(404)
+                        .message("Not Found")
+                        .body("{}".toByteArray().toResponseBody("application/json".toMediaType()))
+                        .build()
+                }
+            }
+            .build()
+
+        val mockSyncManager = DesktopSyncManager(database = db, client = okClient)
+        val source = FakeSource()
+        val registry = SourceRegistry(listOf(source))
+        val repoWithSync = DesktopToonRepository(
+            client = ToonClient(sources = { registry }),
+            database = db,
+            syncManager = mockSyncManager,
+            downloadManager = null,
+            now = { System.currentTimeMillis() },
+            sources = registry,
+            isSourceEnabled = { true },
+            installedIds = { setOf("test_source") },
+        )
+
+        val workId = WorkId("test_source", "toon_higher_local")
+        // Local history has 80 episodes read to order 80 (saved in DB directly without catalog record)
+        db.saveHistory(
+            ReadHistoryRecord(
+                sourceId = workId.sourceId,
+                toonId = workId.toonId,
+                toonTitle = "Title",
+                toonThumbUrl = "thumb",
+                toonHref = "href",
+                lastWrId = "80",
+                lastEpisodeTitle = "Ep 80",
+                lastEpisodeHref = "href/80",
+                lastReadOrder = 80,
+                totalEpisodes = 80,
+                lastReadAt = 2000L,
+                hasNew = false,
+            )
+        )
+
+        val item = ToonItem(
+            id = workId.toonId,
+            title = "Title",
+            thumbUrl = "thumb",
+            href = "href",
+            sourceId = workId.sourceId,
+        )
+
+        var updatedTotal = 0
+        repoWithSync.syncEpisodeCounts(listOf(item)) { _, total, _ ->
+            updatedTotal = total
+        }
+
+        var attempts = 0
+        while (updatedTotal == 0 && attempts < 50) {
+            delay(50)
+            attempts++
+        }
+
+        // Must remain 80 (not downgraded to 50 from server)
+        assertThat(updatedTotal).isEqualTo(80)
+        val historyInDb = db.getHistory(workId)
+        assertThat(historyInDb?.totalEpisodes).isEqualTo(80)
+
+        // And our higher count 80 should have been reported back to server
+        assertThat(reported).isNotEmpty()
+        assertThat(reported.first()).contains("80")
+
+        repoWithSync.close()
+    }
 }
