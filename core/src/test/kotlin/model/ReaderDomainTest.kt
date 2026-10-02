@@ -48,6 +48,25 @@ class ReaderDomainTest {
     }
 
     @Test
+    fun episodePositionDerivesLastPageCountFromKnownTotalWhenLastPageCountMissing() {
+        // 205 total episodes, 3 pages, pageSize = 100.
+        // Page 3 has 5 episodes (205 - 2*100 = 5).
+        // On page 2 (item #204, index 1 of 3): olderCount = 5 + 0 = 5, onPageOrder = 3 - 1 = 2 -> readOrder = 7.
+        val position = ReaderDomain.episodePosition(
+            episodeIds = listOf("205", "204", "203"),
+            currentEpisodeId = "204",
+            currentPage = 2,
+            lastPage = 3,
+            knownLastPageCount = null,
+            knownTotalCount = 205,
+        )
+
+        assertThat(position.totalEpisodes).isEqualTo(205)
+        assertThat(position.readOrder).isEqualTo(7)
+        assertThat(position.nextEpisodeIndex).isEqualTo(0)
+    }
+
+    @Test
     fun episodePositionPrefersKnownTotalAndHandlesUnknownEpisode() {
         val position = ReaderDomain.episodePosition(
             episodeIds = listOf("3", "2", "1"),
