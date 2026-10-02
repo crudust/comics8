@@ -530,16 +530,13 @@ class ToonRepository(
 
                                 val lastP = epPage.lastPage.coerceAtLeast(1)
                                 val pageSize = source.episodePageSize
-                                val lastPageItemCount = if (lastP > 1) {
-                                    try {
-                                        loadEpisodes(item, lastP).items.size
-                                    } catch (_: Exception) {
-                                        null
-                                    }
-                                } else {
-                                    null
+                                val existingTotal = toonCatalogDao?.get(workId)?.totalEpisodes?.takeIf { it > 0 }
+                                    ?: readHistoryDao.get(workId)?.totalEpisodes?.takeIf { it > 1 }
+                                val exactTotal = when {
+                                    lastP <= 1 -> epPage.items.size
+                                    existingTotal != null -> maxOf(existingTotal, RepositoryTransforms.estimateTotalEpisodes(epPage, pageSize))
+                                    else -> RepositoryTransforms.estimateTotalEpisodes(epPage, pageSize)
                                 }
-                                val exactTotal = RepositoryTransforms.estimateTotalEpisodes(epPage, pageSize, lastPageItemCount)
 
                                 var changed = false
                                 if (exactTotal > 0) {

@@ -1404,6 +1404,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         val series = current.series ?: return
         val lastPage = current.episodeLastPage
         val raw = current.rawEpisodes.ifEmpty { current.episodes }
+        val seriesKey = series.workId().storageKey()
         if (lastPage <= 1) {
             val firstEp = raw.lastOrNull()
             if (firstEp != null) {
@@ -1412,6 +1413,8 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 viewModelScope.launch {
                     try {
                         val result = repository.loadEpisodes(series, 1)
+                        toonTotalCounts[seriesKey] = result.items.size
+                        repository.saveCatalogTotal(series.workId(), result.items.size)
                         _state.update {
                             it.copy(
                                 rawEpisodes = result.items,
@@ -1429,6 +1432,10 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             viewModelScope.launch {
                 try {
                     val result = repository.loadEpisodes(series, lastPage)
+                    val pageSize = repository.sourceOrNull(series.sourceId)?.episodePageSize ?: 100
+                    val exactTotal = RepositoryTransforms.estimateTotalEpisodes(result, pageSize, result.items.size)
+                    toonTotalCounts[seriesKey] = exactTotal
+                    repository.saveCatalogTotal(series.workId(), exactTotal)
                     _state.update {
                         it.copy(
                             rawEpisodes = result.items,
@@ -2157,14 +2164,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 val finalOrder = position.readOrder
                     ?: existingHistory?.lastReadOrder
                     ?: 1
-
-                val candidateTotal = if (position.totalEpisodes > 1) position.totalEpisodes else (existingHistory?.totalEpisodes ?: 1)
-                val finalTotal = when {
-                    existingHistory != null && existingHistory.totalEpisodes > 1 && toonTotalCounts[seriesKey] == null ->
-                        maxOf(existingHistory.totalEpisodes, finalOrder)
-                    else ->
-                        maxOf(candidateTotal, finalOrder, existingHistory?.totalEpisodes ?: 1)
-                }
+                val finalTotal = maxOf(position.totalEpisodes, existingHistory?.totalEpisodes ?: 1, finalOrder)
 
                 val (progressText, readCount) = listingProgress(
                     series.sourceId,
