@@ -428,9 +428,9 @@ class DesktopToonRepositorySyncTest {
     }
 
     @Test
-    fun syncEpisodeCountsSkipsUnreadNonFavoriteBatchItems() = runBlocking {
-        // Multiple unread, non-favorite items in a list (e.g. explore screen)
-        val items = (1..5).map { idx ->
+    fun syncEpisodeCountsPopulatesCatalogForUnreadBatchItemsWhenMissing() = runBlocking {
+        // Multiple unread, non-favorite items missing from catalog (e.g. explore screen)
+        val items = (1..3).map { idx ->
             ToonItem(
                 id = "explore_toon_$idx",
                 title = "Explore Toon $idx",
@@ -441,15 +441,32 @@ class DesktopToonRepositorySyncTest {
         }
 
         var callbackCount = 0
-        repository.syncEpisodeCounts(items) { _, _, _ ->
+        repository.syncEpisodeCounts(items) { _, total, progress ->
             callbackCount++
+            assertThat(total).isEqualTo(15)
+            assertThat(progress).isEqualTo("15화")
         }
 
-        delay(300)
-        assertThat(callbackCount).isEqualTo(0)
-        for (item in items) {
-            assertThat(db.getCatalog(item.workId())).isNull()
+        var attempts = 0
+        while (callbackCount < 3 && attempts < 50) {
+            delay(50)
+            attempts++
         }
+
+        assertThat(callbackCount).isEqualTo(3)
+        for (item in items) {
+            val record = db.getCatalog(item.workId())
+            assertThat(record).isNotNull()
+            assertThat(record?.totalEpisodes).isEqualTo(15)
+        }
+
+        // Once populated, re-running syncEpisodeCounts should skip since needsCatalog is now false
+        var secondCallbackCount = 0
+        repository.syncEpisodeCounts(items) { _, _, _ ->
+            secondCallbackCount++
+        }
+        delay(200)
+        assertThat(secondCallbackCount).isEqualTo(0)
     }
 
     @Test
@@ -522,5 +539,159 @@ class DesktopToonRepositorySyncTest {
         assertThat(inDb?.totalEpisodes).isEqualTo(77)
 
         repoWithSync.close()
+    }
+
+    @Test
+    fun syncEpisodeCountsDoesNotDowngradeLocalHistoryWhenServerIsLower() = runBlocking {
+        val reported = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val okClient = okhttp3.OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val req = chain.request()
+                if (req.url.encodedPath.contains("/catalog/batch")) {
+                    val respJson = org.json.JSONObject().apply {
+                        put("catalog", org.json.JSONArray().apply {
+                            put(org.json.JSONObject().apply {
+                                put("sourceId", "test_source")
+                                put("toonId", "toon_higher_local")
+                                put("totalEpisodes", 50)
+                                put("updatedAt", 1000L)
+                            })
+                        })
+                    }
+                    okhttp3.Response.Builder()
+                        .request(req)
+                        .protocol(okhttp3.Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .body(respJson.toString().toByteArray().toResponseBody("application/json".toMediaType()))
+                        .build()
+                } else if (req.url.encodedPath.contains("/catalog/report")) {
+                    reported.add(req.body?.let {
+                        val buffer = okio.Buffer()
+                        it.writeTo(buffer)
+                        buffer.readUtf8()
+                    }.orEmpty())
+                    okhttp3.Response.Builder()
+                        .request(req)
+                        .protocol(okhttp3.Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .body("{\"status\":\"ok\"}".toByteArray().toResponseBody("application/json".toMediaType()))
+                        .build()
+                } else {
+                    okhttp3.Response.Builder()
+                        .request(req)
+                        .protocol(okhttp3.Protocol.HTTP_1_1)
+                        .code(404)
+                        .message("Not Found")
+                        .body("{}".toByteArray().toResponseBody("application/json".toMediaType()))
+                        .build()
+                }
+            }
+            .build()
+
+        val mockSyncManager = DesktopSyncManager(database = db, client = okClient)
+        val source = FakeSource()
+        val registry = SourceRegistry(listOf(source))
+        val repoWithSync = DesktopToonRepository(
+            client = ToonClient(sources = { registry }),
+            database = db,
+            syncManager = mockSyncManager,
+            downloadManager = null,
+            now = { System.currentTimeMillis() },
+            sources = registry,
+            isSourceEnabled = { true },
+            installedIds = { setOf("test_source") },
+        )
+
+        val workId = WorkId("test_source", "toon_higher_local")
+        // Local history has 80 episodes read to order 80 (saved in DB directly without catalog record)
+        db.saveHistory(
+            ReadHistoryRecord(
+                sourceId = workId.sourceId,
+                toonId = workId.toonId,
+                toonTitle = "Title",
+                toonThumbUrl = "thumb",
+                toonHref = "href",
+                lastWrId = "80",
+                lastEpisodeTitle = "Ep 80",
+                lastEpisodeHref = "href/80",
+                lastReadOrder = 80,
+                totalEpisodes = 80,
+                lastReadAt = 2000L,
+                hasNew = false,
+            )
+        )
+
+        val item = ToonItem(
+            id = workId.toonId,
+            title = "Title",
+            thumbUrl = "thumb",
+            href = "href",
+            sourceId = workId.sourceId,
+        )
+
+        var updatedTotal = 0
+        repoWithSync.syncEpisodeCounts(listOf(item)) { _, total, _ ->
+            updatedTotal = total
+        }
+
+        var attempts = 0
+        while (updatedTotal == 0 && attempts < 50) {
+            delay(50)
+            attempts++
+        }
+
+        // Must remain 80 (not downgraded to 50 from server)
+        assertThat(updatedTotal).isEqualTo(80)
+        val historyInDb = db.getHistory(workId)
+        assertThat(historyInDb?.totalEpisodes).isEqualTo(80)
+
+        // And our higher count 80 should have been reported back to server
+        assertThat(reported).isNotEmpty()
+        assertThat(reported.first()).contains("80")
+
+        repoWithSync.close()
+    }
+
+    @Test
+    fun getHistoryEnrichesTotalEpisodesAndHasNewFromCatalog() = runBlocking {
+        val workId = WorkId("test_source", "toon_enrich")
+        // History record has older count: read 10 of 10 (hasNew = false)
+        db.saveHistory(
+            ReadHistoryRecord(
+                sourceId = workId.sourceId,
+                toonId = workId.toonId,
+                toonTitle = "Title",
+                toonThumbUrl = "thumb",
+                toonHref = "href",
+                lastWrId = "10",
+                lastEpisodeTitle = "Ep 10",
+                lastEpisodeHref = "href/10",
+                lastReadOrder = 10,
+                totalEpisodes = 10,
+                lastReadAt = 1000L,
+                hasNew = false,
+            )
+        )
+
+        // Catalog has discovered new episodes: 25 total
+        db.upsertCatalogMonotonic(workId, 25)
+
+        // getHistory(workId) should reflect 25 and hasNew = true (10 < 25)
+        val single = repository.getHistory(workId)
+        assertThat(single).isNotNull()
+        assertThat(single?.totalEpisodes).isEqualTo(25)
+        assertThat(single?.hasNew).isTrue()
+
+        // getHistory(sourceId) should also reflect 25 and hasNew = true
+        val list = repository.getHistory(workId.sourceId)
+        assertThat(list).isNotEmpty()
+        val fromList = list.first { it.workId() == workId }
+        assertThat(fromList.totalEpisodes).isEqualTo(25)
+        assertThat(fromList.hasNew).isTrue()
+
+        // getCatalogTotal should return 25
+        assertThat(repository.getCatalogTotal(workId)).isEqualTo(25)
     }
 }

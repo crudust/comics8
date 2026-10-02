@@ -96,4 +96,30 @@ class ProgressDisplayTest {
         assertThat(registry.defaultProgressDisplayMode("storage_source").requiresReadCount).isTrue()
         assertThat(registry.defaultProgressDisplayMode("remote_webtoon").requiresReadCount).isFalse()
     }
+
+    @Test
+    fun percentageModeUsesReadCountWhenLastReadOrderZero() {
+        val registry = SourceRegistry(emptyList())
+        // Storage source: lastReadOrder = 0, readCount = 5, total = 20 -> 25%
+        assertThat(
+            registry.formatReadProgress("network-smb", 0, 20, 5, com.comics8.core.model.ProgressDisplayMode.PERCENTAGE),
+        ).isEqualTo("25%")
+    }
+
+    @Test
+    fun progressDisplayModeNeverShowsReadOrderGreaterThanTotal() {
+        val registry = SourceRegistry(emptyList())
+        // Edge case: lastReadOrder = 55, totalEpisodes = 50 -> effectiveTotal is 55, formats as "55/55"
+        assertThat(
+            registry.formatReadProgress("eleven", 55, 50, 0, com.comics8.core.model.ProgressDisplayMode.LATEST_EPISODE),
+        ).isEqualTo("55/55")
+    }
+
+    @Test
+    fun requiresReadCountBySourceId() {
+        val mode = com.comics8.core.model.ProgressDisplayMode.PERCENTAGE
+        assertThat(mode.requiresReadCount("local")).isTrue()
+        assertThat(mode.requiresReadCount("network-webdav")).isTrue()
+        assertThat(mode.requiresReadCount("naver")).isFalse()
+    }
 }

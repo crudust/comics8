@@ -896,11 +896,14 @@ class DesktopViewModel(
                 curr.copy(
                     items = updatedItems,
                     seriesHistory = if (curr.series?.workId() == workId) {
-                        curr.seriesHistory?.copy(
-                            totalEpisodes = totalEpisodes,
-                            lastReadOrder = (curr.seriesHistory.lastReadOrder).coerceIn(0, totalEpisodes),
-                            hasNew = curr.seriesHistory.lastReadOrder < totalEpisodes,
-                        )
+                        curr.seriesHistory?.let { currHist ->
+                            val effectiveTotal = maxOf(currHist.totalEpisodes, totalEpisodes)
+                            currHist.copy(
+                                totalEpisodes = effectiveTotal,
+                                lastReadOrder = currHist.lastReadOrder.coerceIn(0, effectiveTotal),
+                                hasNew = currHist.lastReadOrder < effectiveTotal,
+                            )
+                        }
                     } else curr.seriesHistory,
                 )
             }
@@ -1104,6 +1107,11 @@ class DesktopViewModel(
             val favorited = repository.isFavorite(item.workId())
             val history = repository.getHistory(item.workId())
             val readCount = countIfNeeded(item.workId())
+            val catalogTotal = repository.getCatalogTotal(item.workId())
+            val itemKey = item.workId().storageKey()
+            if (catalogTotal > 0 && toonTotalCounts[itemKey] == null) {
+                toonTotalCounts[itemKey] = catalogTotal
+            }
             _state.update { current ->
                 if (current.series?.workId() == item.workId()) {
                     current.copy(
@@ -1287,10 +1295,11 @@ class DesktopViewModel(
             return
         }
 
-        val candidateOrder = existing.lastReadOrder.coerceIn(0, exactTotal)
+        val effectiveTotal = maxOf(existing.totalEpisodes, exactTotal)
+        val candidateOrder = existing.lastReadOrder.coerceIn(0, effectiveTotal)
         val shouldElevate = derivedOrder != null && derivedOrder > candidateOrder
         val safeOrder = if (shouldElevate) derivedOrder!! else candidateOrder
-        val hasNew = safeOrder < exactTotal
+        val hasNew = safeOrder < effectiveTotal
 
         val updatedWrId = if (shouldElevate && latestRead != null) latestRead.wrId else existing.lastWrId
         val updatedTitle = if (shouldElevate && latestRead != null) latestRead.title else existing.lastEpisodeTitle
@@ -1308,14 +1317,14 @@ class DesktopViewModel(
             rawEpisodes.getOrNull(derivedPosition.nextEpisodeIndex!!)?.href ?: existing.nextEpisodeHref
         } else existing.nextEpisodeHref
 
-        if (existing.totalEpisodes != exactTotal ||
+        if (existing.totalEpisodes != effectiveTotal ||
             existing.lastReadOrder != safeOrder ||
             existing.hasNew != hasNew ||
             existing.lastWrId != updatedWrId ||
             existing.lastReadAt != updatedReadAt
         ) {
             val updated = existing.copy(
-                totalEpisodes = exactTotal,
+                totalEpisodes = effectiveTotal,
                 lastReadOrder = safeOrder,
                 hasNew = hasNew,
                 lastWrId = updatedWrId,
@@ -1702,6 +1711,9 @@ class DesktopViewModel(
         val current = _state.value
         scope.launch {
             val updated = repository.refreshProgress(current.items)
+            current.tab?.let { tab ->
+                catalogCache[tab] = updated
+            }
             val historyCounts = if (current.historyItems.isNotEmpty()) {
                 countIfNeeded(current.historyItems.map { it.workId() }, sourceId)
             } else emptyMap()
@@ -2058,7 +2070,7 @@ class DesktopViewModel(
             currentPage = current.episodePage,
             lastPage = current.episodeLastPage,
             knownLastPageCount = toonLastPageCounts[seriesKey],
-            knownTotalCount = toonTotalCounts[seriesKey],
+            knownTotalCount = toonTotalCounts[seriesKey] ?: current.seriesHistory?.totalEpisodes?.takeIf { it > 1 },
             pageSize = series?.let { repository.sourceOrNull(it.sourceId)?.episodePageSize } ?: 100,
         )
         val nextEp = position.nextEpisodeIndex?.let(rawEpisodes::get)
@@ -2131,7 +2143,7 @@ class DesktopViewModel(
                     nextWrId = nextEp?.wrId ?: existingHistory?.nextWrId,
                     nextEpisodeTitle = nextEp?.title ?: existingHistory?.nextEpisodeTitle,
                     nextEpisodeHref = nextEp?.href ?: existingHistory?.nextEpisodeHref,
-                    hasNew = false,
+                    hasNew = finalOrder < finalTotal,
                 )
                 repository.saveHistory(savedHistory)
                 _state.update { curr ->
