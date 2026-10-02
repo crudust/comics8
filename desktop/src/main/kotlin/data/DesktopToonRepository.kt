@@ -572,11 +572,38 @@ class DesktopToonRepository(
     }
 
     suspend fun getHistory(sourceId: String): List<ReadHistoryRecord> = withContext(Dispatchers.IO) {
-        database.getHistoryBySource(sourceId)
+        val rows = database.getHistoryBySource(sourceId)
+        if (rows.isEmpty()) return@withContext emptyList()
+        val workIds = rows.map { it.workId() }
+        val catalogTotals = database.getCatalogTotalsByToonIds(workIds)
+        rows.map { row ->
+            val catTotal = catalogTotals[row.workId().storageKey()] ?: 0
+            if (catTotal > row.totalEpisodes) {
+                row.copy(
+                    totalEpisodes = catTotal,
+                    hasNew = row.lastReadOrder < catTotal,
+                )
+            } else {
+                row
+            }
+        }
     }
 
     suspend fun getHistory(workId: WorkId): ReadHistoryRecord? = withContext(Dispatchers.IO) {
-        database.getHistory(workId)
+        val row = database.getHistory(workId) ?: return@withContext null
+        val catTotal = database.getCatalog(workId)?.totalEpisodes ?: 0
+        if (catTotal > row.totalEpisodes) {
+            row.copy(
+                totalEpisodes = catTotal,
+                hasNew = row.lastReadOrder < catTotal,
+            )
+        } else {
+            row
+        }
+    }
+
+    suspend fun getCatalogTotal(workId: WorkId): Int = withContext(Dispatchers.IO) {
+        database.getCatalog(workId)?.totalEpisodes ?: 0
     }
 
     suspend fun saveHistory(history: ReadHistoryRecord) = withContext(Dispatchers.IO) {
@@ -618,7 +645,7 @@ class DesktopToonRepository(
 
     private fun countReadEpisodesNow(workIds: List<WorkId>): Map<String, Int> {
         val needed = workIds.filter {
-            sources.progressDisplayMode(it.sourceId, DesktopSourcePrefs).requiresReadCount
+            sources.progressDisplayMode(it.sourceId, DesktopSourcePrefs).requiresReadCount(it.sourceId)
         }
         if (needed.isEmpty()) return emptyMap()
         return database.countReadEpisodes(needed)

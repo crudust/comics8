@@ -770,11 +770,40 @@ class ToonRepository(
 
     suspend fun getHistory(sourceId: String): List<ReadHistory> = withContext(Dispatchers.IO) {
         val sid = sourceId.ifBlank { WorkId.DEFAULT_SOURCE }
-        readHistoryDao.bySource(sid)
+        val rows = readHistoryDao.bySource(sid)
+        if (rows.isEmpty()) return@withContext emptyList()
+        val toonIds = rows.map { it.toonId }.distinct()
+        val catMap = toonCatalogDao?.byToonIds(toonIds)
+            ?.associate { it.workId().storageKey() to it.totalEpisodes }
+            ?: emptyMap()
+        rows.map { row ->
+            val catTotal = catMap[row.workId().storageKey()] ?: 0
+            if (catTotal > row.totalEpisodes) {
+                row.copy(
+                    totalEpisodes = catTotal,
+                    hasNew = row.lastReadOrder < catTotal,
+                )
+            } else {
+                row
+            }
+        }
     }
 
     suspend fun getHistory(workId: WorkId): ReadHistory? = withContext(Dispatchers.IO) {
-        readHistoryDao.get(workId)
+        val row = readHistoryDao.get(workId) ?: return@withContext null
+        val catTotal = toonCatalogDao?.get(workId)?.totalEpisodes ?: 0
+        if (catTotal > row.totalEpisodes) {
+            row.copy(
+                totalEpisodes = catTotal,
+                hasNew = row.lastReadOrder < catTotal,
+            )
+        } else {
+            row
+        }
+    }
+
+    suspend fun getCatalogTotal(workId: WorkId): Int = withContext(Dispatchers.IO) {
+        toonCatalogDao?.get(workId)?.totalEpisodes ?: 0
     }
 
     suspend fun saveHistory(history: ReadHistory) = withContext(Dispatchers.IO) {
@@ -860,7 +889,7 @@ class ToonRepository(
 
     private suspend fun countReadEpisodesNow(workIds: List<WorkId>): Map<String, Int> {
         val needed = workIds.filter {
-            sources.progressDisplayMode(it.sourceId, sourceSettings).requiresReadCount
+            sources.progressDisplayMode(it.sourceId, sourceSettings).requiresReadCount(it.sourceId)
         }
         if (needed.isEmpty()) return emptyMap()
         val wanted = needed.map { it.storageKey() }.toSet()

@@ -653,4 +653,45 @@ class DesktopToonRepositorySyncTest {
 
         repoWithSync.close()
     }
+
+    @Test
+    fun getHistoryEnrichesTotalEpisodesAndHasNewFromCatalog() = runBlocking {
+        val workId = WorkId("test_source", "toon_enrich")
+        // History record has older count: read 10 of 10 (hasNew = false)
+        db.saveHistory(
+            ReadHistoryRecord(
+                sourceId = workId.sourceId,
+                toonId = workId.toonId,
+                toonTitle = "Title",
+                toonThumbUrl = "thumb",
+                toonHref = "href",
+                lastWrId = "10",
+                lastEpisodeTitle = "Ep 10",
+                lastEpisodeHref = "href/10",
+                lastReadOrder = 10,
+                totalEpisodes = 10,
+                lastReadAt = 1000L,
+                hasNew = false,
+            )
+        )
+
+        // Catalog has discovered new episodes: 25 total
+        db.upsertCatalogMonotonic(workId, 25)
+
+        // getHistory(workId) should reflect 25 and hasNew = true (10 < 25)
+        val single = repository.getHistory(workId)
+        assertThat(single).isNotNull()
+        assertThat(single?.totalEpisodes).isEqualTo(25)
+        assertThat(single?.hasNew).isTrue()
+
+        // getHistory(sourceId) should also reflect 25 and hasNew = true
+        val list = repository.getHistory(workId.sourceId)
+        assertThat(list).isNotEmpty()
+        val fromList = list.first { it.workId() == workId }
+        assertThat(fromList.totalEpisodes).isEqualTo(25)
+        assertThat(fromList.hasNew).isTrue()
+
+        // getCatalogTotal should return 25
+        assertThat(repository.getCatalogTotal(workId)).isEqualTo(25)
+    }
 }

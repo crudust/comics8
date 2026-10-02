@@ -8,21 +8,30 @@ enum class ProgressDisplayMode(val label: String, val description: String) {
 
     val requiresReadCount: Boolean get() = this == READ_COUNT
 
-    fun format(lastReadOrder: Int, totalEpisodes: Int, readCount: Int): String? = when (this) {
-        LATEST_EPISODE -> when {
-            lastReadOrder > 0 && totalEpisodes > 0 -> "$lastReadOrder/$totalEpisodes"
-            lastReadOrder > 0 -> "${lastReadOrder}화"
-            totalEpisodes > 0 -> "${totalEpisodes}화"
-            else -> null
+    fun requiresReadCount(sourceId: String): Boolean =
+        this == READ_COUNT || (this == PERCENTAGE && defaultFor(sourceId) == READ_COUNT)
+
+    fun format(lastReadOrder: Int, totalEpisodes: Int, readCount: Int): String? {
+        val effectiveTotal = maxOf(totalEpisodes, lastReadOrder, readCount)
+        return when (this) {
+            LATEST_EPISODE -> when {
+                lastReadOrder > 0 && effectiveTotal > 0 -> "$lastReadOrder/$effectiveTotal"
+                lastReadOrder > 0 -> "${lastReadOrder}화"
+                effectiveTotal > 0 -> "${effectiveTotal}화"
+                else -> null
+            }
+            READ_COUNT -> when {
+                readCount > 0 && effectiveTotal > 0 -> "$readCount/$effectiveTotal"
+                readCount > 0 -> "${readCount}개"
+                effectiveTotal > 0 -> "${effectiveTotal}화"
+                else -> null
+            }
+            PERCENTAGE -> if (effectiveTotal > 0 && (lastReadOrder > 0 || readCount > 0)) {
+                val progress = if (lastReadOrder > 0) lastReadOrder else readCount
+                "${(progress * 100 / effectiveTotal).coerceIn(0, 100)}%"
+            } else null
+            HIDDEN -> null
         }
-        READ_COUNT -> when {
-            readCount > 0 && totalEpisodes > 0 -> "$readCount/$totalEpisodes"
-            readCount > 0 -> "${readCount}개"
-            totalEpisodes > 0 -> "${totalEpisodes}화"
-            else -> null
-        }
-        PERCENTAGE -> if (totalEpisodes > 0 && lastReadOrder > 0) "${(lastReadOrder * 100 / totalEpisodes).coerceIn(0, 100)}%" else null
-        HIDDEN -> null
     }
 
     companion object {
