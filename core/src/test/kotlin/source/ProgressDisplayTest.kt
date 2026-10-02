@@ -61,6 +61,20 @@ class ProgressDisplayTest {
     }
 
     @Test
+    fun progressDisplayModeFormatsUnreadWhenOnlyTotalEpisodesKnown() {
+        val registry = SourceRegistry(emptyList())
+        assertThat(
+            registry.formatReadProgress("eleven", 0, 104, 0, com.comics8.core.model.ProgressDisplayMode.LATEST_EPISODE),
+        ).isEqualTo("104화")
+        assertThat(
+            registry.formatReadProgress("eleven", 0, 104, 0, com.comics8.core.model.ProgressDisplayMode.READ_COUNT),
+        ).isEqualTo("104화")
+        assertThat(
+            registry.formatReadProgress("eleven", 0, 104, 0, com.comics8.core.model.ProgressDisplayMode.PERCENTAGE),
+        ).isEqualTo("")
+    }
+
+    @Test
     fun sourceContractProvidesDefaultProgressDisplayMode() {
         val registry = SourceRegistry(
             listOf(

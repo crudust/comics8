@@ -17,6 +17,7 @@ data class SyncResult(
     val message: String,
     val favoritesCount: Int = 0,
     val historyCount: Int = 0,
+    val episodesCount: Int = 0,
 )
 
 data class BackupStats(

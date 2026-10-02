@@ -16,12 +16,20 @@ data class SyncTombstoneWire(
     val deletedAt: Long,
 )
 
+data class SyncCatalogWire(
+    val sourceId: String,
+    val toonId: String,
+    val totalEpisodes: Int,
+    val updatedAt: Long = 0L,
+)
+
 data class SyncPayload(
     val favorites: List<BackupFavoriteWire> = emptyList(),
     val history: List<BackupHistoryWire> = emptyList(),
     val readEpisodes: List<BackupEpisodeWire> = emptyList(),
     val readerSettings: List<BackupReaderSettingWire> = emptyList(),
     val tombstones: List<SyncTombstoneWire> = emptyList(),
+    val catalog: List<SyncCatalogWire> = emptyList(),
 )
 
 object SyncPayloadCodec {
@@ -60,6 +68,18 @@ object SyncPayloadCodec {
                 }
             })
         }
+        if (payload.catalog.isNotEmpty()) {
+            root.put("catalog", JSONArray().apply {
+                payload.catalog.forEach { entry ->
+                    put(JSONObject().apply {
+                        put("sourceId", entry.sourceId)
+                        put("toonId", entry.toonId)
+                        put("totalEpisodes", entry.totalEpisodes)
+                        put("updatedAt", entry.updatedAt)
+                    })
+                }
+            })
+        }
         return root
     }
 
@@ -70,6 +90,7 @@ object SyncPayloadCodec {
             defaults = BackupWireDefaults.SYNC,
         )
         val tombstones = root.optJSONArray("tombstones") ?: JSONArray()
+        val catalogArray = root.optJSONArray("catalog") ?: JSONArray()
         return SyncPayload(
             favorites = backup.favorites,
             history = backup.history,
@@ -83,6 +104,15 @@ object SyncPayloadCodec {
                     deletedAt = item.optLong("deletedAt", serverTime),
                 )
             },
+            catalog = List(catalogArray.length()) { index ->
+                val item = catalogArray.getJSONObject(index)
+                SyncCatalogWire(
+                    sourceId = item.optString("sourceId", "eleven"),
+                    toonId = item.optString("toonId", ""),
+                    totalEpisodes = item.optInt("totalEpisodes", 0),
+                    updatedAt = item.optLong("updatedAt", serverTime),
+                )
+            }.filter { it.toonId.isNotBlank() && it.totalEpisodes > 0 },
         )
     }
 }

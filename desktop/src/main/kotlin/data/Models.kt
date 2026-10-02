@@ -85,3 +85,13 @@ data class DownloadedEpisodeRecord(
     fun workId(): WorkId = WorkId(sourceId, toonId)
 }
 
+data class ToonCatalogRecord(
+    val sourceId: String = WorkId.DEFAULT_SOURCE,
+    val toonId: String,
+    val totalEpisodes: Int = 0,
+    val updatedAt: Long = 0L,
+) {
+    fun workId(): WorkId = WorkId(sourceId, toonId)
+}
+
+

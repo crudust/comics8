@@ -10,6 +10,7 @@ import com.comics8.core.model.SyncState
 import com.comics8.core.network.ToonClient
 import com.comics8.core.source.WorkId
 import com.comics8.core.sync.BaseSyncManager
+import com.comics8.core.sync.SyncApplyCounts
 import com.comics8.core.sync.SyncConstants
 import com.comics8.core.sync.SyncStorageAdapter
 import com.comics8.core.sync.SyncPayload
@@ -148,18 +149,18 @@ class DesktopSyncStorageAdapter(
     override suspend fun applyRemoteChanges(
         serverChanges: JSONObject,
         serverTime: Long,
-    ): Pair<Int, Int> = applyPayload(serverChanges, serverTime, applyTombstones = true)
+    ): SyncApplyCounts = applyPayload(serverChanges, serverTime, applyTombstones = true)
 
     override suspend fun applyFullSnapshot(
         snapshot: JSONObject,
         serverTime: Long,
-    ): Pair<Int, Int> = applyPayload(snapshot, serverTime, applyTombstones = false)
+    ): SyncApplyCounts = applyPayload(snapshot, serverTime, applyTombstones = false)
 
     private suspend fun applyPayload(
         root: JSONObject,
         serverTime: Long,
         applyTombstones: Boolean,
-    ): Pair<Int, Int> {
+    ): SyncApplyCounts {
         val payload = SyncPayloadCodec.decode(root, serverTime)
         val favorites = payload.favorites.mapNotNull { item ->
             val workId = BackupWireCodec.workId(item.sourceId, item.id, item.toonId, preferId = true)
@@ -224,8 +225,44 @@ class DesktopSyncStorageAdapter(
         } else {
             emptyList()
         }
-        database.applySyncBatch(deletions, favorites, history, episodes, settings)
-        return favorites.size to history.size
+
+        val historyToSave = if (history.isEmpty()) emptyList() else {
+            val workIds = history.map { it.workId() }
+            val existingMap = database.getHistoryByToonIds(workIds).associateBy { it.workId().storageKey() }
+            history.filter { incoming ->
+                val local = existingMap[incoming.workId().storageKey()]
+                if (local == null) true
+                else {
+                    incoming.lastReadOrder > local.lastReadOrder ||
+                        (incoming.lastReadOrder == local.lastReadOrder && incoming.lastReadAt >= local.lastReadAt)
+                }
+            }
+        }
+
+        database.applySyncBatch(deletions, favorites, historyToSave, episodes, settings)
+
+        val catalogFromHistory = history.filter { it.totalEpisodes > 0 }.map {
+            ToonCatalogRecord(
+                sourceId = it.sourceId,
+                toonId = it.toonId,
+                totalEpisodes = it.totalEpisodes,
+                updatedAt = it.lastReadAt,
+            )
+        }
+        val directCatalog = payload.catalog.map {
+            ToonCatalogRecord(
+                sourceId = it.sourceId,
+                toonId = it.toonId,
+                totalEpisodes = it.totalEpisodes,
+                updatedAt = it.updatedAt,
+            )
+        }
+        val allCatalog = catalogFromHistory + directCatalog
+        if (allCatalog.isNotEmpty()) {
+            database.saveAllCatalog(allCatalog)
+        }
+
+        return SyncApplyCounts(favorites = favorites.size, history = historyToSave.size, episodes = episodes.size)
     }
 }
 

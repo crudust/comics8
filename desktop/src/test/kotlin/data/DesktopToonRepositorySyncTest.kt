@@ -18,6 +18,8 @@ import com.comics8.core.source.WorkId
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -210,5 +212,315 @@ class DesktopToonRepositorySyncTest {
         assertThat(setting?.viewMode).isEqualTo(ViewMode.PAGE)
         assertThat(setting?.readDirection).isEqualTo(ReadDirection.RIGHT_TO_LEFT)
         assertThat(setting?.splitMode).isEqualTo(SplitMode.FIT)
+    }
+
+    @Test
+    fun applyRemoteChangesRejectsStaleHistoryOrderAndCountsEpisodes() = runBlocking {
+        val adapter = DesktopSyncStorageAdapter(db)
+        val workId = WorkId("test_source", "toon-sync-test")
+
+        // 로컬에 이미 104화 읽음 기록 (order = 104)
+        db.saveHistory(
+            ReadHistoryRecord(
+                sourceId = workId.sourceId,
+                toonId = workId.toonId,
+                toonTitle = "Test Toon Sync",
+                toonThumbUrl = "thumb",
+                toonHref = "href",
+                lastWrId = "104",
+                lastEpisodeTitle = "Episode 104",
+                lastEpisodeHref = "href/104",
+                lastReadOrder = 104,
+                totalEpisodes = 104,
+                lastReadAt = 2000L,
+                hasNew = false,
+            )
+        )
+
+        // 원격에서 과거/하위 회차 (order = 103, 타임스탬프가 더 높더라도 회차 순번이 낮음)가 들어온 경우
+        val payload = org.json.JSONObject().apply {
+            put("favorites", org.json.JSONArray())
+            put("history", org.json.JSONArray().apply {
+                put(org.json.JSONObject().apply {
+                    put("sourceId", workId.sourceId)
+                    put("toonId", workId.toonId)
+                    put("toonTitle", "Test Toon Sync")
+                    put("toonThumbUrl", "thumb")
+                    put("toonHref", "href")
+                    put("lastWrId", "103")
+                    put("lastEpisodeTitle", "Episode 103")
+                    put("lastEpisodeHref", "href/103")
+                    put("lastReadOrder", 103)
+                    put("totalEpisodes", 104)
+                    put("lastReadAt", 3000L) // 타임스탬프는 더 늦지만 order는 낮음
+                    put("hasNew", 1)
+                })
+            })
+            put("readEpisodes", org.json.JSONArray().apply {
+                put(org.json.JSONObject().apply {
+                    put("sourceId", workId.sourceId)
+                    put("toonId", workId.toonId)
+                    put("wrId", "104")
+                    put("readAt", 2000L)
+                    put("lastPage", 1)
+                })
+            })
+        }
+
+        val counts = adapter.applyRemoteChanges(payload, 3000L)
+
+        // stale한 103은 기각되어 history 카운트는 0, readEpisodes 카운트는 1이어야 함
+        assertThat(counts.history).isEqualTo(0)
+        assertThat(counts.episodes).isEqualTo(1)
+
+        val hist = db.getHistory(workId)
+        assertThat(hist?.lastReadOrder).isEqualTo(104)
+        assertThat(hist?.lastWrId).isEqualTo("104")
+    }
+
+    @Test
+    fun applyRemoteChangesAcceptsHigherHistoryOrder() = runBlocking {
+        val adapter = DesktopSyncStorageAdapter(db)
+        val workId = WorkId("test_source", "toon-sync-elevate")
+
+        // 로컬에 103화 읽음 기록 (order = 103)
+        db.saveHistory(
+            ReadHistoryRecord(
+                sourceId = workId.sourceId,
+                toonId = workId.toonId,
+                toonTitle = "Test Elevate",
+                toonThumbUrl = "thumb",
+                toonHref = "href",
+                lastWrId = "103",
+                lastEpisodeTitle = "Episode 103",
+                lastEpisodeHref = "href/103",
+                lastReadOrder = 103,
+                totalEpisodes = 104,
+                lastReadAt = 1000L,
+                hasNew = true,
+            )
+        )
+
+        // 원격에서 최신 회차 (order = 104)가 수신됨
+        val payload = org.json.JSONObject().apply {
+            put("favorites", org.json.JSONArray())
+            put("history", org.json.JSONArray().apply {
+                put(org.json.JSONObject().apply {
+                    put("sourceId", workId.sourceId)
+                    put("toonId", workId.toonId)
+                    put("toonTitle", "Test Elevate")
+                    put("toonThumbUrl", "thumb")
+                    put("toonHref", "href")
+                    put("lastWrId", "104")
+                    put("lastEpisodeTitle", "Episode 104")
+                    put("lastEpisodeHref", "href/104")
+                    put("lastReadOrder", 104)
+                    put("totalEpisodes", 104)
+                    put("lastReadAt", 2000L)
+                    put("hasNew", 0)
+                })
+            })
+            put("readEpisodes", org.json.JSONArray().apply {
+                put(org.json.JSONObject().apply {
+                    put("sourceId", workId.sourceId)
+                    put("toonId", workId.toonId)
+                    put("wrId", "104")
+                    put("readAt", 2000L)
+                    put("lastPage", 1)
+                })
+            })
+        }
+
+        val counts = adapter.applyRemoteChanges(payload, 2000L)
+
+        // 최신 104는 수용되어 history 1, episodes 1이어야 함
+        assertThat(counts.history).isEqualTo(1)
+        assertThat(counts.episodes).isEqualTo(1)
+
+        val hist = db.getHistory(workId)
+        assertThat(hist?.lastReadOrder).isEqualTo(104)
+        assertThat(hist?.lastWrId).isEqualTo("104")
+        assertThat(hist?.hasNew).isFalse()
+    }
+
+    @Test
+    fun syncEpisodeCountsWithUnreadItemUpdatesCatalogAndProgress() = runBlocking {
+        val workId = WorkId("test_source", "unread_toon")
+        // No history exists for this toon
+        assertThat(db.getHistory(workId)).isNull()
+        assertThat(db.getCatalog(workId)).isNull()
+
+        val item = ToonItem(
+            id = "unread_toon",
+            title = "Unread Toon",
+            thumbUrl = "thumb",
+            href = "href",
+            sourceId = "test_source",
+        )
+
+        var updatedTotal = 0
+        var updatedProgress: String? = null
+
+        repository.syncEpisodeCounts(listOf(item)) { id, total, progress ->
+            if (id == workId) {
+                updatedTotal = total
+                updatedProgress = progress
+            }
+        }
+
+        var attempts = 0
+        while (updatedTotal == 0 && attempts < 50) {
+            delay(50)
+            attempts++
+        }
+
+        assertThat(updatedTotal).isEqualTo(15) // TestSource has 15 episodes
+        assertThat(updatedProgress).isEqualTo("15화")
+
+        // Catalog record must be saved in database
+        val catalogRecord = db.getCatalog(workId)
+        assertThat(catalogRecord).isNotNull()
+        assertThat(catalogRecord?.totalEpisodes).isEqualTo(15)
+
+        // Reading history should NOT have been falsely created
+        assertThat(db.getHistory(workId)).isNull()
+
+        // Listing refreshProgress should display "15화" using catalog
+        val refreshed = repository.refreshProgress(listOf(item))
+        assertThat(refreshed.first().readProgress).isEqualTo("15화")
+    }
+
+    @Test
+    fun desktopCatalogMonotonicUpsertDoesNotDowngrade() = runBlocking {
+        val workId = WorkId("test_source", "toon-monotonic")
+
+        db.upsertCatalogMonotonic(workId, totalEpisodes = 50, updatedAt = 500L)
+        var record = db.getCatalog(workId)
+        assertThat(record?.totalEpisodes).isEqualTo(50)
+        assertThat(record?.updatedAt).isEqualTo(500L)
+
+        // Downgrade attempt: 30 episodes at t=100 -> rejected
+        db.upsertCatalogMonotonic(workId, totalEpisodes = 30, updatedAt = 100L)
+        record = db.getCatalog(workId)
+        assertThat(record?.totalEpisodes).isEqualTo(50)
+        assertThat(record?.updatedAt).isEqualTo(500L)
+
+        // Upgrade attempt: 60 episodes at t=600 -> accepted
+        db.upsertCatalogMonotonic(workId, totalEpisodes = 60, updatedAt = 600L)
+        record = db.getCatalog(workId)
+        assertThat(record?.totalEpisodes).isEqualTo(60)
+        assertThat(record?.updatedAt).isEqualTo(600L)
+
+        // Batch saveAllCatalog test
+        db.saveAllCatalog(
+            listOf(
+                ToonCatalogRecord("test_source", "toon-monotonic", 40, 700L),
+                ToonCatalogRecord("test_source", "toon-batch-new", 20, 200L),
+            ),
+        )
+        record = db.getCatalog(workId)
+        assertThat(record?.totalEpisodes).isEqualTo(60)
+        assertThat(record?.updatedAt).isEqualTo(600L)
+
+        val newRecord = db.getCatalog(WorkId("test_source", "toon-batch-new"))
+        assertThat(newRecord?.totalEpisodes).isEqualTo(20)
+        assertThat(newRecord?.updatedAt).isEqualTo(200L)
+    }
+
+    @Test
+    fun syncEpisodeCountsSkipsUnreadNonFavoriteBatchItems() = runBlocking {
+        // Multiple unread, non-favorite items in a list (e.g. explore screen)
+        val items = (1..5).map { idx ->
+            ToonItem(
+                id = "explore_toon_$idx",
+                title = "Explore Toon $idx",
+                thumbUrl = "thumb",
+                href = "href",
+                sourceId = "test_source",
+            )
+        }
+
+        var callbackCount = 0
+        repository.syncEpisodeCounts(items) { _, _, _ ->
+            callbackCount++
+        }
+
+        delay(300)
+        assertThat(callbackCount).isEqualTo(0)
+        for (item in items) {
+            assertThat(db.getCatalog(item.workId())).isNull()
+        }
+    }
+
+    @Test
+    fun syncEpisodeCountsQueriesServerBatchAndPopulatesCatalog() = runBlocking {
+        val okClient = okhttp3.OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val respJson = org.json.JSONObject().apply {
+                    put("catalog", org.json.JSONArray().apply {
+                        put(org.json.JSONObject().apply {
+                            put("sourceId", "test_source")
+                            put("toonId", "server_toon_1")
+                            put("totalEpisodes", 77)
+                            put("updatedAt", 1700000000000L)
+                        })
+                    })
+                }
+                okhttp3.Response.Builder()
+                    .request(chain.request())
+                    .protocol(okhttp3.Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body(respJson.toString().toByteArray().toResponseBody("application/json".toMediaType()))
+                    .build()
+            }
+            .build()
+
+        val mockSyncManager = DesktopSyncManager(
+            database = db,
+            client = okClient,
+        )
+
+        val source = FakeSource()
+        val registry = SourceRegistry(listOf(source))
+        val repoWithSync = DesktopToonRepository(
+            client = ToonClient(sources = { registry }),
+            database = db,
+            syncManager = mockSyncManager,
+            downloadManager = null,
+            now = { System.currentTimeMillis() },
+            sources = registry,
+            isSourceEnabled = { true },
+            installedIds = { setOf("test_source") },
+        )
+
+        val item = ToonItem(
+            id = "server_toon_1",
+            title = "Server Toon",
+            thumbUrl = "thumb",
+            href = "href",
+            sourceId = "test_source",
+        )
+
+        var updatedTotal = 0
+        var updatedProgress: String? = null
+        repoWithSync.syncEpisodeCounts(listOf(item)) { _, total, progress ->
+            updatedTotal = total
+            updatedProgress = progress
+        }
+
+        var attempts = 0
+        while (updatedTotal == 0 && attempts < 50) {
+            delay(50)
+            attempts++
+        }
+
+        assertThat(updatedTotal).isEqualTo(77)
+        assertThat(updatedProgress).isEqualTo("77화")
+        val inDb = db.getCatalog(item.workId())
+        assertThat(inDb).isNotNull()
+        assertThat(inDb?.totalEpisodes).isEqualTo(77)
+
+        repoWithSync.close()
     }
 }

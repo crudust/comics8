@@ -9,8 +9,18 @@ enum class ProgressDisplayMode(val label: String, val description: String) {
     val requiresReadCount: Boolean get() = this == READ_COUNT
 
     fun format(lastReadOrder: Int, totalEpisodes: Int, readCount: Int): String? = when (this) {
-        LATEST_EPISODE -> if (totalEpisodes > 0) "$lastReadOrder/$totalEpisodes" else if (lastReadOrder > 0) "${lastReadOrder}화" else null
-        READ_COUNT -> if (totalEpisodes > 0) "$readCount/$totalEpisodes" else if (readCount > 0) "${readCount}개" else null
+        LATEST_EPISODE -> when {
+            lastReadOrder > 0 && totalEpisodes > 0 -> "$lastReadOrder/$totalEpisodes"
+            lastReadOrder > 0 -> "${lastReadOrder}화"
+            totalEpisodes > 0 -> "${totalEpisodes}화"
+            else -> null
+        }
+        READ_COUNT -> when {
+            readCount > 0 && totalEpisodes > 0 -> "$readCount/$totalEpisodes"
+            readCount > 0 -> "${readCount}개"
+            totalEpisodes > 0 -> "${totalEpisodes}화"
+            else -> null
+        }
         PERCENTAGE -> if (totalEpisodes > 0 && lastReadOrder > 0) "${(lastReadOrder * 100 / totalEpisodes).coerceIn(0, 100)}%" else null
         HIDDEN -> null
     }

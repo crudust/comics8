@@ -5,6 +5,7 @@ import com.comics8.core.model.PairRequestResult
 import com.comics8.core.model.SyncResult
 import com.comics8.core.model.SyncState
 import com.comics8.core.network.ToonClient
+import com.comics8.core.source.WorkId
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -333,7 +334,7 @@ open class BaseSyncManager(
             val serverChanges = json.optJSONObject("changes") ?: JSONObject()
             val isPro = json.optBoolean("isPro", false)
 
-            val (favCount, histCount) = storage.applyRemoteChanges(serverChanges, serverTime)
+            val (favCount, histCount, epCount) = storage.applyRemoteChanges(serverChanges, serverTime)
 
             // Cleanup tombstones older than 30 days
             val thirtyDaysAgo = System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000
@@ -342,7 +343,7 @@ open class BaseSyncManager(
             // Update sync timestamp
             storage.setPreference(SyncConstants.KEY_LAST_SYNCED_AT, serverTime.toString())
 
-            val msg = "증분 동기화 완료 (즐겨찾기 $favCount, 기록 $histCount)"
+            val msg = "증분 동기화 완료 (즐겨찾기 $favCount, 기록 $histCount, 회차 $epCount)"
             _syncState.value = _syncState.value.copy(
                 isSyncing = false,
                 isSuccess = true,
@@ -350,7 +351,7 @@ open class BaseSyncManager(
                 lastSyncedAt = serverTime,
                 syncMessage = msg,
             )
-            SyncResult(true, msg, favCount, histCount)
+            SyncResult(true, msg, favCount, histCount, epCount)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -393,12 +394,12 @@ open class BaseSyncManager(
             val serverTime = json.optLong("exportedAt", System.currentTimeMillis())
             val isPro = json.optBoolean("isPro", false)
 
-            val (favCount, histCount) = storage.applyFullSnapshot(json, serverTime)
+            val (favCount, histCount, epCount) = storage.applyFullSnapshot(json, serverTime)
 
             // Update sync timestamp
             storage.setPreference(SyncConstants.KEY_LAST_SYNCED_AT, serverTime.toString())
 
-            val msg = "가져오기 완료 (즐겨찾기 $favCount, 기록 $histCount)"
+            val msg = "가져오기 완료 (즐겨찾기 $favCount, 기록 $histCount, 회차 $epCount)"
             _syncState.value = _syncState.value.copy(
                 isSyncing = false,
                 isSuccess = true,
@@ -406,7 +407,7 @@ open class BaseSyncManager(
                 lastSyncedAt = serverTime,
                 syncMessage = msg,
             )
-            SyncResult(true, msg, favCount, histCount)
+            SyncResult(true, msg, favCount, histCount, epCount)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -447,11 +448,12 @@ open class BaseSyncManager(
             val isPro = json.optBoolean("isPro", false)
             val favCount = json.optInt("favorites", 0)
             val histCount = json.optInt("history", 0)
+            val epCount = json.optInt("readEpisodes", json.optInt("episodes", 0))
             val serverTime = System.currentTimeMillis()
 
             storage.setPreference(SyncConstants.KEY_LAST_SYNCED_AT, serverTime.toString())
 
-            val msg = "올리기 완료 (즐겨찾기 $favCount, 기록 $histCount)"
+            val msg = "올리기 완료 (즐겨찾기 $favCount, 기록 $histCount, 회차 $epCount)"
             _syncState.value = _syncState.value.copy(
                 isSyncing = false,
                 isSuccess = true,
@@ -459,13 +461,96 @@ open class BaseSyncManager(
                 lastSyncedAt = serverTime,
                 syncMessage = msg,
             )
-            SyncResult(true, msg, favCount, histCount)
+            SyncResult(true, msg, favCount, histCount, epCount)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             val err = "올리기 실패: ${e.localizedMessage ?: "서버 연결 오류"}"
             _syncState.value = _syncState.value.copy(isSyncing = false, isSuccess = false, syncMessage = err)
             SyncResult(false, err)
+        }
+    }
+
+    suspend fun fetchCatalogBatch(
+        items: List<WorkId>,
+        updates: List<SyncCatalogWire> = emptyList(),
+    ): List<SyncCatalogWire> = withContext(Dispatchers.IO) {
+        if (items.isEmpty() && updates.isEmpty()) return@withContext emptyList()
+        val state = _syncState.value
+        val url = SyncConstants.catalogBatchUrl(state.serverUrl)
+        try {
+            val payload = JSONObject().apply {
+                if (items.isNotEmpty()) {
+                    put("items", org.json.JSONArray().apply {
+                        items.take(200).forEach { workId ->
+                            put(JSONObject().apply {
+                                put("sourceId", workId.sourceId)
+                                put("toonId", workId.toonId)
+                            })
+                        }
+                    })
+                }
+                if (updates.isNotEmpty()) {
+                    put("updates", org.json.JSONArray().apply {
+                        updates.take(200).forEach { update ->
+                            put(JSONObject().apply {
+                                put("sourceId", update.sourceId)
+                                put("toonId", update.toonId)
+                                put("totalEpisodes", update.totalEpisodes)
+                                put("updatedAt", update.updatedAt)
+                            })
+                        }
+                    })
+                }
+            }
+            val reqBody = payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+            val req = Request.Builder()
+                .url(url)
+                .post(reqBody)
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext emptyList()
+                val json = JSONObject(resp.body?.string().orEmpty())
+                val arr = json.optJSONArray("catalog") ?: return@withContext emptyList()
+                List(arr.length()) { idx ->
+                    val obj = arr.getJSONObject(idx)
+                    SyncCatalogWire(
+                        sourceId = obj.optString("sourceId"),
+                        toonId = obj.optString("toonId"),
+                        totalEpisodes = obj.optInt("totalEpisodes", 0),
+                        updatedAt = obj.optLong("updatedAt", 0L),
+                    )
+                }.filter { it.totalEpisodes > 0 && it.sourceId.isNotBlank() && it.toonId.isNotBlank() }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun reportCatalog(entries: List<SyncCatalogWire>) = withContext(Dispatchers.IO) {
+        if (entries.isEmpty()) return@withContext
+        val state = _syncState.value
+        val url = SyncConstants.catalogReportUrl(state.serverUrl)
+        try {
+            val payload = JSONObject().apply {
+                put("updates", org.json.JSONArray().apply {
+                    entries.take(200).forEach { entry ->
+                        put(JSONObject().apply {
+                            put("sourceId", entry.sourceId)
+                            put("toonId", entry.toonId)
+                            put("totalEpisodes", entry.totalEpisodes)
+                            put("updatedAt", entry.updatedAt)
+                        })
+                    }
+                })
+            }
+            val reqBody = payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+            val req = Request.Builder()
+                .url(url)
+                .post(reqBody)
+                .build()
+            client.newCall(req).execute().close()
+        } catch (_: Exception) {
         }
     }
 }

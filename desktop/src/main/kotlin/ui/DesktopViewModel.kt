@@ -306,7 +306,7 @@ class DesktopViewModel(
             }
             scope.launch {
                 val res = sm.syncPull()
-                if (res.success && (res.favoritesCount > 0 || res.historyCount > 0)) {
+                if (res.success && (res.favoritesCount > 0 || res.historyCount > 0 || res.episodesCount > 0)) {
                     applySyncRefresh()
                 }
             }
@@ -980,7 +980,7 @@ class DesktopViewModel(
         val sm = repository.syncManager ?: return
         scope.launch {
             val res = sm.syncIfIdle() ?: return@launch
-            if (res.success && (res.favoritesCount > 0 || res.historyCount > 0)) {
+            if (res.success && (res.favoritesCount > 0 || res.historyCount > 0 || res.episodesCount > 0)) {
                 val now = _state.value
                 if (now.screen == Screen.Browse && !now.isSearch) {
                     loadPage(now.page, replace = true)
@@ -1213,14 +1213,118 @@ class DesktopViewModel(
 
     private suspend fun updateHistoryAndProgress(item: ToonItem, exactTotal: Int) {
         if (exactTotal <= 0) return
-        val existing = repository.getHistory(item.workId()) ?: return
-        val safeOrder = existing.lastReadOrder.coerceIn(0, exactTotal)
+        repository.saveCatalogTotal(item.workId(), exactTotal)
+        val rawEpisodes = _state.value.rawEpisodes.ifEmpty { _state.value.episodes }
+        val latestRead = rawEpisodes.firstOrNull { it.isRead }
+        val seriesKey = item.workId().storageKey()
+        val derivedPosition = if (latestRead != null) {
+            ReaderDomain.episodePosition(
+                episodeIds = rawEpisodes.map(EpisodeItem::wrId),
+                currentEpisodeId = latestRead.wrId,
+                currentPage = _state.value.episodePage,
+                lastPage = _state.value.episodeLastPage,
+                knownLastPageCount = toonLastPageCounts[seriesKey],
+                knownTotalCount = toonTotalCounts[seriesKey] ?: exactTotal,
+                pageSize = repository.sourceOrNull(item.sourceId)?.episodePageSize ?: 100,
+            )
+        } else null
+        val derivedOrder = derivedPosition?.readOrder
+
+        val existing = repository.getHistory(item.workId())
+        if (existing == null) {
+            if (latestRead != null && derivedOrder != null) {
+                val nextEp = derivedPosition.nextEpisodeIndex?.let { rawEpisodes.getOrNull(it) }
+                val created = ReadHistoryRecord(
+                    sourceId = item.sourceId,
+                    toonId = item.id,
+                    toonTitle = item.title,
+                    toonThumbUrl = item.thumbUrl.orEmpty(),
+                    toonHref = item.href,
+                    lastWrId = latestRead.wrId,
+                    lastEpisodeTitle = latestRead.title,
+                    lastEpisodeHref = latestRead.href,
+                    lastReadOrder = derivedOrder,
+                    totalEpisodes = exactTotal,
+                    lastReadAt = latestRead.readAt ?: System.currentTimeMillis(),
+                    nextWrId = nextEp?.wrId,
+                    nextEpisodeTitle = nextEp?.title,
+                    nextEpisodeHref = nextEp?.href,
+                    hasNew = derivedOrder < exactTotal,
+                )
+                repository.saveHistory(created)
+                val (progressText, readCount) = listingProgress(
+                    item.sourceId,
+                    created.lastReadOrder,
+                    created.totalEpisodes,
+                    item.workId(),
+                )
+                _state.update { curr ->
+                    val updatedItems = curr.items.map { row ->
+                        if (row.workId() == item.workId()) row.copy(readProgress = progressText) else row
+                    }
+                    curr.copy(
+                        items = updatedItems,
+                        seriesHistory = if (curr.series?.workId() == item.workId()) created else curr.seriesHistory,
+                        readCounts = curr.readCounts.withCount(item.workId(), readCount),
+                    )
+                }
+            } else {
+                val (progressText, _) = listingProgress(
+                    item.sourceId,
+                    0,
+                    exactTotal,
+                    item.workId(),
+                )
+                if (progressText.isNotBlank()) {
+                    _state.update { curr ->
+                        val updatedItems = curr.items.map { row ->
+                            if (row.workId() == item.workId()) row.copy(readProgress = progressText) else row
+                        }
+                        curr.copy(items = updatedItems)
+                    }
+                }
+            }
+            return
+        }
+
+        val candidateOrder = existing.lastReadOrder.coerceIn(0, exactTotal)
+        val shouldElevate = derivedOrder != null && derivedOrder > candidateOrder
+        val safeOrder = if (shouldElevate) derivedOrder!! else candidateOrder
         val hasNew = safeOrder < exactTotal
-        if (existing.totalEpisodes != exactTotal || existing.lastReadOrder != safeOrder || existing.hasNew != hasNew) {
+
+        val updatedWrId = if (shouldElevate && latestRead != null) latestRead.wrId else existing.lastWrId
+        val updatedTitle = if (shouldElevate && latestRead != null) latestRead.title else existing.lastEpisodeTitle
+        val updatedHref = if (shouldElevate && latestRead != null) latestRead.href else existing.lastEpisodeHref
+        val updatedReadAt = if (shouldElevate && latestRead != null) {
+            maxOf(existing.lastReadAt, latestRead.readAt ?: 0L)
+        } else existing.lastReadAt
+        val updatedNextWrId = if (shouldElevate && derivedPosition?.nextEpisodeIndex != null) {
+            rawEpisodes.getOrNull(derivedPosition.nextEpisodeIndex!!)?.wrId ?: existing.nextWrId
+        } else existing.nextWrId
+        val updatedNextTitle = if (shouldElevate && derivedPosition?.nextEpisodeIndex != null) {
+            rawEpisodes.getOrNull(derivedPosition.nextEpisodeIndex!!)?.title ?: existing.nextEpisodeTitle
+        } else existing.nextEpisodeTitle
+        val updatedNextHref = if (shouldElevate && derivedPosition?.nextEpisodeIndex != null) {
+            rawEpisodes.getOrNull(derivedPosition.nextEpisodeIndex!!)?.href ?: existing.nextEpisodeHref
+        } else existing.nextEpisodeHref
+
+        if (existing.totalEpisodes != exactTotal ||
+            existing.lastReadOrder != safeOrder ||
+            existing.hasNew != hasNew ||
+            existing.lastWrId != updatedWrId ||
+            existing.lastReadAt != updatedReadAt
+        ) {
             val updated = existing.copy(
                 totalEpisodes = exactTotal,
                 lastReadOrder = safeOrder,
                 hasNew = hasNew,
+                lastWrId = updatedWrId,
+                lastEpisodeTitle = updatedTitle,
+                lastEpisodeHref = updatedHref,
+                lastReadAt = updatedReadAt,
+                nextWrId = updatedNextWrId,
+                nextEpisodeTitle = updatedNextTitle,
+                nextEpisodeHref = updatedNextHref,
             )
             repository.saveHistory(updated)
             val (progressText, readCount) = listingProgress(

@@ -266,6 +266,18 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
                 )
                 """.trimIndent(),
             )
+            stmt.execute(
+                """
+                CREATE TABLE IF NOT EXISTS toon_catalog (
+                    sourceId TEXT NOT NULL,
+                    toonId TEXT NOT NULL,
+                    totalEpisodes INTEGER NOT NULL DEFAULT 0,
+                    updatedAt INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (sourceId, toonId)
+                )
+                """.trimIndent(),
+            )
+            stmt.execute("CREATE INDEX IF NOT EXISTS index_toon_catalog_toonId ON toon_catalog(toonId)")
         }
     }
 
@@ -1148,5 +1160,100 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
         totalBytes = rs.getLong("totalBytes"),
         downloadedAt = rs.getLong("downloadedAt"),
         localDirPath = rs.getString("localDirPath"),
+    )
+
+    // --- Toon Catalog ---
+    fun getCatalog(workId: WorkId): ToonCatalogRecord? {
+        withConnection { conn ->
+            conn.prepareStatement("SELECT * FROM toon_catalog WHERE sourceId = ? AND toonId = ?").use { stmt ->
+                stmt.setString(1, workId.sourceId)
+                stmt.setString(2, workId.toonId)
+                val rs = stmt.executeQuery()
+                if (rs.next()) {
+                    return catalogFrom(rs)
+                }
+            }
+        }
+        return null
+    }
+
+    fun getCatalogTotalsByToonIds(ids: List<WorkId>): Map<String, Int> {
+        if (ids.isEmpty()) return emptyMap()
+        val wanted = ids.map { it.storageKey() }.toSet()
+        val toonIds = ids.map { it.toonId }.distinct()
+        val map = mutableMapOf<String, Int>()
+        withConnection { conn ->
+            for (chunk in toonIds.chunked(400)) {
+                val placeholders = chunk.joinToString(",") { "?" }
+                conn.prepareStatement("SELECT sourceId, toonId, totalEpisodes FROM toon_catalog WHERE toonId IN ($placeholders)").use { stmt ->
+                    chunk.forEachIndexed { index, id -> stmt.setString(index + 1, id) }
+                    val rs = stmt.executeQuery()
+                    while (rs.next()) {
+                        val sid = rs.getString("sourceId")
+                        val tid = rs.getString("toonId")
+                        val key = WorkId(sid, tid).storageKey()
+                        if (key in wanted) {
+                            map[key] = rs.getInt("totalEpisodes")
+                        }
+                    }
+                }
+            }
+        }
+        return map
+    }
+
+    fun upsertCatalogMonotonic(workId: WorkId, totalEpisodes: Int, updatedAt: Long = System.currentTimeMillis()) {
+        if (totalEpisodes <= 0) return
+        withConnection { conn ->
+            conn.prepareStatement(
+                """
+                INSERT INTO toon_catalog (sourceId, toonId, totalEpisodes, updatedAt)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(sourceId, toonId) DO UPDATE SET
+                    totalEpisodes = excluded.totalEpisodes,
+                    updatedAt = excluded.updatedAt
+                WHERE excluded.totalEpisodes > toon_catalog.totalEpisodes
+                """.trimIndent(),
+            ).use { stmt ->
+                stmt.setString(1, workId.sourceId)
+                stmt.setString(2, workId.toonId)
+                stmt.setInt(3, totalEpisodes)
+                stmt.setLong(4, updatedAt)
+                stmt.executeUpdate()
+            }
+        }
+    }
+
+    fun saveAllCatalog(items: List<ToonCatalogRecord>) {
+        if (items.isEmpty()) return
+        withTransaction { conn ->
+            conn.prepareStatement(
+                """
+                INSERT INTO toon_catalog (sourceId, toonId, totalEpisodes, updatedAt)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(sourceId, toonId) DO UPDATE SET
+                    totalEpisodes = excluded.totalEpisodes,
+                    updatedAt = excluded.updatedAt
+                WHERE excluded.totalEpisodes > toon_catalog.totalEpisodes
+                """.trimIndent(),
+            ).use { stmt ->
+                for (item in items) {
+                    if (item.totalEpisodes <= 0) continue
+                    stmt.setString(1, item.sourceId)
+                    stmt.setString(2, item.toonId)
+                    stmt.setInt(3, item.totalEpisodes)
+                    stmt.setLong(4, item.updatedAt)
+                    stmt.addBatch()
+                }
+                stmt.executeBatch()
+            }
+        }
+    }
+
+    private fun catalogFrom(rs: ResultSet): ToonCatalogRecord = ToonCatalogRecord(
+        sourceId = rs.getString("sourceId"),
+        toonId = rs.getString("toonId"),
+        totalEpisodes = rs.getInt("totalEpisodes"),
+        updatedAt = rs.getLong("updatedAt"),
     )
 }

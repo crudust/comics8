@@ -105,7 +105,7 @@ class RepositoryTransformsTest {
             historyByKey = mapOf(seenKey to (2 to 10)),
             readCountsByKey = mapOf(seenKey to 4),
             seenUpdatedAt = { it },
-        ) { _, history, readCount -> "${history.first}/${history.second}/$readCount" }
+        ) { _, history, readCount, _ -> history?.let { "${it.first}/${it.second}/$readCount" } }
 
         assertThat(result[0].isNew).isTrue()
         assertThat(result[0].isFavorite).isTrue()
@@ -113,6 +113,29 @@ class RepositoryTransformsTest {
         assertThat(result[1].isNew).isTrue()
         assertThat(result[1].isFavorite).isFalse()
         assertThat(result[1].readProgress).isNull()
+    }
+
+    @Test
+    fun applyListingFlags_supportsCatalogTotalsForUnreadItems() {
+        val unreadItem = toon("unread", updatedAt = "same")
+        val key = unreadItem.workId().storageKey()
+
+        val result = RepositoryTransforms.applyListingFlags(
+            items = listOf(unreadItem),
+            seenCount = 0,
+            favoriteKeys = emptySet(),
+            seenByKey = emptyMap<String, String>(),
+            historyByKey = emptyMap<String, Pair<Int, Int>>(),
+            readCountsByKey = emptyMap(),
+            catalogTotalsByKey = mapOf(key to 104),
+            seenUpdatedAt = { it: String -> it },
+        ) { _, history, _, catalogTotal ->
+            val total = if (history != null && history.second > 0) history.second else catalogTotal
+            val lastOrder = history?.first ?: 0
+            if (total > 0 && lastOrder == 0) "${total}화" else null
+        }
+
+        assertThat(result[0].readProgress).isEqualTo("104화")
     }
 
     @Test
