@@ -755,7 +755,14 @@ async def apply_delta_for_user(
                 "has_new": stmt.excluded.has_new,
                 "sync_updated_at": stmt.excluded.sync_updated_at,
             },
-            where=(stmt.excluded.last_read_at >= UserHistory.last_read_at),
+            where=(
+                (stmt.excluded.last_read_order > UserHistory.last_read_order)
+                | (
+                    (stmt.excluded.last_read_order == UserHistory.last_read_order)
+                    & (stmt.excluded.last_read_at >= UserHistory.last_read_at)
+                )
+                | (stmt.excluded.last_read_at >= UserHistory.last_read_at)
+            ),
         )
         await session.execute(stmt)
 

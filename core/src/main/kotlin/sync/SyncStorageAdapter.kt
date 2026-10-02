@@ -2,6 +2,12 @@ package com.comics8.core.sync
 
 import org.json.JSONObject
 
+data class SyncApplyCounts(
+    val favorites: Int = 0,
+    val history: Int = 0,
+    val episodes: Int = 0,
+)
+
 /**
  * Storage abstraction for SyncManager.
  * Implemented by Android Room DB and Desktop SQLite DB.
@@ -20,15 +26,15 @@ interface SyncStorageAdapter {
 
     /**
      * Applies incremental remote changes from the server.
-     * Returns Pair(appliedFavoritesCount, appliedHistoryCount).
+     * Returns SyncApplyCounts(appliedFavoritesCount, appliedHistoryCount, appliedEpisodesCount).
      */
-    suspend fun applyRemoteChanges(serverChanges: JSONObject, serverTime: Long): Pair<Int, Int>
+    suspend fun applyRemoteChanges(serverChanges: JSONObject, serverTime: Long): SyncApplyCounts
 
     /**
      * Replaces or merges full snapshot from the server.
-     * Returns Pair(appliedFavoritesCount, appliedHistoryCount).
+     * Returns SyncApplyCounts(appliedFavoritesCount, appliedHistoryCount, appliedEpisodesCount).
      */
-    suspend fun applyFullSnapshot(snapshot: JSONObject, serverTime: Long): Pair<Int, Int>
+    suspend fun applyFullSnapshot(snapshot: JSONObject, serverTime: Long): SyncApplyCounts
 
     /**
      * Deletes tombstones older than [cutoff] timestamp.

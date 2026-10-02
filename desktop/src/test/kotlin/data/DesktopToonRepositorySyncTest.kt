@@ -211,4 +211,133 @@ class DesktopToonRepositorySyncTest {
         assertThat(setting?.readDirection).isEqualTo(ReadDirection.RIGHT_TO_LEFT)
         assertThat(setting?.splitMode).isEqualTo(SplitMode.FIT)
     }
+
+    @Test
+    fun applyRemoteChangesRejectsStaleHistoryOrderAndCountsEpisodes() = runBlocking {
+        val adapter = DesktopSyncStorageAdapter(db)
+        val workId = WorkId("test_source", "toon-sync-test")
+
+        // 로컬에 이미 104화 읽음 기록 (order = 104)
+        db.saveHistory(
+            ReadHistoryRecord(
+                sourceId = workId.sourceId,
+                toonId = workId.toonId,
+                toonTitle = "Test Toon Sync",
+                toonThumbUrl = "thumb",
+                toonHref = "href",
+                lastWrId = "104",
+                lastEpisodeTitle = "Episode 104",
+                lastEpisodeHref = "href/104",
+                lastReadOrder = 104,
+                totalEpisodes = 104,
+                lastReadAt = 2000L,
+                hasNew = false,
+            )
+        )
+
+        // 원격에서 과거/하위 회차 (order = 103, 타임스탬프가 더 높더라도 회차 순번이 낮음)가 들어온 경우
+        val payload = org.json.JSONObject().apply {
+            put("favorites", org.json.JSONArray())
+            put("history", org.json.JSONArray().apply {
+                put(org.json.JSONObject().apply {
+                    put("sourceId", workId.sourceId)
+                    put("toonId", workId.toonId)
+                    put("toonTitle", "Test Toon Sync")
+                    put("toonThumbUrl", "thumb")
+                    put("toonHref", "href")
+                    put("lastWrId", "103")
+                    put("lastEpisodeTitle", "Episode 103")
+                    put("lastEpisodeHref", "href/103")
+                    put("lastReadOrder", 103)
+                    put("totalEpisodes", 104)
+                    put("lastReadAt", 3000L) // 타임스탬프는 더 늦지만 order는 낮음
+                    put("hasNew", 1)
+                })
+            })
+            put("readEpisodes", org.json.JSONArray().apply {
+                put(org.json.JSONObject().apply {
+                    put("sourceId", workId.sourceId)
+                    put("toonId", workId.toonId)
+                    put("wrId", "104")
+                    put("readAt", 2000L)
+                    put("lastPage", 1)
+                })
+            })
+        }
+
+        val counts = adapter.applyRemoteChanges(payload, 3000L)
+
+        // stale한 103은 기각되어 history 카운트는 0, readEpisodes 카운트는 1이어야 함
+        assertThat(counts.history).isEqualTo(0)
+        assertThat(counts.episodes).isEqualTo(1)
+
+        val hist = db.getHistory(workId)
+        assertThat(hist?.lastReadOrder).isEqualTo(104)
+        assertThat(hist?.lastWrId).isEqualTo("104")
+    }
+
+    @Test
+    fun applyRemoteChangesAcceptsHigherHistoryOrder() = runBlocking {
+        val adapter = DesktopSyncStorageAdapter(db)
+        val workId = WorkId("test_source", "toon-sync-elevate")
+
+        // 로컬에 103화 읽음 기록 (order = 103)
+        db.saveHistory(
+            ReadHistoryRecord(
+                sourceId = workId.sourceId,
+                toonId = workId.toonId,
+                toonTitle = "Test Elevate",
+                toonThumbUrl = "thumb",
+                toonHref = "href",
+                lastWrId = "103",
+                lastEpisodeTitle = "Episode 103",
+                lastEpisodeHref = "href/103",
+                lastReadOrder = 103,
+                totalEpisodes = 104,
+                lastReadAt = 1000L,
+                hasNew = true,
+            )
+        )
+
+        // 원격에서 최신 회차 (order = 104)가 수신됨
+        val payload = org.json.JSONObject().apply {
+            put("favorites", org.json.JSONArray())
+            put("history", org.json.JSONArray().apply {
+                put(org.json.JSONObject().apply {
+                    put("sourceId", workId.sourceId)
+                    put("toonId", workId.toonId)
+                    put("toonTitle", "Test Elevate")
+                    put("toonThumbUrl", "thumb")
+                    put("toonHref", "href")
+                    put("lastWrId", "104")
+                    put("lastEpisodeTitle", "Episode 104")
+                    put("lastEpisodeHref", "href/104")
+                    put("lastReadOrder", 104)
+                    put("totalEpisodes", 104)
+                    put("lastReadAt", 2000L)
+                    put("hasNew", 0)
+                })
+            })
+            put("readEpisodes", org.json.JSONArray().apply {
+                put(org.json.JSONObject().apply {
+                    put("sourceId", workId.sourceId)
+                    put("toonId", workId.toonId)
+                    put("wrId", "104")
+                    put("readAt", 2000L)
+                    put("lastPage", 1)
+                })
+            })
+        }
+
+        val counts = adapter.applyRemoteChanges(payload, 2000L)
+
+        // 최신 104는 수용되어 history 1, episodes 1이어야 함
+        assertThat(counts.history).isEqualTo(1)
+        assertThat(counts.episodes).isEqualTo(1)
+
+        val hist = db.getHistory(workId)
+        assertThat(hist?.lastReadOrder).isEqualTo(104)
+        assertThat(hist?.lastWrId).isEqualTo("104")
+        assertThat(hist?.hasNew).isFalse()
+    }
 }

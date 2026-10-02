@@ -333,7 +333,7 @@ open class BaseSyncManager(
             val serverChanges = json.optJSONObject("changes") ?: JSONObject()
             val isPro = json.optBoolean("isPro", false)
 
-            val (favCount, histCount) = storage.applyRemoteChanges(serverChanges, serverTime)
+            val (favCount, histCount, epCount) = storage.applyRemoteChanges(serverChanges, serverTime)
 
             // Cleanup tombstones older than 30 days
             val thirtyDaysAgo = System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000
@@ -342,7 +342,7 @@ open class BaseSyncManager(
             // Update sync timestamp
             storage.setPreference(SyncConstants.KEY_LAST_SYNCED_AT, serverTime.toString())
 
-            val msg = "증분 동기화 완료 (즐겨찾기 $favCount, 기록 $histCount)"
+            val msg = "증분 동기화 완료 (즐겨찾기 $favCount, 기록 $histCount, 회차 $epCount)"
             _syncState.value = _syncState.value.copy(
                 isSyncing = false,
                 isSuccess = true,
@@ -350,7 +350,7 @@ open class BaseSyncManager(
                 lastSyncedAt = serverTime,
                 syncMessage = msg,
             )
-            SyncResult(true, msg, favCount, histCount)
+            SyncResult(true, msg, favCount, histCount, epCount)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -393,12 +393,12 @@ open class BaseSyncManager(
             val serverTime = json.optLong("exportedAt", System.currentTimeMillis())
             val isPro = json.optBoolean("isPro", false)
 
-            val (favCount, histCount) = storage.applyFullSnapshot(json, serverTime)
+            val (favCount, histCount, epCount) = storage.applyFullSnapshot(json, serverTime)
 
             // Update sync timestamp
             storage.setPreference(SyncConstants.KEY_LAST_SYNCED_AT, serverTime.toString())
 
-            val msg = "가져오기 완료 (즐겨찾기 $favCount, 기록 $histCount)"
+            val msg = "가져오기 완료 (즐겨찾기 $favCount, 기록 $histCount, 회차 $epCount)"
             _syncState.value = _syncState.value.copy(
                 isSyncing = false,
                 isSuccess = true,
@@ -406,7 +406,7 @@ open class BaseSyncManager(
                 lastSyncedAt = serverTime,
                 syncMessage = msg,
             )
-            SyncResult(true, msg, favCount, histCount)
+            SyncResult(true, msg, favCount, histCount, epCount)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -447,11 +447,12 @@ open class BaseSyncManager(
             val isPro = json.optBoolean("isPro", false)
             val favCount = json.optInt("favorites", 0)
             val histCount = json.optInt("history", 0)
+            val epCount = json.optInt("readEpisodes", json.optInt("episodes", 0))
             val serverTime = System.currentTimeMillis()
 
             storage.setPreference(SyncConstants.KEY_LAST_SYNCED_AT, serverTime.toString())
 
-            val msg = "올리기 완료 (즐겨찾기 $favCount, 기록 $histCount)"
+            val msg = "올리기 완료 (즐겨찾기 $favCount, 기록 $histCount, 회차 $epCount)"
             _syncState.value = _syncState.value.copy(
                 isSyncing = false,
                 isSuccess = true,
@@ -459,7 +460,7 @@ open class BaseSyncManager(
                 lastSyncedAt = serverTime,
                 syncMessage = msg,
             )
-            SyncResult(true, msg, favCount, histCount)
+            SyncResult(true, msg, favCount, histCount, epCount)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

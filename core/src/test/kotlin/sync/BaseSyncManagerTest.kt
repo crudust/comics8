@@ -17,13 +17,13 @@ class BaseSyncManagerTest {
     private class FakeStorageAdapter : SyncStorageAdapter {
         val prefs = mutableMapOf<String, String>()
         var fullSnapshotJson = JSONObject().put("favorites", org.json.JSONArray()).put("history", org.json.JSONArray())
-        var appliedFullSnapshotCount = Pair(0, 0)
-        var appliedRemoteChangesCount = Pair(0, 0)
+        var appliedFullSnapshotCount = SyncApplyCounts(0, 0, 0)
+        var appliedRemoteChangesCount = SyncApplyCounts(0, 0, 0)
 
         override suspend fun getLocalChangesSince(since: Long): JSONObject = JSONObject().put("favorites", org.json.JSONArray())
         override suspend fun getFullSnapshot(): JSONObject = fullSnapshotJson
-        override suspend fun applyRemoteChanges(serverChanges: JSONObject, serverTime: Long): Pair<Int, Int> = appliedRemoteChangesCount
-        override suspend fun applyFullSnapshot(snapshot: JSONObject, serverTime: Long): Pair<Int, Int> = appliedFullSnapshotCount
+        override suspend fun applyRemoteChanges(serverChanges: JSONObject, serverTime: Long): SyncApplyCounts = appliedRemoteChangesCount
+        override suspend fun applyFullSnapshot(snapshot: JSONObject, serverTime: Long): SyncApplyCounts = appliedFullSnapshotCount
         override suspend fun deleteOldTombstones(cutoff: Long) {}
         override fun getPreference(key: String, defaultValue: String?): String? = prefs[key] ?: defaultValue
         override fun setPreference(key: String, value: String?) {
@@ -123,7 +123,7 @@ class BaseSyncManagerTest {
     @Test
     fun restoreAccountSetsKeyResetsTimestampAndPullsSnapshot() = runBlocking {
         storage.setPreference(SyncConstants.KEY_LAST_SYNCED_AT, "999999999")
-        storage.appliedFullSnapshotCount = Pair(5, 12)
+        storage.appliedFullSnapshotCount = SyncApplyCounts(5, 12, 0)
 
         val okClient = OkHttpClient.Builder()
             .addInterceptor { chain ->

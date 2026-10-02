@@ -13,6 +13,7 @@ import com.comics8.core.model.SyncState
 import com.comics8.core.network.ToonClient
 import com.comics8.core.source.WorkId
 import com.comics8.core.sync.BaseSyncManager
+import com.comics8.core.sync.SyncApplyCounts
 import com.comics8.core.sync.SyncConstants
 import com.comics8.core.sync.SyncStorageAdapter
 import com.comics8.core.sync.SyncPayload
@@ -144,18 +145,18 @@ class AndroidRoomSyncStorageAdapter(
     override suspend fun applyRemoteChanges(
         serverChanges: JSONObject,
         serverTime: Long,
-    ): Pair<Int, Int> = applyPayload(serverChanges, serverTime, applyTombstones = true)
+    ): SyncApplyCounts = applyPayload(serverChanges, serverTime, applyTombstones = true)
 
     override suspend fun applyFullSnapshot(
         snapshot: JSONObject,
         serverTime: Long,
-    ): Pair<Int, Int> = applyPayload(snapshot, serverTime, applyTombstones = false)
+    ): SyncApplyCounts = applyPayload(snapshot, serverTime, applyTombstones = false)
 
     private suspend fun applyPayload(
         root: JSONObject,
         serverTime: Long,
         applyTombstones: Boolean,
-    ): Pair<Int, Int> {
+    ): SyncApplyCounts {
         val payload = SyncPayloadCodec.decode(root, serverTime)
         val favorites = payload.favorites.mapNotNull { item ->
             val workId = BackupWireCodec.workId(item.sourceId, item.id, item.toonId, preferId = true)
@@ -216,6 +217,7 @@ class AndroidRoomSyncStorageAdapter(
             )
         }
 
+        var savedHistoryCount = 0
         database.withTransaction {
             if (applyTombstones) {
                 payload.tombstones.forEach { tombstone ->
@@ -228,11 +230,26 @@ class AndroidRoomSyncStorageAdapter(
                 }
             }
             if (favorites.isNotEmpty()) database.favoriteDao().upsertAll(favorites)
-            if (history.isNotEmpty()) database.readHistoryDao().upsertAll(history)
+            if (history.isNotEmpty()) {
+                val existingMap = database.readHistoryDao().byToonIds(history.map { it.toonId }.distinct())
+                    .associateBy { it.workId().storageKey() }
+                val historyToSave = history.filter { incoming ->
+                    val local = existingMap[incoming.workId().storageKey()]
+                    if (local == null) true
+                    else {
+                        incoming.lastReadOrder > local.lastReadOrder ||
+                            (incoming.lastReadOrder == local.lastReadOrder && incoming.lastReadAt >= local.lastReadAt)
+                    }
+                }
+                if (historyToSave.isNotEmpty()) {
+                    database.readHistoryDao().upsertAll(historyToSave)
+                }
+                savedHistoryCount = historyToSave.size
+            }
             if (episodes.isNotEmpty()) database.readEpisodeDao().markReadAll(episodes)
             if (settings.isNotEmpty()) database.readerSettingDao().saveAll(settings)
         }
-        return favorites.size to history.size
+        return SyncApplyCounts(favorites = favorites.size, history = savedHistoryCount, episodes = episodes.size)
     }
 }
 
