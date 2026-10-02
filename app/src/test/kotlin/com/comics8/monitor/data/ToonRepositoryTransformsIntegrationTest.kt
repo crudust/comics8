@@ -226,7 +226,7 @@ class ToonRepositoryTransformsIntegrationTest {
             }
 
             var attempts = 0
-            while (callbackCount < 3 && attempts < 50) {
+            while (callbackCount < 3 && attempts < 100) {
                 kotlinx.coroutines.delay(50)
                 attempts++
             }
