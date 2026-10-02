@@ -43,6 +43,7 @@ class AppDatabaseRoomMigrationTest {
                 AppDatabase.MIGRATION_9_10,
                 AppDatabase.MIGRATION_10_11,
                 AppDatabase.MIGRATION_11_12,
+                AppDatabase.MIGRATION_12_13,
             )
             .allowMainThreadQueries()
             .build()
@@ -70,6 +71,9 @@ class AppDatabaseRoomMigrationTest {
             val tombs = room.tombstoneDao().getSince(0)
             assertThat(tombs).hasSize(1)
             assertThat(tombs[0].entityId).isEqualTo("eleven:456")
+            val catalog = room.toonCatalogDao().byToonIds(listOf("123"))
+            assertThat(catalog).hasSize(1)
+            assertThat(catalog[0].totalEpisodes).isEqualTo(10)
         } finally {
             room.close()
         }

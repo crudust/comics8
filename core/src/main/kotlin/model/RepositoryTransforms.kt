@@ -93,22 +93,44 @@ object RepositoryTransforms {
         seenByKey: Map<String, Seen>,
         historyByKey: Map<String, History>,
         readCountsByKey: Map<String, Int>,
+        catalogTotalsByKey: Map<String, Int> = emptyMap(),
         seenUpdatedAt: (Seen) -> String?,
-        formatProgress: (ToonItem, History, Int) -> String,
+        formatProgress: (ToonItem, History?, Int, Int) -> String?,
     ): List<ToonItem> = items.map { item ->
         val key = item.workId().storageKey()
         val seen = seenByKey[key]
         val history = historyByKey[key]
+        val catalogTotal = catalogTotalsByKey[key] ?: 0
         val isUpdated = seen != null &&
             !item.updatedAt.isNullOrBlank() &&
             seenUpdatedAt(seen) != item.updatedAt
         item.copy(
             isNew = seenCount > 0 && (seen == null || isUpdated),
             isFavorite = key in favoriteKeys,
-            readProgress = history?.let {
-                formatProgress(item, it, readCountsByKey[key] ?: 0)
-            },
+            readProgress = formatProgress(item, history, readCountsByKey[key] ?: 0, catalogTotal)?.ifBlank { null },
         )
+    }
+
+    fun <Seen, History> applyListingFlags(
+        items: List<ToonItem>,
+        seenCount: Int,
+        favoriteKeys: Set<String>,
+        seenByKey: Map<String, Seen>,
+        historyByKey: Map<String, History>,
+        readCountsByKey: Map<String, Int>,
+        seenUpdatedAt: (Seen) -> String?,
+        formatProgress: (ToonItem, History, Int) -> String,
+    ): List<ToonItem> = applyListingFlags(
+        items = items,
+        seenCount = seenCount,
+        favoriteKeys = favoriteKeys,
+        seenByKey = seenByKey,
+        historyByKey = historyByKey,
+        readCountsByKey = readCountsByKey,
+        catalogTotalsByKey = emptyMap(),
+        seenUpdatedAt = seenUpdatedAt,
+    ) { item, hist, count, _ ->
+        hist?.let { formatProgress(item, it, count) }
     }
 
     fun parseReaderSetting(

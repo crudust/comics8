@@ -248,6 +248,27 @@ class AndroidRoomSyncStorageAdapter(
             }
             if (episodes.isNotEmpty()) database.readEpisodeDao().markReadAll(episodes)
             if (settings.isNotEmpty()) database.readerSettingDao().saveAll(settings)
+
+            val catalogFromHistory = history.filter { it.totalEpisodes > 0 }.map {
+                com.comics8.monitor.data.local.ToonCatalogEntry(
+                    sourceId = it.sourceId,
+                    id = it.toonId,
+                    totalEpisodes = it.totalEpisodes,
+                    updatedAt = it.lastReadAt,
+                )
+            }
+            val directCatalog = payload.catalog.map {
+                com.comics8.monitor.data.local.ToonCatalogEntry(
+                    sourceId = it.sourceId,
+                    id = it.toonId,
+                    totalEpisodes = it.totalEpisodes,
+                    updatedAt = it.updatedAt,
+                )
+            }
+            val allCatalog = catalogFromHistory + directCatalog
+            if (allCatalog.isNotEmpty()) {
+                database.toonCatalogDao().upsertAll(allCatalog)
+            }
         }
         return SyncApplyCounts(favorites = favorites.size, history = savedHistoryCount, episodes = episodes.size)
     }

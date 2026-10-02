@@ -43,6 +43,8 @@ import com.comics8.monitor.data.local.getReadEpisode
 import com.comics8.monitor.data.local.getReadEpisodes
 import com.comics8.monitor.data.local.getSetting
 import com.comics8.monitor.data.local.updateLastPage
+import com.comics8.monitor.data.local.ToonCatalogDao
+import com.comics8.monitor.data.local.upsertMonotonic
 import com.comics8.monitor.data.local.updateUpdatedAt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -71,8 +73,14 @@ class ToonRepository(
     private val sources: SourceRegistry,
     private val isSourceEnabled: (String) -> Boolean = { false },
     private val installedIds: () -> Set<String> = { sources.knownIds() },
+    private val toonCatalogDao: com.comics8.monitor.data.local.ToonCatalogDao? = database?.toonCatalogDao(),
 ) : AutoCloseable {
     fun sourceRegistry(): SourceRegistry = sources
+
+    suspend fun saveCatalogTotal(workId: WorkId, totalEpisodes: Int, updatedAt: Long = System.currentTimeMillis()) =
+        withContext(Dispatchers.IO) {
+            toonCatalogDao?.upsertMonotonic(workId, totalEpisodes, updatedAt)
+        }
 
     fun source(id: String) = sources.get(id)
 
@@ -195,9 +203,21 @@ class ToonRepository(
             } catch (_: Exception) {
                 emptyMap()
             }
+            val catalogTotals = try {
+                if (ids.isEmpty()) emptyMap() else {
+                    toonCatalogDao?.byToonIds(ids)
+                        ?.filter { it.workId().storageKey() in wanted }
+                        ?.associate { it.workId().storageKey() to it.totalEpisodes }
+                        ?: emptyMap()
+                }
+            } catch (_: Exception) {
+                emptyMap()
+            }
             val targets = items.filter { item ->
                 val key = item.workId().storageKey()
-                historyMap.containsKey(key) && activeSyncKeys.add(key)
+                val hasHistory = historyMap.containsKey(key)
+                val needsCatalog = (catalogTotals[key] ?: 0) == 0
+                (hasHistory || needsCatalog) && activeSyncKeys.add(key)
             }
 
             if (targets.isEmpty()) return@launch
@@ -210,6 +230,7 @@ class ToonRepository(
                         semaphore.withPermit {
                             val exactTotal = fetchTotalEpisodes(target)
                             if (exactTotal > 0) {
+                                toonCatalogDao?.upsertMonotonic(target.workId(), exactTotal)
                                 val existing = readHistoryDao.get(target.workId())
                                 if (existing != null) {
                                     val safeOrder = existing.lastReadOrder.coerceIn(0, exactTotal)
@@ -229,6 +250,16 @@ class ToonRepository(
                                             updated.totalEpisodes,
                                             readCount,
                                         )
+                                        onUpdated?.invoke(target.workId(), exactTotal, progressText)
+                                    }
+                                } else {
+                                    val progressText = formatReadProgress(
+                                        target.sourceId,
+                                        0,
+                                        exactTotal,
+                                        0,
+                                    )
+                                    if (progressText.isNotBlank()) {
                                         onUpdated?.invoke(target.workId(), exactTotal, progressText)
                                     }
                                 }
@@ -476,6 +507,16 @@ class ToonRepository(
         val readCounts = countReadEpisodesNow(
             items.map { it.workId() }.filter { historyMap.containsKey(it.storageKey()) },
         )
+        val catalogTotals = try {
+            if (ids.isEmpty()) emptyMap() else {
+                toonCatalogDao?.byToonIds(ids)
+                    ?.filter { it.workId().storageKey() in wanted }
+                    ?.associate { it.workId().storageKey() to it.totalEpisodes }
+                    ?: emptyMap()
+            }
+        } catch (_: Exception) {
+            emptyMap()
+        }
         for (item in items) {
             if (item.workId().storageKey() in favoriteKeys) {
                 touchFavoriteUpdatedAt(item.workId(), item.updatedAt)
@@ -488,9 +529,12 @@ class ToonRepository(
             seenByKey = existing,
             historyByKey = historyMap,
             readCountsByKey = readCounts,
+            catalogTotalsByKey = catalogTotals,
             seenUpdatedAt = { it.updatedAt },
-        ) { item, history, readCount ->
-            formatReadProgress(item.sourceId, history.lastReadOrder, history.totalEpisodes, readCount)
+        ) { item, history, readCount, catalogTotal ->
+            val totalEp = maxOf(history?.totalEpisodes ?: 0, catalogTotal)
+            val lastOrder = history?.lastReadOrder ?: 0
+            formatReadProgress(item.sourceId, lastOrder, totalEp, readCount)
         }
     }
 

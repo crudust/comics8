@@ -240,6 +240,28 @@ class DesktopSyncStorageAdapter(
         }
 
         database.applySyncBatch(deletions, favorites, historyToSave, episodes, settings)
+
+        val catalogFromHistory = history.filter { it.totalEpisodes > 0 }.map {
+            ToonCatalogRecord(
+                sourceId = it.sourceId,
+                toonId = it.toonId,
+                totalEpisodes = it.totalEpisodes,
+                updatedAt = it.lastReadAt,
+            )
+        }
+        val directCatalog = payload.catalog.map {
+            ToonCatalogRecord(
+                sourceId = it.sourceId,
+                toonId = it.toonId,
+                totalEpisodes = it.totalEpisodes,
+                updatedAt = it.updatedAt,
+            )
+        }
+        val allCatalog = catalogFromHistory + directCatalog
+        if (allCatalog.isNotEmpty()) {
+            database.saveAllCatalog(allCatalog)
+        }
+
         return SyncApplyCounts(favorites = favorites.size, history = historyToSave.size, episodes = episodes.size)
     }
 }

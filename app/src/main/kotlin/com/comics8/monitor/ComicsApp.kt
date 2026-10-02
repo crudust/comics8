@@ -68,6 +68,7 @@ class ComicsApp : Application(), ImageLoaderFactory {
                 AppDatabase.MIGRATION_9_10,
                 AppDatabase.MIGRATION_10_11,
                 AppDatabase.MIGRATION_11_12,
+                AppDatabase.MIGRATION_12_13,
             )
             .fallbackToDestructiveMigrationFrom(1, 2, 3, 4, 5, 6, 7, 8)
             .build()

@@ -9,7 +9,7 @@
   - Docker config: `server/docker-compose.yml`.
 - **Database Authority (`server/schema.sql`)**:
   - `schema.sql` is the canonical ground truth for fresh database initialization.
-  - Contains 9 optimized PostgreSQL 18 tables covering users, sync state, device pairing, reading history, favorites, and billing.
+  - Contains 10 optimized PostgreSQL 18 tables covering users, sync state, device pairing, reading history, favorites, billing, and global crowdsourced comic catalog.
   - Primary/foreign keys use `TEXT` identifiers to handle unbounded network/SMB UUIDs and Base64 encoded work IDs without truncation.
 
 ## Key Service Boundaries

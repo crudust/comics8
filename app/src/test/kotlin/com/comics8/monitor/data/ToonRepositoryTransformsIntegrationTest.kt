@@ -61,4 +61,40 @@ class ToonRepositoryTransformsIntegrationTest {
             database.close()
         }
     }
+
+    @Test
+    fun refreshProgressUsesCatalogTotalForUnreadItems() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        try {
+            val registry = SourceRegistry()
+            val repository = ToonRepository(
+                client = ToonClient(sources = { registry }),
+                seenDao = database.seenDao(),
+                favoriteDao = database.favoriteDao(),
+                readerSettingDao = database.readerSettingDao(),
+                readEpisodeDao = database.readEpisodeDao(),
+                readHistoryDao = database.readHistoryDao(),
+                database = database,
+                sources = registry,
+            )
+            val workId = WorkId("eleven", "unread-catalog-test")
+            repository.saveCatalogTotal(workId, 104)
+
+            val item = com.comics8.core.model.ToonItem(
+                id = workId.toonId,
+                title = "Unread Catalog Comic",
+                thumbUrl = "thumb",
+                href = "href",
+                sourceId = workId.sourceId,
+            )
+
+            val refreshed = repository.refreshProgress(listOf(item))
+            assertThat(refreshed.first().readProgress).isEqualTo("104화")
+        } finally {
+            database.close()
+        }
+    }
 }

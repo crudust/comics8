@@ -390,6 +390,48 @@ suspend fun DownloadedEpisodeDao.delete(workId: WorkId, wrId: String) =
 suspend fun DownloadedEpisodeDao.deleteByToon(workId: WorkId) =
     deleteByToon(workId.sourceId, workId.toonId)
 
+@Entity(
+    tableName = "toon_catalog",
+    primaryKeys = ["sourceId", "toonId"],
+    indices = [Index("toonId")],
+)
+data class ToonCatalogEntry(
+    val sourceId: String = WorkId.DEFAULT_SOURCE,
+    @ColumnInfo(name = "toonId") val id: String,
+    val totalEpisodes: Int = 0,
+    val updatedAt: Long = 0L,
+) {
+    fun workId(): WorkId = WorkId(sourceId, id)
+}
+
+@Dao
+interface ToonCatalogDao {
+    @Query("SELECT * FROM toon_catalog WHERE sourceId = :sourceId AND toonId = :toonId")
+    suspend fun get(sourceId: String, toonId: String): ToonCatalogEntry?
+
+    @Query("SELECT * FROM toon_catalog WHERE toonId IN (:toonIds)")
+    suspend fun byToonIds(toonIds: List<String>): List<ToonCatalogEntry>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(entry: ToonCatalogEntry)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(entries: List<ToonCatalogEntry>)
+
+    @Query("UPDATE toon_catalog SET totalEpisodes = MAX(totalEpisodes, :totalEpisodes), updatedAt = :updatedAt WHERE sourceId = :sourceId AND toonId = :toonId")
+    suspend fun updateMonotonic(sourceId: String, toonId: String, totalEpisodes: Int, updatedAt: Long): Int
+}
+
+suspend fun ToonCatalogDao.get(workId: WorkId): ToonCatalogEntry? = get(workId.sourceId, workId.toonId)
+
+suspend fun ToonCatalogDao.upsertMonotonic(workId: WorkId, totalEpisodes: Int, updatedAt: Long = System.currentTimeMillis()) {
+    if (totalEpisodes <= 0) return
+    val updated = updateMonotonic(workId.sourceId, workId.toonId, totalEpisodes, updatedAt)
+    if (updated == 0) {
+        upsert(ToonCatalogEntry(workId.sourceId, workId.toonId, totalEpisodes, updatedAt))
+    }
+}
+
 @Database(
     entities = [
         SeenToon::class,
@@ -399,8 +441,9 @@ suspend fun DownloadedEpisodeDao.deleteByToon(workId: WorkId) =
         ReadHistory::class,
         Tombstone::class,
         DownloadedEpisode::class,
+        ToonCatalogEntry::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -411,6 +454,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun readHistoryDao(): ReadHistoryDao
     abstract fun tombstoneDao(): TombstoneDao
     abstract fun downloadedEpisodeDao(): DownloadedEpisodeDao
+    abstract fun toonCatalogDao(): ToonCatalogDao
 
     companion object {
         val MIGRATION_9_10: Migration = object : Migration(9, 10) {
@@ -432,6 +476,28 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_read_episodes_readAt ON read_episodes(readAt)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_read_history_toonId ON read_history(toonId)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_tombstones_deletedAt ON tombstones(deletedAt)")
+            }
+        }
+        val MIGRATION_12_13: Migration = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS toon_catalog (
+                        sourceId TEXT NOT NULL,
+                        toonId TEXT NOT NULL,
+                        totalEpisodes INTEGER NOT NULL DEFAULT 0,
+                        updatedAt INTEGER NOT NULL DEFAULT 0,
+                        PRIMARY KEY (sourceId, toonId)
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_toon_catalog_toonId ON toon_catalog(toonId)")
+                db.execSQL(
+                    """
+                    INSERT OR IGNORE INTO toon_catalog (sourceId, toonId, totalEpisodes, updatedAt)
+                    SELECT sourceId, toonId, totalEpisodes, lastReadAt FROM read_history WHERE totalEpisodes > 0
+                    """.trimIndent(),
+                )
             }
         }
     }

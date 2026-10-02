@@ -167,3 +167,17 @@ CREATE TABLE IF NOT EXISTS pairing_codes (
 );
 
 CREATE INDEX IF NOT EXISTS idx_pairing_codes_expiry ON pairing_codes(expires_at);
+
+-- -----------------------------------------------------------------------------
+-- 10. Global Toon Catalog Table (Crowdsourced monotonic episode counts)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS toon_catalog (
+    source_id TEXT NOT NULL DEFAULT 'eleven',
+    toon_id TEXT NOT NULL,
+    total_episodes INT NOT NULL DEFAULT 0,
+    updated_at BIGINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (source_id, toon_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_toon_catalog_toon_id ON toon_catalog(toon_id);
+CREATE INDEX IF NOT EXISTS idx_toon_catalog_updated ON toon_catalog(updated_at DESC);

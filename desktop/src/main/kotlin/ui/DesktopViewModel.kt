@@ -1213,6 +1213,7 @@ class DesktopViewModel(
 
     private suspend fun updateHistoryAndProgress(item: ToonItem, exactTotal: Int) {
         if (exactTotal <= 0) return
+        repository.saveCatalogTotal(item.workId(), exactTotal)
         val rawEpisodes = _state.value.rawEpisodes.ifEmpty { _state.value.episodes }
         val latestRead = rawEpisodes.firstOrNull { it.isRead }
         val seriesKey = item.workId().storageKey()
@@ -1266,6 +1267,21 @@ class DesktopViewModel(
                         seriesHistory = if (curr.series?.workId() == item.workId()) created else curr.seriesHistory,
                         readCounts = curr.readCounts.withCount(item.workId(), readCount),
                     )
+                }
+            } else {
+                val (progressText, _) = listingProgress(
+                    item.sourceId,
+                    0,
+                    exactTotal,
+                    item.workId(),
+                )
+                if (progressText.isNotBlank()) {
+                    _state.update { curr ->
+                        val updatedItems = curr.items.map { row ->
+                            if (row.workId() == item.workId()) row.copy(readProgress = progressText) else row
+                        }
+                        curr.copy(items = updatedItems)
+                    }
                 }
             }
             return

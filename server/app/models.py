@@ -292,3 +292,17 @@ class PairingCode(Base):
         server_default=func.now(),
         nullable=False,
     )
+
+
+class ToonCatalog(Base):
+    __tablename__ = "toon_catalog"
+
+    source_id: Mapped[str] = mapped_column(Text, primary_key=True, default="eleven")
+    toon_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    total_episodes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, index=True)
+
+    __table_args__ = (
+        Index("idx_toon_catalog_updated", "updated_at"),
+    )
+

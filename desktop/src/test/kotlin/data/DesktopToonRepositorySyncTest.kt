@@ -340,4 +340,51 @@ class DesktopToonRepositorySyncTest {
         assertThat(hist?.lastWrId).isEqualTo("104")
         assertThat(hist?.hasNew).isFalse()
     }
+
+    @Test
+    fun syncEpisodeCountsWithUnreadItemUpdatesCatalogAndProgress() = runBlocking {
+        val workId = WorkId("test_source", "unread_toon")
+        // No history exists for this toon
+        assertThat(db.getHistory(workId)).isNull()
+        assertThat(db.getCatalog(workId)).isNull()
+
+        val item = ToonItem(
+            id = "unread_toon",
+            title = "Unread Toon",
+            thumbUrl = "thumb",
+            href = "href",
+            sourceId = "test_source",
+        )
+
+        var updatedTotal = 0
+        var updatedProgress: String? = null
+
+        repository.syncEpisodeCounts(listOf(item)) { id, total, progress ->
+            if (id == workId) {
+                updatedTotal = total
+                updatedProgress = progress
+            }
+        }
+
+        var attempts = 0
+        while (updatedTotal == 0 && attempts < 50) {
+            delay(50)
+            attempts++
+        }
+
+        assertThat(updatedTotal).isEqualTo(15) // TestSource has 15 episodes
+        assertThat(updatedProgress).isEqualTo("15화")
+
+        // Catalog record must be saved in database
+        val catalogRecord = db.getCatalog(workId)
+        assertThat(catalogRecord).isNotNull()
+        assertThat(catalogRecord?.totalEpisodes).isEqualTo(15)
+
+        // Reading history should NOT have been falsely created
+        assertThat(db.getHistory(workId)).isNull()
+
+        // Listing refreshProgress should display "15화" using catalog
+        val refreshed = repository.refreshProgress(listOf(item))
+        assertThat(refreshed.first().readProgress).isEqualTo("15화")
+    }
 }

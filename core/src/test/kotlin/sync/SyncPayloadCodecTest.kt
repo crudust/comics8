@@ -45,4 +45,20 @@ class SyncPayloadCodecTest {
         assertThat(decoded.history.single().lastReadOrder).isEqualTo(0)
         assertThat(decoded.history.single().lastReadAt).isEqualTo(42)
     }
+
+    @Test
+    fun catalogEncodingAndDecodingPreservesTotals() {
+        val payload = SyncPayload(
+            catalog = listOf(
+                SyncCatalogWire(sourceId = "eleven", toonId = "comic1", totalEpisodes = 104, updatedAt = 1000L),
+            ),
+        )
+        val encoded = SyncPayloadCodec.encode(payload)
+        assertThat(encoded.has("catalog")).isTrue()
+        val decoded = SyncPayloadCodec.decode(encoded, serverTime = 2000L)
+        assertThat(decoded.catalog).hasSize(1)
+        assertThat(decoded.catalog.first().toonId).isEqualTo("comic1")
+        assertThat(decoded.catalog.first().totalEpisodes).isEqualTo(104)
+        assertThat(decoded.catalog.first().updatedAt).isEqualTo(1000L)
+    }
 }

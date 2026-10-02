@@ -170,11 +170,13 @@ class DesktopToonRepository(
         syncScope.launch {
             val workIds = items.map { it.workId() }
             val historyMap = database.getHistoryByToonIds(workIds).associateBy { it.workId().storageKey() }
-            val existingSeen = database.getSeenByIds(workIds)
+            val catalogTotals = database.getCatalogTotalsByToonIds(workIds)
 
             val targets = items.filter { item ->
                 val key = item.workId().storageKey()
-                historyMap.containsKey(key) && activeSyncKeys.add(key)
+                val hasHistory = historyMap.containsKey(key)
+                val needsCatalog = (catalogTotals[key] ?: 0) == 0
+                (hasHistory || needsCatalog) && activeSyncKeys.add(key)
             }
 
             if (targets.isEmpty()) return@launch
@@ -187,6 +189,7 @@ class DesktopToonRepository(
                         semaphore.withPermit {
                             val exactTotal = fetchTotalEpisodes(target)
                             if (exactTotal > 0) {
+                                database.upsertCatalogMonotonic(target.workId(), exactTotal)
                                 val existing = database.getHistory(target.workId())
                                 if (existing != null) {
                                     val safeOrder = existing.lastReadOrder.coerceIn(0, exactTotal)
@@ -206,6 +209,16 @@ class DesktopToonRepository(
                                             updated.totalEpisodes,
                                             readCount,
                                         )
+                                        onUpdated?.invoke(target.workId(), exactTotal, progressText)
+                                    }
+                                } else {
+                                    val progressText = formatReadProgress(
+                                        target.sourceId,
+                                        0,
+                                        exactTotal,
+                                        0,
+                                    )
+                                    if (progressText.isNotBlank()) {
                                         onUpdated?.invoke(target.workId(), exactTotal, progressText)
                                     }
                                 }
@@ -299,6 +312,11 @@ class DesktopToonRepository(
         applyFlags(items)
     }
 
+    suspend fun saveCatalogTotal(workId: WorkId, totalEpisodes: Int, updatedAt: Long = now()) =
+        withContext(Dispatchers.IO) {
+            database.upsertCatalogMonotonic(workId, totalEpisodes, updatedAt)
+        }
+
     private suspend fun applyFlags(items: List<ToonItem>): List<ToonItem> {
         if (items.isEmpty()) return items
         val workIds = items.map { it.workId() }
@@ -306,6 +324,7 @@ class DesktopToonRepository(
         val total = database.getSeenCount()
         val existing = if (total == 0) emptyMap() else database.getSeenByIds(workIds)
         val historyMap = database.getHistoryByToonIds(workIds).associateBy { it.workId().storageKey() }
+        val catalogTotals = database.getCatalogTotalsByToonIds(workIds)
         val readCounts = countReadEpisodesNow(workIds.filter { historyMap.containsKey(it.storageKey()) })
 
         for (item in items) {
@@ -324,9 +343,12 @@ class DesktopToonRepository(
             seenByKey = existing,
             historyByKey = historyMap,
             readCountsByKey = readCounts,
+            catalogTotalsByKey = catalogTotals,
             seenUpdatedAt = { it.updatedAt },
-        ) { item, history, readCount ->
-            formatReadProgress(item.sourceId, history.lastReadOrder, history.totalEpisodes, readCount)
+        ) { item, history, readCount, catalogTotal ->
+            val totalEp = maxOf(history?.totalEpisodes ?: 0, catalogTotal)
+            val lastOrder = history?.lastReadOrder ?: 0
+            formatReadProgress(item.sourceId, lastOrder, totalEp, readCount)
         }
     }
 

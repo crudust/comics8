@@ -15,6 +15,7 @@ The Sync domain coordinates bidirectional state synchronization across multi-pla
     - `history`: Read episodes, timestamps, last read page index, and completion status.
     - `bookmarks`: Specific saved page bookmarks within chapters.
     - `settings`: Cross-device UI and reading preference flags.
+    - `catalog`: Global crowdsourced monotonic episode count metadata.
 - **Conflict Resolution (Last-Write-Wins - LWW)**:
   - Every sync record carries an `updatedAt` millisecond timestamp.
   - Conflicts between local storage and server records are resolved by choosing the record with the higher `updatedAt`.

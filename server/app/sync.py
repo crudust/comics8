@@ -22,6 +22,7 @@ from app.database import get_db
 from app.models import (
     PairingCode,
     Subscription,
+    ToonCatalog,
     User,
     UserFavorite,
     UserHistory,
@@ -35,7 +36,7 @@ router = APIRouter(tags=["Sync"])
 
 _PREFETCH_CHUNK_SIZE = 400
 _SUPPORTED_TOMBSTONE_TYPES = {"FAVORITE", "HISTORY", "EPISODE"}
-_SYNC_BUCKETS = ("favorites", "history", "readEpisodes", "readerSettings", "tombstones")
+_SYNC_BUCKETS = ("favorites", "history", "readEpisodes", "readerSettings", "tombstones", "catalog")
 _SYNC_STRING_LIMITS = {
     "sourceId": 255,
     "id": 512,
@@ -520,6 +521,54 @@ async def import_snapshot_for_user(
         )
         await session.execute(stmt)
 
+        # Upsert global toon_catalog from history
+        cat_values = [
+            {
+                "source_id": row_source_id(h),
+                "toon_id": str(h.get("toonId") or h.get("id")),
+                "total_episodes": int(h.get("totalEpisodes", 0)),
+                "updated_at": int(h.get("lastReadAt", now_ms)),
+            }
+            for h in history_rows
+            if int(h.get("totalEpisodes", 0)) > 0 and (h.get("toonId") or h.get("id"))
+        ]
+        if cat_values:
+            cat_stmt = pg_insert(ToonCatalog).values(cat_values)
+            cat_stmt = cat_stmt.on_conflict_do_update(
+                index_elements=[ToonCatalog.source_id, ToonCatalog.toon_id],
+                set_={
+                    "total_episodes": func.greatest(ToonCatalog.total_episodes, cat_stmt.excluded.total_episodes),
+                    "updated_at": cat_stmt.excluded.updated_at,
+                },
+                where=(cat_stmt.excluded.total_episodes > ToonCatalog.total_episodes),
+            )
+            await session.execute(cat_stmt)
+
+    # Global toon_catalog direct batch
+    catalog_rows = [r for r in in_changes.get("catalog", []) if accept_inbound_row(r)]
+    if catalog_rows:
+        direct_cat = [
+            {
+                "source_id": row_source_id(c),
+                "toon_id": str(c.get("toonId") or c.get("id")),
+                "total_episodes": int(c.get("totalEpisodes", 0)),
+                "updated_at": int(c.get("updatedAt", now_ms)),
+            }
+            for c in catalog_rows
+            if int(c.get("totalEpisodes", 0)) > 0 and (c.get("toonId") or c.get("id"))
+        ]
+        if direct_cat:
+            direct_stmt = pg_insert(ToonCatalog).values(direct_cat)
+            direct_stmt = direct_stmt.on_conflict_do_update(
+                index_elements=[ToonCatalog.source_id, ToonCatalog.toon_id],
+                set_={
+                    "total_episodes": func.greatest(ToonCatalog.total_episodes, direct_stmt.excluded.total_episodes),
+                    "updated_at": direct_stmt.excluded.updated_at,
+                },
+                where=(direct_stmt.excluded.total_episodes > ToonCatalog.total_episodes),
+            )
+            await session.execute(direct_stmt)
+
     # 3. Read Episodes Batch UPSERT
     if episode_rows:
         ep_values = [
@@ -777,6 +826,54 @@ async def apply_delta_for_user(
             )
         )
 
+        # Upsert global toon_catalog from history
+        cat_values = [
+            {
+                "source_id": row_source_id(h),
+                "toon_id": str(h.get("toonId") or h.get("id")),
+                "total_episodes": int(h.get("totalEpisodes", 0)),
+                "updated_at": int(h.get("lastReadAt", now_ms)),
+            }
+            for h in history_rows
+            if int(h.get("totalEpisodes", 0)) > 0 and (h.get("toonId") or h.get("id"))
+        ]
+        if cat_values:
+            cat_stmt = pg_insert(ToonCatalog).values(cat_values)
+            cat_stmt = cat_stmt.on_conflict_do_update(
+                index_elements=[ToonCatalog.source_id, ToonCatalog.toon_id],
+                set_={
+                    "total_episodes": func.greatest(ToonCatalog.total_episodes, cat_stmt.excluded.total_episodes),
+                    "updated_at": cat_stmt.excluded.updated_at,
+                },
+                where=(cat_stmt.excluded.total_episodes > ToonCatalog.total_episodes),
+            )
+            await session.execute(cat_stmt)
+
+    # Global toon_catalog direct batch in delta
+    catalog_rows = [r for r in in_changes.get("catalog", []) if accept_inbound_row(r)]
+    if catalog_rows:
+        direct_cat = [
+            {
+                "source_id": row_source_id(c),
+                "toon_id": str(c.get("toonId") or c.get("id")),
+                "total_episodes": int(c.get("totalEpisodes", 0)),
+                "updated_at": int(c.get("updatedAt", now_ms)),
+            }
+            for c in catalog_rows
+            if int(c.get("totalEpisodes", 0)) > 0 and (c.get("toonId") or c.get("id"))
+        ]
+        if direct_cat:
+            direct_stmt = pg_insert(ToonCatalog).values(direct_cat)
+            direct_stmt = direct_stmt.on_conflict_do_update(
+                index_elements=[ToonCatalog.source_id, ToonCatalog.toon_id],
+                set_={
+                    "total_episodes": func.greatest(ToonCatalog.total_episodes, direct_stmt.excluded.total_episodes),
+                    "updated_at": direct_stmt.excluded.updated_at,
+                },
+                where=(direct_stmt.excluded.total_episodes > ToonCatalog.total_episodes),
+            )
+            await session.execute(direct_stmt)
+
     # D. Read Episodes Batch UPSERT (LWW)
     if episode_rows:
         ep_values = [
@@ -832,6 +929,55 @@ async def apply_delta_for_user(
         )
         await session.execute(stmt)
 
+    # Global toon_catalog upsert from delta history
+    if history_rows:
+        cat_values = [
+            {
+                "source_id": row_source_id(h),
+                "toon_id": str(h.get("toonId") or h.get("id")),
+                "total_episodes": int(h.get("totalEpisodes", 0)),
+                "updated_at": int(h.get("lastReadAt", now_ms)),
+            }
+            for h in history_rows
+            if int(h.get("totalEpisodes", 0)) > 0 and (h.get("toonId") or h.get("id"))
+        ]
+        if cat_values:
+            cat_stmt = pg_insert(ToonCatalog).values(cat_values)
+            cat_stmt = cat_stmt.on_conflict_do_update(
+                index_elements=[ToonCatalog.source_id, ToonCatalog.toon_id],
+                set_={
+                    "total_episodes": func.greatest(ToonCatalog.total_episodes, cat_stmt.excluded.total_episodes),
+                    "updated_at": cat_stmt.excluded.updated_at,
+                },
+                where=(cat_stmt.excluded.total_episodes > ToonCatalog.total_episodes),
+            )
+            await session.execute(cat_stmt)
+
+    # Global toon_catalog direct batch in delta
+    catalog_rows = [r for r in changes.get("catalog", []) if accept_inbound_row(r)]
+    if catalog_rows:
+        direct_cat = [
+            {
+                "source_id": row_source_id(c),
+                "toon_id": str(c.get("toonId") or c.get("id")),
+                "total_episodes": int(c.get("totalEpisodes", 0)),
+                "updated_at": int(c.get("updatedAt", now_ms)),
+            }
+            for c in catalog_rows
+            if int(c.get("totalEpisodes", 0)) > 0 and (c.get("toonId") or c.get("id"))
+        ]
+        if direct_cat:
+            direct_stmt = pg_insert(ToonCatalog).values(direct_cat)
+            direct_stmt = direct_stmt.on_conflict_do_update(
+                index_elements=[ToonCatalog.source_id, ToonCatalog.toon_id],
+                set_={
+                    "total_episodes": func.greatest(ToonCatalog.total_episodes, direct_stmt.excluded.total_episodes),
+                    "updated_at": direct_stmt.excluded.updated_at,
+                },
+                where=(direct_stmt.excluded.total_episodes > ToonCatalog.total_episodes),
+            )
+            await session.execute(direct_stmt)
+
     if has_rows:
         await enforce_user_storage_limit(session, user_id, previous_count)
     await session.commit()
@@ -884,12 +1030,31 @@ async def collect_delta_for_user(session: AsyncSession, user_id: str, since: int
     tombs = [emit_tombstone(t) for t in tomb_res.scalars().all()]
     tombs = [t for t in tombs if t is not None]
 
+    # Toon Catalog (global crowdsourced counts)
+    cat_stmt = (
+        select(ToonCatalog)
+        .where(ToonCatalog.updated_at > since)
+        .order_by(ToonCatalog.updated_at.desc())
+        .limit(500)
+    )
+    cat_res = await session.execute(cat_stmt)
+    catalog = [
+        {
+            "sourceId": c.source_id,
+            "toonId": c.toon_id,
+            "totalEpisodes": c.total_episodes,
+            "updatedAt": c.updated_at,
+        }
+        for c in cat_res.scalars().all()
+    ]
+
     return {
         "favorites": favs,
         "history": hist,
         "readEpisodes": eps,
         "readerSettings": settings,
         "tombstones": tombs,
+        "catalog": catalog,
     }
 
 
@@ -1086,3 +1251,45 @@ async def pair_confirm(
         "success": True,
         "syncKey": sync_key,
     }
+
+
+class CatalogBatchRequest(BaseModel):
+    items: list[dict[str, Any]] = Field(default_factory=list)
+
+
+@router.post("/catalog/batch")
+@router.post("/api/comics8/catalog/batch")
+async def get_catalog_batch(
+    req: CatalogBatchRequest,
+    session: AsyncSession = Depends(get_db),
+):
+    if not req.items:
+        return {"catalog": []}
+
+    conditions = []
+    for item in req.items[:200]:
+        s_id = row_source_id(item)
+        t_id = str(item.get("toonId") or item.get("id") or "").strip()
+        if t_id:
+            conditions.append((s_id, t_id))
+
+    if not conditions:
+        return {"catalog": []}
+
+    stmt = select(ToonCatalog).where(
+        tuple_(ToonCatalog.source_id, ToonCatalog.toon_id).in_(conditions)
+    )
+    res = await session.execute(stmt)
+    records = res.scalars().all()
+    return {
+        "catalog": [
+            {
+                "sourceId": r.source_id,
+                "toonId": r.toon_id,
+                "totalEpisodes": r.total_episodes,
+                "updatedAt": r.updated_at,
+            }
+            for r in records
+        ]
+    }
+
