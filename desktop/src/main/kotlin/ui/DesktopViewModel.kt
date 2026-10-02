@@ -137,7 +137,6 @@ class DesktopViewModel(
     private val catalogPages = mutableMapOf<BrowseTab, Pair<Int, Int>>()
 
     private val toonTotalCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
-    private val toonLastPageCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
     // 계층적 내비게이션 상태 (그리드 <-> 회차리스트 <-> 뷰어)
     private var lastViewedSeries: ToonItem? = null
@@ -1170,37 +1169,15 @@ class DesktopViewModel(
                     val pageSize = repository.sourceOrNull(item.sourceId)?.episodePageSize ?: 100
                     val itemKey = item.workId().storageKey()
 
-                    if (lastP <= 1) {
-                        val exactTotal = result.items.size
-                        toonTotalCounts[itemKey] = exactTotal
-                        toonLastPageCounts[itemKey] = exactTotal
-                        updateHistoryAndProgress(item, exactTotal)
-                    } else if (currP == lastP) {
-                        val lastCount = result.items.size
-                        toonLastPageCounts[itemKey] = lastCount
-                        val exactTotal = RepositoryTransforms.estimateTotalEpisodes(result, pageSize, lastCount)
-                        toonTotalCounts[itemKey] = exactTotal
-                        updateHistoryAndProgress(item, exactTotal)
-                    } else {
-                        val knownLast = toonLastPageCounts[itemKey]
-                        if (knownLast != null) {
-                            val exactTotal = RepositoryTransforms.estimateTotalEpisodes(result, pageSize, knownLast)
-                            toonTotalCounts[itemKey] = exactTotal
-                            updateHistoryAndProgress(item, exactTotal)
-                        } else {
-                            scope.launch(Dispatchers.IO) {
-                                try {
-                                    val lastRes = repository.loadEpisodes(item, lastP)
-                                    val lastCount = lastRes.items.size
-                                    toonLastPageCounts[itemKey] = lastCount
-                                    val exactTotal = RepositoryTransforms.estimateTotalEpisodes(result, pageSize, lastCount)
-                                    toonTotalCounts[itemKey] = exactTotal
-                                    updateHistoryAndProgress(item, exactTotal)
-                                } catch (_: Exception) {
-                                }
-                            }
-                        }
+                    val exactTotal = when {
+                        lastP <= 1 -> result.items.size
+                        currP == lastP -> RepositoryTransforms.estimateTotalEpisodes(result, pageSize, result.items.size)
+                        else -> toonTotalCounts[itemKey]
+                            ?: repository.getCatalogTotal(item.workId()).takeIf { it > 0 }
+                            ?: RepositoryTransforms.estimateTotalEpisodes(result, pageSize)
                     }
+                    toonTotalCounts[itemKey] = exactTotal
+                    updateHistoryAndProgress(item, exactTotal)
                 }
             } catch (e: Exception) {
                 if (e is CancellationException) return@launch
@@ -1231,7 +1208,6 @@ class DesktopViewModel(
                 currentEpisodeId = latestRead.wrId,
                 currentPage = _state.value.episodePage,
                 lastPage = _state.value.episodeLastPage,
-                knownLastPageCount = toonLastPageCounts[seriesKey],
                 knownTotalCount = toonTotalCounts[seriesKey] ?: exactTotal,
                 pageSize = repository.sourceOrNull(item.sourceId)?.episodePageSize ?: 100,
             )
@@ -1432,6 +1408,7 @@ class DesktopViewModel(
         val series = current.series ?: return
         val lastPage = current.episodeLastPage
         val raw = current.rawEpisodes.ifEmpty { current.episodes }
+        val seriesKey = series.workId().storageKey()
         if (lastPage <= 1) {
             val firstEp = raw.lastOrNull()
             if (firstEp != null) {
@@ -1440,6 +1417,8 @@ class DesktopViewModel(
                 scope.launch {
                     try {
                         val result = repository.loadEpisodes(series, 1)
+                        toonTotalCounts[seriesKey] = result.items.size
+                        repository.saveCatalogTotal(series.workId(), result.items.size)
                         _state.update {
                             it.copy(
                                 rawEpisodes = result.items,
@@ -1457,6 +1436,10 @@ class DesktopViewModel(
             scope.launch {
                 try {
                     val result = repository.loadEpisodes(series, lastPage)
+                    val pageSize = repository.sourceOrNull(series.sourceId)?.episodePageSize ?: 100
+                    val exactTotal = RepositoryTransforms.estimateTotalEpisodes(result, pageSize, result.items.size)
+                    toonTotalCounts[seriesKey] = exactTotal
+                    repository.saveCatalogTotal(series.workId(), exactTotal)
                     _state.update {
                         it.copy(
                             rawEpisodes = result.items,
@@ -2069,7 +2052,6 @@ class DesktopViewModel(
             currentEpisodeId = episode.wrId,
             currentPage = current.episodePage,
             lastPage = current.episodeLastPage,
-            knownLastPageCount = toonLastPageCounts[seriesKey],
             knownTotalCount = toonTotalCounts[seriesKey] ?: current.seriesHistory?.totalEpisodes?.takeIf { it > 1 },
             pageSize = series?.let { repository.sourceOrNull(it.sourceId)?.episodePageSize } ?: 100,
         )
@@ -2113,14 +2095,7 @@ class DesktopViewModel(
                 val finalOrder = position.readOrder
                     ?: existingHistory?.lastReadOrder
                     ?: 1
-
-                val candidateTotal = if (position.totalEpisodes > 1) position.totalEpisodes else (existingHistory?.totalEpisodes ?: 1)
-                val finalTotal = when {
-                    existingHistory != null && existingHistory.totalEpisodes > 1 && (toonTotalCounts[seriesKey] == null && toonLastPageCounts[seriesKey] == null) ->
-                        maxOf(existingHistory.totalEpisodes, finalOrder)
-                    else ->
-                        maxOf(candidateTotal, finalOrder, existingHistory?.totalEpisodes ?: 1)
-                }
+                val finalTotal = maxOf(position.totalEpisodes, existingHistory?.totalEpisodes ?: 1, finalOrder)
 
                 val (progressText, readCount) = listingProgress(
                     series.sourceId,
@@ -2321,20 +2296,9 @@ class DesktopViewModel(
             val seriesKey = series.workId().storageKey()
 
             if (lastP <= 1) {
-                val exactTotal = result.items.size
-                toonTotalCounts[seriesKey] = exactTotal
-                toonLastPageCounts[seriesKey] = exactTotal
+                toonTotalCounts[seriesKey] = result.items.size
             } else if (currP == lastP) {
-                val lastCount = result.items.size
-                toonLastPageCounts[seriesKey] = lastCount
-                val exactTotal = RepositoryTransforms.estimateTotalEpisodes(result, pageSize, lastCount)
-                toonTotalCounts[seriesKey] = exactTotal
-            } else {
-                val knownLast = toonLastPageCounts[seriesKey]
-                if (knownLast != null) {
-                    val exactTotal = RepositoryTransforms.estimateTotalEpisodes(result, pageSize, knownLast)
-                    toonTotalCounts[seriesKey] = exactTotal
-                }
+                toonTotalCounts[seriesKey] = RepositoryTransforms.estimateTotalEpisodes(result, pageSize, result.items.size)
             }
 
             _state.update {

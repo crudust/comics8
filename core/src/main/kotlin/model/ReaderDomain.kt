@@ -121,8 +121,8 @@ object ReaderDomain {
         currentEpisodeId: String,
         currentPage: Int,
         lastPage: Int,
-        knownLastPageCount: Int?,
-        knownTotalCount: Int?,
+        knownLastPageCount: Int? = null,
+        knownTotalCount: Int? = null,
         pageSize: Int = DEFAULT_EPISODE_PAGE_SIZE,
     ): EpisodePosition {
         val safeLastPage = lastPage.coerceAtLeast(1)
@@ -145,7 +145,12 @@ object ReaderDomain {
             val olderCount = if (safeCurrentPage == safeLastPage) {
                 0
             } else {
-                val lastPageItems = knownLastPageCount ?: pageSize
+                val lastPageItems = knownLastPageCount
+                    ?: if (knownTotalCount != null && safeLastPage > 1) {
+                        (knownTotalCount - (safeLastPage - 1) * pageSize).coerceIn(1, pageSize)
+                    } else {
+                        pageSize
+                    }
                 val middlePagesCount = (safeLastPage - 1 - safeCurrentPage).coerceAtLeast(0) * pageSize
                 lastPageItems + middlePagesCount
             }
