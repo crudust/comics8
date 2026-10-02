@@ -428,9 +428,9 @@ class DesktopToonRepositorySyncTest {
     }
 
     @Test
-    fun syncEpisodeCountsSkipsUnreadNonFavoriteBatchItems() = runBlocking {
-        // Multiple unread, non-favorite items in a list (e.g. explore screen)
-        val items = (1..5).map { idx ->
+    fun syncEpisodeCountsPopulatesCatalogForUnreadBatchItemsWhenMissing() = runBlocking {
+        // Multiple unread, non-favorite items missing from catalog (e.g. explore screen)
+        val items = (1..3).map { idx ->
             ToonItem(
                 id = "explore_toon_$idx",
                 title = "Explore Toon $idx",
@@ -441,15 +441,32 @@ class DesktopToonRepositorySyncTest {
         }
 
         var callbackCount = 0
-        repository.syncEpisodeCounts(items) { _, _, _ ->
+        repository.syncEpisodeCounts(items) { _, total, progress ->
             callbackCount++
+            assertThat(total).isEqualTo(15)
+            assertThat(progress).isEqualTo("15화")
         }
 
-        delay(300)
-        assertThat(callbackCount).isEqualTo(0)
-        for (item in items) {
-            assertThat(db.getCatalog(item.workId())).isNull()
+        var attempts = 0
+        while (callbackCount < 3 && attempts < 50) {
+            delay(50)
+            attempts++
         }
+
+        assertThat(callbackCount).isEqualTo(3)
+        for (item in items) {
+            val record = db.getCatalog(item.workId())
+            assertThat(record).isNotNull()
+            assertThat(record?.totalEpisodes).isEqualTo(15)
+        }
+
+        // Once populated, re-running syncEpisodeCounts should skip since needsCatalog is now false
+        var secondCallbackCount = 0
+        repository.syncEpisodeCounts(items) { _, _, _ ->
+            secondCallbackCount++
+        }
+        delay(200)
+        assertThat(secondCallbackCount).isEqualTo(0)
     }
 
     @Test

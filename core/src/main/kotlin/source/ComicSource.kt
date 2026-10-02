@@ -32,13 +32,14 @@ interface ComicSource {
     val defaultProgressDisplayMode: com.comics8.core.model.ProgressDisplayMode
         get() = when (progressDisplay) {
             ProgressDisplay.READ_COUNT -> com.comics8.core.model.ProgressDisplayMode.READ_COUNT
-            else -> com.comics8.core.model.ProgressDisplayMode.LATEST_EPISODE
+            else -> com.comics8.core.model.ProgressDisplayMode.defaultFor(id)
         }
 
-    val progressDisplay: ProgressDisplay get() = when (defaultProgressDisplayMode) {
-        com.comics8.core.model.ProgressDisplayMode.READ_COUNT -> ProgressDisplay.READ_COUNT
-        else -> ProgressDisplay.LAST_READ_ORDER
-    }
+    val progressDisplay: ProgressDisplay
+        get() = when (com.comics8.core.model.ProgressDisplayMode.defaultFor(id)) {
+            com.comics8.core.model.ProgressDisplayMode.READ_COUNT -> ProgressDisplay.READ_COUNT
+            else -> ProgressDisplay.LAST_READ_ORDER
+        }
 
     fun formatReadProgress(
         lastReadOrder: Int,

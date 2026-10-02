@@ -229,9 +229,10 @@ class DesktopToonRepository(
                 val hist = historyMap[key]
                 val hasHistory = hist != null
                 val needsCatalog = (catalogTotals[key] ?: 0) == 0
-                val shouldSync = (hasHistory && (hist?.hasNew == true || item.isNew || needsCatalog)) ||
-                    (item.isFavorite && (item.isNew || needsCatalog)) ||
-                    (items.size == 1 && needsCatalog)
+                val shouldSync = needsCatalog ||
+                    item.isNew ||
+                    (hasHistory && hist?.hasNew == true) ||
+                    item.isFavorite
                 shouldSync && activeSyncKeys.add(key)
             }
 
@@ -247,15 +248,17 @@ class DesktopToonRepository(
                     val key = target.workId().storageKey()
                     try {
                         semaphore.withPermit {
-                            if (encounteredUpToDate && !target.isFavorite && !historyMap.containsKey(key)) {
+                            val needsCatalogNow = (catalogTotals[key] ?: 0) == 0
+                            if (encounteredUpToDate && !needsCatalogNow && !target.isFavorite && historyMap[key]?.hasNew != true) {
                                 return@withPermit
                             }
                             val exactTotal = fetchTotalEpisodes(target)
                             if (exactTotal > 0) {
                                 val prev = catalogTotals[key] ?: 0
                                 val isIncreased = exactTotal > prev
+                                val effectiveTotal = maxOf(prev, exactTotal)
                                 database.upsertCatalogMonotonic(target.workId(), exactTotal)
-                                catalogTotals[key] = maxOf(prev, exactTotal)
+                                catalogTotals[key] = effectiveTotal
 
                                 if (isIncreased) {
                                     discoveredUpdates.add(
@@ -274,11 +277,11 @@ class DesktopToonRepository(
 
                                 val existing = database.getHistory(target.workId())
                                 if (existing != null) {
-                                    val safeOrder = existing.lastReadOrder.coerceIn(0, exactTotal)
-                                    val hasNew = safeOrder < exactTotal
-                                    if (existing.totalEpisodes != exactTotal || existing.hasNew != hasNew) {
+                                    val safeOrder = existing.lastReadOrder.coerceIn(0, effectiveTotal)
+                                    val hasNew = safeOrder < effectiveTotal
+                                    if (existing.totalEpisodes != effectiveTotal || existing.hasNew != hasNew) {
                                         val updated = existing.copy(
-                                            totalEpisodes = exactTotal,
+                                            totalEpisodes = effectiveTotal,
                                             lastReadOrder = safeOrder,
                                             hasNew = hasNew,
                                         )
@@ -292,17 +295,17 @@ class DesktopToonRepository(
                                             updated.totalEpisodes,
                                             readCount,
                                         )
-                                        onUpdated?.invoke(target.workId(), exactTotal, progressText)
+                                        onUpdated?.invoke(target.workId(), effectiveTotal, progressText)
                                     }
                                 } else {
                                     val progressText = formatReadProgress(
                                         target.sourceId,
                                         0,
-                                        exactTotal,
+                                        effectiveTotal,
                                         0,
                                     )
                                     if (progressText.isNotBlank()) {
-                                        onUpdated?.invoke(target.workId(), exactTotal, progressText)
+                                        onUpdated?.invoke(target.workId(), effectiveTotal, progressText)
                                     }
                                 }
                             }
