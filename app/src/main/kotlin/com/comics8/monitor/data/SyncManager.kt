@@ -28,6 +28,7 @@ import com.comics8.monitor.data.local.ReaderSetting
 import com.comics8.monitor.data.local.Tombstone
 import com.comics8.monitor.data.local.delete
 import com.comics8.monitor.data.local.deleteByToonId
+import com.comics8.monitor.data.local.upsertAllMonotonic
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -267,7 +268,7 @@ class AndroidRoomSyncStorageAdapter(
             }
             val allCatalog = catalogFromHistory + directCatalog
             if (allCatalog.isNotEmpty()) {
-                database.toonCatalogDao().upsertAll(allCatalog)
+                database.toonCatalogDao().upsertAllMonotonic(allCatalog)
             }
         }
         return SyncApplyCounts(favorites = favorites.size, history = savedHistoryCount, episodes = episodes.size)

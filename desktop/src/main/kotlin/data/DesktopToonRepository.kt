@@ -174,9 +174,13 @@ class DesktopToonRepository(
 
             val targets = items.filter { item ->
                 val key = item.workId().storageKey()
-                val hasHistory = historyMap.containsKey(key)
+                val hist = historyMap[key]
+                val hasHistory = hist != null
                 val needsCatalog = (catalogTotals[key] ?: 0) == 0
-                (hasHistory || needsCatalog) && activeSyncKeys.add(key)
+                val shouldSync = (hasHistory && (hist?.hasNew == true || item.isNew || needsCatalog)) ||
+                    (item.isFavorite && (item.isNew || needsCatalog)) ||
+                    (items.size == 1 && needsCatalog)
+                shouldSync && activeSyncKeys.add(key)
             }
 
             if (targets.isEmpty()) return@launch

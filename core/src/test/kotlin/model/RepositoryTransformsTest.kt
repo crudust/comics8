@@ -105,7 +105,7 @@ class RepositoryTransformsTest {
             historyByKey = mapOf(seenKey to (2 to 10)),
             readCountsByKey = mapOf(seenKey to 4),
             seenUpdatedAt = { it },
-        ) { _, history, readCount -> "${history.first}/${history.second}/$readCount" }
+        ) { _, history, readCount, _ -> history?.let { "${it.first}/${it.second}/$readCount" } }
 
         assertThat(result[0].isNew).isTrue()
         assertThat(result[0].isFavorite).isTrue()

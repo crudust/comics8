@@ -111,28 +111,6 @@ object RepositoryTransforms {
         )
     }
 
-    fun <Seen, History> applyListingFlags(
-        items: List<ToonItem>,
-        seenCount: Int,
-        favoriteKeys: Set<String>,
-        seenByKey: Map<String, Seen>,
-        historyByKey: Map<String, History>,
-        readCountsByKey: Map<String, Int>,
-        seenUpdatedAt: (Seen) -> String?,
-        formatProgress: (ToonItem, History, Int) -> String,
-    ): List<ToonItem> = applyListingFlags(
-        items = items,
-        seenCount = seenCount,
-        favoriteKeys = favoriteKeys,
-        seenByKey = seenByKey,
-        historyByKey = historyByKey,
-        readCountsByKey = readCountsByKey,
-        catalogTotalsByKey = emptyMap(),
-        seenUpdatedAt = seenUpdatedAt,
-    ) { item, hist, count, _ ->
-        hist?.let { formatProgress(item, it, count) }
-    }
-
     fun parseReaderSetting(
         viewMode: String,
         readDirection: String,

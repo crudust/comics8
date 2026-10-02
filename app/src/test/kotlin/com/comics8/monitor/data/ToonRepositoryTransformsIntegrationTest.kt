@@ -12,6 +12,10 @@ import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
 import com.comics8.monitor.data.local.AppDatabase
 import com.comics8.monitor.data.local.ReaderSetting
+import com.comics8.monitor.data.local.ToonCatalogEntry
+import com.comics8.monitor.data.local.get
+import com.comics8.monitor.data.local.upsertMonotonic
+import com.comics8.monitor.data.local.upsertAllMonotonic
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
@@ -93,6 +97,55 @@ class ToonRepositoryTransformsIntegrationTest {
 
             val refreshed = repository.refreshProgress(listOf(item))
             assertThat(refreshed.first().readProgress).isEqualTo("104화")
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun toonCatalogMonotonicUpsertDoesNotDowngradeTotalEpisodesOrUpdatedAt() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        try {
+            val dao = database.toonCatalogDao()
+            val workId = WorkId("source1", "toon1")
+
+            // 1. Initial insert: 50 episodes at t=500
+            dao.upsertMonotonic(workId, totalEpisodes = 50, updatedAt = 500L)
+            var entry = dao.get(workId)
+            assertThat(entry).isNotNull()
+            assertThat(entry?.totalEpisodes).isEqualTo(50)
+            assertThat(entry?.updatedAt).isEqualTo(500L)
+
+            // 2. Attempt downgrade: 30 episodes at t=100 -> should be rejected/ignored
+            dao.upsertMonotonic(workId, totalEpisodes = 30, updatedAt = 100L)
+            entry = dao.get(workId)
+            assertThat(entry?.totalEpisodes).isEqualTo(50)
+            assertThat(entry?.updatedAt).isEqualTo(500L)
+
+            // 3. Upgrade: 60 episodes at t=600 -> should be accepted
+            dao.upsertMonotonic(workId, totalEpisodes = 60, updatedAt = 600L)
+            entry = dao.get(workId)
+            assertThat(entry?.totalEpisodes).isEqualTo(60)
+            assertThat(entry?.updatedAt).isEqualTo(600L)
+
+            // 4. Batch upsertAllMonotonic: downgrade should be ignored, upgrade should apply
+            val batchEntries = listOf(
+                ToonCatalogEntry("source1", "toon1", 40, 700L),
+                ToonCatalogEntry("source1", "toon2", 20, 200L),
+            )
+            dao.upsertAllMonotonic(batchEntries)
+
+            entry = dao.get(workId)
+            assertThat(entry?.totalEpisodes).isEqualTo(60)
+            assertThat(entry?.updatedAt).isEqualTo(600L)
+
+            val entry2 = dao.get(WorkId("source1", "toon2"))
+            assertThat(entry2).isNotNull()
+            assertThat(entry2?.totalEpisodes).isEqualTo(20)
+            assertThat(entry2?.updatedAt).isEqualTo(200L)
         } finally {
             database.close()
         }

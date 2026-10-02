@@ -1210,8 +1210,9 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
                 INSERT INTO toon_catalog (sourceId, toonId, totalEpisodes, updatedAt)
                 VALUES (?, ?, ?, ?)
                 ON CONFLICT(sourceId, toonId) DO UPDATE SET
-                    totalEpisodes = MAX(toon_catalog.totalEpisodes, excluded.totalEpisodes),
+                    totalEpisodes = excluded.totalEpisodes,
                     updatedAt = excluded.updatedAt
+                WHERE excluded.totalEpisodes > toon_catalog.totalEpisodes
                 """.trimIndent(),
             ).use { stmt ->
                 stmt.setString(1, workId.sourceId)
@@ -1231,8 +1232,9 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
                 INSERT INTO toon_catalog (sourceId, toonId, totalEpisodes, updatedAt)
                 VALUES (?, ?, ?, ?)
                 ON CONFLICT(sourceId, toonId) DO UPDATE SET
-                    totalEpisodes = MAX(toon_catalog.totalEpisodes, excluded.totalEpisodes),
+                    totalEpisodes = excluded.totalEpisodes,
                     updatedAt = excluded.updatedAt
+                WHERE excluded.totalEpisodes > toon_catalog.totalEpisodes
                 """.trimIndent(),
             ).use { stmt ->
                 for (item in items) {

@@ -418,7 +418,7 @@ interface ToonCatalogDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(entries: List<ToonCatalogEntry>)
 
-    @Query("UPDATE toon_catalog SET totalEpisodes = MAX(totalEpisodes, :totalEpisodes), updatedAt = :updatedAt WHERE sourceId = :sourceId AND toonId = :toonId")
+    @Query("UPDATE toon_catalog SET totalEpisodes = MAX(totalEpisodes, :totalEpisodes), updatedAt = CASE WHEN :totalEpisodes > totalEpisodes THEN :updatedAt ELSE updatedAt END WHERE sourceId = :sourceId AND toonId = :toonId")
     suspend fun updateMonotonic(sourceId: String, toonId: String, totalEpisodes: Int, updatedAt: Long): Int
 }
 
@@ -429,6 +429,14 @@ suspend fun ToonCatalogDao.upsertMonotonic(workId: WorkId, totalEpisodes: Int, u
     val updated = updateMonotonic(workId.sourceId, workId.toonId, totalEpisodes, updatedAt)
     if (updated == 0) {
         upsert(ToonCatalogEntry(workId.sourceId, workId.toonId, totalEpisodes, updatedAt))
+    }
+}
+
+suspend fun ToonCatalogDao.upsertAllMonotonic(entries: List<ToonCatalogEntry>) {
+    for (entry in entries) {
+        if (entry.totalEpisodes > 0) {
+            upsertMonotonic(entry.workId(), entry.totalEpisodes, entry.updatedAt)
+        }
     }
 }
 

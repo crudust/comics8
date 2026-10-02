@@ -387,4 +387,66 @@ class DesktopToonRepositorySyncTest {
         val refreshed = repository.refreshProgress(listOf(item))
         assertThat(refreshed.first().readProgress).isEqualTo("15화")
     }
+
+    @Test
+    fun desktopCatalogMonotonicUpsertDoesNotDowngrade() = runBlocking {
+        val workId = WorkId("test_source", "toon-monotonic")
+
+        db.upsertCatalogMonotonic(workId, totalEpisodes = 50, updatedAt = 500L)
+        var record = db.getCatalog(workId)
+        assertThat(record?.totalEpisodes).isEqualTo(50)
+        assertThat(record?.updatedAt).isEqualTo(500L)
+
+        // Downgrade attempt: 30 episodes at t=100 -> rejected
+        db.upsertCatalogMonotonic(workId, totalEpisodes = 30, updatedAt = 100L)
+        record = db.getCatalog(workId)
+        assertThat(record?.totalEpisodes).isEqualTo(50)
+        assertThat(record?.updatedAt).isEqualTo(500L)
+
+        // Upgrade attempt: 60 episodes at t=600 -> accepted
+        db.upsertCatalogMonotonic(workId, totalEpisodes = 60, updatedAt = 600L)
+        record = db.getCatalog(workId)
+        assertThat(record?.totalEpisodes).isEqualTo(60)
+        assertThat(record?.updatedAt).isEqualTo(600L)
+
+        // Batch saveAllCatalog test
+        db.saveAllCatalog(
+            listOf(
+                ToonCatalogRecord("test_source", "toon-monotonic", 40, 700L),
+                ToonCatalogRecord("test_source", "toon-batch-new", 20, 200L),
+            ),
+        )
+        record = db.getCatalog(workId)
+        assertThat(record?.totalEpisodes).isEqualTo(60)
+        assertThat(record?.updatedAt).isEqualTo(600L)
+
+        val newRecord = db.getCatalog(WorkId("test_source", "toon-batch-new"))
+        assertThat(newRecord?.totalEpisodes).isEqualTo(20)
+        assertThat(newRecord?.updatedAt).isEqualTo(200L)
+    }
+
+    @Test
+    fun syncEpisodeCountsSkipsUnreadNonFavoriteBatchItems() = runBlocking {
+        // Multiple unread, non-favorite items in a list (e.g. explore screen)
+        val items = (1..5).map { idx ->
+            ToonItem(
+                id = "explore_toon_$idx",
+                title = "Explore Toon $idx",
+                thumbUrl = "thumb",
+                href = "href",
+                sourceId = "test_source",
+            )
+        }
+
+        var callbackCount = 0
+        repository.syncEpisodeCounts(items) { _, _, _ ->
+            callbackCount++
+        }
+
+        delay(300)
+        assertThat(callbackCount).isEqualTo(0)
+        for (item in items) {
+            assertThat(db.getCatalog(item.workId())).isNull()
+        }
+    }
 }

@@ -413,6 +413,66 @@ async def export_snapshot_for_user(session: AsyncSession, user_id: str) -> dict[
     }
 
 
+async def upsert_catalog_from_payload(
+    session: AsyncSession,
+    history_rows: list[dict[str, Any]],
+    catalog_rows: list[dict[str, Any]],
+    now_ms: int,
+) -> None:
+    merged: dict[tuple[str, str], dict[str, Any]] = {}
+
+    def add_entry(source_id: str, toon_id: str, total_episodes: int, updated_at: int) -> None:
+        if not toon_id or total_episodes <= 0:
+            return
+        key = (source_id, toon_id)
+        if key not in merged:
+            merged[key] = {
+                "source_id": source_id,
+                "toon_id": toon_id,
+                "total_episodes": total_episodes,
+                "updated_at": updated_at,
+            }
+        else:
+            prev = merged[key]
+            if total_episodes > prev["total_episodes"]:
+                prev["total_episodes"] = total_episodes
+                prev["updated_at"] = updated_at
+            elif total_episodes == prev["total_episodes"]:
+                prev["updated_at"] = max(prev["updated_at"], updated_at)
+
+    for h in history_rows:
+        tid = str(h.get("toonId") or h.get("id") or "").strip()
+        add_entry(
+            source_id=row_source_id(h),
+            toon_id=tid,
+            total_episodes=int(h.get("totalEpisodes", 0)),
+            updated_at=int(h.get("lastReadAt", now_ms)),
+        )
+
+    for c in catalog_rows:
+        tid = str(c.get("toonId") or c.get("id") or "").strip()
+        add_entry(
+            source_id=row_source_id(c),
+            toon_id=tid,
+            total_episodes=int(c.get("totalEpisodes", 0)),
+            updated_at=int(c.get("updatedAt", now_ms)),
+        )
+
+    if not merged:
+        return
+
+    cat_stmt = pg_insert(ToonCatalog).values(list(merged.values()))
+    cat_stmt = cat_stmt.on_conflict_do_update(
+        index_elements=[ToonCatalog.source_id, ToonCatalog.toon_id],
+        set_={
+            "total_episodes": func.greatest(ToonCatalog.total_episodes, cat_stmt.excluded.total_episodes),
+            "updated_at": cat_stmt.excluded.updated_at,
+        },
+        where=(cat_stmt.excluded.total_episodes > ToonCatalog.total_episodes),
+    )
+    await session.execute(cat_stmt)
+
+
 # Import full snapshot
 async def import_snapshot_for_user(
     session: AsyncSession,
@@ -521,53 +581,9 @@ async def import_snapshot_for_user(
         )
         await session.execute(stmt)
 
-        # Upsert global toon_catalog from history
-        cat_values = [
-            {
-                "source_id": row_source_id(h),
-                "toon_id": str(h.get("toonId") or h.get("id")),
-                "total_episodes": int(h.get("totalEpisodes", 0)),
-                "updated_at": int(h.get("lastReadAt", now_ms)),
-            }
-            for h in history_rows
-            if int(h.get("totalEpisodes", 0)) > 0 and (h.get("toonId") or h.get("id"))
-        ]
-        if cat_values:
-            cat_stmt = pg_insert(ToonCatalog).values(cat_values)
-            cat_stmt = cat_stmt.on_conflict_do_update(
-                index_elements=[ToonCatalog.source_id, ToonCatalog.toon_id],
-                set_={
-                    "total_episodes": func.greatest(ToonCatalog.total_episodes, cat_stmt.excluded.total_episodes),
-                    "updated_at": cat_stmt.excluded.updated_at,
-                },
-                where=(cat_stmt.excluded.total_episodes > ToonCatalog.total_episodes),
-            )
-            await session.execute(cat_stmt)
-
-    # Global toon_catalog direct batch
-    catalog_rows = [r for r in in_changes.get("catalog", []) if accept_inbound_row(r)]
-    if catalog_rows:
-        direct_cat = [
-            {
-                "source_id": row_source_id(c),
-                "toon_id": str(c.get("toonId") or c.get("id")),
-                "total_episodes": int(c.get("totalEpisodes", 0)),
-                "updated_at": int(c.get("updatedAt", now_ms)),
-            }
-            for c in catalog_rows
-            if int(c.get("totalEpisodes", 0)) > 0 and (c.get("toonId") or c.get("id"))
-        ]
-        if direct_cat:
-            direct_stmt = pg_insert(ToonCatalog).values(direct_cat)
-            direct_stmt = direct_stmt.on_conflict_do_update(
-                index_elements=[ToonCatalog.source_id, ToonCatalog.toon_id],
-                set_={
-                    "total_episodes": func.greatest(ToonCatalog.total_episodes, direct_stmt.excluded.total_episodes),
-                    "updated_at": direct_stmt.excluded.updated_at,
-                },
-                where=(direct_stmt.excluded.total_episodes > ToonCatalog.total_episodes),
-            )
-            await session.execute(direct_stmt)
+    # Upsert global toon_catalog
+    catalog_rows = [r for r in data.get("catalog", []) if accept_inbound_row(r)]
+    await upsert_catalog_from_payload(session, history_rows, catalog_rows, now_ms)
 
     # 3. Read Episodes Batch UPSERT
     if episode_rows:
@@ -826,54 +842,6 @@ async def apply_delta_for_user(
             )
         )
 
-        # Upsert global toon_catalog from history
-        cat_values = [
-            {
-                "source_id": row_source_id(h),
-                "toon_id": str(h.get("toonId") or h.get("id")),
-                "total_episodes": int(h.get("totalEpisodes", 0)),
-                "updated_at": int(h.get("lastReadAt", now_ms)),
-            }
-            for h in history_rows
-            if int(h.get("totalEpisodes", 0)) > 0 and (h.get("toonId") or h.get("id"))
-        ]
-        if cat_values:
-            cat_stmt = pg_insert(ToonCatalog).values(cat_values)
-            cat_stmt = cat_stmt.on_conflict_do_update(
-                index_elements=[ToonCatalog.source_id, ToonCatalog.toon_id],
-                set_={
-                    "total_episodes": func.greatest(ToonCatalog.total_episodes, cat_stmt.excluded.total_episodes),
-                    "updated_at": cat_stmt.excluded.updated_at,
-                },
-                where=(cat_stmt.excluded.total_episodes > ToonCatalog.total_episodes),
-            )
-            await session.execute(cat_stmt)
-
-    # Global toon_catalog direct batch in delta
-    catalog_rows = [r for r in in_changes.get("catalog", []) if accept_inbound_row(r)]
-    if catalog_rows:
-        direct_cat = [
-            {
-                "source_id": row_source_id(c),
-                "toon_id": str(c.get("toonId") or c.get("id")),
-                "total_episodes": int(c.get("totalEpisodes", 0)),
-                "updated_at": int(c.get("updatedAt", now_ms)),
-            }
-            for c in catalog_rows
-            if int(c.get("totalEpisodes", 0)) > 0 and (c.get("toonId") or c.get("id"))
-        ]
-        if direct_cat:
-            direct_stmt = pg_insert(ToonCatalog).values(direct_cat)
-            direct_stmt = direct_stmt.on_conflict_do_update(
-                index_elements=[ToonCatalog.source_id, ToonCatalog.toon_id],
-                set_={
-                    "total_episodes": func.greatest(ToonCatalog.total_episodes, direct_stmt.excluded.total_episodes),
-                    "updated_at": direct_stmt.excluded.updated_at,
-                },
-                where=(direct_stmt.excluded.total_episodes > ToonCatalog.total_episodes),
-            )
-            await session.execute(direct_stmt)
-
     # D. Read Episodes Batch UPSERT (LWW)
     if episode_rows:
         ep_values = [
@@ -929,54 +897,9 @@ async def apply_delta_for_user(
         )
         await session.execute(stmt)
 
-    # Global toon_catalog upsert from delta history
-    if history_rows:
-        cat_values = [
-            {
-                "source_id": row_source_id(h),
-                "toon_id": str(h.get("toonId") or h.get("id")),
-                "total_episodes": int(h.get("totalEpisodes", 0)),
-                "updated_at": int(h.get("lastReadAt", now_ms)),
-            }
-            for h in history_rows
-            if int(h.get("totalEpisodes", 0)) > 0 and (h.get("toonId") or h.get("id"))
-        ]
-        if cat_values:
-            cat_stmt = pg_insert(ToonCatalog).values(cat_values)
-            cat_stmt = cat_stmt.on_conflict_do_update(
-                index_elements=[ToonCatalog.source_id, ToonCatalog.toon_id],
-                set_={
-                    "total_episodes": func.greatest(ToonCatalog.total_episodes, cat_stmt.excluded.total_episodes),
-                    "updated_at": cat_stmt.excluded.updated_at,
-                },
-                where=(cat_stmt.excluded.total_episodes > ToonCatalog.total_episodes),
-            )
-            await session.execute(cat_stmt)
-
-    # Global toon_catalog direct batch in delta
+    # Upsert global toon_catalog
     catalog_rows = [r for r in changes.get("catalog", []) if accept_inbound_row(r)]
-    if catalog_rows:
-        direct_cat = [
-            {
-                "source_id": row_source_id(c),
-                "toon_id": str(c.get("toonId") or c.get("id")),
-                "total_episodes": int(c.get("totalEpisodes", 0)),
-                "updated_at": int(c.get("updatedAt", now_ms)),
-            }
-            for c in catalog_rows
-            if int(c.get("totalEpisodes", 0)) > 0 and (c.get("toonId") or c.get("id"))
-        ]
-        if direct_cat:
-            direct_stmt = pg_insert(ToonCatalog).values(direct_cat)
-            direct_stmt = direct_stmt.on_conflict_do_update(
-                index_elements=[ToonCatalog.source_id, ToonCatalog.toon_id],
-                set_={
-                    "total_episodes": func.greatest(ToonCatalog.total_episodes, direct_stmt.excluded.total_episodes),
-                    "updated_at": direct_stmt.excluded.updated_at,
-                },
-                where=(direct_stmt.excluded.total_episodes > ToonCatalog.total_episodes),
-            )
-            await session.execute(direct_stmt)
+    await upsert_catalog_from_payload(session, history_rows, catalog_rows, now_ms)
 
     if has_rows:
         await enforce_user_storage_limit(session, user_id, previous_count)
