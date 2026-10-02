@@ -21,6 +21,7 @@ import com.comics8.core.source.SourceAccess
 import com.comics8.core.source.SourceConfig
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
+import com.comics8.core.sync.SyncCatalogWire
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -169,9 +170,60 @@ class DesktopToonRepository(
         if (items.isEmpty()) return
         syncScope.launch {
             val workIds = items.map { it.workId() }
-            val historyMap = database.getHistoryByToonIds(workIds).associateBy { it.workId().storageKey() }
-            val catalogTotals = database.getCatalogTotalsByToonIds(workIds)
+            val historyMap = database.getHistoryByToonIds(workIds).associateBy { it.workId().storageKey() }.toMutableMap()
+            val catalogTotals = database.getCatalogTotalsByToonIds(workIds).toMutableMap()
 
+            // 1. Server-First: Batch query global catalog for items missing from local DB
+            val missingFromLocal = workIds.filter { (catalogTotals[it.storageKey()] ?: 0) == 0 }
+            if (missingFromLocal.isNotEmpty() && syncManager != null) {
+                try {
+                    val remoteEntries = syncManager.fetchCatalogBatch(missingFromLocal)
+                    if (remoteEntries.isNotEmpty()) {
+                        val catalogRecords = remoteEntries.map {
+                            ToonCatalogRecord(
+                                sourceId = it.sourceId,
+                                toonId = it.toonId,
+                                totalEpisodes = it.totalEpisodes,
+                                updatedAt = it.updatedAt,
+                            )
+                        }
+                        database.saveAllCatalog(catalogRecords)
+                        for (record in catalogRecords) {
+                            val key = record.workId().storageKey()
+                            val prev = catalogTotals[key] ?: 0
+                            if (record.totalEpisodes > prev) {
+                                catalogTotals[key] = record.totalEpisodes
+                                val hist = historyMap[key]
+                                if (hist != null) {
+                                    val safeOrder = hist.lastReadOrder.coerceIn(0, record.totalEpisodes)
+                                    val hasNew = safeOrder < record.totalEpisodes
+                                    if (hist.totalEpisodes != record.totalEpisodes || hist.hasNew != hasNew) {
+                                        val updatedHist = hist.copy(
+                                            totalEpisodes = record.totalEpisodes,
+                                            lastReadOrder = safeOrder,
+                                            hasNew = hasNew,
+                                        )
+                                        saveHistory(updatedHist)
+                                        historyMap[key] = updatedHist
+                                    }
+                                }
+                                val readCounts = countReadEpisodesNow(listOf(record.workId()))
+                                val readCount = readCounts[key] ?: 0
+                                val progressText = formatReadProgress(
+                                    record.sourceId,
+                                    historyMap[key]?.lastReadOrder ?: 0,
+                                    record.totalEpisodes,
+                                    readCount,
+                                )
+                                onUpdated?.invoke(record.workId(), record.totalEpisodes, progressText)
+                            }
+                        }
+                    }
+                } catch (_: Exception) {
+                }
+            }
+
+            // 2. Incremental Web Scraping (Fallback for newly updated or explicitly requested items)
             val targets = items.filter { item ->
                 val key = item.workId().storageKey()
                 val hist = historyMap[key]
@@ -185,15 +237,41 @@ class DesktopToonRepository(
 
             if (targets.isEmpty()) return@launch
 
+            val isListing = items.size > 1
+            var encounteredUpToDate = false
+            val discoveredUpdates = java.util.Collections.synchronizedList(mutableListOf<SyncCatalogWire>())
+
             val semaphore = Semaphore(3)
             val jobs = targets.map { target ->
                 async {
                     val key = target.workId().storageKey()
                     try {
                         semaphore.withPermit {
+                            if (encounteredUpToDate && !target.isFavorite && !historyMap.containsKey(key)) {
+                                return@withPermit
+                            }
                             val exactTotal = fetchTotalEpisodes(target)
                             if (exactTotal > 0) {
+                                val prev = catalogTotals[key] ?: 0
+                                val isIncreased = exactTotal > prev
                                 database.upsertCatalogMonotonic(target.workId(), exactTotal)
+                                catalogTotals[key] = maxOf(prev, exactTotal)
+
+                                if (isIncreased) {
+                                    discoveredUpdates.add(
+                                        SyncCatalogWire(
+                                            sourceId = target.sourceId,
+                                            toonId = target.id,
+                                            totalEpisodes = exactTotal,
+                                            updatedAt = System.currentTimeMillis(),
+                                        )
+                                    )
+                                } else {
+                                    if (isListing && !target.isNew && historyMap[key]?.hasNew != true) {
+                                        encounteredUpToDate = true
+                                    }
+                                }
+
                                 val existing = database.getHistory(target.workId())
                                 if (existing != null) {
                                     val safeOrder = existing.lastReadOrder.coerceIn(0, exactTotal)
@@ -205,6 +283,7 @@ class DesktopToonRepository(
                                             hasNew = hasNew,
                                         )
                                         saveHistory(updated)
+                                        historyMap[key] = updated
                                         val readCounts = countReadEpisodesNow(listOf(target.workId()))
                                         val readCount = readCounts[key] ?: 0
                                         val progressText = formatReadProgress(
@@ -235,6 +314,14 @@ class DesktopToonRepository(
                 }
             }
             jobs.awaitAll()
+
+            // 3. Instant crowdsource report to server
+            if (discoveredUpdates.isNotEmpty() && syncManager != null) {
+                try {
+                    syncManager.reportCatalog(discoveredUpdates.toList())
+                } catch (_: Exception) {
+                }
+            }
         }
     }
 

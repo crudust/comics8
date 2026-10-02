@@ -1178,6 +1178,7 @@ async def pair_confirm(
 
 class CatalogBatchRequest(BaseModel):
     items: list[dict[str, Any]] = Field(default_factory=list)
+    updates: list[dict[str, Any]] = Field(default_factory=list)
 
 
 @router.post("/catalog/batch")
@@ -1186,6 +1187,16 @@ async def get_catalog_batch(
     req: CatalogBatchRequest,
     session: AsyncSession = Depends(get_db),
 ):
+    now_ms = int(time.time() * 1000)
+
+    # 1. Process crowdsourced updates if present
+    if req.updates:
+        catalog_rows = [r for r in req.updates[:200] if accept_inbound_row(r)]
+        if catalog_rows:
+            await upsert_catalog_from_payload(session, [], catalog_rows, now_ms)
+            await session.commit()
+
+    # 2. Query requested items
     if not req.items:
         return {"catalog": []}
 
@@ -1215,4 +1226,21 @@ async def get_catalog_batch(
             for r in records
         ]
     }
+
+
+@router.post("/catalog/report")
+@router.post("/api/comics8/catalog/report")
+async def report_catalog(
+    req: CatalogBatchRequest,
+    session: AsyncSession = Depends(get_db),
+):
+    updates = req.updates or req.items
+    if updates:
+        catalog_rows = [r for r in updates[:200] if accept_inbound_row(r)]
+        if catalog_rows:
+            now_ms = int(time.time() * 1000)
+            await upsert_catalog_from_payload(session, [], catalog_rows, now_ms)
+            await session.commit()
+            return {"status": "ok", "updated": len(catalog_rows)}
+    return {"status": "ok", "updated": 0}
 

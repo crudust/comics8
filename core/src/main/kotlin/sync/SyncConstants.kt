@@ -56,6 +56,10 @@ object SyncConstants {
 
     fun pairConfirmUrl(serverUrl: String = DEFAULT_SERVER_URL): String = "${apiRoot(serverUrl)}/pair/confirm"
 
+    fun catalogBatchUrl(serverUrl: String = DEFAULT_SERVER_URL): String = "${apiRoot(serverUrl)}/catalog/batch"
+
+    fun catalogReportUrl(serverUrl: String = DEFAULT_SERVER_URL): String = "${apiRoot(serverUrl)}/catalog/report"
+
     fun versionUrl(serverUrl: String = DEFAULT_SERVER_URL): String = "${apiRoot(serverUrl)}/version"
 
     fun healthUrl(serverUrl: String = DEFAULT_SERVER_URL): String = "${apiRoot(serverUrl)}/health"

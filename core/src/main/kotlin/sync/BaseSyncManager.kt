@@ -5,6 +5,7 @@ import com.comics8.core.model.PairRequestResult
 import com.comics8.core.model.SyncResult
 import com.comics8.core.model.SyncState
 import com.comics8.core.network.ToonClient
+import com.comics8.core.source.WorkId
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -467,6 +468,89 @@ open class BaseSyncManager(
             val err = "올리기 실패: ${e.localizedMessage ?: "서버 연결 오류"}"
             _syncState.value = _syncState.value.copy(isSyncing = false, isSuccess = false, syncMessage = err)
             SyncResult(false, err)
+        }
+    }
+
+    suspend fun fetchCatalogBatch(
+        items: List<WorkId>,
+        updates: List<SyncCatalogWire> = emptyList(),
+    ): List<SyncCatalogWire> = withContext(Dispatchers.IO) {
+        if (items.isEmpty() && updates.isEmpty()) return@withContext emptyList()
+        val state = _syncState.value
+        val url = SyncConstants.catalogBatchUrl(state.serverUrl)
+        try {
+            val payload = JSONObject().apply {
+                if (items.isNotEmpty()) {
+                    put("items", org.json.JSONArray().apply {
+                        items.take(200).forEach { workId ->
+                            put(JSONObject().apply {
+                                put("sourceId", workId.sourceId)
+                                put("toonId", workId.toonId)
+                            })
+                        }
+                    })
+                }
+                if (updates.isNotEmpty()) {
+                    put("updates", org.json.JSONArray().apply {
+                        updates.take(200).forEach { update ->
+                            put(JSONObject().apply {
+                                put("sourceId", update.sourceId)
+                                put("toonId", update.toonId)
+                                put("totalEpisodes", update.totalEpisodes)
+                                put("updatedAt", update.updatedAt)
+                            })
+                        }
+                    })
+                }
+            }
+            val reqBody = payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+            val req = Request.Builder()
+                .url(url)
+                .post(reqBody)
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext emptyList()
+                val json = JSONObject(resp.body?.string().orEmpty())
+                val arr = json.optJSONArray("catalog") ?: return@withContext emptyList()
+                List(arr.length()) { idx ->
+                    val obj = arr.getJSONObject(idx)
+                    SyncCatalogWire(
+                        sourceId = obj.optString("sourceId"),
+                        toonId = obj.optString("toonId"),
+                        totalEpisodes = obj.optInt("totalEpisodes", 0),
+                        updatedAt = obj.optLong("updatedAt", 0L),
+                    )
+                }.filter { it.totalEpisodes > 0 && it.sourceId.isNotBlank() && it.toonId.isNotBlank() }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun reportCatalog(entries: List<SyncCatalogWire>) = withContext(Dispatchers.IO) {
+        if (entries.isEmpty()) return@withContext
+        val state = _syncState.value
+        val url = SyncConstants.catalogReportUrl(state.serverUrl)
+        try {
+            val payload = JSONObject().apply {
+                put("updates", org.json.JSONArray().apply {
+                    entries.take(200).forEach { entry ->
+                        put(JSONObject().apply {
+                            put("sourceId", entry.sourceId)
+                            put("toonId", entry.toonId)
+                            put("totalEpisodes", entry.totalEpisodes)
+                            put("updatedAt", entry.updatedAt)
+                        })
+                    }
+                })
+            }
+            val reqBody = payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+            val req = Request.Builder()
+                .url(url)
+                .post(reqBody)
+                .build()
+            client.newCall(req).execute().close()
+        } catch (_: Exception) {
         }
     }
 }

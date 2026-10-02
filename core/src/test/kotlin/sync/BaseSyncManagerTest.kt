@@ -185,4 +185,67 @@ class BaseSyncManagerTest {
 
         BaseSyncManager(storage = storage, client = okClient).requestPairingCode()
     }
+
+    @Test
+    fun fetchCatalogBatchParsesServerResponse() = runBlocking {
+        val okClient = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val respJson = JSONObject().apply {
+                    put("catalog", org.json.JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("sourceId", "test_source")
+                            put("toonId", "toon1")
+                            put("totalEpisodes", 42)
+                            put("updatedAt", 1700000000000L)
+                        })
+                    })
+                }
+                Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body(respJson.toString().toResponseBody("application/json".toMediaType()))
+                    .build()
+            }
+            .build()
+
+        val manager = BaseSyncManager(storage = storage, client = okClient)
+        val result = manager.fetchCatalogBatch(listOf(com.comics8.core.source.WorkId("test_source", "toon1")))
+
+        assertThat(result).hasSize(1)
+        assertThat(result[0].sourceId).isEqualTo("test_source")
+        assertThat(result[0].toonId).isEqualTo("toon1")
+        assertThat(result[0].totalEpisodes).isEqualTo(42)
+    }
+
+    @Test
+    fun reportCatalogSendsUpdatesPayload() = runBlocking {
+        var requestedUrl: String? = null
+        var requestedBody: String? = null
+        val okClient = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val req = chain.request()
+                requestedUrl = req.url.toString()
+                val buffer = okio.Buffer()
+                req.body?.writeTo(buffer)
+                requestedBody = buffer.readUtf8()
+                Response.Builder()
+                    .request(req)
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body("{}".toResponseBody("application/json".toMediaType()))
+                    .build()
+            }
+            .build()
+
+        val manager = BaseSyncManager(storage = storage, client = okClient)
+        manager.reportCatalog(listOf(SyncCatalogWire("test_source", "toon1", 50, 1000L)))
+
+        assertThat(requestedUrl).contains("/catalog/report")
+        assertThat(requestedBody).contains("test_source")
+        assertThat(requestedBody).contains("toon1")
+        assertThat(requestedBody).contains("50")
+    }
 }

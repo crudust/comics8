@@ -18,6 +18,8 @@ import com.comics8.core.source.WorkId
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -448,5 +450,77 @@ class DesktopToonRepositorySyncTest {
         for (item in items) {
             assertThat(db.getCatalog(item.workId())).isNull()
         }
+    }
+
+    @Test
+    fun syncEpisodeCountsQueriesServerBatchAndPopulatesCatalog() = runBlocking {
+        val okClient = okhttp3.OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val respJson = org.json.JSONObject().apply {
+                    put("catalog", org.json.JSONArray().apply {
+                        put(org.json.JSONObject().apply {
+                            put("sourceId", "test_source")
+                            put("toonId", "server_toon_1")
+                            put("totalEpisodes", 77)
+                            put("updatedAt", 1700000000000L)
+                        })
+                    })
+                }
+                okhttp3.Response.Builder()
+                    .request(chain.request())
+                    .protocol(okhttp3.Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body(respJson.toString().toByteArray().toResponseBody("application/json".toMediaType()))
+                    .build()
+            }
+            .build()
+
+        val mockSyncManager = DesktopSyncManager(
+            database = db,
+            client = okClient,
+        )
+
+        val source = FakeSource()
+        val registry = SourceRegistry(listOf(source))
+        val repoWithSync = DesktopToonRepository(
+            client = ToonClient(sources = { registry }),
+            database = db,
+            syncManager = mockSyncManager,
+            downloadManager = null,
+            now = { System.currentTimeMillis() },
+            sources = registry,
+            isSourceEnabled = { true },
+            installedIds = { setOf("test_source") },
+        )
+
+        val item = ToonItem(
+            id = "server_toon_1",
+            title = "Server Toon",
+            thumbUrl = "thumb",
+            href = "href",
+            sourceId = "test_source",
+        )
+
+        var updatedTotal = 0
+        var updatedProgress: String? = null
+        repoWithSync.syncEpisodeCounts(listOf(item)) { _, total, progress ->
+            updatedTotal = total
+            updatedProgress = progress
+        }
+
+        var attempts = 0
+        while (updatedTotal == 0 && attempts < 50) {
+            delay(50)
+            attempts++
+        }
+
+        assertThat(updatedTotal).isEqualTo(77)
+        assertThat(updatedProgress).isEqualTo("77화")
+        val inDb = db.getCatalog(item.workId())
+        assertThat(inDb).isNotNull()
+        assertThat(inDb?.totalEpisodes).isEqualTo(77)
+
+        repoWithSync.close()
     }
 }

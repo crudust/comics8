@@ -43,7 +43,10 @@ import com.comics8.monitor.data.local.getReadEpisode
 import com.comics8.monitor.data.local.getReadEpisodes
 import com.comics8.monitor.data.local.getSetting
 import com.comics8.monitor.data.local.updateLastPage
+import com.comics8.core.sync.SyncCatalogWire
 import com.comics8.monitor.data.local.ToonCatalogDao
+import com.comics8.monitor.data.local.ToonCatalogEntry
+import com.comics8.monitor.data.local.upsertAllMonotonic
 import com.comics8.monitor.data.local.upsertMonotonic
 import com.comics8.monitor.data.local.updateUpdatedAt
 import kotlinx.coroutines.CoroutineScope
@@ -195,24 +198,78 @@ class ToonRepository(
             val ids = items.map { it.id }.distinct()
             val wanted = workIds.map { it.storageKey() }.toSet()
             val historyMap = try {
-                if (ids.isEmpty()) emptyMap() else {
+                if (ids.isEmpty()) mutableMapOf() else {
                     readHistoryDao.byToonIds(ids)
                         .filter { it.workId().storageKey() in wanted }
                         .associateBy { it.workId().storageKey() }
+                        .toMutableMap()
                 }
             } catch (_: Exception) {
-                emptyMap()
+                mutableMapOf()
             }
             val catalogTotals = try {
-                if (ids.isEmpty()) emptyMap() else {
+                if (ids.isEmpty()) mutableMapOf() else {
                     toonCatalogDao?.byToonIds(ids)
                         ?.filter { it.workId().storageKey() in wanted }
                         ?.associate { it.workId().storageKey() to it.totalEpisodes }
-                        ?: emptyMap()
+                        ?.toMutableMap()
+                        ?: mutableMapOf()
                 }
             } catch (_: Exception) {
-                emptyMap()
+                mutableMapOf()
             }
+
+            // 1. Server-First: Batch query global catalog for items missing from local DB
+            val missingFromLocal = workIds.filter { (catalogTotals[it.storageKey()] ?: 0) == 0 }
+            if (missingFromLocal.isNotEmpty() && syncManager != null) {
+                try {
+                    val remoteEntries = syncManager.fetchCatalogBatch(missingFromLocal)
+                    if (remoteEntries.isNotEmpty()) {
+                        val catalogEntries = remoteEntries.map {
+                            ToonCatalogEntry(
+                                sourceId = it.sourceId,
+                                id = it.toonId,
+                                totalEpisodes = it.totalEpisodes,
+                                updatedAt = it.updatedAt,
+                            )
+                        }
+                        toonCatalogDao?.upsertAllMonotonic(catalogEntries)
+                        for (entry in catalogEntries) {
+                            val key = entry.workId().storageKey()
+                            val prev = catalogTotals[key] ?: 0
+                            if (entry.totalEpisodes > prev) {
+                                catalogTotals[key] = entry.totalEpisodes
+                                val hist = historyMap[key]
+                                if (hist != null) {
+                                    val safeOrder = hist.lastReadOrder.coerceIn(0, entry.totalEpisodes)
+                                    val hasNew = safeOrder < entry.totalEpisodes
+                                    if (hist.totalEpisodes != entry.totalEpisodes || hist.hasNew != hasNew) {
+                                        val updatedHist = hist.copy(
+                                            totalEpisodes = entry.totalEpisodes,
+                                            lastReadOrder = safeOrder,
+                                            hasNew = hasNew,
+                                        )
+                                        saveHistory(updatedHist)
+                                        historyMap[key] = updatedHist
+                                    }
+                                }
+                                val readCounts = countReadEpisodesNow(listOf(entry.workId()))
+                                val readCount = readCounts[key] ?: 0
+                                val progressText = formatReadProgress(
+                                    entry.sourceId,
+                                    historyMap[key]?.lastReadOrder ?: 0,
+                                    entry.totalEpisodes,
+                                    readCount,
+                                )
+                                onUpdated?.invoke(entry.workId(), entry.totalEpisodes, progressText)
+                            }
+                        }
+                    }
+                } catch (_: Exception) {
+                }
+            }
+
+            // 2. Incremental Web Scraping (Fallback for newly updated or explicitly requested items)
             val targets = items.filter { item ->
                 val key = item.workId().storageKey()
                 val hist = historyMap[key]
@@ -226,15 +283,41 @@ class ToonRepository(
 
             if (targets.isEmpty()) return@launch
 
+            val isListing = items.size > 1
+            var encounteredUpToDate = false
+            val discoveredUpdates = java.util.Collections.synchronizedList(mutableListOf<SyncCatalogWire>())
+
             val semaphore = Semaphore(3)
             val jobs = targets.map { target ->
                 async {
                     val key = target.workId().storageKey()
                     try {
                         semaphore.withPermit {
+                            if (encounteredUpToDate && !target.isFavorite && !historyMap.containsKey(key)) {
+                                return@withPermit
+                            }
                             val exactTotal = fetchTotalEpisodes(target)
                             if (exactTotal > 0) {
+                                val prev = catalogTotals[key] ?: 0
+                                val isIncreased = exactTotal > prev
                                 toonCatalogDao?.upsertMonotonic(target.workId(), exactTotal)
+                                catalogTotals[key] = maxOf(prev, exactTotal)
+
+                                if (isIncreased) {
+                                    discoveredUpdates.add(
+                                        SyncCatalogWire(
+                                            sourceId = target.sourceId,
+                                            toonId = target.id,
+                                            totalEpisodes = exactTotal,
+                                            updatedAt = System.currentTimeMillis(),
+                                        )
+                                    )
+                                } else {
+                                    if (isListing && !target.isNew && historyMap[key]?.hasNew != true) {
+                                        encounteredUpToDate = true
+                                    }
+                                }
+
                                 val existing = readHistoryDao.get(target.workId())
                                 if (existing != null) {
                                     val safeOrder = existing.lastReadOrder.coerceIn(0, exactTotal)
@@ -246,6 +329,7 @@ class ToonRepository(
                                             hasNew = hasNew,
                                         )
                                         saveHistory(updated)
+                                        historyMap[key] = updated
                                         val readCounts = countReadEpisodesNow(listOf(target.workId()))
                                         val readCount = readCounts[key] ?: 0
                                         val progressText = formatReadProgress(
@@ -276,6 +360,14 @@ class ToonRepository(
                 }
             }
             jobs.awaitAll()
+
+            // 3. Instant crowdsource report to server
+            if (discoveredUpdates.isNotEmpty() && syncManager != null) {
+                try {
+                    syncManager.reportCatalog(discoveredUpdates.toList())
+                } catch (_: Exception) {
+                }
+            }
         }
     }
 
