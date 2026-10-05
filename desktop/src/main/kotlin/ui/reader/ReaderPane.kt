@@ -42,6 +42,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -365,6 +366,20 @@ private fun ReaderPagedLayout(
         prevPromptVisible = false
     }
 
+    var activeGestureDirection by remember { mutableStateOf<ReaderDomain.BoundaryDirection?>(null) }
+    var gestureResetJob by remember { mutableStateOf<Job?>(null) }
+
+    LaunchedEffect(state.currentEpisode?.wrId) {
+        gestureResetJob?.cancel()
+        activeGestureDirection = null
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            gestureResetJob?.cancel()
+        }
+    }
+
     LaunchedEffect(pagerState.isScrollInProgress) {
         if (pagerState.isScrollInProgress) {
             controlsVisible = false
@@ -375,13 +390,17 @@ private fun ReaderPagedLayout(
     val currentNextPromptVisible by rememberUpdatedState(nextPromptVisible)
     val currentPrevPromptVisible by rememberUpdatedState(prevPromptVisible)
 
-    val onAdvance: () -> Unit = {
+    val navigate: (ReaderDomain.BoundaryDirection) -> Unit = { direction ->
         controlsVisible = false
+        val isPromptActive = when (direction) {
+            ReaderDomain.BoundaryDirection.ADVANCE -> currentNextPromptVisible
+            ReaderDomain.BoundaryDirection.RETREAT -> currentPrevPromptVisible
+        }
         when (val decision = ReaderDomain.resolveBoundaryDecision(
             currentPage = pagerState.currentPage,
             totalPages = pagerState.pageCount,
-            direction = ReaderDomain.BoundaryDirection.ADVANCE,
-            isPromptActive = currentNextPromptVisible,
+            direction = direction,
+            isPromptActive = isPromptActive,
         )) {
             is ReaderDomain.BoundaryDecision.PageTurn -> {
                 if (!pagerState.isScrollInProgress) {
@@ -391,65 +410,36 @@ private fun ReaderPagedLayout(
                 }
             }
             is ReaderDomain.BoundaryDecision.ShowPrompt -> {
-                nextPromptVisible = true
-                prevPromptVisible = false
+                val isAdvance = direction == ReaderDomain.BoundaryDirection.ADVANCE
+                nextPromptVisible = isAdvance
+                prevPromptVisible = !isAdvance
                 promptJob?.cancel()
                 promptJob = scope.launch {
                     delay(3000)
-                    nextPromptVisible = false
+                    if (isAdvance) nextPromptVisible = false else prevPromptVisible = false
                 }
             }
             is ReaderDomain.BoundaryDecision.ConfirmNavigate -> {
                 nextPromptVisible = false
-                if (state.hasNextEpisode) {
-                    viewModel.openNextEpisode()
-                } else {
-                    viewModel.closeReader()
+                prevPromptVisible = false
+                when (direction) {
+                    ReaderDomain.BoundaryDirection.ADVANCE -> {
+                        if (state.hasNextEpisode) viewModel.openNextEpisode() else viewModel.closeReader()
+                    }
+                    ReaderDomain.BoundaryDirection.RETREAT -> {
+                        if (state.hasPrevEpisode) viewModel.openPrevEpisode() else viewModel.closeReader()
+                    }
                 }
             }
         }
     }
 
-    val onRetreat: () -> Unit = {
-        controlsVisible = false
-        when (val decision = ReaderDomain.resolveBoundaryDecision(
-            currentPage = pagerState.currentPage,
-            totalPages = pagerState.pageCount,
-            direction = ReaderDomain.BoundaryDirection.RETREAT,
-            isPromptActive = currentPrevPromptVisible,
-        )) {
-            is ReaderDomain.BoundaryDecision.PageTurn -> {
-                if (!pagerState.isScrollInProgress) {
-                    nextPromptVisible = false
-                    prevPromptVisible = false
-                    scope.launch { pagerState.animateScrollToPage(decision.targetPage) }
-                }
-            }
-            is ReaderDomain.BoundaryDecision.ShowPrompt -> {
-                prevPromptVisible = true
-                nextPromptVisible = false
-                promptJob?.cancel()
-                promptJob = scope.launch {
-                    delay(3000)
-                    prevPromptVisible = false
-                }
-            }
-            is ReaderDomain.BoundaryDecision.ConfirmNavigate -> {
-                prevPromptVisible = false
-                if (state.hasPrevEpisode) {
-                    viewModel.openPrevEpisode()
-                } else {
-                    viewModel.closeReader()
-                }
-            }
-        }
-    }
+    val onAdvance = { navigate(ReaderDomain.BoundaryDirection.ADVANCE) }
+    val onRetreat = { navigate(ReaderDomain.BoundaryDirection.RETREAT) }
 
     LaunchedEffect(onAdvance, onRetreat) {
         onRegisterActions(onAdvance, onRetreat)
     }
-
-    var activeGestureDirection by remember { mutableStateOf<ReaderDomain.BoundaryDirection?>(null) }
 
     @OptIn(ExperimentalComposeUiApi::class)
     val desktopScrollModifier = Modifier.onPointerEvent(PointerEventType.Scroll) { event ->
@@ -457,6 +447,7 @@ private fun ReaderPagedLayout(
         val deltaY = event.changes.sumOf { it.scrollDelta.y.toDouble() }.toFloat()
 
         if (abs(deltaX) < 0.2f && abs(deltaY) < 0.2f) {
+            gestureResetJob?.cancel()
             activeGestureDirection = null
             return@onPointerEvent
         }
@@ -468,13 +459,17 @@ private fun ReaderPagedLayout(
             threshold = 1.0f,
         ) ?: return@onPointerEvent
 
+        gestureResetJob?.cancel()
+        gestureResetJob = scope.launch {
+            delay(200)
+            activeGestureDirection = null
+        }
+
         if (direction == activeGestureDirection) return@onPointerEvent
 
         activeGestureDirection = direction
-        when (direction) {
-            ReaderDomain.BoundaryDirection.ADVANCE -> onAdvance()
-            ReaderDomain.BoundaryDirection.RETREAT -> onRetreat()
-        }
+        event.changes.forEach { it.consume() }
+        navigate(direction)
     }
 
     val handleTap: (Offset, IntSize) -> Unit = { tapOffset, size ->
