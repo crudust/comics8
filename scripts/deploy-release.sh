@@ -46,22 +46,41 @@ if [[ -z "${JAVA_HOME:-}" || ! -x "${JAVA_HOME}/bin/java" ]]; then
     echo "❌ JAVA_HOME is not set to a JDK 17 install"
     exit 1
 fi
-if [[ -z "${ANDROID_SDK_ROOT:-}" || ! -d "${ANDROID_SDK_ROOT}" ]]; then
-    echo "❌ ANDROID_SDK_ROOT is not set"
-    exit 1
+# Parse options and arguments
+TARGET="all"
+NON_FLAG_ARGS=()
+for arg in "$@"; do
+    case "$arg" in
+        --desktop|-d) TARGET="desktop" ;;
+        --android|-a) TARGET="android" ;;
+        --all) TARGET="all" ;;
+        *) NON_FLAG_ARGS+=("$arg") ;;
+    esac
+done
+
+if [[ "${#NON_FLAG_ARGS[@]}" -ge 4 && "${NON_FLAG_ARGS[3]}" =~ ^(all|desktop|android)$ ]]; then
+    TARGET="${NON_FLAG_ARGS[3]}"
 fi
 
-
-# Fail before editing version files when release signing is unavailable or invalid.
-./gradlew -q :app:validateReleaseSigning
-
-VERSION_NAME="${1:-1.0.0}"
-VERSION_CODE="${2:-1}"
-RELEASE_NOTES="${3:-버그 수정 및 성능 개선}"
+VERSION_NAME="${NON_FLAG_ARGS[0]:-1.0.0}"
+VERSION_CODE="${NON_FLAG_ARGS[1]:-1}"
+RELEASE_NOTES="${NON_FLAG_ARGS[2]:-버그 수정 및 성능 개선}"
 PUBLIC_REPO="${COMICS8_PUBLIC_REPO_URL:-git@github.com:crudust/comics8.git}"
+
+if [[ "$TARGET" != "desktop" ]]; then
+    if [[ -z "${ANDROID_SDK_ROOT:-}" || ! -d "${ANDROID_SDK_ROOT}" ]]; then
+        echo "❌ ANDROID_SDK_ROOT is not set"
+        exit 1
+    fi
+    # Fail before editing version files when release signing is unavailable or invalid.
+    ./gradlew -q :app:validateReleaseSigning
+else
+    echo "ℹ️ Target is desktop-only: skipping Android SDK and signing validation."
+fi
 
 echo "=================================================="
 echo "🚀 Comics8 Deploying Release v${VERSION_NAME} (code ${VERSION_CODE})"
+echo "Target: ${TARGET^^}"
 echo "Notes: ${RELEASE_NOTES}"
 echo "=================================================="
 
@@ -92,22 +111,49 @@ object DesktopVersion {
 }
 VERSION_EOF
 
-# 2. Build Android Release APK, AAB & Windows Portable Zip
-echo "📦 2/5: Building Android Release APK, AAB & Windows Portable Zip..."
-./gradlew assembleStandaloneRelease bundlePlayRelease :desktop:packageWindowsZip
-
+# 2. Build binaries depending on target
 APK_PATH="app/build/outputs/apk/standalone/release/app-standalone-release.apk"
 AAB_PATH="app/build/outputs/bundle/playRelease/app-play-release.aab"
 WIN_ZIP_PATH="desktop/build/compose/binaries/main/Comics8-win.zip"
 
-if [ ! -f "$APK_PATH" ]; then
-    echo "❌ APK file not found: $APK_PATH"
-    exit 1
-fi
-if [ ! -f "$AAB_PATH" ]; then
-    echo "❌ AAB file not found: $AAB_PATH"
-    exit 1
-fi
+case "$TARGET" in
+    desktop)
+        echo "📦 2/5: Building Windows Portable Zip (Desktop only)..."
+        ./gradlew :desktop:packageWindowsZip -Pcomics8.desktopOnly=true
+        if [ ! -f "$WIN_ZIP_PATH" ]; then
+            echo "❌ Windows Zip file not found: $WIN_ZIP_PATH"
+            exit 1
+        fi
+        ;;
+    android)
+        echo "📦 2/5: Building Android Release APK & AAB (Android only)..."
+        ./gradlew assembleStandaloneRelease bundlePlayRelease
+        if [ ! -f "$APK_PATH" ]; then
+            echo "❌ APK file not found: $APK_PATH"
+            exit 1
+        fi
+        if [ ! -f "$AAB_PATH" ]; then
+            echo "❌ AAB file not found: $AAB_PATH"
+            exit 1
+        fi
+        ;;
+    all|*)
+        echo "📦 2/5: Building Android Release APK, AAB & Windows Portable Zip..."
+        ./gradlew assembleStandaloneRelease bundlePlayRelease :desktop:packageWindowsZip
+        if [ ! -f "$APK_PATH" ]; then
+            echo "❌ APK file not found: $APK_PATH"
+            exit 1
+        fi
+        if [ ! -f "$AAB_PATH" ]; then
+            echo "❌ AAB file not found: $AAB_PATH"
+            exit 1
+        fi
+        if [ ! -f "$WIN_ZIP_PATH" ]; then
+            echo "❌ Windows Zip file not found: $WIN_ZIP_PATH"
+            exit 1
+        fi
+        ;;
+esac
 
 # 3. Commit version bump in dev repo
 echo "📝 3/5: Committing version bump to dev repo..."
@@ -131,36 +177,66 @@ SERVER_VERSION_FILE="${COMICS8_SERVER_VERSION_FILE:-/home/crudust/comics8-sync/d
 
 echo "📡 5/5: Uploading to Sync Server ($SERVER_HOST)..."
 if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=3 "${SERVER_USER}@${SERVER_HOST}" "mkdir -p ${SERVER_DOWNLOAD_DIR}" >/dev/null 2>&1; then
-    scp "$APK_PATH" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/comics8-latest.apk"
-    if [ -f "$WIN_ZIP_PATH" ]; then
+    if [[ "$TARGET" != "desktop" && -f "$APK_PATH" ]]; then
+        scp "$APK_PATH" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/comics8-latest.apk"
+    fi
+    if [[ "$TARGET" != "android" && -f "$WIN_ZIP_PATH" ]]; then
         scp "$WIN_ZIP_PATH" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/Comics8-win.zip"
     fi
 
+    # Retrieve existing version.json to preserve non-targeted platform version
+    scp -o StrictHostKeyChecking=no "${SERVER_USER}@${SERVER_HOST}:${SERVER_VERSION_FILE}" /tmp/comics8-existing-version.json 2>/dev/null || true
+
+    COMICS8_TARGET="$TARGET" \
     COMICS8_VERSION_NAME="$VERSION_NAME" \
     COMICS8_VERSION_CODE="$VERSION_CODE" \
     COMICS8_RELEASE_NOTES="$RELEASE_NOTES" \
     python3 - <<'PY' >/tmp/comics8-version.json
 import json, os, sys
 
-tag = f"v{os.environ['COMICS8_VERSION_NAME']}"
-android = {
-    "versionCode": int(os.environ["COMICS8_VERSION_CODE"]),
-    "versionName": os.environ["COMICS8_VERSION_NAME"],
-    "downloadUrl": f"https://github.com/crudust/comics8/releases/download/{tag}/comics8-latest.apk",
-    "releaseNotes": os.environ["COMICS8_RELEASE_NOTES"],
-}
-desktop = {
-    "versionCode": int(os.environ["COMICS8_VERSION_CODE"]),
-    "versionName": os.environ["COMICS8_VERSION_NAME"],
-    "downloadUrl": f"https://github.com/crudust/comics8/releases/download/{tag}/Comics8-mac.zip",
-    "releaseNotes": os.environ["COMICS8_RELEASE_NOTES"],
-    "windowsDownloadUrl": f"https://github.com/crudust/comics8/releases/download/{tag}/Comics8-win.zip",
-}
-json.dump({"android": android, "desktop": desktop}, sys.stdout, ensure_ascii=False, indent=2)
+target = os.environ.get("COMICS8_TARGET", "all")
+version_name = os.environ["COMICS8_VERSION_NAME"]
+version_code = int(os.environ["COMICS8_VERSION_CODE"])
+notes = os.environ["COMICS8_RELEASE_NOTES"]
+tag = f"v{version_name}"
+
+existing = {}
+if os.path.exists("/tmp/comics8-existing-version.json"):
+    try:
+        with open("/tmp/comics8-existing-version.json", "r", encoding="utf-8") as f:
+            existing = json.load(f)
+    except Exception:
+        existing = {}
+
+android = existing.get("android") or {}
+desktop = existing.get("desktop") or {}
+
+if target in ("all", "android"):
+    android = {
+        "versionCode": version_code,
+        "versionName": version_name,
+        "downloadUrl": f"https://github.com/crudust/comics8/releases/download/{tag}/comics8-latest.apk",
+        "releaseNotes": notes,
+    }
+
+if target in ("all", "desktop"):
+    desktop = {
+        "versionCode": version_code,
+        "versionName": version_name,
+        "downloadUrl": f"https://github.com/crudust/comics8/releases/download/{tag}/Comics8-mac.zip",
+        "releaseNotes": notes,
+        "windowsDownloadUrl": f"https://github.com/crudust/comics8/releases/download/{tag}/Comics8-win.zip",
+    }
+
+payload = {"android": android, "desktop": desktop}
+if "serverUrl" in existing:
+    payload["serverUrl"] = existing["serverUrl"]
+
+json.dump(payload, sys.stdout, ensure_ascii=False, indent=2)
 print()
 PY
     scp /tmp/comics8-version.json "${SERVER_USER}@${SERVER_HOST}:${SERVER_VERSION_FILE}"
-    rm -f /tmp/comics8-version.json
+    rm -f /tmp/comics8-version.json /tmp/comics8-existing-version.json
     echo "  ✅ Synced version.json and binaries to ${SERVER_HOST}"
 else
     echo "  ⚠️ Sync server (${SERVER_HOST}) unreachable via SSH. Skipped server upload."
@@ -168,23 +244,35 @@ fi
 
 # 6. Publish to GitHub Releases (AAB is excluded from public release for security)
 echo "🐙 6/6: Publishing to GitHub Releases (crudust/comics8)..."
-GITHUB_APK_PATH="build/release/comics8-latest.apk"
-mkdir -p "$(dirname "${GITHUB_APK_PATH}")"
-cp "${APK_PATH}" "${GITHUB_APK_PATH}"
-RELEASE_FILES=("$GITHUB_APK_PATH")
-if [ -f "$WIN_ZIP_PATH" ]; then
+RELEASE_FILES=()
+if [[ "$TARGET" != "desktop" && -f "$APK_PATH" ]]; then
+    GITHUB_APK_PATH="build/release/comics8-latest.apk"
+    mkdir -p "$(dirname "${GITHUB_APK_PATH}")"
+    cp "${APK_PATH}" "${GITHUB_APK_PATH}"
+    RELEASE_FILES+=("$GITHUB_APK_PATH")
+fi
+if [[ "$TARGET" != "android" && -f "$WIN_ZIP_PATH" ]]; then
     RELEASE_FILES+=("$WIN_ZIP_PATH")
 fi
 
 if gh release view "${TAG_NAME}" --repo crudust/comics8 >/dev/null 2>&1; then
     echo "  ⬆️ Updating assets for release ${TAG_NAME}..."
-    gh release upload "${TAG_NAME}" "${RELEASE_FILES[@]}" --clobber --repo crudust/comics8
+    if [ ${#RELEASE_FILES[@]} -gt 0 ]; then
+        gh release upload "${TAG_NAME}" "${RELEASE_FILES[@]}" --clobber --repo crudust/comics8
+    fi
 else
     echo "  🎉 Creating release ${TAG_NAME}..."
-    gh release create "${TAG_NAME}" "${RELEASE_FILES[@]}" \
-      --repo crudust/comics8 \
-      --title "Comics8 ${TAG_NAME}" \
-      --notes "${RELEASE_NOTES}"
+    if [ ${#RELEASE_FILES[@]} -gt 0 ]; then
+        gh release create "${TAG_NAME}" "${RELEASE_FILES[@]}" \
+          --repo crudust/comics8 \
+          --title "Comics8 ${TAG_NAME}" \
+          --notes "${RELEASE_NOTES}"
+    else
+        gh release create "${TAG_NAME}" \
+          --repo crudust/comics8 \
+          --title "Comics8 ${TAG_NAME}" \
+          --notes "${RELEASE_NOTES}"
+    fi
 fi
 
 # 7. Prune older releases (Keep only the latest 2 releases)
@@ -200,10 +288,14 @@ for r_tag in $ALL_RELEASES; do
 done
 
 echo "=================================================="
-echo "🎉 배포가 성공적으로 완료되었습니다!"
+echo "🎉 배포가 성공적으로 완료되었습니다! (Target: ${TARGET})"
 echo "• GitHub Release: https://github.com/crudust/comics8/releases/tag/${TAG_NAME}"
-echo "• Android APK:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/comics8-latest.apk"
-echo "• Windows Zip:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/Comics8-win.zip"
-echo "• Mac Desktop:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/Comics8-mac.zip (GitHub Actions)"
-echo "• Play Store AAB: ${AAB_PATH} (로컬 보관, 비공개 Play Console 전용)"
+if [[ "$TARGET" != "desktop" ]]; then
+    echo "• Android APK:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/comics8-latest.apk"
+    echo "• Play Store AAB: ${AAB_PATH} (로컬 보관, 비공개 Play Console 전용)"
+fi
+if [[ "$TARGET" != "android" ]]; then
+    echo "• Windows Zip:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/Comics8-win.zip"
+    echo "• Mac Desktop:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/Comics8-mac.zip (GitHub Actions)"
+fi
 echo "=================================================="
