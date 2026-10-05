@@ -67,14 +67,13 @@ async def lifespan(app: FastAPI):
             logger.warning(f"Error closing DB: {e}")
 
 
-settings = get_settings()
 app = FastAPI(
     title="Comics8 Multi-User Sync & Billing Server",
     version="2.0.0",
     lifespan=lifespan,
-    docs_url="/docs" if settings.DEBUG else None,
-    redoc_url="/redoc" if settings.DEBUG else None,
-    openapi_url="/openapi.json" if settings.DEBUG else None,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 
 # CORS Configuration
