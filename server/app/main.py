@@ -67,12 +67,14 @@ async def lifespan(app: FastAPI):
             logger.warning(f"Error closing DB: {e}")
 
 
+settings = get_settings()
 app = FastAPI(
     title="Comics8 Multi-User Sync & Billing Server",
     version="2.0.0",
     lifespan=lifespan,
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url="/docs" if settings.DEBUG else None,
+    redoc_url="/redoc" if settings.DEBUG else None,
+    openapi_url="/openapi.json" if settings.DEBUG else None,
 )
 
 # CORS Configuration
@@ -184,19 +186,33 @@ def get_file_mime_type(filename: str) -> str:
     return "application/octet-stream"
 
 
+def resolve_safe_download_path(downloads_dir: str, filename: str) -> str | None:
+    clean_filename = os.path.basename(re.sub(r"[^a-zA-Z0-9_\-\.]", "", filename))
+    if not clean_filename or clean_filename.startswith("."):
+        return None
+    root = os.path.realpath(downloads_dir)
+    target = os.path.realpath(os.path.join(root, clean_filename))
+    if os.path.commonpath([root, target]) != root:
+        return None
+    if not os.path.isfile(target):
+        return None
+    return target
+
+
 @app.get("/download/{filename}")
 @app.get("/api/comics8/download/{filename}")
 async def download_file(filename: str):
     settings = get_settings()
-    clean_filename = re.sub(r"[^a-zA-Z0-9_\-\.]", "", filename)
-    file_path = os.path.join(settings.downloads_dir, clean_filename)
+    file_path = resolve_safe_download_path(settings.downloads_dir, filename)
 
-    if not os.path.isfile(file_path):
+    if not file_path:
+        clean_filename = os.path.basename(re.sub(r"[^a-zA-Z0-9_\-\.]", "", filename))
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"error": "Not Found", "message": f"File {clean_filename} not found"},
         )
 
+    clean_filename = os.path.basename(file_path)
     mime_type = get_file_mime_type(clean_filename)
     return FileResponse(
         path=file_path,
@@ -209,13 +225,13 @@ async def download_file(filename: str):
 @app.head("/api/comics8/download/{filename}")
 async def download_file_head(filename: str):
     settings = get_settings()
-    clean_filename = re.sub(r"[^a-zA-Z0-9_\-\.]", "", filename)
-    file_path = os.path.join(settings.downloads_dir, clean_filename)
+    file_path = resolve_safe_download_path(settings.downloads_dir, filename)
 
-    if not os.path.isfile(file_path):
+    if not file_path:
         return RawResponse(status_code=404)
 
     file_size = os.path.getsize(file_path)
+    clean_filename = os.path.basename(file_path)
     mime_type = get_file_mime_type(clean_filename)
     headers = {
         "Content-Type": mime_type,

@@ -422,7 +422,9 @@ async def upsert_catalog_from_payload(
     merged: dict[tuple[str, str], dict[str, Any]] = {}
 
     def add_entry(source_id: str, toon_id: str, total_episodes: int, updated_at: int) -> None:
-        if not toon_id or total_episodes <= 0:
+        if not toon_id or not (0 < total_episodes <= 100_000):
+            return
+        if len(source_id) > 255 or len(toon_id) > 512:
             return
         key = (source_id, toon_id)
         if key not in merged:
@@ -1067,6 +1069,18 @@ async def sync_delta(
         )
 
 
+def get_client_ip(request: Request) -> str:
+    cf_ip = request.headers.get("cf-connecting-ip")
+    if cf_ip and cf_ip.strip():
+        return cf_ip.strip()
+    xff = request.headers.get("x-forwarded-for")
+    if xff and xff.strip():
+        return xff.split(",")[0].strip()
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
 _PAIR_RATE_CLIENT_CAPACITY = 10_000
 _pair_confirm_attempts: OrderedDict[str, deque[float]] = OrderedDict()
 _pair_confirm_attempt_lock = asyncio.Lock()
@@ -1150,7 +1164,7 @@ async def pair_confirm(
             detail={"success": False, "message": "6자리 숫자 페어링 코드를 입력해주세요."},
         )
 
-    client_id = request.client.host if request.client else "unknown"
+    client_id = get_client_ip(request)
     await check_pair_confirm_rate_limit(client_id)
 
     now_dt = datetime.now(timezone.utc)
@@ -1176,6 +1190,38 @@ async def pair_confirm(
     }
 
 
+_CATALOG_RATE_CLIENT_CAPACITY = 10_000
+_catalog_rate_attempts: OrderedDict[str, deque[float]] = OrderedDict()
+_catalog_rate_attempt_lock = asyncio.Lock()
+
+
+async def check_catalog_rate_limit(client_id: str) -> None:
+    settings = get_settings()
+    limit = settings.CATALOG_RATE_LIMIT_PER_MINUTE
+    window = 60.0
+    if limit <= 0:
+        return
+
+    now = time.monotonic()
+    cutoff = now - window
+    async with _catalog_rate_attempt_lock:
+        attempts = _catalog_rate_attempts.pop(client_id, deque())
+        while attempts and attempts[0] <= cutoff:
+            attempts.popleft()
+        if len(attempts) >= limit:
+            _catalog_rate_attempts[client_id] = attempts
+            retry_after = max(1, int(attempts[0] + window - now) + 1)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={"error": "TooManyRequests", "message": "카탈로그 요청 한도를 초과했습니다. 잠시 후 다시 시도해주세요."},
+                headers={"Retry-After": str(retry_after)},
+            )
+        attempts.append(now)
+        _catalog_rate_attempts[client_id] = attempts
+        if len(_catalog_rate_attempts) > _CATALOG_RATE_CLIENT_CAPACITY:
+            _catalog_rate_attempts.popitem(last=False)
+
+
 class CatalogBatchRequest(BaseModel):
     items: list[dict[str, Any]] = Field(default_factory=list)
     updates: list[dict[str, Any]] = Field(default_factory=list)
@@ -1184,9 +1230,13 @@ class CatalogBatchRequest(BaseModel):
 @router.post("/catalog/batch")
 @router.post("/api/comics8/catalog/batch")
 async def get_catalog_batch(
+    request: Request,
     req: CatalogBatchRequest,
     session: AsyncSession = Depends(get_db),
 ):
+    client_id = get_client_ip(request)
+    await check_catalog_rate_limit(client_id)
+
     now_ms = int(time.time() * 1000)
 
     # 1. Process crowdsourced updates if present
@@ -1231,9 +1281,13 @@ async def get_catalog_batch(
 @router.post("/catalog/report")
 @router.post("/api/comics8/catalog/report")
 async def report_catalog(
+    request: Request,
     req: CatalogBatchRequest,
     session: AsyncSession = Depends(get_db),
 ):
+    client_id = get_client_ip(request)
+    await check_catalog_rate_limit(client_id)
+
     updates = req.updates or req.items
     if updates:
         catalog_rows = [r for r in updates[:200] if accept_inbound_row(r)]
