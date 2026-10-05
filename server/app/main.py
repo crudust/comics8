@@ -8,7 +8,7 @@ import time
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response as RawResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response as RawResponse
 from app.billing import router as billing_router
 from app.config import get_settings
 from app.database import close_db, init_db
@@ -100,6 +100,13 @@ async def add_sync_schema_header(request: Request, call_next):
     response: Response = await call_next(request)
     response.headers[settings.SYNC_SCHEMA_HEADER] = str(settings.SYNC_SCHEMA_CURRENT)
     return response
+
+
+# Root redirect to GitHub project page
+@app.get("/", include_in_schema=False)
+@app.head("/", include_in_schema=False)
+async def root_redirect():
+    return RedirectResponse(url="https://github.com/crudust/comics8", status_code=307)
 
 
 # Include Routers
