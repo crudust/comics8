@@ -8,7 +8,7 @@ import java.net.Inet4Address
 class FallbackDnsTest {
     @Test
     fun resolvesComics8ViaDohWhenNeeded() {
-        val addresses = FallbackDns.lookup("comics8.tail1946af.ts.net")
+        val addresses = FallbackDns.lookup("comics8.lazylabo.com")
         assertFalse("Address list should not be empty", addresses.isEmpty())
         assertTrue("Should contain at least one IPv4 address", addresses.any { it is Inet4Address })
     }

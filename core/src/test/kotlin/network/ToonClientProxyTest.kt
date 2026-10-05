@@ -14,24 +14,24 @@ class ToonClientProxyTest {
     fun testProxyUrlGeneration() {
         val target = "https://11toon.com/bbs/board.php?bo_table=toons"
         val proxyUrl = SyncConstants.proxyUrl(target)
-        assertThat(proxyUrl).startsWith("https://comics8.tail1946af.ts.net/api/comics8/proxy?url=")
+        assertThat(proxyUrl).startsWith("https://comics8.lazylabo.com/api/comics8/proxy?url=")
         assertThat(proxyUrl).contains("11toon.com")
     }
 
     @Test
     fun testProxyBaseUrlCalculation() {
-        val base1 = SyncConstants.proxyBaseUrl("https://comics8.tail1946af.ts.net/api/comics8/sync")
-        assertThat(base1).isEqualTo("https://comics8.tail1946af.ts.net/api/comics8/proxy")
+        val base1 = SyncConstants.proxyBaseUrl("https://comics8.lazylabo.com/api/comics8/sync")
+        assertThat(base1).isEqualTo("https://comics8.lazylabo.com/api/comics8/proxy")
 
         val base2 = SyncConstants.proxyBaseUrl("http://192.168.0.136:8905")
         assertThat(base2).isEqualTo("http://192.168.0.136:8905/proxy")
 
         // Crucial bugfix test: already ends with /proxy must not duplicate to /proxy/proxy
-        val base3 = SyncConstants.proxyBaseUrl("https://comics8.tail1946af.ts.net/api/comics8/proxy")
-        assertThat(base3).isEqualTo("https://comics8.tail1946af.ts.net/api/comics8/proxy")
+        val base3 = SyncConstants.proxyBaseUrl("https://comics8.lazylabo.com/api/comics8/proxy")
+        assertThat(base3).isEqualTo("https://comics8.lazylabo.com/api/comics8/proxy")
 
         val proxyUrlFromBase = SyncConstants.proxyUrl("https://11toon.com/bbs/board.php", base3)
-        assertThat(proxyUrlFromBase).startsWith("https://comics8.tail1946af.ts.net/api/comics8/proxy?url=")
+        assertThat(proxyUrlFromBase).startsWith("https://comics8.lazylabo.com/api/comics8/proxy?url=")
         assertThat(proxyUrlFromBase).doesNotContain("/proxy/proxy")
     }
 
