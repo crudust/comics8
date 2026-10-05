@@ -37,12 +37,12 @@ fi
 
 # 4. Copy open-source modules
 echo "📁 Copying open-source files..."
-cp -R .github "${WORK_DIR}/"
-cp -R core "${WORK_DIR}/"
-cp -R desktop "${WORK_DIR}/"
-cp -R examples "${WORK_DIR}/"
-cp -R docs "${WORK_DIR}/"
-cp -R gradle "${WORK_DIR}/"
+rsync -a --exclude="build" --exclude=".gradle" .github "${WORK_DIR}/"
+rsync -a --exclude="build" --exclude=".gradle" core "${WORK_DIR}/"
+rsync -a --exclude="build" --exclude=".gradle" desktop "${WORK_DIR}/"
+rsync -a --exclude="build" --exclude=".gradle" examples "${WORK_DIR}/"
+rsync -a --exclude="build" --exclude=".gradle" docs "${WORK_DIR}/"
+rsync -a --exclude="build" --exclude=".gradle" gradle "${WORK_DIR}/"
 cp gradlew gradlew.bat build.gradle.kts LICENSE README.md PRIVACY_POLICY.md server.json "${WORK_DIR}/"
 
 # Clean build artifacts if any
