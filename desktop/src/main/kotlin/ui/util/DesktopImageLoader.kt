@@ -623,6 +623,7 @@ fun DesktopAsyncImage(
                     alignment = alignment,
                     modifier = Modifier.fillMaxSize(),
                 )
+            } else {
                 val cropRect = remember(currentBitmap, half, url) {
                     val cacheKey = url to half
                     if (url.isNotBlank()) {

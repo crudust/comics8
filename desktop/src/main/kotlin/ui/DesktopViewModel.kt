@@ -16,11 +16,15 @@ import com.comics8.core.model.ViewMode
 import com.comics8.core.source.ProgressDisplay
 import com.comics8.core.source.WorkId
 import com.comics8.core.source.js.JsPackStore
+import com.comics8.core.source.LocalImageUri
+import com.comics8.core.source.local.LibraryScanner
 import com.comics8.core.source.local.LibraryScanIndex
 import com.comics8.core.source.local.LocalSource
 import com.comics8.core.source.local.ZipArchive
 import com.comics8.core.source.local.ZipImageNames
 import com.comics8.core.source.local.ZipImageUri
+import com.comics8.desktop.ExternalTargetResolver
+import java.text.Normalizer
 import com.comics8.core.source.network.NetworkProtocol
 import com.comics8.core.source.network.NetworkSourceConfig
 import com.comics8.core.source.network.NetworkSourceStore
@@ -2136,9 +2140,28 @@ class DesktopViewModel(
     }
 
     fun openExternalArchive(file: File) {
-        val archive = file.toPath().toAbsolutePath().normalize().toFile()
-        if (!archive.isFile || !ZipImageNames.isZipName(archive.name)) return
+        val target = file.toPath().toAbsolutePath().normalize().toFile()
+        val resolved = ExternalTargetResolver.resolve(target)
+        if (resolved == null) {
+            _state.update {
+                it.copy(
+                    sourceError = if (!target.exists()) {
+                        "파일 또는 폴더를 찾을 수 없습니다:\n${target.path}"
+                    } else {
+                        "지원하는 만화 파일(ZIP, CBZ)이나 이미지를 찾을 수 없습니다:\n${target.name}"
+                    }
+                )
+            }
+            return
+        }
 
+        when (resolved) {
+            is ExternalTargetResolver.Target.Zip -> openExternalZip(resolved.file)
+            is ExternalTargetResolver.Target.Folder -> openExternalFolder(resolved.dir, resolved.initialFile)
+        }
+    }
+
+    private fun prepareExternalReaderSession() {
         val current = _state.value
         if (externalReaderSession == null) {
             if (current.screen == Screen.Reader) {
@@ -2151,10 +2174,15 @@ class DesktopViewModel(
                 readDirection = current.readDirection,
                 splitMode = current.splitMode,
             )
+        } else if (current.screen == Screen.Reader) {
+            flushPendingPageSave()
         }
         DesktopImageCache.cancelPendingPreviews()
         DesktopImageCache.clear(ImageCacheRole.READER)
+    }
 
+    private fun openExternalZip(archive: File) {
+        prepareExternalReaderSession()
         val title = archive.name.substringBeforeLast('.', archive.name)
         val episode = EpisodeItem(
             wrId = archive.path,
@@ -2171,6 +2199,7 @@ class DesktopViewModel(
                 imageAspectRatios = emptyMap(),
                 readerLoading = true,
                 readerError = null,
+                sourceError = null,
             )
         }
         loadReaderImages(episode) {
@@ -2178,6 +2207,45 @@ class DesktopViewModel(
                 ZipArchive(archive).use { zip ->
                     zip.imageEntries().map { entry -> ZipImageUri.encode(archive, entry) }
                 }
+            }
+        }
+    }
+
+    private fun openExternalFolder(dir: File, initialFile: File? = null) {
+        prepareExternalReaderSession()
+        val title = dir.name
+        val episode = EpisodeItem(
+            wrId = dir.path,
+            title = title,
+            date = null,
+            thumbUrl = null,
+            href = LocalImageUri.fromFile(dir),
+        )
+        _state.update {
+            it.copy(
+                screen = Screen.Reader,
+                currentEpisode = episode,
+                readerImages = emptyList(),
+                imageAspectRatios = emptyMap(),
+                readerLoading = true,
+                readerError = null,
+                sourceError = null,
+            )
+        }
+        loadReaderImages(episode) {
+            withContext(Dispatchers.IO) {
+                val imageFiles = LibraryScanner().listFolderImages(dir)
+                val images = imageFiles.map { LocalImageUri.fromFile(it) }
+                if (initialFile != null) {
+                    val initialName = initialFile.name
+                    val idx = imageFiles.indexOfFirst { it.name.equals(initialName, ignoreCase = true) }
+                    if (idx > 0) {
+                        _state.update { curr ->
+                            curr.copy(currentEpisode = curr.currentEpisode?.copy(lastReadPage = idx))
+                        }
+                    }
+                }
+                images
             }
         }
     }

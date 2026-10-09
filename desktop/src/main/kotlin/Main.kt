@@ -82,10 +82,11 @@ private val DarkColors = darkColorScheme(
     onError = Color(0xFF000000), // Pure Black
 )
 
-fun main() {
+fun main(args: Array<String>) {
     System.setProperty("apple.awt.application.appearance", "system")
     System.setProperty("apple.laf.useScreenMenuBar", "true")
     DesktopOpenFileEvents.install()
+    DesktopOpenFileEvents.acceptArgs(args.toList())
 
     application {
         val jsPackStore = remember { JsPackStore.desktopDefault() }
@@ -215,6 +216,14 @@ fun main() {
             },
         ) {
             DisposableEffect(window) {
+                DesktopOpenFileEvents.onBringToFront = {
+                    windowState.isMinimized = false
+                    if ((window.extendedState and java.awt.Frame.ICONIFIED) != 0) {
+                        window.extendedState = window.extendedState and java.awt.Frame.ICONIFIED.inv()
+                    }
+                    window.toFront()
+                    window.requestFocus()
+                }
                 val listener = object : java.awt.event.WindowAdapter() {
                     override fun windowIconified(e: java.awt.event.WindowEvent?) {
                         com.comics8.desktop.ui.util.DesktopImageCache.trimMemory()
@@ -222,6 +231,7 @@ fun main() {
                 }
                 window.addWindowListener(listener)
                 onDispose {
+                    DesktopOpenFileEvents.onBringToFront = null
                     window.removeWindowListener(listener)
                 }
             }
