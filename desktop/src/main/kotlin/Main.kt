@@ -214,6 +214,18 @@ fun main() {
                 } else false
             },
         ) {
+            DisposableEffect(window) {
+                val listener = object : java.awt.event.WindowAdapter() {
+                    override fun windowIconified(e: java.awt.event.WindowEvent?) {
+                        com.comics8.desktop.ui.util.DesktopImageCache.trimMemory()
+                    }
+                }
+                window.addWindowListener(listener)
+                onDispose {
+                    window.removeWindowListener(listener)
+                }
+            }
+
             MaterialTheme(colorScheme = DarkColors) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),

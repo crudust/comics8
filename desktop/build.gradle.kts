@@ -32,6 +32,13 @@ dependencies {
 compose.desktop {
     application {
         mainClass = "com.comics8.desktop.MainKt"
+        jvmArgs += listOf(
+            "-Xmx512m",
+            "-XX:+UseG1GC",
+            "-XX:G1PeriodicGCInterval=3000",
+            "-XX:MinHeapFreeRatio=20",
+            "-XX:MaxHeapFreeRatio=40",
+        )
         nativeDistributions {
             modules(
                 "java.sql",
