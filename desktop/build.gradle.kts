@@ -32,6 +32,13 @@ dependencies {
 compose.desktop {
     application {
         mainClass = "com.comics8.desktop.MainKt"
+        jvmArgs += listOf(
+            "-Xmx512m",
+            "-XX:+UseG1GC",
+            "-XX:G1PeriodicGCInterval=3000",
+            "-XX:MinHeapFreeRatio=20",
+            "-XX:MaxHeapFreeRatio=40",
+        )
         nativeDistributions {
             modules(
                 "java.sql",
@@ -43,7 +50,7 @@ compose.desktop {
                 "jdk.unsupported",
             )
             packageName = "Comics8"
-            packageVersion = "1.2.33"
+            packageVersion = "1.2.34"
             description = "Comics8 Monitor Desktop"
             macOS {
                 bundleID = "com.comics8.desktop"

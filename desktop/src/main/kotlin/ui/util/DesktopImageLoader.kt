@@ -150,11 +150,20 @@ internal fun decodeAvifToSkiaImage(bytes: ByteArray): Image? {
 }
 
 object DesktopImageCache {
-    private const val MEMORY_MAX_BYTES = 304L * 1024L * 1024L
+    private const val MEMORY_MAX_BYTES = 160L * 1024L * 1024L
     private const val DISPLAY_LONG_EDGE = 2048
+    private const val THUMBNAIL_LONG_EDGE = 480
     private const val DISK_HARD_LIMIT_BYTES = 500L * 1024 * 1024
     private const val DISK_TARGET_BYTES = 400L * 1024 * 1024
     private val pipelineSlots = Semaphore(3)
+
+    private val cropRectCache = java.util.concurrent.ConcurrentHashMap<Pair<String, ImageHalf>, CropRect>()
+
+    fun getCropRect(key: Pair<String, ImageHalf>): CropRect? = cropRectCache[key]
+    fun putCropRect(key: Pair<String, ImageHalf>, rect: CropRect) {
+        if (cropRectCache.size > 200) cropRectCache.clear()
+        cropRectCache[key] = rect
+    }
 
     private val memoryLock = Any()
     private data class CachedBitmap(val bitmap: ImageBitmap, val sizeBytes: Long)
@@ -275,6 +284,7 @@ object DesktopImageCache {
         synchronized(memoryLock) {
             memoryCaches.values.forEach(MemoryBucket::clear)
         }
+        cropRectCache.clear()
     }
 
     fun clear(role: ImageCacheRole) {
@@ -291,6 +301,16 @@ object DesktopImageCache {
             matching
         }
         pending.forEach { it.cancel() }
+        if (role == ImageCacheRole.READER) {
+            cropRectCache.clear()
+            System.gc()
+        }
+    }
+
+    fun trimMemory() {
+        clear(ImageCacheRole.READER)
+        cropRectCache.clear()
+        System.gc()
     }
 
     internal fun readImageBytes(url: String, forceRetry: Boolean = false): ByteArray? {
@@ -424,6 +444,10 @@ object DesktopImageCache {
 
             val generation = roleGenerations[role.ordinal]
             val requestId = requestIds.incrementAndGet()
+            val maxLongEdge = when (role) {
+                ImageCacheRole.GRID, ImageCacheRole.EPISODE -> THUMBNAIL_LONG_EDGE
+                ImageCacheRole.READER -> DISPLAY_LONG_EDGE
+            }
             val def = loadScope.async(start = CoroutineStart.LAZY) {
                 try {
                     if (!isActive) return@async null
@@ -431,7 +455,7 @@ object DesktopImageCache {
                         if (!isActive) return@async null
                         val bytes = readImageBytes(url, forceRetry = forceRetry)
                         if (bytes != null && bytes.isNotEmpty()) {
-                            val bitmap = decodeForDisplay(bytes)
+                            val bitmap = decodeForDisplay(bytes, maxLongEdge)
                             if (bitmap != null) {
                                 synchronized(inFlightLock) {
                                     if (roleGenerations[role.ordinal] == generation && isActive) {
@@ -475,17 +499,17 @@ object DesktopImageCache {
     }
 
 
-    private fun decodeForDisplay(bytes: ByteArray): ImageBitmap? {
+    internal fun decodeForDisplay(bytes: ByteArray, maxLongEdge: Int = DISPLAY_LONG_EDGE): ImageBitmap? {
         return try {
             val src = decodeToSkiaImage(bytes) ?: return null
             src.use {
                 val w = src.width.coerceAtLeast(1)
                 val h = src.height.coerceAtLeast(1)
                 val longEdge = maxOf(w, h)
-                if (longEdge <= DISPLAY_LONG_EDGE) {
+                if (longEdge <= maxLongEdge) {
                     return src.toComposeImageBitmap()
                 }
-                val scale = DISPLAY_LONG_EDGE.toFloat() / longEdge
+                val scale = maxLongEdge.toFloat() / longEdge
                 val tw = (w * scale).toInt().coerceAtLeast(1)
                 val th = (h * scale).toInt().coerceAtLeast(1)
                 return Surface.makeRasterN32Premul(tw, th).use { surface ->
@@ -600,8 +624,12 @@ fun DesktopAsyncImage(
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
-                val cropRect = remember(currentBitmap, half) {
-                    try {
+                val cropRect = remember(currentBitmap, half, url) {
+                    val cacheKey = url to half
+                    if (url.isNotBlank()) {
+                        DesktopImageCache.getCropRect(cacheKey)?.let { return@remember it }
+                    }
+                    val calculated = try {
                         val awtImage = currentBitmap.toAwtImage()
                         val w = awtImage.width
                         val h = awtImage.height
@@ -625,6 +653,10 @@ fun DesktopAsyncImage(
                         val regionRight = if (half == ImageHalf.LEFT) w / 2 else w
                         CropRect(regionLeft, 0, regionRight, h)
                     }
+                    if (url.isNotBlank()) {
+                        DesktopImageCache.putCropRect(cacheKey, calculated)
+                    }
+                    calculated
                 }
 
                 androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {

@@ -38,6 +38,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -123,6 +124,9 @@ fun BrowsePane(
                             gridState.scrollToItem(0)
                         }
                     }
+                    val distinctItems = remember(state.items) {
+                        state.items.distinctBy { it.listingKey() }
+                    }
                     LazyVerticalGrid(
                         columns = GridCells.Adaptive(minSize = 160.dp),
                         state = gridState,
@@ -131,7 +135,7 @@ fun BrowsePane(
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                     ) {
-                        items(state.items.distinctBy { it.listingKey() }, key = { it.listingKey() }) { item ->
+                        items(distinctItems, key = { it.listingKey() }) { item ->
                             ToonCard(
                                 item = item,
                                 onClick = { viewModel.onListingOpen(item) },
