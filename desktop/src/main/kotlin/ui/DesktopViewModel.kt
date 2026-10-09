@@ -55,6 +55,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.cancel
 import java.io.File
+import java.nio.file.Files
 
 import com.comics8.core.i18n.AppLanguage
 import java.util.prefs.Preferences
@@ -2140,12 +2141,21 @@ class DesktopViewModel(
     }
 
     fun openExternalArchive(file: File) {
-        val target = file.toPath().toAbsolutePath().normalize().toFile()
+        val target = try {
+            file.toPath().toAbsolutePath().normalize().toFile()
+        } catch (_: Exception) {
+            file.absoluteFile
+        }
         val resolved = ExternalTargetResolver.resolve(target)
         if (resolved == null) {
+            val exists = target.exists() || try {
+                Files.exists(target.toPath())
+            } catch (_: Exception) {
+                false
+            }
             _state.update {
                 it.copy(
-                    sourceError = if (!target.exists()) {
+                    sourceError = if (!exists) {
                         "파일 또는 폴더를 찾을 수 없습니다:\n${target.path}"
                     } else {
                         "지원하는 만화 파일(ZIP, CBZ)이나 이미지를 찾을 수 없습니다:\n${target.name}"
@@ -2281,7 +2291,8 @@ class DesktopViewModel(
                     )
                 }
 
-                val targetPage = ReaderDomain.initialImagePage(episode.lastReadPage, images.size) ?: 0
+                val effectivePage = _state.value.currentEpisode?.lastReadPage ?: episode.lastReadPage
+                val targetPage = ReaderDomain.initialImagePage(effectivePage, images.size) ?: 0
                 val preloadUrls = images.subList(
                     (targetPage - 1).coerceAtLeast(0),
                     (targetPage + 3).coerceAtMost(images.size),

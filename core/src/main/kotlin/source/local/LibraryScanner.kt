@@ -1,6 +1,7 @@
 package com.comics8.core.source.local
 
 import java.io.File
+import java.nio.file.Files
 
 enum class LocalWorkKind { ZIP, DIR, SERIES }
 
@@ -39,16 +40,16 @@ class LibraryScanner {
     fun scan(roots: Iterable<File>): List<ScannedWork> = roots.flatMap { scan(it) }
 
     fun scan(root: File): List<ScannedWork> {
-        if (!root.isDirectory) return emptyList()
+        if (!isDirectory(root)) return emptyList()
         val children = listed(root) ?: return emptyList()
         val works = ArrayList<ScannedWork>()
         for (child in children.sortedWith(compareBy(NaturalSort) { it.name })) {
             if (ZipImageNames.isJunkName(child.name)) continue
-            if (child.isFile && ZipImageNames.isZipName(child.name)) {
+            if (isRegularFile(child) && ZipImageNames.isZipName(child.name)) {
                 works += zipWork(child)
                 continue
             }
-            if (child.isDirectory) {
+            if (isDirectory(child)) {
                 classifyFolder(child)?.let { works += it }
             }
         }
@@ -58,15 +59,15 @@ class LibraryScanner {
     fun listFolderImages(dir: File): List<File> {
         val files = listed(dir) ?: return emptyList()
         return files
-            .filter { it.isFile && ZipImageNames.isImageEntry(it.name) }
+            .filter { isRegularFile(it) && ZipImageNames.isImageEntry(it.name) }
             .sortedWith(compareBy(NaturalSort) { it.name })
     }
 
     private fun classifyFolder(dir: File): ScannedWork? {
         val children = listed(dir) ?: return null
         val visible = children.filterNot { ZipImageNames.isJunkName(it.name) }
-        val zips = visible.filter { it.isFile && ZipImageNames.isZipName(it.name) }
-        val imageFolders = visible.filter { it.isDirectory && hasDirectImages(it) }
+        val zips = visible.filter { isRegularFile(it) && ZipImageNames.isZipName(it.name) }
+        val imageFolders = visible.filter { isDirectory(it) && hasDirectImages(it) }
         if (zips.isNotEmpty() || imageFolders.isNotEmpty()) {
             val episodes = ArrayList<ScannedEpisode>(zips.size + imageFolders.size)
             for (zip in zips) episodes += zipEpisode(zip)
@@ -124,10 +125,28 @@ class LibraryScanner {
 
     private fun hasDirectImages(dir: File): Boolean {
         val files = listed(dir) ?: return false
-        return files.any { it.isFile && ZipImageNames.isImageEntry(it.name) }
+        return files.any { isRegularFile(it) && ZipImageNames.isImageEntry(it.name) }
     }
 
     private fun listed(dir: File): Array<File>? = dir.listFiles()
+
+    private fun isRegularFile(file: File): Boolean {
+        if (file.isFile) return true
+        return try {
+            Files.isRegularFile(file.toPath())
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun isDirectory(file: File): Boolean {
+        if (file.isDirectory) return true
+        return try {
+            Files.isDirectory(file.toPath())
+        } catch (_: Exception) {
+            false
+        }
+    }
 
     private fun stem(name: String): String {
         val dot = name.lastIndexOf('.')

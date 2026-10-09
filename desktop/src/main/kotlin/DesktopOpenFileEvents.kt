@@ -14,6 +14,14 @@ internal object DesktopOpenFileEvents {
     private var listener: ((File) -> Unit)? = null
     var onBringToFront: (() -> Unit)? = null
 
+    internal fun resetForTest() {
+        synchronized(lock) {
+            pending.clear()
+            listener = null
+            onBringToFront = null
+        }
+    }
+
     fun install() {
         if (!Desktop.isDesktopSupported()) return
         val desktop = Desktop.getDesktop()
@@ -49,7 +57,7 @@ internal object DesktopOpenFileEvents {
         if (args.isEmpty()) return
         val files = args.mapNotNull { arg ->
             val trimmed = arg.trim()
-            if (trimmed.isEmpty()) null else parsePathOrUri(trimmed)
+            if (trimmed.isEmpty() || trimmed.startsWith("-")) null else parsePathOrUri(trimmed)
         }
         if (files.isNotEmpty()) {
             accept(files)
@@ -87,7 +95,9 @@ internal object DesktopOpenFileEvents {
             return try {
                 File(URI(trimmed).path)
             } catch (_: Exception) {
-                val pathOnly = trimmed.removePrefix("file://")
+                val pathOnly = trimmed
+                    .removePrefix("file://localhost")
+                    .removePrefix("file://")
                 decodeUrlPath(pathOnly)
             }
         }
@@ -108,18 +118,49 @@ internal object DesktopOpenFileEvents {
 
         // 1. Primary candidate: /Volumes/<share>/<rel>
         val directMount = File("/Volumes/$share/$rel")
-        if (directMount.exists()) return directMount
+        if (isPathExisting(directMount)) return directMount
+
+        val volumesDir = File("/Volumes")
+        val volumeChildren = volumesDir.listFiles() ?: emptyArray()
+
+        // 1-1. Suffix variations: /Volumes/<share>-1/<rel>, /Volumes/<share>-2/<rel>...
+        val sharePrefixed = volumeChildren.filter {
+            it.name.startsWith(share, ignoreCase = true) && it.name != share
+        }
+        for (vol in sharePrefixed) {
+            val candidate = if (rel.isEmpty()) vol else File(vol, rel)
+            if (isPathExisting(candidate)) return candidate
+        }
 
         // 2. Candidate: volume mounted by file name, e.g. /Volumes/<fileName>
         val fileName = File(decoded).name
         val volumeMount = File("/Volumes/$fileName")
-        if (volumeMount.exists()) {
+        if (isPathExisting(volumeMount)) {
             val inner = File(volumeMount, fileName)
-            if (inner.exists()) return inner
+            if (isPathExisting(inner)) return inner
             return volumeMount
         }
 
+        // 2-1. Suffix variations: /Volumes/<fileName>-1, /Volumes/<fileName>-2...
+        val filePrefixed = volumeChildren.filter {
+            it.name.startsWith(fileName, ignoreCase = true) && it.name != fileName
+        }
+        for (vol in filePrefixed) {
+            val inner = File(vol, fileName)
+            if (isPathExisting(inner)) return inner
+            if (isPathExisting(vol)) return vol
+        }
+
         return directMount
+    }
+
+    private fun isPathExisting(file: File): Boolean {
+        if (file.exists()) return true
+        return try {
+            java.nio.file.Files.exists(file.toPath())
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun decodeUrlPath(path: String): File {

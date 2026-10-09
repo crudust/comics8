@@ -1,6 +1,5 @@
 package com.comics8.desktop
 
-import com.comics8.core.source.local.LibraryScanner
 import com.comics8.core.source.local.ZipImageNames
 import java.io.File
 import java.net.URLDecoder
@@ -32,8 +31,17 @@ internal object ExternalTargetResolver {
         }
     }
 
+    private fun hasDirectImages(dir: File): Boolean {
+        val files = dir.listFiles() ?: return false
+        return files.any { it.isAnyRegularFile() && ZipImageNames.isImageEntry(it.name) }
+    }
+
     fun resolve(target: File): Target? {
-        val normalized = target.toPath().toAbsolutePath().normalize().toFile()
+        val normalized = try {
+            target.toPath().toAbsolutePath().normalize().toFile()
+        } catch (_: Exception) {
+            target.absoluteFile
+        }
         val exists = normalized.exists() || try {
             Files.exists(normalized.toPath())
         } catch (_: Exception) {
@@ -96,14 +104,13 @@ internal object ExternalTargetResolver {
             }
 
             // 4. Direct images inside directory
-            val directImages = LibraryScanner().listFolderImages(normalized)
-            if (directImages.isNotEmpty()) {
+            if (hasDirectImages(normalized)) {
                 return Target.Folder(normalized)
             }
 
             // 5. Subfolder containing images
             val subdirs = children.filter { it.isAnyDirectory() && !ZipImageNames.isJunkName(it.name) }
-            val subWithImages = subdirs.firstOrNull { LibraryScanner().listFolderImages(it).isNotEmpty() }
+            val subWithImages = subdirs.firstOrNull { hasDirectImages(it) }
             if (subWithImages != null) {
                 return Target.Folder(subWithImages)
             }

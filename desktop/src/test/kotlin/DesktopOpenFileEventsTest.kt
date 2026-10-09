@@ -1,11 +1,23 @@
 package com.comics8.desktop
 
 import com.google.common.truth.Truth.assertThat
+import org.junit.After
+import org.junit.Before
 import org.junit.Test
 import java.io.File
 import java.net.URI
 
 class DesktopOpenFileEventsTest {
+    @Before
+    fun setUp() {
+        DesktopOpenFileEvents.resetForTest()
+    }
+
+    @After
+    fun tearDown() {
+        DesktopOpenFileEvents.resetForTest()
+    }
+
     @Test
     fun queuesFilesUntilReaderIsReady() {
         val file = File("/tmp/pending.cbz")
@@ -41,13 +53,19 @@ class DesktopOpenFileEventsTest {
     }
 
     @Test
-    fun acceptArgsForwardsValidPaths() {
+    fun acceptArgsForwardsValidPathsAndIgnoresFlags() {
         val opened = mutableListOf<File>()
         DesktopOpenFileEvents.listen(opened::add).use {
-            DesktopOpenFileEvents.acceptArgs(listOf("  /tmp/first.zip  ", "", "file:///tmp/second.cbz"))
+            DesktopOpenFileEvents.acceptArgs(listOf("-psn_0_123456", "--option", "  /tmp/first.zip  ", "", "file:///tmp/second.cbz"))
         }
 
         assertThat(opened.map(File::getPath)).containsExactly("/tmp/first.zip", "/tmp/second.cbz")
+    }
+
+    @Test
+    fun parsesFileUriWithLocalhost() {
+        val path = DesktopOpenFileEvents.parsePathOrUri("file://localhost/tmp/hello.zip")
+        assertThat(path.path).isEqualTo("/tmp/hello.zip")
     }
 
     @Test
