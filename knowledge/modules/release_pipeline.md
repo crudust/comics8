@@ -4,6 +4,7 @@
 
 - **Single Release Authority (Linux Server)**:
   - All official releases MUST be initiated from the Linux development server using `./scripts/deploy-release.sh [versionName] [versionCode] [releaseNotes]`.
+  - Release notes MUST be written in English for multi-language client compatibility. If omitted, the deployment script automatically derives English release notes from Git commit history since the previous release tag (falling back to "Bug fixes and performance improvements").
   - Never run standalone release tags directly from local dev clones without going through the canonical deployment script.
 - **macOS CI Builder Topology (GitHub Actions)**:
   - macOS packaging is performed autonomously in cloud CI via `.github/workflows/release.yml` on `macos-latest`.

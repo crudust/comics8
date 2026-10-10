@@ -159,13 +159,13 @@ async def version_check():
             "versionCode": 1,
             "versionName": "1.0.0",
             "downloadUrl": "/api/comics8/download/comics8-latest.apk",
-            "releaseNotes": "초기 릴리즈",
+            "releaseNotes": "Initial release",
         },
         "desktop": {
             "versionCode": 1,
             "versionName": "1.0.0",
             "downloadUrl": "/api/comics8/download/Comics8-mac.zip",
-            "releaseNotes": "초기 릴리즈",
+            "releaseNotes": "Initial release",
             "windowsDownloadUrl": "/api/comics8/download/Comics8-win.zip",
         },
     }

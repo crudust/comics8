@@ -67,8 +67,9 @@ Mac 코딩 클론에서:
 Linux에서 `./scripts/deploy-release.sh`를 실행하면 APK와 Windows Zip을 빌드하고, 버전을 올린 뒤 `crudust/comics8` 오픈소스 레포와 GitHub Releases에 자동 배포합니다:
 ```bash
 ./scripts/deploy-release.sh [versionName] [versionCode] [releaseNotes]
-# 예시:
-./scripts/deploy-release.sh 1.5.64 90 "성능 개선 및 안정화"
+# 예시 (릴리즈 노트는 다국어 지원을 위해 영문으로 작성):
+./scripts/deploy-release.sh 1.5.64 90 "Performance improvements and bug fixes"
+# (releaseNotes 인수를 생략하면 이전 태그 이후의 Git 커밋 히스토리로부터 영문 릴리즈 노트가 자동 생성됩니다)
 ```
 - **Android APK**: `crudust/comics8` GitHub Releases에 `comics8-latest.apk`로 자동 업로드
 - **Windows Zip**: `Comics8-win.zip` 자동 업로드

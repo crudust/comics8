@@ -64,7 +64,24 @@ fi
 
 VERSION_NAME="${NON_FLAG_ARGS[0]:-1.0.0}"
 VERSION_CODE="${NON_FLAG_ARGS[1]:-1}"
-RELEASE_NOTES="${NON_FLAG_ARGS[2]:-버그 수정 및 성능 개선}"
+if [[ -n "${NON_FLAG_ARGS[2]:-}" ]]; then
+    RELEASE_NOTES="${NON_FLAG_ARGS[2]}"
+else
+    # Auto-generate English release notes from commit history since previous tag
+    PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+    AUTO_NOTES=""
+    if [[ -n "${PREV_TAG}" ]]; then
+        AUTO_NOTES=$(git log "${PREV_TAG}..HEAD" --oneline --no-merges \
+            --grep="^chore: Bump version" --invert-grep \
+            --grep="^sync:" --invert-grep \
+            --format="- %s" 2>/dev/null || echo "")
+    fi
+    if [[ -n "${AUTO_NOTES}" ]]; then
+        RELEASE_NOTES="${AUTO_NOTES}"
+    else
+        RELEASE_NOTES="Bug fixes and performance improvements"
+    fi
+fi
 PUBLIC_REPO="${COMICS8_PUBLIC_REPO_URL:-git@github.com:crudust/comics8.git}"
 
 if [[ "$TARGET" != "desktop" ]]; then
@@ -288,11 +305,11 @@ for r_tag in $ALL_RELEASES; do
 done
 
 echo "=================================================="
-echo "🎉 배포가 성공적으로 완료되었습니다! (Target: ${TARGET})"
+echo "🎉 Release deployed successfully! (Target: ${TARGET})"
 echo "• GitHub Release: https://github.com/crudust/comics8/releases/tag/${TAG_NAME}"
 if [[ "$TARGET" != "desktop" ]]; then
     echo "• Android APK:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/comics8-latest.apk"
-    echo "• Play Store AAB: ${AAB_PATH} (로컬 보관, 비공개 Play Console 전용)"
+    echo "• Play Store AAB: ${AAB_PATH} (Local archive, private Play Console only)"
 fi
 if [[ "$TARGET" != "android" ]]; then
     echo "• Windows Zip:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/Comics8-win.zip"
