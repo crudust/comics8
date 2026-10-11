@@ -84,13 +84,24 @@ else
 fi
 PUBLIC_REPO="${COMICS8_PUBLIC_REPO_URL:-git@github.com:crudust/comics8.git}"
 
+REMOTE_BUILD_HOST="${COMICS8_BUILD_HOST:-crudust@192.168.0.154}"
+REMOTE_BUILD_DIR="${COMICS8_BUILD_DIR:-/home/crudust/projects/comics8}"
+NEED_REMOTE_BUILD=false
+
 if [[ "$TARGET" != "desktop" ]]; then
-    if [[ -z "${ANDROID_SDK_ROOT:-}" || ! -d "${ANDROID_SDK_ROOT}" ]]; then
-        echo "❌ ANDROID_SDK_ROOT is not set"
-        exit 1
+    if [[ -z "${ANDROID_SDK_ROOT:-}" || ! -d "${ANDROID_SDK_ROOT}" ]] || ! ./gradlew -q :app:validateReleaseSigning >/dev/null 2>&1; then
+        NEED_REMOTE_BUILD=true
     fi
-    # Fail before editing version files when release signing is unavailable or invalid.
-    ./gradlew -q :app:validateReleaseSigning
+
+    if [[ "$NEED_REMOTE_BUILD" == "true" ]]; then
+        echo "📡 Local Android SDK/signing not available. Checking remote Linux build server (${REMOTE_BUILD_HOST})..."
+        if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=3 "${REMOTE_BUILD_HOST}" "test -d ${REMOTE_BUILD_DIR}" >/dev/null 2>&1; then
+            echo "  ✅ Connected to remote build server (${REMOTE_BUILD_HOST}). Android build will be delegated."
+        else
+            echo "❌ ANDROID_SDK_ROOT is not set locally and remote build server (${REMOTE_BUILD_HOST}) is unreachable."
+            exit 1
+        fi
+    fi
 else
     echo "ℹ️ Target is desktop-only: skipping Android SDK and signing validation."
 fi
@@ -133,6 +144,43 @@ APK_PATH="app/build/outputs/apk/standalone/release/app-standalone-release.apk"
 AAB_PATH="app/build/outputs/bundle/playRelease/app-play-release.aab"
 WIN_ZIP_PATH="desktop/build/compose/binaries/main/Comics8-win.zip"
 
+build_android() {
+    if [[ "$NEED_REMOTE_BUILD" == "true" ]]; then
+        echo "📡 Flushing Mutagen sync before remote build..."
+        if command -v mutagen >/dev/null 2>&1; then
+            mutagen sync flush comics8 2>/dev/null || true
+        fi
+        echo "🚀 Running Android build on remote host (${REMOTE_BUILD_HOST})..."
+        ssh "${REMOTE_BUILD_HOST}" "bash -lc '
+            cd \"${REMOTE_BUILD_DIR}\" && \
+            set -a && \
+            if [ -f ~/.comics8-deploy.env ]; then source ~/.comics8-deploy.env; fi && \
+            set +a && \
+            export JAVA_HOME=\"\${JAVA_HOME:-/usr/lib/jvm/java-17-openjdk-amd64}\" && \
+            export ANDROID_HOME=\"\${ANDROID_HOME:-\$HOME/android-sdk}\" && \
+            export ANDROID_SDK_ROOT=\"\${ANDROID_SDK_ROOT:-\$HOME/android-sdk}\" && \
+            export PATH=\"\$JAVA_HOME/bin:\$ANDROID_SDK_ROOT/platform-tools:\$PATH\" && \
+            ./gradlew assembleStandaloneRelease bundlePlayRelease
+        '"
+
+        echo "📥 Fetching built APK & AAB from remote host..."
+        mkdir -p "$(dirname "$APK_PATH")" "$(dirname "$AAB_PATH")"
+        scp "${REMOTE_BUILD_HOST}:${REMOTE_BUILD_DIR}/${APK_PATH}" "${APK_PATH}"
+        scp "${REMOTE_BUILD_HOST}:${REMOTE_BUILD_DIR}/${AAB_PATH}" "${AAB_PATH}"
+    else
+        ./gradlew assembleStandaloneRelease bundlePlayRelease
+    fi
+
+    if [ ! -f "$APK_PATH" ]; then
+        echo "❌ APK file not found: $APK_PATH"
+        exit 1
+    fi
+    if [ ! -f "$AAB_PATH" ]; then
+        echo "❌ AAB file not found: $AAB_PATH"
+        exit 1
+    fi
+}
+
 case "$TARGET" in
     desktop)
         echo "📦 2/5: Building Windows Portable Zip (Desktop only)..."
@@ -144,29 +192,14 @@ case "$TARGET" in
         ;;
     android)
         echo "📦 2/5: Building Android Release APK & AAB (Android only)..."
-        ./gradlew assembleStandaloneRelease bundlePlayRelease
-        if [ ! -f "$APK_PATH" ]; then
-            echo "❌ APK file not found: $APK_PATH"
-            exit 1
-        fi
-        if [ ! -f "$AAB_PATH" ]; then
-            echo "❌ AAB file not found: $AAB_PATH"
-            exit 1
-        fi
+        build_android
         ;;
     all|*)
         echo "📦 2/5: Building Android Release APK & AAB (Windows & Mac are built via GitHub Actions)..."
-        ./gradlew assembleStandaloneRelease bundlePlayRelease
-        if [ ! -f "$APK_PATH" ]; then
-            echo "❌ APK file not found: $APK_PATH"
-            exit 1
-        fi
-        if [ ! -f "$AAB_PATH" ]; then
-            echo "❌ AAB file not found: $AAB_PATH"
-            exit 1
-        fi
+        build_android
         ;;
 esac
+
 
 # 3. Commit version bump in dev repo
 echo "📝 3/5: Committing version bump to dev repo..."
