@@ -145,7 +145,6 @@ AAB_PATH="app/build/outputs/bundle/playRelease/app-play-release.aab"
 DIST_DIR="dist"
 DIST_APK="${DIST_DIR}/comics8-v${VERSION_NAME}.apk"
 DIST_AAB="${DIST_DIR}/comics8-v${VERSION_NAME}.aab"
-DIST_LATEST_APK="${DIST_DIR}/comics8-latest.apk"
 
 build_android() {
     if [[ "$NEED_REMOTE_BUILD" == "true" ]]; then
@@ -187,7 +186,6 @@ build_android() {
     mkdir -p "${DIST_DIR}"
     cp "${APK_PATH}" "${DIST_APK}"
     cp "${AAB_PATH}" "${DIST_AAB}"
-    cp "${APK_PATH}" "${DIST_LATEST_APK}"
     echo "  📦 Release artifacts collected in ${DIST_DIR}/:"
     echo "     - ${DIST_APK}"
     echo "     - ${DIST_AAB}"
@@ -226,8 +224,8 @@ SERVER_VERSION_FILE="${COMICS8_SERVER_VERSION_FILE:-/home/crudust/projects/comic
 
 echo "📡 5/5: Uploading to Sync Server ($SERVER_HOST)..."
 if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=3 "${SERVER_USER}@${SERVER_HOST}" "mkdir -p ${SERVER_DOWNLOAD_DIR}" >/dev/null 2>&1; then
-    if [[ "$TARGET" != "desktop" && -f "$APK_PATH" ]]; then
-        scp "$DIST_LATEST_APK" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/comics8-latest.apk"
+    if [[ "$TARGET" != "desktop" && -f "$DIST_APK" ]]; then
+        scp "$DIST_APK" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/comics8-latest.apk"
     fi
 
     # Retrieve existing version.json to preserve non-targeted platform version
@@ -291,8 +289,11 @@ fi
 # 6. Publish to GitHub Releases (AAB is excluded from public release for security)
 echo "🐙 6/6: Publishing to GitHub Releases (crudust/comics8)..."
 RELEASE_FILES=()
-if [[ "$TARGET" != "desktop" && -f "$DIST_LATEST_APK" ]]; then
-    RELEASE_FILES+=("$DIST_LATEST_APK")
+if [[ "$TARGET" != "desktop" && -f "$DIST_APK" ]]; then
+    TMP_LATEST_APK="build/release/comics8-latest.apk"
+    mkdir -p "$(dirname "${TMP_LATEST_APK}")"
+    cp "${DIST_APK}" "${TMP_LATEST_APK}"
+    RELEASE_FILES+=("${TMP_LATEST_APK}")
 fi
 
 if gh release view "${TAG_NAME}" --repo crudust/comics8 >/dev/null 2>&1; then
