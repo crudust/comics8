@@ -108,7 +108,7 @@ fi
 
 echo "=================================================="
 echo "🚀 Comics8 Deploying Release v${VERSION_NAME} (code ${VERSION_CODE})"
-echo "Target: ${TARGET^^}"
+echo "Target: $(echo "$TARGET" | tr '[:lower:]' '[:upper:]')"
 echo "Notes: ${RELEASE_NOTES}"
 echo "=================================================="
 
