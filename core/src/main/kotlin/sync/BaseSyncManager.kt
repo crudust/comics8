@@ -553,4 +553,34 @@ open class BaseSyncManager(
         } catch (_: Exception) {
         }
     }
+
+    suspend fun resolveSource(wire: SourceResolveWire): SourceResolveResultWire? = withContext(Dispatchers.IO) {
+        val state = _syncState.value
+        val url = SyncConstants.catalogSourceResolveUrl(state.serverUrl)
+        try {
+            val payload = JSONObject().apply {
+                put("client_source_id", wire.clientSourceId)
+                put("origin_host", wire.originHost)
+                put("sample_toon_ids", org.json.JSONArray(wire.sampleToonIds.take(50)))
+                put("sample_titles", org.json.JSONArray(wire.sampleTitles.take(50)))
+            }
+            val reqBody = payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+            val req = Request.Builder()
+                .url(url)
+                .post(reqBody)
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext null
+                val json = JSONObject(resp.body?.string().orEmpty())
+                SourceResolveResultWire(
+                    canonicalSourceId = json.optString("canonical_source_id").ifBlank { wire.clientSourceId },
+                    status = json.optString("status", "UNKNOWN"),
+                    confidence = json.optDouble("confidence", 1.0),
+                    reason = json.optString("reason", ""),
+                )
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
 }

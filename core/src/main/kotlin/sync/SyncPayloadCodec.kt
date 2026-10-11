@@ -23,6 +23,20 @@ data class SyncCatalogWire(
     val updatedAt: Long = 0L,
 )
 
+data class SourceResolveWire(
+    val clientSourceId: String,
+    val originHost: String = "",
+    val sampleToonIds: List<String> = emptyList(),
+    val sampleTitles: List<String> = emptyList(),
+)
+
+data class SourceResolveResultWire(
+    val canonicalSourceId: String,
+    val status: String,
+    val confidence: Double,
+    val reason: String = "",
+)
+
 data class SyncPayload(
     val favorites: List<BackupFavoriteWire> = emptyList(),
     val history: List<BackupHistoryWire> = emptyList(),

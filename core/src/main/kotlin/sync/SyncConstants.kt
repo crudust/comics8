@@ -60,6 +60,8 @@ object SyncConstants {
 
     fun catalogReportUrl(serverUrl: String = DEFAULT_SERVER_URL): String = "${apiRoot(serverUrl)}/catalog/report"
 
+    fun catalogSourceResolveUrl(serverUrl: String = DEFAULT_SERVER_URL): String = "${apiRoot(serverUrl)}/catalog/source/resolve"
+
     fun versionUrl(serverUrl: String = DEFAULT_SERVER_URL): String = "${apiRoot(serverUrl)}/version"
 
     fun healthUrl(serverUrl: String = DEFAULT_SERVER_URL): String = "${apiRoot(serverUrl)}/health"
