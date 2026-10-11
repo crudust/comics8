@@ -8,6 +8,7 @@ import logging
 import re
 import secrets
 import time
+from urllib.parse import urlparse
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -23,6 +24,7 @@ from app.models import (
     PairingCode,
     Subscription,
     ToonCatalog,
+    ToonSource,
     User,
     UserFavorite,
     UserHistory,
@@ -1297,4 +1299,203 @@ async def report_catalog(
             await session.commit()
             return {"status": "ok", "updated": len(catalog_rows)}
     return {"status": "ok", "updated": 0}
+
+
+class SourceResolveRequest(BaseModel):
+    client_source_id: str = Field(..., max_length=255)
+    origin_host: str = Field(default="", max_length=255)
+    sample_toon_ids: list[str] = Field(default_factory=list)
+    sample_titles: list[str] = Field(default_factory=list)
+
+
+class SourceResolveResponse(BaseModel):
+    canonical_source_id: str
+    status: str  # "MATCHED_HOST", "MATCHED_IDS", "MATCHED_TITLE", "CREATED_NEW"
+    confidence: float
+    reason: str = ""
+
+
+def _detect_toon_id_pattern(sample_ids: list[str]) -> str:
+    if not sample_ids:
+        return ".*"
+    if all(re.match(r"^\d+$", i) for i in sample_ids):
+        return r"^\d+$"
+    if all(re.match(r"^artist:[^:]+$", i) for i in sample_ids):
+        return r"^artist:.+$"
+    if all(re.match(r"^[a-zA-Z0-9%_-]+$", i) for i in sample_ids):
+        return r"^[a-zA-Z0-9%_-]+$"
+    return ".*"
+
+
+_DEFAULT_SOURCE_SEEDS: dict[str, dict[str, Any]] = {
+    "eleven": {
+        "display_name": "11toon",
+        "primary_host": "11toon.com",
+        "known_hosts": [
+            "11toon.com",
+            "update.spotv24.com",
+            "spotv24.com",
+            "103.204.13.68",
+            "fu01.11toon24.com",
+            "update.11toon24.com",
+            "11toon24.com",
+            "11toon8.com",
+        ],
+        "id_pattern": r"^\d+$",
+    },
+    "hitomi": {
+        "display_name": "Hitomi",
+        "primary_host": "hitomi.la",
+        "known_hosts": ["hitomi.la"],
+        "id_pattern": r"^artist:.+$",
+    },
+    "rawkuma": {
+        "display_name": "Rawkuma",
+        "primary_host": "rawkuma.net",
+        "known_hosts": ["rawkuma.net"],
+        "id_pattern": r"^[a-zA-Z0-9%_-]+$",
+    },
+}
+
+
+async def resolve_source_identity(
+    session: AsyncSession,
+    req: SourceResolveRequest,
+) -> dict[str, Any]:
+    client_source_id = req.client_source_id.strip()
+    raw_host = (req.origin_host or "").strip().lower()
+    if "://" in raw_host:
+        try:
+            raw_host = urlparse(raw_host).hostname or raw_host
+        except Exception:
+            pass
+    raw_host = raw_host.strip("/")
+    # Strip port if present (e.g. "103.204.13.68:8904" -> "103.204.13.68")
+    origin_host = raw_host
+    origin_host_clean = origin_host.split(":")[0] if ":" in origin_host else origin_host
+    sample_ids = [str(x).strip() for x in req.sample_toon_ids[:100] if str(x).strip()]
+    sample_titles = [str(x).strip() for x in req.sample_titles[:100] if str(x).strip()]
+    now_ms = int(time.time() * 1000)
+
+    # Tier 1: Host / Mirror Match (O(1))
+    if origin_host:
+        # Check in-memory well-known seeds first
+        for seed_id, seed_data in _DEFAULT_SOURCE_SEEDS.items():
+            hosts = seed_data.get("known_hosts", [])
+            if seed_data.get("primary_host") in (origin_host, origin_host_clean) or origin_host in hosts or origin_host_clean in hosts:
+                return {
+                    "canonical_source_id": seed_id,
+                    "status": "MATCHED_HOST",
+                    "confidence": 1.0,
+                    "reason": f"도메인 '{origin_host}' 일치 (사전 등록 도메인)",
+                }
+
+        stmt = select(ToonSource)
+        res = await session.execute(stmt)
+        sources = res.scalars().all()
+        for src in sources:
+            hosts = src.known_hosts if isinstance(src.known_hosts, list) else []
+            if src.primary_host in (origin_host, origin_host_clean) or origin_host in hosts or origin_host_clean in hosts:
+                return {
+                    "canonical_source_id": src.id,
+                    "status": "MATCHED_HOST",
+                    "confidence": 1.0,
+                    "reason": f"도메인 '{origin_host}' 일치",
+                }
+
+    # Tier 2: Cumulative Toon ID Intersection (누적 카탈로그 대조)
+    if sample_ids:
+        stmt = (
+            select(ToonCatalog.source_id, func.count().label("cnt"))
+            .where(ToonCatalog.toon_id.in_(sample_ids))
+            .group_by(ToonCatalog.source_id)
+            .order_by(func.count().desc())
+            .limit(1)
+        )
+        res = await session.execute(stmt)
+        row = res.first()
+        if row:
+            matched_source, count = row[0], int(row[1])
+            threshold = max(2, int(len(sample_ids) * 0.15))
+            if count >= threshold:
+                # Self-healing domain tracking
+                if origin_host:
+                    src_stmt = select(ToonSource).where(ToonSource.id == matched_source)
+                    src_res = await session.execute(src_stmt)
+                    src = src_res.scalar_one_or_none()
+                    if src:
+                        hosts = list(src.known_hosts or [])
+                        if origin_host not in hosts:
+                            hosts.append(origin_host)
+                            src.known_hosts = hosts
+                            src.updated_at = now_ms
+                            await session.commit()
+
+                return {
+                    "canonical_source_id": matched_source,
+                    "status": "MATCHED_IDS",
+                    "confidence": round(count / len(sample_ids), 2),
+                    "reason": f"{len(sample_ids)}개 중 {count}개 ID 일치",
+                }
+
+    # Tier 3: Title Semantic Fallback (1달 뒤 50개가 전면 물갈이된 엣지 케이스)
+    if sample_titles:
+        clean_titles = [t.lower().replace(" ", "") for t in sample_titles[:50]]
+        clean_titles = [t for t in clean_titles if t]
+        if clean_titles:
+            title_stmt = (
+                select(UserHistory.source_id, func.count().label("cnt"))
+                .where(func.lower(func.replace(UserHistory.toon_title, " ", "")).in_(clean_titles))
+                .group_by(UserHistory.source_id)
+                .order_by(func.count().desc())
+                .limit(1)
+            )
+            title_res = await session.execute(title_stmt)
+            t_row = title_res.first()
+            if t_row and int(t_row[1]) >= 2:
+                matched_source = t_row[0]
+                return {
+                    "canonical_source_id": matched_source,
+                    "status": "MATCHED_TITLE",
+                    "confidence": 0.8,
+                    "reason": f"제목 {t_row[1]}개 일치 (물갈이 대응 Fallback)",
+                }
+
+    # Tier 4: New Source Creation (새로운 사이트)
+    clean_id = re.sub(r"[^a-zA-Z0-9._-]", "", client_source_id).strip() or "source"
+    check_stmt = select(ToonSource).where(ToonSource.id == clean_id)
+    exists = (await session.execute(check_stmt)).scalar_one_or_none()
+    new_id = clean_id if not exists else f"{clean_id}_{secrets.token_hex(3)}"
+
+    pattern = _detect_toon_id_pattern(sample_ids)
+    new_src = ToonSource(
+        id=new_id,
+        display_name=client_source_id,
+        primary_host=origin_host or None,
+        known_hosts=[origin_host] if origin_host else [],
+        id_pattern=pattern,
+        created_at=now_ms,
+        updated_at=now_ms,
+    )
+    session.add(new_src)
+    await session.commit()
+
+    return {
+        "canonical_source_id": new_id,
+        "status": "CREATED_NEW",
+        "confidence": 1.0,
+        "reason": "신규 소스 등록",
+    }
+
+
+@router.post("/catalog/source/resolve")
+@router.post("/api/comics8/catalog/source/resolve")
+async def resolve_catalog_source(
+    request: Request,
+    req: SourceResolveRequest,
+    session: AsyncSession = Depends(get_db),
+):
+    client_id = get_client_ip(request)
+    await check_catalog_rate_limit(client_id)
+    return await resolve_source_identity(session, req)
 

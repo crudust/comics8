@@ -155,18 +155,14 @@ case "$TARGET" in
         fi
         ;;
     all|*)
-        echo "📦 2/5: Building Android Release APK, AAB & Windows Portable Zip..."
-        ./gradlew assembleStandaloneRelease bundlePlayRelease :desktop:packageWindowsZip
+        echo "📦 2/5: Building Android Release APK & AAB (Windows & Mac are built via GitHub Actions)..."
+        ./gradlew assembleStandaloneRelease bundlePlayRelease
         if [ ! -f "$APK_PATH" ]; then
             echo "❌ APK file not found: $APK_PATH"
             exit 1
         fi
         if [ ! -f "$AAB_PATH" ]; then
             echo "❌ AAB file not found: $AAB_PATH"
-            exit 1
-        fi
-        if [ ! -f "$WIN_ZIP_PATH" ]; then
-            echo "❌ Windows Zip file not found: $WIN_ZIP_PATH"
             exit 1
         fi
         ;;
@@ -189,8 +185,8 @@ echo "🔄 4/5: Syncing open-source repository..."
 # 5. Upload binaries and version.json to Sync Server (if reachable)
 SERVER_HOST="${COMICS8_SERVER_HOST:-192.168.0.136}"
 SERVER_USER="${COMICS8_SERVER_USER:-crudust}"
-SERVER_DOWNLOAD_DIR="${COMICS8_SERVER_DOWNLOAD_DIR:-/home/crudust/comics8-sync/data/downloads}"
-SERVER_VERSION_FILE="${COMICS8_SERVER_VERSION_FILE:-/home/crudust/comics8-sync/data/version.json}"
+SERVER_DOWNLOAD_DIR="${COMICS8_SERVER_DOWNLOAD_DIR:-/home/crudust/projects/comics8/server/data/downloads}"
+SERVER_VERSION_FILE="${COMICS8_SERVER_VERSION_FILE:-/home/crudust/projects/comics8/server/data/version.json}"
 
 echo "📡 5/5: Uploading to Sync Server ($SERVER_HOST)..."
 if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=3 "${SERVER_USER}@${SERVER_HOST}" "mkdir -p ${SERVER_DOWNLOAD_DIR}" >/dev/null 2>&1; then
@@ -312,7 +308,7 @@ if [[ "$TARGET" != "desktop" ]]; then
     echo "• Play Store AAB: ${AAB_PATH} (Local archive, private Play Console only)"
 fi
 if [[ "$TARGET" != "android" ]]; then
-    echo "• Windows Zip:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/Comics8-win.zip"
+    echo "• Windows Zip:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/Comics8-win.zip (GitHub Actions)"
     echo "• Mac Desktop:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/Comics8-mac.zip (GitHub Actions)"
 fi
 echo "=================================================="

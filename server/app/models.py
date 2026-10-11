@@ -306,3 +306,15 @@ class ToonCatalog(Base):
         Index("idx_toon_catalog_updated", "updated_at"),
     )
 
+
+class ToonSource(Base):
+    __tablename__ = "toon_sources"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    display_name: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    primary_host: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
+    known_hosts: Mapped[list[Any]] = mapped_column(JSON, nullable=False, default=list)
+    id_pattern: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    updated_at: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+

@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     # Data & Storage directories
     DATA_DIR: str = os.getenv(
         "DATA_DIR",
-        os.path.expanduser("~/comics8-sync/data"),
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data"),
     )
     DOWNLOADS_DIR_NAME: str = "downloads"
     VERSION_FILE_NAME: str = "version.json"

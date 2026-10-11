@@ -21,9 +21,11 @@ import com.comics8.core.source.NotificationMode
 import com.comics8.core.source.ProgressDisplay
 import com.comics8.core.source.SearchQuery
 import com.comics8.core.source.SourceAccess
+import com.comics8.core.source.SourceBindingManager
 import com.comics8.core.source.SourceConfig
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
+import com.comics8.core.sync.SourceResolveWire
 import com.comics8.monitor.data.local.AppDatabase
 import com.comics8.monitor.data.local.FavoriteDao
 import com.comics8.monitor.data.local.FavoriteToon
@@ -77,7 +79,10 @@ class ToonRepository(
     private val isSourceEnabled: (String) -> Boolean = { false },
     private val installedIds: () -> Set<String> = { sources.knownIds() },
     private val toonCatalogDao: com.comics8.monitor.data.local.ToonCatalogDao? = database?.toonCatalogDao(),
+    val bindingManager: SourceBindingManager = SourceBindingManager.global,
 ) : AutoCloseable {
+    private val activeResolvingSources = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
     fun sourceRegistry(): SourceRegistry = sources
 
     suspend fun saveCatalogTotal(workId: WorkId, totalEpisodes: Int, updatedAt: Long = System.currentTimeMillis()) =
@@ -85,10 +90,11 @@ class ToonRepository(
             toonCatalogDao?.upsertMonotonic(workId, totalEpisodes, updatedAt)
             if (syncManager != null && totalEpisodes > 0 && sources.syncParticipates(workId.sourceId)) {
                 try {
+                    val cSid = bindingManager.getCanonicalSourceId(workId.sourceId)
                     syncManager.reportCatalog(
                         listOf(
                             SyncCatalogWire(
-                                sourceId = workId.sourceId,
+                                sourceId = cSid,
                                 toonId = workId.toonId,
                                 totalEpisodes = totalEpisodes,
                                 updatedAt = updatedAt,
@@ -236,15 +242,44 @@ class ToonRepository(
 
             val discoveredUpdates = java.util.Collections.synchronizedList(mutableListOf<SyncCatalogWire>())
 
+            // 0. Auto-Resolve Source Identity if not yet bound
+            val sampleItem = items.firstOrNull()
+            if (sampleItem != null && syncManager != null && !bindingManager.hasBinding(sampleItem.sourceId) && activeResolvingSources.add(sampleItem.sourceId)) {
+                try {
+                    val originHost = try { sources.getOrNull(sampleItem.sourceId)?.origin.orEmpty() } catch (_: Exception) { "" }
+                    val host = SourceRegistry.hostOf(originHost).orEmpty()
+                    val sampleIds = items.map { it.id }.take(50)
+                    val sampleTitles = items.map { it.title }.take(50)
+                    val res = syncManager.resolveSource(
+                        SourceResolveWire(
+                            clientSourceId = sampleItem.sourceId,
+                            originHost = host,
+                            sampleToonIds = sampleIds,
+                            sampleTitles = sampleTitles,
+                        )
+                    )
+                    if (res != null) {
+                        bindingManager.bind(sampleItem.sourceId, res.canonicalSourceId)
+                    }
+                } catch (_: Exception) {
+                } finally {
+                    activeResolvingSources.remove(sampleItem.sourceId)
+                }
+            }
+
             // 1. Server-First: Batch query global catalog for items missing from local DB
             val missingFromLocal = workIds.filter { (catalogTotals[it.storageKey()] ?: 0) == 0 }
             if (missingFromLocal.isNotEmpty() && syncManager != null) {
                 try {
-                    val remoteEntries = syncManager.fetchCatalogBatch(missingFromLocal)
+                    val canonicalQueries = missingFromLocal.map {
+                        val cSid = bindingManager.getCanonicalSourceId(it.sourceId)
+                        if (cSid != it.sourceId) WorkId(cSid, it.toonId) else it
+                    }
+                    val remoteEntries = syncManager.fetchCatalogBatch(canonicalQueries)
                     if (remoteEntries.isNotEmpty()) {
                         val catalogEntries = remoteEntries.map {
                             ToonCatalogEntry(
-                                sourceId = it.sourceId,
+                                sourceId = sampleItem?.sourceId ?: it.sourceId,
                                 id = it.toonId,
                                 totalEpisodes = it.totalEpisodes,
                                 updatedAt = it.updatedAt,
@@ -396,7 +431,11 @@ class ToonRepository(
             // 3. Instant crowdsource report to server
             if (discoveredUpdates.isNotEmpty() && syncManager != null) {
                 try {
-                    syncManager.reportCatalog(discoveredUpdates.toList())
+                    val canonicalUpdates = discoveredUpdates.map {
+                        val cSid = bindingManager.getCanonicalSourceId(it.sourceId)
+                        if (cSid != it.sourceId) it.copy(sourceId = cSid) else it
+                    }
+                    syncManager.reportCatalog(canonicalUpdates)
                 } catch (_: Exception) {
                 }
             }

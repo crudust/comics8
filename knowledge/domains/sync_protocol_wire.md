@@ -16,6 +16,9 @@ The Sync domain coordinates bidirectional state synchronization across multi-pla
     - `bookmarks`: Specific saved page bookmarks within chapters.
     - `settings`: Cross-device UI and reading preference flags.
     - `catalog`: Global crowdsourced monotonic episode count metadata.
+- **Source Resolution Protocol (`/catalog/source/resolve`)**:
+  - Maps arbitrary client JS source IDs to canonical server source clusters via a 4-tier pipeline: Host match (O(1)) -> Cumulative toon ID intersection (threshold >= 15%) with domain self-healing -> Title semantic fallback -> Isolated new source creation.
+  - Clients bind canonical source IDs locally via `SourceBindingManager` upon initial discovery to ensure zero ongoing overhead during batch catalog queries and reports.
 - **Conflict Resolution (Last-Write-Wins - LWW)**:
   - Every sync record carries an `updatedAt` millisecond timestamp.
   - Conflicts between local storage and server records are resolved by choosing the record with the higher `updatedAt`.

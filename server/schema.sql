@@ -181,3 +181,27 @@ CREATE TABLE IF NOT EXISTS toon_catalog (
 
 CREATE INDEX IF NOT EXISTS idx_toon_catalog_toon_id ON toon_catalog(toon_id);
 CREATE INDEX IF NOT EXISTS idx_toon_catalog_updated ON toon_catalog(updated_at DESC);
+
+-- -----------------------------------------------------------------------------
+-- 11. Toon Sources Table (Canonical source clusters and domain fingerprinting)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS toon_sources (
+    id TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL DEFAULT '',
+    primary_host TEXT,
+    known_hosts JSONB NOT NULL DEFAULT '[]'::jsonb,
+    id_pattern TEXT,
+    created_at BIGINT NOT NULL DEFAULT 0,
+    updated_at BIGINT NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_toon_sources_primary_host ON toon_sources(primary_host);
+
+-- Seed well-known sources and mirrors
+INSERT INTO toon_sources (id, display_name, primary_host, known_hosts, id_pattern)
+VALUES
+    ('eleven', '11toon', '11toon.com', '["11toon.com", "update.spotv24.com", "spotv24.com", "103.204.13.68", "fu01.11toon24.com", "update.11toon24.com", "11toon24.com", "11toon8.com"]'::jsonb, '^\d+$'),
+    ('hitomi', 'Hitomi', 'hitomi.la', '["hitomi.la"]'::jsonb, '^artist:.+$'),
+    ('rawkuma', 'Rawkuma', 'rawkuma.net', '["rawkuma.net"]'::jsonb, '^[a-zA-Z0-9%_-]+$')
+ON CONFLICT (id) DO UPDATE SET
+    known_hosts = EXCLUDED.known_hosts;
