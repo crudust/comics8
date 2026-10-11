@@ -37,17 +37,15 @@ Android는 에뮬레이터로 돌리지 않습니다. 폰은 인앱 업데이트
 ## 3. 주요 빌드 및 실행 명령어 (Build & Run Commands)
 
 ### 3.1. APK, AAB 및 Windows 포터블 단독 빌드
-정식 서명된 Release APK/AAB 및 Windows 무설치 포터블 Zip을 빌드할 때 사용합니다:
+### 3.1. APK 및 AAB 단독 빌드
+정식 서명된 Release APK/AAB를 빌드할 때 사용합니다:
 ```bash
-# GitHub / 자체 배포용 APK 및 Windows Zip
-./gradlew assembleStandaloneRelease :desktop:packageWindowsZip
-
-# Google Play 배포용 AAB
-./gradlew bundlePlayRelease
+# GitHub / 자체 배포용 APK 및 Google Play 배포용 AAB
+./gradlew assembleStandaloneRelease bundlePlayRelease
 ```
-- **출력 APK 경로**: `app/build/outputs/apk/standalone/release/app-standalone-release.apk`
-- **출력 AAB 경로**: `app/build/outputs/bundle/playRelease/app-play-release.aab`
-- **출력 Windows Zip 경로**: `desktop/build/compose/binaries/main/Comics8-win.zip`
+- **출력 APK 경로**: `dist/comics8-v{version}.apk` (또는 `app/build/outputs/apk/standalone/release/app-standalone-release.apk`)
+- **출력 AAB 경로**: `dist/comics8-v{version}.aab` (또는 `app/build/outputs/bundle/playRelease/app-play-release.aab`)
+- **Windows / Mac 데스크톱**: 태그 푸시 시 GitHub Actions에서 자동 빌드되어 GitHub Releases에 배포됩니다.
 
 ### 3.2. macOS 데스크톱 앱 실행 (개발용)
 Mac 코딩 클론에서:
@@ -57,25 +55,20 @@ Mac 코딩 클론에서:
 ./gradlew :desktop:run
 ```
 
-### 3.3. macOS 첫 설치 (`/Applications`)
-빌더 Mac에서 한 번:
-```bash
-./scripts/build-mac-local.sh
-```
-
-### 3.4. 릴리즈 배포
-Linux에서 `./scripts/deploy-release.sh`를 실행하면 APK와 Windows Zip을 빌드하고, 버전을 올린 뒤 `crudust/comics8` 오픈소스 레포와 GitHub Releases에 자동 배포합니다:
+### 3.3. 릴리즈 배포
+`./scripts/deploy-release.sh`를 실행하면 APK와 AAB를 빌드(로컬에 SDK/서명키 부재 시 Linux 빌드 서버 위임)하여 `dist/`에 모으고, 버전을 올린 뒤 `crudust/comics8` 오픈소스 레포와 GitHub Releases에 자동 배포합니다:
 ```bash
 ./scripts/deploy-release.sh [versionName] [versionCode] [releaseNotes]
 # 예시 (릴리즈 노트는 다국어 지원을 위해 영문으로 작성):
 ./scripts/deploy-release.sh 1.5.64 90 "Performance improvements and bug fixes"
 # (releaseNotes 인수를 생략하면 이전 태그 이후의 Git 커밋 히스토리로부터 영문 릴리즈 노트가 자동 생성됩니다)
 ```
-- **Android APK**: `crudust/comics8` GitHub Releases에 `comics8-latest.apk`로 자동 업로드
-- **Windows Zip**: `Comics8-win.zip` 자동 업로드
-- **macOS Desktop**: GitHub Actions (`macos-latest`) 또는 빌더 Mac을 통해 자동 빌드/업로드
-- **Android AAB**: `app/build/outputs/bundle/playRelease/app-play-release.aab`에 로컬 빌드 보관 (보안상 GitHub 미공개, Google Play Console 전용)
-- **Homebrew Cask**: `build/homebrew/comics8.rb` 자동 생성 (SHA256 포함)
+- **배포 아티팩트 보관 (`dist/`)**:
+  - `dist/comics8-v{version}.apk`: 독립형 Release APK
+  - `dist/comics8-v{version}.aab`: Google Play Console 전용 AAB (보안상 GitHub 미공개, 로컬 보관)
+- **GitHub Releases 자동 업로드**:
+  - **Android APK**: `crudust/comics8` GitHub Releases에 `comics8-latest.apk`로 자동 업로드
+  - **macOS Desktop / Windows Zip**: GitHub Actions (`release.yml`)가 태그 푸시를 감지해 자동 빌드 및 업로드
 - **릴리즈 보관 정책**: 최신 2개 버전만 유지하고 이전 릴리즈는 자동 정리 (용량 최적화)
 
 ---
@@ -109,10 +102,10 @@ Comics8/
 │   ├── docker-compose.yml      # postgres (5433) + backend (8905) 컨테이너
 │   ├── schema.sql              # 9개 최적화 테이블 DDL
 │   └── Dockerfile
+├── dist/                       # 최종 배포 아티팩트 보관 (APK, Play Store AAB)
 ├── scripts/
-│   ├── build-mac-local.sh          # Mac에서 /Applications 첫 설치
 │   ├── run-desktop.sh              # Mac에서 데스크톱 앱 직접 실행
-│   ├── deploy-release.sh           # APK + Mac/Win zip 릴리즈 배포
+│   ├── deploy-release.sh           # APK + AAB 릴리즈 빌드 및 배포
 │   ├── sync-public-repo.sh         # 오픈소스 공개 레포지토리 동기화
 │   └── deploy.env.example          # ~/.comics8-deploy.env 예시
 ├── knowledge/                  # 도메인/모듈별 지속적 사양 및 아키텍처 불변 규칙 (Internal Only)

@@ -142,7 +142,10 @@ VERSION_EOF
 # 2. Build binaries depending on target
 APK_PATH="app/build/outputs/apk/standalone/release/app-standalone-release.apk"
 AAB_PATH="app/build/outputs/bundle/playRelease/app-play-release.aab"
-WIN_ZIP_PATH="desktop/build/compose/binaries/main/Comics8-win.zip"
+DIST_DIR="dist"
+DIST_APK="${DIST_DIR}/comics8-v${VERSION_NAME}.apk"
+DIST_AAB="${DIST_DIR}/comics8-v${VERSION_NAME}.aab"
+DIST_LATEST_APK="${DIST_DIR}/comics8-latest.apk"
 
 build_android() {
     if [[ "$NEED_REMOTE_BUILD" == "true" ]]; then
@@ -179,22 +182,22 @@ build_android() {
         echo "❌ AAB file not found: $AAB_PATH"
         exit 1
     fi
+
+    # Collect artifacts into project dist/ folder
+    mkdir -p "${DIST_DIR}"
+    cp "${APK_PATH}" "${DIST_APK}"
+    cp "${AAB_PATH}" "${DIST_AAB}"
+    cp "${APK_PATH}" "${DIST_LATEST_APK}"
+    echo "  📦 Release artifacts collected in ${DIST_DIR}/:"
+    echo "     - ${DIST_APK}"
+    echo "     - ${DIST_AAB}"
 }
 
 case "$TARGET" in
     desktop)
-        echo "📦 2/5: Building Windows Portable Zip (Desktop only)..."
-        ./gradlew :desktop:packageWindowsZip -Pcomics8.desktopOnly=true
-        if [ ! -f "$WIN_ZIP_PATH" ]; then
-            echo "❌ Windows Zip file not found: $WIN_ZIP_PATH"
-            exit 1
-        fi
+        echo "ℹ️ Desktop binaries (Windows & Mac) are built automatically by GitHub Actions on tag push."
         ;;
-    android)
-        echo "📦 2/5: Building Android Release APK & AAB (Android only)..."
-        build_android
-        ;;
-    all|*)
+    android|all|*)
         echo "📦 2/5: Building Android Release APK & AAB (Windows & Mac are built via GitHub Actions)..."
         build_android
         ;;
@@ -224,10 +227,7 @@ SERVER_VERSION_FILE="${COMICS8_SERVER_VERSION_FILE:-/home/crudust/projects/comic
 echo "📡 5/5: Uploading to Sync Server ($SERVER_HOST)..."
 if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=3 "${SERVER_USER}@${SERVER_HOST}" "mkdir -p ${SERVER_DOWNLOAD_DIR}" >/dev/null 2>&1; then
     if [[ "$TARGET" != "desktop" && -f "$APK_PATH" ]]; then
-        scp "$APK_PATH" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/comics8-latest.apk"
-    fi
-    if [[ "$TARGET" != "android" && -f "$WIN_ZIP_PATH" ]]; then
-        scp "$WIN_ZIP_PATH" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/Comics8-win.zip"
+        scp "$DIST_LATEST_APK" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/comics8-latest.apk"
     fi
 
     # Retrieve existing version.json to preserve non-targeted platform version
@@ -291,14 +291,8 @@ fi
 # 6. Publish to GitHub Releases (AAB is excluded from public release for security)
 echo "🐙 6/6: Publishing to GitHub Releases (crudust/comics8)..."
 RELEASE_FILES=()
-if [[ "$TARGET" != "desktop" && -f "$APK_PATH" ]]; then
-    GITHUB_APK_PATH="build/release/comics8-latest.apk"
-    mkdir -p "$(dirname "${GITHUB_APK_PATH}")"
-    cp "${APK_PATH}" "${GITHUB_APK_PATH}"
-    RELEASE_FILES+=("$GITHUB_APK_PATH")
-fi
-if [[ "$TARGET" != "android" && -f "$WIN_ZIP_PATH" ]]; then
-    RELEASE_FILES+=("$WIN_ZIP_PATH")
+if [[ "$TARGET" != "desktop" && -f "$DIST_LATEST_APK" ]]; then
+    RELEASE_FILES+=("$DIST_LATEST_APK")
 fi
 
 if gh release view "${TAG_NAME}" --repo crudust/comics8 >/dev/null 2>&1; then
@@ -337,8 +331,10 @@ echo "=================================================="
 echo "🎉 Release deployed successfully! (Target: ${TARGET})"
 echo "• GitHub Release: https://github.com/crudust/comics8/releases/tag/${TAG_NAME}"
 if [[ "$TARGET" != "desktop" ]]; then
-    echo "• Android APK:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/comics8-latest.apk"
-    echo "• Play Store AAB: ${AAB_PATH} (Local archive, private Play Console only)"
+    echo "• Local Artifacts (dist/):"
+    echo "  - Standalone APK: ${DIST_APK}"
+    echo "  - Play Store AAB: ${DIST_AAB} (Private, Play Console only)"
+    echo "• Android APK URL: https://github.com/crudust/comics8/releases/download/${TAG_NAME}/comics8-latest.apk"
 fi
 if [[ "$TARGET" != "android" ]]; then
     echo "• Windows Zip:    https://github.com/crudust/comics8/releases/download/${TAG_NAME}/Comics8-win.zip (GitHub Actions)"
