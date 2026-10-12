@@ -581,7 +581,7 @@ fun DesktopAsyncImage(
     // Check synchronous memory cache first
     val cachedBitmap = remember(cacheRole, url) { DesktopImageCache.get(cacheRole, url) }
     var displayedBitmap by remember(cacheRole, url) { mutableStateOf(cachedBitmap) }
-    var loading by remember(cacheRole, url) { mutableStateOf(cachedBitmap == null) }
+    var loading by remember(cacheRole, url) { mutableStateOf(url.isNotBlank() && cachedBitmap == null) }
 
     val retryKey = if (displayedBitmap == null) refreshEpoch else 0L
 
@@ -704,7 +704,7 @@ fun DesktopAsyncImage(
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
-        } else if (!loading) {
+        } else if (url.isNotBlank() && !loading) {
             val strings = LocalStrings.current
             var localRetry by remember(url) { mutableStateOf(0) }
             LaunchedEffect(localRetry) {
@@ -751,6 +751,12 @@ fun DesktopAsyncImage(
                     )
                 }
             }
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f)),
+            )
         }
     }
 }

@@ -77,6 +77,9 @@ interface FavoriteDao {
     @Query("UPDATE favorites SET updatedAt = :updatedAt WHERE sourceId = :sourceId AND toonId = :toonId")
     suspend fun updateUpdatedAt(sourceId: String, toonId: String, updatedAt: String)
 
+    @Query("UPDATE favorites SET thumbUrl = :thumbUrl WHERE sourceId = :sourceId AND toonId = :toonId AND (thumbUrl IS NULL OR thumbUrl = '')")
+    suspend fun updateThumbUrlIfBlank(sourceId: String, toonId: String, thumbUrl: String)
+
     @Query("DELETE FROM favorites WHERE sourceId = :sourceId AND toonId = :toonId")
     suspend fun delete(sourceId: String, toonId: String)
 }
@@ -87,6 +90,9 @@ suspend fun FavoriteDao.exists(workId: WorkId): Boolean = exists(workId.sourceId
 
 suspend fun FavoriteDao.updateUpdatedAt(workId: WorkId, updatedAt: String) =
     updateUpdatedAt(workId.sourceId, workId.toonId, updatedAt)
+
+suspend fun FavoriteDao.updateThumbUrlIfBlank(workId: WorkId, thumbUrl: String) =
+    updateThumbUrlIfBlank(workId.sourceId, workId.toonId, thumbUrl)
 
 suspend fun FavoriteDao.delete(workId: WorkId) = delete(workId.sourceId, workId.toonId)
 

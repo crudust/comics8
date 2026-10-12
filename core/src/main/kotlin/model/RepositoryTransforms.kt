@@ -17,6 +17,11 @@ object RepositoryTransforms {
         val splitMode: SplitMode,
     )
 
+    data class EpisodeMetadata(
+        val totalEpisodes: Int,
+        val thumbUrl: String? = null,
+    )
+
     fun installedSources(
         allSources: List<ComicSource>,
         installedIds: Set<String>,

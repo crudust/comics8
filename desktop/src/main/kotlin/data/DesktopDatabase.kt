@@ -405,6 +405,21 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
         }
     }
 
+    fun updateFavoriteThumbnail(workId: WorkId, thumbUrl: String, onlyIfBlank: Boolean = true) {
+        if (thumbUrl.isBlank()) return
+        val condition = if (onlyIfBlank) " AND (thumbUrl IS NULL OR thumbUrl = '')" else ""
+        withConnection { conn ->
+            conn.prepareStatement(
+                "UPDATE favorites SET thumbUrl = ? WHERE sourceId = ? AND toonId = ?$condition",
+            ).use { stmt ->
+                stmt.setString(1, thumbUrl)
+                stmt.setString(2, workId.sourceId)
+                stmt.setString(3, workId.toonId)
+                stmt.executeUpdate()
+            }
+        }
+    }
+
     fun getFavoriteIds(): Set<WorkId> {
         val set = mutableSetOf<WorkId>()
         withConnection { conn ->
