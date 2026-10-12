@@ -219,8 +219,8 @@ echo "🔄 4/5: Syncing open-source repository..."
 # 5. Upload binaries and version.json to Sync Server (if reachable)
 SERVER_HOST="${COMICS8_SERVER_HOST:-192.168.0.136}"
 SERVER_USER="${COMICS8_SERVER_USER:-crudust}"
-SERVER_DOWNLOAD_DIR="${COMICS8_SERVER_DOWNLOAD_DIR:-/home/crudust/projects/comics8/server/data/downloads}"
-SERVER_VERSION_FILE="${COMICS8_SERVER_VERSION_FILE:-/home/crudust/projects/comics8/server/data/version.json}"
+SERVER_DOWNLOAD_DIR="${COMICS8_SERVER_DOWNLOAD_DIR:-/home/crudust/comics8-sync/data/downloads}"
+SERVER_VERSION_FILE="${COMICS8_SERVER_VERSION_FILE:-/home/crudust/comics8-sync/data/version.json}"
 
 echo "📡 5/5: Uploading to Sync Server ($SERVER_HOST)..."
 if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=3 "${SERVER_USER}@${SERVER_HOST}" "mkdir -p ${SERVER_DOWNLOAD_DIR}" >/dev/null 2>&1; then
