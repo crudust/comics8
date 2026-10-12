@@ -138,4 +138,40 @@ class DesktopDatabaseMigrationTest {
             db.close()
         }
     }
+
+    @Test
+    fun updateFavoriteThumbnailPopulatesEmptyThumbnail() {
+        val file = File.createTempFile("comics8-fav-thumb", ".db")
+        val db = DesktopDatabase(file)
+        try {
+            db.isSourceEnabled = { true }
+            db.installedIds = { setOf("hitomi") }
+            val workId = WorkId("hitomi", "artist:samidare_setsuna")
+            db.saveFavorite(
+                FavoriteRecord(
+                    sourceId = "hitomi",
+                    id = "artist:samidare_setsuna",
+                    title = "Samidare Setsuna",
+                    thumbUrl = "",
+                    href = "https://hitomi.la/artist/samidare-all.html",
+                    genre = "artist",
+                    updatedAt = "10.26",
+                    savedAt = 1000L,
+                ),
+            )
+            assertThat(db.getFavorite(workId)?.thumbUrl).isEmpty()
+
+            // Backfill thumbnail
+            val thumb = "https://tn.gold-usergeneratedcontent.net/webpsmalltn/1.webp"
+            db.updateFavoriteThumbnail(workId, thumb)
+            assertThat(db.getFavorite(workId)?.thumbUrl).isEqualTo(thumb)
+
+            // Calling again with another thumb when onlyIfBlank=true (default) should not overwrite
+            db.updateFavoriteThumbnail(workId, "https://tn.gold-usergeneratedcontent.net/webpsmalltn/2.webp")
+            assertThat(db.getFavorite(workId)?.thumbUrl).isEqualTo(thumb)
+        } finally {
+            db.close()
+            file.delete()
+        }
+    }
 }

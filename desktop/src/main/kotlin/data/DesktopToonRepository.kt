@@ -92,16 +92,25 @@ class DesktopToonRepository(
         val sid = sourceId.ifBlank { WorkId.DEFAULT_SOURCE }
         val local = database.getAllFavorites().map { it.toItem().copy(isFavorite = true) }
             .filter { it.sourceId.ifBlank { WorkId.DEFAULT_SOURCE } == sid }
-        val items = FavoriteListing.assembleBySource(local) { sourceId, page ->
-            val source = sources.getOrNull(sourceId)
-            if (source == null || !source.favoriteUsesLatestListing) {
-                null
-            } else {
-                fetchRemoteListing(sourceId, "LATEST", page)
+        val blankItems = local.filter { it.thumbUrl.isBlank() }
+        val enrichedLocal = if (blankItems.isEmpty()) {
+            local
+        } else {
+            val historyMap = database.getHistoryByToonIds(blankItems.map { it.workId() })
+                .associateBy { it.workId().storageKey() }
+            local.map { fav ->
+                if (fav.thumbUrl.isBlank()) {
+                    val histThumb = historyMap[fav.workId().storageKey()]?.toonThumbUrl
+                    if (!histThumb.isNullOrBlank()) {
+                        database.updateFavoriteThumbnail(fav.workId(), histThumb)
+                        fav.copy(thumbUrl = histThumb)
+                    } else fav
+                } else fav
             }
         }
+        val items = FavoriteListing.assemble(enrichedLocal)
         return ListingPage(
-            items = applyFlags(items),
+            items = applyFlags(items, touchFavorites = false),
             currentPage = 1,
             lastPage = 1,
         )
@@ -122,11 +131,19 @@ class DesktopToonRepository(
         if (parsed.items.isEmpty() && !source.emptyEpisodesOk) {
             error("회차 목록을 읽지 못했습니다.")
         }
-        val firstDate = parsed.items.firstOrNull()?.date
+        val firstEp = parsed.items.firstOrNull()
+        val firstDate = firstEp?.date
+        val firstThumb = firstEp?.thumbUrl
         val workId = item.workId()
         if (!firstDate.isNullOrBlank()) {
             try {
                 database.updateFavoriteUpdatedAt(workId, firstDate)
+            } catch (_: Exception) {
+            }
+        }
+        if (!firstThumb.isNullOrBlank()) {
+            try {
+                database.updateFavoriteThumbnail(workId, firstThumb)
             } catch (_: Exception) {
             }
         }
@@ -171,6 +188,7 @@ class DesktopToonRepository(
 
     fun syncEpisodeCounts(
         items: List<ToonItem>,
+        onThumbnailResolved: ((workId: WorkId, thumbUrl: String) -> Unit)? = null,
         onUpdated: ((workId: WorkId, totalEpisodes: Int, progressText: String) -> Unit)? = null,
     ) {
         if (items.isEmpty()) return
@@ -279,7 +297,9 @@ class DesktopToonRepository(
                 val hist = historyMap[key]
                 val hasHistory = hist != null
                 val needsCatalog = (catalogTotals[key] ?: 0) == 0
+                val needsThumb = item.thumbUrl.isBlank()
                 val shouldSync = needsCatalog ||
+                    needsThumb ||
                     item.isNew ||
                     (hasHistory && hist?.hasNew == true) ||
                     item.isFavorite
@@ -297,10 +317,16 @@ class DesktopToonRepository(
                         try {
                             semaphore.withPermit {
                                 val needsCatalogNow = (catalogTotals[key] ?: 0) == 0
-                                if (encounteredUpToDate && !needsCatalogNow && !target.isFavorite && historyMap[key]?.hasNew != true) {
+                                val needsThumbNow = target.thumbUrl.isBlank()
+                                if (encounteredUpToDate && !needsCatalogNow && !needsThumbNow && !target.isFavorite && historyMap[key]?.hasNew != true) {
                                     return@withPermit
                                 }
-                                val exactTotal = fetchTotalEpisodes(target)
+                                val metadata = fetchEpisodeMetadata(target)
+                                val exactTotal = metadata.totalEpisodes
+                                val thumb = metadata.thumbUrl
+                                if (!thumb.isNullOrBlank()) {
+                                    onThumbnailResolved?.invoke(target.workId(), thumb)
+                                }
                                 if (exactTotal > 0) {
                                     val prev = catalogTotals[key] ?: 0
                                     val isIncreased = exactTotal > prev
@@ -381,11 +407,13 @@ class DesktopToonRepository(
         }
     }
 
-    suspend fun fetchTotalEpisodes(item: ToonItem): Int = withContext(Dispatchers.IO) {
+    suspend fun fetchEpisodeMetadata(item: ToonItem): RepositoryTransforms.EpisodeMetadata = withContext(Dispatchers.IO) {
         val firstPage = loadEpisodes(item, 1)
+        val firstThumb = firstPage.items.firstOrNull()?.thumbUrl?.ifBlank { null }
         val lastP = firstPage.lastPage.coerceAtLeast(1)
         if (firstPage.items.isEmpty() || lastP <= 1) {
-            return@withContext RepositoryTransforms.estimateTotalEpisodes(firstPage, 1)
+            val total = RepositoryTransforms.estimateTotalEpisodes(firstPage, 1)
+            return@withContext RepositoryTransforms.EpisodeMetadata(total, firstThumb)
         }
         val pageSize = sourceFor(item).episodePageSize
         val lastPageItemCount = try {
@@ -393,8 +421,12 @@ class DesktopToonRepository(
         } catch (_: Exception) {
             null
         }
-        RepositoryTransforms.estimateTotalEpisodes(firstPage, pageSize, lastPageItemCount)
+        val total = RepositoryTransforms.estimateTotalEpisodes(firstPage, pageSize, lastPageItemCount)
+        RepositoryTransforms.EpisodeMetadata(total, firstThumb)
     }
+
+    suspend fun fetchTotalEpisodes(item: ToonItem): Int =
+        fetchEpisodeMetadata(item).totalEpisodes
 
     suspend fun loadImages(episode: EpisodeItem, workId: WorkId? = null): List<String> = withContext(Dispatchers.IO) {
         if (workId != null && downloadManager != null) {
@@ -480,7 +512,7 @@ class DesktopToonRepository(
             }
         }
 
-    private suspend fun applyFlags(items: List<ToonItem>): List<ToonItem> {
+    private suspend fun applyFlags(items: List<ToonItem>, touchFavorites: Boolean = true): List<ToonItem> {
         if (items.isEmpty()) return items
         val workIds = items.map { it.workId() }
         val favoriteKeys = database.getFavoritesByToonIds(workIds).map { it.workId().storageKey() }.toSet()
@@ -490,12 +522,14 @@ class DesktopToonRepository(
         val catalogTotals = database.getCatalogTotalsByToonIds(workIds)
         val readCounts = countReadEpisodesNow(workIds.filter { historyMap.containsKey(it.storageKey()) })
 
-        for (item in items) {
-            val uDate = item.updatedAt
-            if (item.workId().storageKey() in favoriteKeys && !uDate.isNullOrBlank()) {
-                try {
-                    database.updateFavoriteUpdatedAt(item.workId(), uDate)
-                } catch (_: Exception) {}
+        if (touchFavorites) {
+            for (item in items) {
+                val uDate = item.updatedAt
+                if (item.workId().storageKey() in favoriteKeys && !uDate.isNullOrBlank()) {
+                    try {
+                        database.updateFavoriteUpdatedAt(item.workId(), uDate)
+                    } catch (_: Exception) {}
+                }
             }
         }
 
@@ -527,12 +561,15 @@ class DesktopToonRepository(
             database.recordTombstone("FAVORITE", workId.storageKey(), now())
             false
         } else {
+            val effectiveThumb = item.thumbUrl.ifBlank {
+                database.getHistory(workId)?.toonThumbUrl.orEmpty()
+            }
             database.saveFavorite(
                 FavoriteRecord(
                     sourceId = workId.sourceId,
                     id = workId.toonId,
                     title = item.title,
-                    thumbUrl = item.thumbUrl,
+                    thumbUrl = effectiveThumb,
                     href = item.href,
                     genre = item.genre,
                     updatedAt = item.updatedAt,

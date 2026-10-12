@@ -27,8 +27,6 @@ interface ComicSource {
     val emptyListingOk: Boolean get() = kind == SourceKind.LOCAL
     val emptyEpisodesOk: Boolean get() = false
     val defaultLanguage: String? get() = null
-    val favoriteUsesLatestListing: Boolean
-        get() = notificationMode == NotificationMode.LATEST_INTERSECTION
     val defaultProgressDisplayMode: com.comics8.core.model.ProgressDisplayMode
         get() = when (progressDisplay) {
             ProgressDisplay.READ_COUNT -> com.comics8.core.model.ProgressDisplayMode.READ_COUNT

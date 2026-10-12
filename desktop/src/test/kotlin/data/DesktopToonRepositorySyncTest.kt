@@ -694,4 +694,40 @@ class DesktopToonRepositorySyncTest {
         // getCatalogTotal should return 25
         assertThat(repository.getCatalogTotal(workId)).isEqualTo(25)
     }
+
+    @Test
+    fun toggleFavoriteEnrichesThumbnailFromHistoryWhenBlank() = runBlocking {
+        val workId = WorkId("test_source", "toon_fav_thumb")
+        db.saveHistory(
+            ReadHistoryRecord(
+                sourceId = workId.sourceId,
+                toonId = workId.toonId,
+                toonTitle = "Title",
+                toonThumbUrl = "https://example.com/hist-thumb.webp",
+                toonHref = "href",
+                lastWrId = "1",
+                lastEpisodeTitle = "Ep 1",
+                lastEpisodeHref = "href/1",
+                lastReadOrder = 1,
+                totalEpisodes = 1,
+                lastReadAt = 1000L,
+                hasNew = false,
+            )
+        )
+
+        val itemWithBlankThumb = ToonItem(
+            id = workId.toonId,
+            title = "Title",
+            thumbUrl = "",
+            href = "href",
+            sourceId = workId.sourceId,
+        )
+
+        val result = repository.toggleFavorite(itemWithBlankThumb)
+        assertThat(result).isTrue()
+
+        val saved = db.getFavorite(workId)
+        assertThat(saved).isNotNull()
+        assertThat(saved?.thumbUrl).isEqualTo("https://example.com/hist-thumb.webp")
+    }
 }

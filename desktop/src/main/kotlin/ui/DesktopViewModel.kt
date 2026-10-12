@@ -881,37 +881,67 @@ class DesktopViewModel(
         }
     }
 
-    private fun triggerEpisodeCountSync(items: List<ToonItem>) {
-        repository.syncEpisodeCounts(items) { workId, totalEpisodes, progressText ->
-            toonTotalCounts[workId.storageKey()] = totalEpisodes
-            _state.update { curr ->
-                val updatedItems = curr.items.map { row ->
-                    if (row.workId() == workId) row.copy(readProgress = progressText) else row
-                }
-                if (!curr.isSearch) {
-                    curr.tab?.let { tab ->
-                        catalogCache[tab]?.let { cached ->
-                            catalogCache[tab] = cached.map { row ->
-                                if (row.workId() == workId) row.copy(readProgress = progressText) else row
-                            }
+    private fun updateThumbnailIfBlank(workId: WorkId, thumbUrl: String) {
+        if (thumbUrl.isBlank()) return
+        _state.update { curr ->
+            val updatedItems = curr.items.map { row ->
+                if (row.workId() == workId && row.thumbUrl.isBlank()) {
+                    row.copy(thumbUrl = thumbUrl)
+                } else row
+            }
+            if (!curr.isSearch) {
+                curr.tab?.let { tab ->
+                    catalogCache[tab]?.let { cached ->
+                        catalogCache[tab] = cached.map { row ->
+                            if (row.workId() == workId && row.thumbUrl.isBlank()) {
+                                row.copy(thumbUrl = thumbUrl)
+                            } else row
                         }
                     }
                 }
-                curr.copy(
-                    items = updatedItems,
-                    seriesHistory = if (curr.series?.workId() == workId) {
-                        curr.seriesHistory?.let { currHist ->
-                            val effectiveTotal = maxOf(currHist.totalEpisodes, totalEpisodes)
-                            currHist.copy(
-                                totalEpisodes = effectiveTotal,
-                                lastReadOrder = currHist.lastReadOrder.coerceIn(0, effectiveTotal),
-                                hasNew = currHist.lastReadOrder < effectiveTotal,
-                            )
-                        }
-                    } else curr.seriesHistory,
-                )
             }
+            val updatedSeries = if (curr.series?.workId() == workId && curr.series.thumbUrl.isBlank()) {
+                curr.series.copy(thumbUrl = thumbUrl)
+            } else curr.series
+            curr.copy(items = updatedItems, series = updatedSeries)
         }
+    }
+
+    private fun triggerEpisodeCountSync(items: List<ToonItem>) {
+        repository.syncEpisodeCounts(
+            items,
+            onThumbnailResolved = ::updateThumbnailIfBlank,
+            onUpdated = { workId, totalEpisodes, progressText ->
+                toonTotalCounts[workId.storageKey()] = totalEpisodes
+                _state.update { curr ->
+                    val updatedItems = curr.items.map { row ->
+                        if (row.workId() == workId) row.copy(readProgress = progressText) else row
+                    }
+                    if (!curr.isSearch) {
+                        curr.tab?.let { tab ->
+                            catalogCache[tab]?.let { cached ->
+                                catalogCache[tab] = cached.map { row ->
+                                    if (row.workId() == workId) row.copy(readProgress = progressText) else row
+                                }
+                            }
+                        }
+                    }
+                    curr.copy(
+                        items = updatedItems,
+                        seriesHistory = if (curr.series?.workId() == workId) {
+                            curr.seriesHistory?.let { currHist ->
+                                val effectiveTotal = maxOf(currHist.totalEpisodes, totalEpisodes)
+                                currHist.copy(
+                                    totalEpisodes = effectiveTotal,
+                                    lastReadOrder = currHist.lastReadOrder.coerceIn(0, effectiveTotal),
+                                    hasNew = currHist.lastReadOrder < effectiveTotal,
+                                )
+                            }
+                        } else curr.seriesHistory,
+                    )
+                }
+            },
+        )
     }
 
     fun loadPage(page: Int, replace: Boolean = false) {
@@ -1169,6 +1199,10 @@ class DesktopViewModel(
                 }
                 refreshDownloadedWrIds()
                 if (result.items.isNotEmpty()) {
+                    val firstThumb = result.items.firstOrNull()?.thumbUrl
+                    if (!firstThumb.isNullOrBlank() && item.thumbUrl.isBlank()) {
+                        updateThumbnailIfBlank(item.workId(), firstThumb)
+                    }
                     val lastP = result.lastPage.coerceAtLeast(1)
                     val currP = ReaderDomain.clampPage(result.currentPage, lastP)
                     val pageSize = repository.sourceOrNull(item.sourceId)?.episodePageSize ?: 100

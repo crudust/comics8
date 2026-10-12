@@ -392,12 +392,27 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
         if (updatedAt.isBlank()) return
         val current = getFavorite(workId) ?: return
         if (!UpdateDates.shouldReplace(current.updatedAt, updatedAt)) return
-        val stored = UpdateDates.toListingDate(updatedAt) ?: updatedAt
+        val stored = updatedAt.trim()
         withConnection { conn ->
             conn.prepareStatement(
                 "UPDATE favorites SET updatedAt = ? WHERE sourceId = ? AND toonId = ?",
             ).use { stmt ->
                 stmt.setString(1, stored)
+                stmt.setString(2, workId.sourceId)
+                stmt.setString(3, workId.toonId)
+                stmt.executeUpdate()
+            }
+        }
+    }
+
+    fun updateFavoriteThumbnail(workId: WorkId, thumbUrl: String, onlyIfBlank: Boolean = true) {
+        if (thumbUrl.isBlank()) return
+        val condition = if (onlyIfBlank) " AND (thumbUrl IS NULL OR thumbUrl = '')" else ""
+        withConnection { conn ->
+            conn.prepareStatement(
+                "UPDATE favorites SET thumbUrl = ? WHERE sourceId = ? AND toonId = ?$condition",
+            ).use { stmt ->
+                stmt.setString(1, thumbUrl)
                 stmt.setString(2, workId.sourceId)
                 stmt.setString(3, workId.toonId)
                 stmt.executeUpdate()
