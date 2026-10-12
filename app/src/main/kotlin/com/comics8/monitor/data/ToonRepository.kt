@@ -154,14 +154,7 @@ class ToonRepository(
                 } else fav
             } else fav
         }
-        val items = FavoriteListing.assembleBySource(enrichedLocal) { sourceId, page ->
-            val source = sources.getOrNull(sourceId)
-            if (source == null || !source.favoriteUsesLatestListing) {
-                null
-            } else {
-                fetchRemoteListing(sourceId, "LATEST", page)
-            }
-        }
+        val items = FavoriteListing.assemble(enrichedLocal)
         return ListingPage(
             items = applyFlags(items),
             currentPage = 1,
