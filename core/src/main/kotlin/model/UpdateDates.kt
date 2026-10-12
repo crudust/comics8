@@ -55,7 +55,7 @@ object UpdateDates {
         val thisYear = today.year
         val candidate = runCatching { LocalDate.of(thisYear, month, day) }.getOrNull()
             ?: return thisYear % 100
-        val year = if (candidate.isAfter(today.plusDays(14))) thisYear - 1 else thisYear
+        val year = if (candidate.isAfter(today.plusDays(1))) thisYear - 1 else thisYear
         return year % 100
     }
 

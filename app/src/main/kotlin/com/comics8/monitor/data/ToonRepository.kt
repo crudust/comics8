@@ -947,7 +947,7 @@ class ToonRepository(
         try {
             val current = favoriteDao.get(workId) ?: return
             if (!UpdateDates.shouldReplace(current.updatedAt, updatedAt)) return
-            val stored = UpdateDates.toListingDate(updatedAt) ?: updatedAt
+            val stored = updatedAt.trim()
             favoriteDao.updateUpdatedAt(workId, stored)
         } catch (_: Exception) {
         }

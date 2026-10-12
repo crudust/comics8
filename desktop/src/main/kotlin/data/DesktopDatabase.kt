@@ -392,7 +392,7 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
         if (updatedAt.isBlank()) return
         val current = getFavorite(workId) ?: return
         if (!UpdateDates.shouldReplace(current.updatedAt, updatedAt)) return
-        val stored = UpdateDates.toListingDate(updatedAt) ?: updatedAt
+        val stored = updatedAt.trim()
         withConnection { conn ->
             conn.prepareStatement(
                 "UPDATE favorites SET updatedAt = ? WHERE sourceId = ? AND toonId = ?",
