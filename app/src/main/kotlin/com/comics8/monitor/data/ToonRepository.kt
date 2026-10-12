@@ -138,25 +138,30 @@ class ToonRepository(
         val sid = sourceId.ifBlank { WorkId.DEFAULT_SOURCE }
         val local = favoriteDao.all().map { it.toItem().copy(isFavorite = true) }
             .filter { it.sourceId.ifBlank { WorkId.DEFAULT_SOURCE } == sid }
-        val ids = local.map { it.id }.distinct()
-        val wanted = local.map { it.workId().storageKey() }.toSet()
-        val historyMap = if (ids.isEmpty()) emptyMap() else {
-            readHistoryDao.byToonIds(ids)
-                .filter { it.workId().storageKey() in wanted }
-                .associateBy { it.workId().storageKey() }
-        }
-        val enrichedLocal = local.map { fav ->
-            if (fav.thumbUrl.isBlank()) {
-                val histThumb = historyMap[fav.workId().storageKey()]?.toonThumbUrl
-                if (!histThumb.isNullOrBlank()) {
-                    touchFavoriteThumbnail(fav.workId(), histThumb)
-                    fav.copy(thumbUrl = histThumb)
+        val blankItems = local.filter { it.thumbUrl.isBlank() }
+        val enrichedLocal = if (blankItems.isEmpty()) {
+            local
+        } else {
+            val ids = blankItems.map { it.id }.distinct()
+            val wanted = blankItems.map { it.workId().storageKey() }.toSet()
+            val historyMap = if (ids.isEmpty()) emptyMap() else {
+                readHistoryDao.byToonIds(ids)
+                    .filter { it.workId().storageKey() in wanted }
+                    .associateBy { it.workId().storageKey() }
+            }
+            local.map { fav ->
+                if (fav.thumbUrl.isBlank()) {
+                    val histThumb = historyMap[fav.workId().storageKey()]?.toonThumbUrl
+                    if (!histThumb.isNullOrBlank()) {
+                        touchFavoriteThumbnail(fav.workId(), histThumb)
+                        fav.copy(thumbUrl = histThumb)
+                    } else fav
                 } else fav
-            } else fav
+            }
         }
         val items = FavoriteListing.assemble(enrichedLocal)
         return ListingPage(
-            items = applyFlags(items),
+            items = applyFlags(items, touchFavorites = false),
             currentPage = 1,
             lastPage = 1,
         )
@@ -671,7 +676,7 @@ class ToonRepository(
         return unseen
     }
 
-    private suspend fun applyFlags(items: List<ToonItem>): List<ToonItem> {
+    private suspend fun applyFlags(items: List<ToonItem>, touchFavorites: Boolean = true): List<ToonItem> {
         if (items.isEmpty()) return items
         val ids = items.map { it.id }.distinct()
         val wanted = items.map { it.workId().storageKey() }.toSet()
@@ -709,9 +714,11 @@ class ToonRepository(
         } catch (_: Exception) {
             emptyMap()
         }
-        for (item in items) {
-            if (item.workId().storageKey() in favoriteKeys) {
-                touchFavoriteUpdatedAt(item.workId(), item.updatedAt)
+        if (touchFavorites) {
+            for (item in items) {
+                if (item.workId().storageKey() in favoriteKeys) {
+                    touchFavoriteUpdatedAt(item.workId(), item.updatedAt)
+                }
             }
         }
         return RepositoryTransforms.applyListingFlags(

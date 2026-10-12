@@ -92,20 +92,25 @@ class DesktopToonRepository(
         val sid = sourceId.ifBlank { WorkId.DEFAULT_SOURCE }
         val local = database.getAllFavorites().map { it.toItem().copy(isFavorite = true) }
             .filter { it.sourceId.ifBlank { WorkId.DEFAULT_SOURCE } == sid }
-        val historyMap = database.getHistoryByToonIds(local.map { it.workId() })
-            .associateBy { it.workId().storageKey() }
-        val enrichedLocal = local.map { fav ->
-            if (fav.thumbUrl.isBlank()) {
-                val histThumb = historyMap[fav.workId().storageKey()]?.toonThumbUrl
-                if (!histThumb.isNullOrBlank()) {
-                    database.updateFavoriteThumbnail(fav.workId(), histThumb)
-                    fav.copy(thumbUrl = histThumb)
+        val blankItems = local.filter { it.thumbUrl.isBlank() }
+        val enrichedLocal = if (blankItems.isEmpty()) {
+            local
+        } else {
+            val historyMap = database.getHistoryByToonIds(blankItems.map { it.workId() })
+                .associateBy { it.workId().storageKey() }
+            local.map { fav ->
+                if (fav.thumbUrl.isBlank()) {
+                    val histThumb = historyMap[fav.workId().storageKey()]?.toonThumbUrl
+                    if (!histThumb.isNullOrBlank()) {
+                        database.updateFavoriteThumbnail(fav.workId(), histThumb)
+                        fav.copy(thumbUrl = histThumb)
+                    } else fav
                 } else fav
-            } else fav
+            }
         }
         val items = FavoriteListing.assemble(enrichedLocal)
         return ListingPage(
-            items = applyFlags(items),
+            items = applyFlags(items, touchFavorites = false),
             currentPage = 1,
             lastPage = 1,
         )
@@ -507,7 +512,7 @@ class DesktopToonRepository(
             }
         }
 
-    private suspend fun applyFlags(items: List<ToonItem>): List<ToonItem> {
+    private suspend fun applyFlags(items: List<ToonItem>, touchFavorites: Boolean = true): List<ToonItem> {
         if (items.isEmpty()) return items
         val workIds = items.map { it.workId() }
         val favoriteKeys = database.getFavoritesByToonIds(workIds).map { it.workId().storageKey() }.toSet()
@@ -517,12 +522,14 @@ class DesktopToonRepository(
         val catalogTotals = database.getCatalogTotalsByToonIds(workIds)
         val readCounts = countReadEpisodesNow(workIds.filter { historyMap.containsKey(it.storageKey()) })
 
-        for (item in items) {
-            val uDate = item.updatedAt
-            if (item.workId().storageKey() in favoriteKeys && !uDate.isNullOrBlank()) {
-                try {
-                    database.updateFavoriteUpdatedAt(item.workId(), uDate)
-                } catch (_: Exception) {}
+        if (touchFavorites) {
+            for (item in items) {
+                val uDate = item.updatedAt
+                if (item.workId().storageKey() in favoriteKeys && !uDate.isNullOrBlank()) {
+                    try {
+                        database.updateFavoriteUpdatedAt(item.workId(), uDate)
+                    } catch (_: Exception) {}
+                }
             }
         }
 
