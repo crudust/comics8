@@ -23,7 +23,7 @@ function getEpisodes(lang) {
     episodes.push({
       wrId: wrId,
       title: fig.textOf("figcaption a") || (img ? img.attr("alt") : wrId),
-      thumbUrl: img ? img.absUrl("src") : "",
+      thumbUrl: fig.imgUrlOf("img", ORIGIN),
       href: href,
       date: host.match(fig.textOf("figcaption"), "(\\d{4}-\\d{2}-\\d{2})", 1)
     });
@@ -128,7 +128,6 @@ var source = {
   },
 
   ownsHost: function (h) {
-    var hostName = String(h || "").toLowerCase();
-    return hostName === "peppercarrot.com" || hostName === "www.peppercarrot.com" || hostName === "davidrevoy.com";
+    return String(h || "").toLowerCase() === "davidrevoy.com";
   }
 };

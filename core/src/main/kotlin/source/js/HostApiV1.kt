@@ -47,6 +47,7 @@ interface HostApiV1 {
     fun log(level: String, message: String)
 
     // Parsing & Convenience Helpers
+    fun unescape(text: String?): String
     fun parseHtml(text: String, baseUrl: String? = null): HostHtmlDoc
     fun absUrl(url: String, baseUrl: String? = null): String
     fun digits(text: String?): String
@@ -83,6 +84,7 @@ class HostHtmlDoc(internal val document: Document) {
     fun textOf(css: String): String = document.selectFirst(css)?.text().orEmpty()
     fun attrOf(css: String, attr: String): String = document.selectFirst(css)?.attr(attr).orEmpty()
     fun absUrlOf(css: String, attr: String): String = document.selectFirst(css)?.absUrl(attr).orEmpty()
+    fun imgUrlOf(css: String, baseUrl: String? = null): String = document.selectFirst(css)?.let { HostHtmlEl(it).imgUrl(baseUrl) }.orEmpty()
 }
 
 class HostHtmlEl(internal val element: Element) {
@@ -96,6 +98,20 @@ class HostHtmlEl(internal val element: Element) {
     fun attrOf(css: String, attr: String): String = element.selectFirst(css)?.attr(attr).orEmpty()
     fun absUrlOf(css: String, attr: String): String = element.selectFirst(css)?.absUrl(attr).orEmpty()
     fun bgUrl(): String? = HostApiV1Impl.extractBackgroundUrl(element.attr("style"))
+    fun imgUrl(baseUrl: String? = null): String {
+        val target = if (element.tagName().equals("img", ignoreCase = true)) element else element.selectFirst("img") ?: element
+        val raw = when {
+            target.hasAttr("data-src") -> target.absUrl("data-src").ifBlank { target.attr("data-src") }
+            target.hasAttr("data-original") -> target.absUrl("data-original").ifBlank { target.attr("data-original") }
+            target.hasAttr("data-lazy") -> target.absUrl("data-lazy").ifBlank { target.attr("data-lazy") }
+            target.hasAttr("data-mobile-image") -> target.absUrl("data-mobile-image").ifBlank { target.attr("data-mobile-image") }
+            target.hasAttr("src") -> target.absUrl("src").ifBlank { target.attr("src") }
+            else -> HostApiV1Impl.extractBackgroundUrl(target.attr("style")) ?: HostApiV1Impl.extractBackgroundUrl(element.attr("style"))
+        }?.trim()?.replace("\\/", "/") ?: ""
+        if (raw.isBlank()) return ""
+        return if (baseUrl.isNullOrBlank()) raw else HostApiV1Impl.resolveAbsUrl(raw, baseUrl)
+    }
+    fun imgUrlOf(css: String, baseUrl: String? = null): String = element.selectFirst(css)?.let { HostHtmlEl(it).imgUrl(baseUrl) }.orEmpty()
 }
 
 fun toFetchSpec(src: ComicSource, spec: HostFetchSpec): FetchSpec =
@@ -207,16 +223,12 @@ internal class HostApiV1Impl(
         System.err.println("[js:$sourceId] $level: $message")
     }
 
-    override fun absUrl(url: String, baseUrl: String?): String {
-        val value = url.trim().trim('\'', '"')
-        if (value.isEmpty()) return value
-        if (value.startsWith("http://", ignoreCase = true) || value.startsWith("https://", ignoreCase = true)) return value
-        if (value.startsWith("//")) return "https:$value"
-        val root = baseUrl?.trimEnd('/') ?: ""
-        if (root.isEmpty()) return value
-        if (value.startsWith("/")) return "$root$value"
-        return "$root/$value"
+    override fun unescape(text: String?): String {
+        if (text.isNullOrBlank()) return ""
+        return org.jsoup.parser.Parser.unescapeEntities(text, false)
     }
+
+    override fun absUrl(url: String, baseUrl: String?): String = resolveAbsUrl(url, baseUrl)
 
     override fun digits(text: String?): String =
         text?.replace(Regex("""\D"""), "").orEmpty()
@@ -540,7 +552,17 @@ internal class HostApiV1Impl(
         for (url in urls) {
             val host = SourceRegistry.hostOf(url)
             if (host != null && host !in owns) {
-                owns[host] = if (cx != null && src != null) {
+                val origin = src?.let { JsValues.asString(ScriptableObject.getProperty(it, "origin")) }
+                val originHost = SourceRegistry.hostOf(origin.orEmpty()) ?: SourceRegistry.hostOf(policy.referer ?: "")
+                val isOriginSubdomain = if (originHost != null) {
+                    val normOrigin = originHost.removePrefix("www.")
+                    val normHost = host.removePrefix("www.")
+                    normHost == normOrigin || normHost.endsWith(".$normOrigin")
+                } else false
+
+                owns[host] = if (isOriginSubdomain) {
+                    true
+                } else if (cx != null && src != null) {
                     callSourceBoolean(cx, src, "ownsHost", host, false)
                 } else {
                     false
@@ -620,6 +642,17 @@ internal class HostApiV1Impl(
         private val JS_ARRAY_STRING_RE = Regex("""["']([^"'\r\n]+)["']""")
         private val BG_URL_RE = Regex("""url\(\s*(['"]?)(.+?)\1\s*\)""", RegexOption.IGNORE_CASE)
         private val IGNORE_IMAGE_PATTERNS = listOf("icon-", "favicon", "192x192", "/toonfile/toonres/", "logo", "banner", "avatar", "captcha")
+
+        fun resolveAbsUrl(url: String, baseUrl: String?): String {
+            val value = url.trim().trim('\'', '"')
+            if (value.isEmpty()) return value
+            if (value.startsWith("http://", ignoreCase = true) || value.startsWith("https://", ignoreCase = true)) return value
+            if (value.startsWith("//")) return "https:$value"
+            val root = baseUrl?.trimEnd('/') ?: ""
+            if (root.isEmpty()) return value
+            if (value.startsWith("/")) return "$root$value"
+            return "$root/$value"
+        }
 
         fun extractBackgroundUrl(style: String?): String? {
             if (style.isNullOrBlank()) return null

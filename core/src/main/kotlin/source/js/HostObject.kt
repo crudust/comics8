@@ -73,6 +73,10 @@ internal class HostObject(
             val base = if (args.size >= 2 && !JsValues.isNullish(args[1])) Context.toString(args[1]) else null
             api.absUrl(url, base)
         }
+        defineHostFn("unescape", 1) { _, _, args ->
+            val text = if (args.isNotEmpty() && !JsValues.isNullish(args[0])) Context.toString(args[0]) else null
+            api.unescape(text)
+        }
         defineHostFn("digits", 1) { _, _, args ->
             val text = if (args.isNotEmpty() && !JsValues.isNullish(args[0])) Context.toString(args[0]) else null
             api.digits(text)
@@ -211,6 +215,11 @@ private class JsHtmlDocView(val doc: HostHtmlDoc) : ScriptableObject() {
                 Context.toString(JsValues.arg(args, 1)),
             )
         }
+        defineHostFn("imgUrlOf", 1) { _, _, args ->
+            val css = Context.toString(JsValues.arg(args, 0))
+            val baseUrl = if (args.size >= 2 && !JsValues.isNullish(args[1])) Context.toString(args[1]) else null
+            doc.imgUrlOf(css, baseUrl)
+        }
     }
 }
 
@@ -248,6 +257,15 @@ private class JsHtmlElView(private val el: HostHtmlEl) : ScriptableObject() {
         }
         defineHostFn("bgUrl", 0) { _, _, _ ->
             el.bgUrl()
+        }
+        defineHostFn("imgUrl", 0) { _, _, args ->
+            val baseUrl = if (args.isNotEmpty() && !JsValues.isNullish(args[0])) Context.toString(args[0]) else null
+            el.imgUrl(baseUrl)
+        }
+        defineHostFn("imgUrlOf", 1) { _, _, args ->
+            val css = Context.toString(JsValues.arg(args, 0))
+            val baseUrl = if (args.size >= 2 && !JsValues.isNullish(args[1])) Context.toString(args[1]) else null
+            el.imgUrlOf(css, baseUrl)
         }
     }
 }
