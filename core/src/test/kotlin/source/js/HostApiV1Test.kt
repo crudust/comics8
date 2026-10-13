@@ -473,6 +473,75 @@ class HostApiV1Test {
         assertThat(jsonFetch.getInt("count")).isEqualTo(42)
     }
 
+    @Test
+    fun unescapeDecodesHtmlEntities() {
+        val result = evalJson(
+            """
+            (function() {
+              return {
+                decoded: host.unescape("Hello &amp; World &#039;test&#039; &quot;quote&quot; &#8217;apostrophe&#8217;")
+              };
+            })()
+            """.trimIndent(),
+            CapturingHttp(HttpResult(200, emptyMap(), ByteArray(0))),
+        )
+        assertThat(result.getString("decoded")).isEqualTo("Hello & World 'test' \"quote\" ’apostrophe’")
+    }
+
+    @Test
+    fun imgUrlAndImgUrlOfResolveLazyAndBackgroundImages() {
+        val html = """
+            <html>
+            <body>
+              <div class="card">
+                <img src="/thumb-low.jpg" data-src="/thumb-hi.jpg" />
+              </div>
+              <div class="bg-card" style="background-image: url('/covers/main.webp')">
+              </div>
+            </body>
+            </html>
+        """.trimIndent()
+        val result = evalJson(
+            """
+            (function() {
+              var doc = host.parseHtml(${JSONObject.quote(html)}, "https://example.com");
+              return {
+                imgFromDoc: doc.imgUrlOf(".card img", "https://example.com"),
+                imgFromCard: doc.selectFirst(".card").imgUrl("https://example.com"),
+                bgFromDoc: doc.imgUrlOf(".bg-card", "https://example.com"),
+                bgFromEl: doc.selectFirst(".bg-card").imgUrl("https://example.com")
+              };
+            })()
+            """.trimIndent(),
+            CapturingHttp(HttpResult(200, emptyMap(), ByteArray(0))),
+        )
+        assertThat(result.getString("imgFromDoc")).isEqualTo("https://example.com/thumb-hi.jpg")
+        assertThat(result.getString("imgFromCard")).isEqualTo("https://example.com/thumb-hi.jpg")
+        assertThat(result.getString("bgFromDoc")).isEqualTo("https://example.com/covers/main.webp")
+        assertThat(result.getString("bgFromEl")).isEqualTo("https://example.com/covers/main.webp")
+    }
+
+    @Test
+    fun ownsHostAutomaticallyIncludesSubdomainsAndOrigin() {
+        val script = """
+            var source = {
+              id: "testsub",
+              displayName: "Test Subdomain",
+              origin: "https://example.com",
+              loadListing: function() { return { items: [] }; },
+              loadEpisodes: function() { return { items: [] }; },
+              resolveImages: function() { return []; }
+            };
+        """.trimIndent()
+        val source = JsComicSource.fromScript(script)
+        assertThat(source.ownsHost("example.com")).isTrue()
+        assertThat(source.ownsHost("www.example.com")).isTrue()
+        assertThat(source.ownsHost("cdn.example.com")).isTrue()
+        assertThat(source.ownsHost("images.sub.example.com")).isTrue()
+        assertThat(source.ownsHost("notexample.com")).isFalse()
+        assertThat(source.ownsHost("google.com")).isFalse()
+    }
+
     private fun evalJson(expression: String, http: SourceHttp): JSONObject {
         val engine = JsEngine()
         val handle = engine.load(JsTestResources.read("js/hello.js"), "hello.js")

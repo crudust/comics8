@@ -87,7 +87,14 @@ class JsComicSource(
     override fun ownsHost(host: String): Boolean {
         val key = host.lowercase().trim().trim('.')
         if (key.isEmpty()) return false
-        if (key == handle.originHost) return true
+        val originHost = handle.originHost
+        if (originHost != null) {
+            val normalizedOrigin = originHost.removePrefix("www.")
+            val normalizedKey = key.removePrefix("www.")
+            if (normalizedKey == normalizedOrigin || normalizedKey.endsWith(".$normalizedOrigin")) {
+                return true
+            }
+        }
         ownsHostCache[key]?.let { return it }
         handle.api.nestedHostQuery?.ownsHost?.get(key)?.let { return it }
         return ownsHostCache.computeIfAbsent(key) {

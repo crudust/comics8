@@ -26,3 +26,7 @@ server/service-account.json
 # rotated and removed from Git history separately; ignore rules do not untrack them.
 /keystore/*.keystore
 /keystore/*.jks
+
+# Source plugins (only keep open-source reference peppercarrot.js tracked)
+/examples/sources/*
+!/examples/sources/peppercarrot.js
