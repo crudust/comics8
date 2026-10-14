@@ -28,6 +28,7 @@ import org.mozilla.javascript.WrappedException
 import java.lang.reflect.InvocationTargetException
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CancellationException
 
 class JsEngine(
     private val callTimeoutMs: Long = JsSandbox.DEFAULT_CALL_TIMEOUT_MS,
@@ -43,10 +44,12 @@ class JsEngine(
         )
         val cx = JsSandbox.enter()
         val deadline = System.currentTimeMillis() + callTimeoutMs
+        val budget = CallBudget(deadlineEpochMs = deadline)
+        api.budget = budget
         api.deadlineEpochMs = deadline
         api.http = http
-        cx.putThreadLocal(JsSandbox.DEADLINE_KEY, deadline)
-        val interrupter = scheduleInterrupt(deadline)
+        cx.putThreadLocal(JsSandbox.BUDGET_KEY, budget)
+        val interrupter = scheduleInterrupt(Thread.currentThread(), budget)
         try {
             val scope = JsSandbox.createScope(cx)
             api.scope = scope
@@ -55,12 +58,13 @@ class JsEngine(
             val sourceObj = ScriptableObject.getProperty(scope, "source") as? Scriptable
                 ?: throw IllegalArgumentException("source가 없음")
             return readHandle(api, scope, sourceObj)
-        } catch (e: Exception) {
-            throw translate(e)
+        } catch (e: Throwable) {
+            throw translate(e, budget)
         } finally {
             interrupter.cancel(false)
             Thread.interrupted()
             api.http = null
+            api.budget = null
             Context.exit()
         }
     }
@@ -207,31 +211,35 @@ class JsEngine(
         synchronized(handle.lock) {
             val cx = JsSandbox.enter()
             val deadline = System.currentTimeMillis() + callTimeoutMs
+            val budget = CallBudget(deadlineEpochMs = deadline)
+            handle.api.budget = budget
             handle.api.deadlineEpochMs = deadline
             handle.api.http = http
-            cx.putThreadLocal(JsSandbox.DEADLINE_KEY, deadline)
-            val interrupter = scheduleInterrupt(deadline)
+            cx.putThreadLocal(JsSandbox.BUDGET_KEY, budget)
+            val interrupter = scheduleInterrupt(Thread.currentThread(), budget)
             try {
                 return block(cx)
-            } catch (e: Exception) {
-                throw translate(e)
+            } catch (e: Throwable) {
+                throw translate(e, budget)
             } finally {
                 interrupter.cancel(false)
                 Thread.interrupted()
                 handle.api.http = null
+                handle.api.budget = null
                 Context.exit()
             }
         }
     }
 
-    private fun scheduleInterrupt(deadline: Long) =
+    private fun scheduleInterrupt(targetThread: Thread, budget: CallBudget) =
         JsSandbox.timeoutScheduler.schedule(
-            interruptTask(Thread.currentThread()),
-            (deadline - System.currentTimeMillis()).coerceAtLeast(0L),
+            Runnable {
+                budget.timedOut.set(true)
+                targetThread.interrupt()
+            },
+            (budget.deadlineEpochMs - System.currentTimeMillis()).coerceAtLeast(0L),
             TimeUnit.MILLISECONDS,
         )
-
-    private fun interruptTask(thread: Thread) = Runnable { thread.interrupt() }
 
     private fun readHandle(
         api: HostApiV1Impl,
@@ -330,14 +338,20 @@ class JsSourceHandle internal constructor(
     fun hasFunction(name: String): Boolean = functions.contains(name)
 }
 
-internal fun translate(error: Throwable): RuntimeException {
+internal fun translate(error: Throwable, budget: CallBudget? = null): RuntimeException {
     val unwrapped = unwrapRhino(error)
+    if (unwrapped is CancellationException) {
+        return unwrapped
+    }
     val message = unwrapped.message ?: error.message.orEmpty()
-    if (unwrapped is InterruptedException ||
+    val isTimeout = budget?.isTimedOut() == true ||
         message.contains("timed out") ||
         (unwrapped is EvaluatorException && message.contains("timed out"))
-    ) {
+    if (isTimeout) {
         return IllegalStateException("source call timed out", unwrapped)
+    }
+    if (unwrapped is InterruptedException) {
+        return CancellationException("source call cancelled", unwrapped)
     }
     return when (unwrapped) {
         is RuntimeException -> unwrapped
@@ -349,14 +363,23 @@ private fun unwrapRhino(error: Throwable): Throwable {
     var cur: Throwable = error
     val seen = HashSet<Throwable>()
     while (seen.add(cur)) {
-        cur = when (cur) {
-            is WrappedException -> cur.wrappedException ?: return cur
-            is JavaScriptException -> (cur.value as? Throwable) ?: return cur
-            is InvocationTargetException -> cur.targetException ?: return cur
-            is ExecutionException -> cur.cause ?: return cur
-            is RhinoException -> return cur
-            else -> return cur
+        val next = when (cur) {
+            is WrappedException -> cur.wrappedException
+            is JavaScriptException -> cur.value as? Throwable
+            is InvocationTargetException -> cur.targetException
+            is ExecutionException -> cur.cause
+            is java.util.concurrent.CompletionException -> cur.cause
+            else -> null
         }
+        if (next != null) {
+            cur = next
+            continue
+        }
+        val cause = cur.cause
+        if (cause is CancellationException) {
+            return cause
+        }
+        return cur
     }
     return cur
 }

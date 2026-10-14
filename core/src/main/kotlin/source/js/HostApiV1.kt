@@ -18,6 +18,7 @@ import org.mozilla.javascript.json.JsonParser
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
+import kotlinx.coroutines.CancellationException
 
 data class PageInfoResult(
     val currentPage: Int,
@@ -136,6 +137,7 @@ internal class HostApiV1Impl(
 ) : HostApiV1 {
     @Volatile var http: SourceHttp? = null
     @Volatile var deadlineEpochMs: Long = Long.MAX_VALUE
+    @Volatile var budget: CallBudget? = null
     @Volatile var nestedHostQuery: NestedHostQuery? = null
     lateinit var scope: Scriptable
     lateinit var sourceObj: Scriptable
@@ -178,7 +180,12 @@ internal class HostApiV1Impl(
                 throw e.cause ?: e
             } catch (e: InterruptedException) {
                 Thread.currentThread().interrupt()
-                throw IllegalStateException("source call timed out", e)
+                val isTimeout = budget?.isTimedOut() == true || System.currentTimeMillis() > deadlineEpochMs
+                if (isTimeout) {
+                    throw IllegalStateException("source call timed out", e)
+                } else {
+                    throw CancellationException("source call cancelled", e)
+                }
             } finally {
                 pool.shutdownNow()
             }
@@ -493,11 +500,14 @@ internal class HostApiV1Impl(
     }
 
     internal fun checkAborted() {
-        if (Thread.currentThread().isInterrupted) {
+        val b = budget
+        if (b != null && b.isTimedOut()) {
+            throw IllegalStateException("source call timed out")
+        } else if (System.currentTimeMillis() > deadlineEpochMs) {
             throw IllegalStateException("source call timed out")
         }
-        if (System.currentTimeMillis() > deadlineEpochMs) {
-            throw IllegalStateException("source call timed out")
+        if (Thread.currentThread().isInterrupted) {
+            throw CancellationException("source call cancelled")
         }
     }
 
@@ -601,7 +611,12 @@ internal class HostApiV1Impl(
             Thread.sleep(BACKOFF_MS[attempt])
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()
-            throw IllegalStateException("source call timed out", e)
+            val isTimeout = budget?.isTimedOut() == true || System.currentTimeMillis() > deadlineEpochMs
+            if (isTimeout) {
+                throw IllegalStateException("source call timed out", e)
+            } else {
+                throw CancellationException("source call cancelled", e)
+            }
         }
         checkAborted()
     }

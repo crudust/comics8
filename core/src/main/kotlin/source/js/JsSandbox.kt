@@ -11,11 +11,21 @@ import org.mozilla.javascript.UniqueTag
 import org.mozilla.javascript.WrapFactory
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
+import kotlinx.coroutines.CancellationException
+
+import java.util.concurrent.atomic.AtomicBoolean
+
+internal data class CallBudget(
+    val deadlineEpochMs: Long,
+    val timedOut: AtomicBoolean = AtomicBoolean(false),
+) {
+    fun isTimedOut(): Boolean = timedOut.get() || System.currentTimeMillis() > deadlineEpochMs
+}
 
 internal object JsSandbox {
     const val ALLOWLIST_PREFIX = "com.comics8.core.source.js."
     const val DEFAULT_CALL_TIMEOUT_MS = 30_000L
-    val DEADLINE_KEY = Any()
+    val BUDGET_KEY = Any()
 
     private val factory = SandboxContextFactory()
 
@@ -43,12 +53,12 @@ internal object JsSandbox {
     }
 
     fun checkDeadline(cx: Context) {
-        if (Thread.currentThread().isInterrupted) {
+        val budget = cx.getThreadLocal(BUDGET_KEY) as? CallBudget
+        if (budget != null && budget.isTimedOut()) {
             throw EvaluatorException("source call timed out")
         }
-        val deadline = cx.getThreadLocal(DEADLINE_KEY) as? Long ?: return
-        if (System.currentTimeMillis() > deadline) {
-            throw EvaluatorException("source call timed out")
+        if (Thread.currentThread().isInterrupted) {
+            throw CancellationException("source call cancelled")
         }
     }
 

@@ -338,8 +338,12 @@ class DesktopViewModel(
             DesktopSourcePrefs.language(id)?.ifBlank { null }
         }
         _state.update { it.copy(packsReady = true) }
-        applyActiveSource(DesktopSourcePrefs.activeSourceId(), loadListing = false)
-        if (_state.value.activeSourceId != null && _state.value.items.isEmpty()) {
+        val currentActive = _state.value.activeSourceId
+        val prefActive = DesktopSourcePrefs.activeSourceId()
+        if (currentActive != prefActive) {
+            applyActiveSource(prefActive, loadListing = false)
+        }
+        if (_state.value.activeSourceId != null && _state.value.items.isEmpty() && loadJob?.isActive != true) {
             loadPage(1)
         }
     }
@@ -946,8 +950,11 @@ class DesktopViewModel(
 
     fun loadPage(page: Int, replace: Boolean = false) {
         val tab = _state.value.tab ?: return
-        loadJob?.cancel()
         val targetPage = page.coerceAtLeast(1)
+        if (!replace && loadJob?.isActive == true && _state.value.page == targetPage && _state.value.loading) {
+            return
+        }
+        loadJob?.cancel()
 
         loadJob = scope.launch {
             _state.update {

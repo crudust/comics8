@@ -98,7 +98,7 @@ data class DesktopUiState(
     val libraryRoots: List<String> = emptyList(),
     val showRemoveSourceSheet: Boolean = false,
     val sourceError: String? = null,
-    val packsReady: Boolean = false,
+    val packsReady: Boolean = true,
     val networkDraft: NetworkSourceConfig? = null,
     val networkTesting: Boolean = false,
     val networkTestMessage: String? = null,

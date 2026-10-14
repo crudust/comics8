@@ -5,6 +5,10 @@ import com.comics8.core.source.HttpResult
 import com.comics8.core.source.RequestPolicy
 import com.comics8.core.source.SourceHttp
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertThrows
 import org.junit.Test
@@ -110,6 +114,41 @@ class JsSandboxTest {
             }
         }
         assertThat(error.message).contains("timed out")
+    }
+
+    @Test
+    fun sourceCallCancellationThrowsCancellationException() = runBlocking {
+        val engine = JsEngine(callTimeoutMs = 5000)
+        val handle = engine.load(
+            """
+            var source = {
+              id: "slow",
+              displayName: "Slow",
+              apiLevel: 1,
+              origin: "https://slow.test",
+              catalogs: [],
+              loadListing: function() { for (;;) {} },
+              loadEpisodes: function() { return { items: [], currentPage: 1, lastPage: 1 }; },
+              resolveImages: function() { return []; }
+            };
+            """.trimIndent(),
+            "slow.js",
+        )
+        val source = JsComicSource(engine, handle)
+        var thrown: Throwable? = null
+        val job = launch(Dispatchers.Default) {
+            try {
+                source.loadListing("LATEST", 1, NoopHttp)
+            } catch (t: Throwable) {
+                thrown = t
+                throw t
+            }
+        }
+        delay(60)
+        job.cancel()
+        job.join()
+        assertThat(thrown).isInstanceOf(CancellationException::class.java)
+        assertThat(thrown?.message).doesNotContain("timed out")
     }
 
     private fun assertFails(engine: JsEngine, handle: JsSourceHandle, expression: String) {
