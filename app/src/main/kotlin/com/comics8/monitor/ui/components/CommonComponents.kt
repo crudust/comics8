@@ -241,12 +241,16 @@ fun Modifier.horizontalPageSwipe(
     lastPage: Int,
     onPrevPage: () -> Unit,
     onNextPage: () -> Unit,
+    onBoundaryPrev: (() -> Unit)? = null,
+    onBoundaryNext: (() -> Unit)? = null,
 ): Modifier {
-    val isEnabled by rememberUpdatedState(enabled && lastPage > 1)
+    val isEnabled by rememberUpdatedState(enabled && (lastPage > 1 || onBoundaryPrev != null || onBoundaryNext != null))
     val currentPage by rememberUpdatedState(page)
     val currentLastPage by rememberUpdatedState(lastPage)
     val currentOnPrev by rememberUpdatedState(onPrevPage)
     val currentOnNext by rememberUpdatedState(onNextPage)
+    val currentOnBoundaryPrev by rememberUpdatedState(onBoundaryPrev)
+    val currentOnBoundaryNext by rememberUpdatedState(onBoundaryNext)
 
     return this.pointerInput(Unit) {
         var totalDragX = 0f
@@ -275,10 +279,14 @@ fun Modifier.horizontalPageSwipe(
                 if (totalDragX < 0f && (totalDragX < -thresholdPx || velocityX < -velocityThresholdPx)) {
                     if (currentPage < currentLastPage) {
                         currentOnNext()
+                    } else {
+                        currentOnBoundaryNext?.invoke()
                     }
                 } else if (totalDragX > 0f && (totalDragX > thresholdPx || velocityX > velocityThresholdPx)) {
                     if (currentPage > 1) {
                         currentOnPrev()
+                    } else {
+                        currentOnBoundaryPrev?.invoke()
                     }
                 }
                 totalDragX = 0f

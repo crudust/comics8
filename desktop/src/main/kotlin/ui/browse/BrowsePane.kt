@@ -58,6 +58,7 @@ import com.comics8.desktop.ui.components.Badge
 import com.comics8.desktop.ui.components.EmptySourcePane
 import com.comics8.desktop.ui.components.ErrorPane
 import com.comics8.desktop.ui.components.LoadingPane
+import com.comics8.desktop.ui.components.desktopHorizontalPageSwipe
 import com.comics8.desktop.ui.components.sourceChipLabel
 import com.comics8.desktop.ui.theme.LocalStrings
 import com.comics8.desktop.ui.theme.MonochromeTheme
@@ -104,7 +105,17 @@ fun BrowsePane(
             )
         }
         else -> {
-            Column(modifier = modifier.fillMaxSize()) {
+            Column(
+                modifier = modifier
+                    .fillMaxSize()
+                    .desktopHorizontalPageSwipe(
+                        enabled = state.tab?.paginated == true && !state.loading && !state.isSearch,
+                        page = state.page,
+                        lastPage = state.lastPage,
+                        onPrevPage = viewModel::prevPage,
+                        onNextPage = viewModel::nextPage,
+                    ),
+            ) {
                 if (state.tab is BrowseTab.Favorite && state.items.isEmpty() && !state.isSearch) {
                     ErrorPane(
                         message = strings.emptyFavorites,
@@ -219,7 +230,7 @@ private fun BrowsePageBar(
             .padding(vertical = 8.dp),
     ) {
         IconButton(
-            onClick = { viewModel.goToPage(state.page - 1) },
+            onClick = viewModel::prevPage,
             enabled = !state.loading && state.page > 1,
         ) {
             Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = strings.actionPrev)
@@ -239,7 +250,7 @@ private fun BrowsePageBar(
         }
 
         IconButton(
-            onClick = { viewModel.goToPage(state.page + 1) },
+            onClick = viewModel::nextPage,
             enabled = !state.loading && state.page < state.lastPage,
         ) {
             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = strings.actionNext)

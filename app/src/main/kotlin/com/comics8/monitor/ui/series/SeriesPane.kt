@@ -96,6 +96,7 @@ fun SeriesPane(
                         lastPage = state.episodeLastPage,
                         onPrevPage = viewModel::prevEpisodePage,
                         onNextPage = viewModel::nextEpisodePage,
+                        onBoundaryPrev = viewModel::closeSeries,
                     ),
             ) {
                 LazyColumn(

@@ -20,9 +20,23 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.onPointerEvent
+import com.comics8.core.model.ReaderDomain.BoundaryDirection
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.math.abs
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.comics8.core.i18n.AppStrings
@@ -200,3 +214,69 @@ fun ErrorPane(
         }
     }
 }
+
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+fun Modifier.desktopHorizontalPageSwipe(
+    enabled: Boolean = true,
+    page: Int,
+    lastPage: Int,
+    onPrevPage: () -> Unit,
+    onNextPage: () -> Unit,
+    onBoundaryPrev: (() -> Unit)? = null,
+    onBoundaryNext: (() -> Unit)? = null,
+): Modifier {
+    val isEnabled by rememberUpdatedState(enabled && (lastPage > 1 || onBoundaryPrev != null || onBoundaryNext != null))
+    val currentPage by rememberUpdatedState(page)
+    val currentLastPage by rememberUpdatedState(lastPage)
+    val currentOnPrev by rememberUpdatedState(onPrevPage)
+    val currentOnNext by rememberUpdatedState(onNextPage)
+    val currentOnBoundaryPrev by rememberUpdatedState(onBoundaryPrev)
+    val currentOnBoundaryNext by rememberUpdatedState(onBoundaryNext)
+    val scope = rememberCoroutineScope()
+    var gestureResetJob by remember { mutableStateOf<Job?>(null) }
+    var activeGestureDirection by remember { mutableStateOf<BoundaryDirection?>(null) }
+
+    return this.onPointerEvent(PointerEventType.Scroll) { event ->
+        if (!isEnabled) return@onPointerEvent
+        val deltaX = event.changes.sumOf { it.scrollDelta.x.toDouble() }.toFloat()
+        val deltaY = event.changes.sumOf { it.scrollDelta.y.toDouble() }.toFloat()
+
+        val absX = abs(deltaX)
+        val absY = abs(deltaY)
+        if (absX < 0.8f || absX < absY) {
+            if (absX < 0.2f && absY < 0.2f) {
+                gestureResetJob?.cancel()
+                activeGestureDirection = null
+            }
+            return@onPointerEvent
+        }
+
+        val direction = if (deltaX > 0f) BoundaryDirection.ADVANCE else BoundaryDirection.RETREAT
+
+        gestureResetJob?.cancel()
+        gestureResetJob = scope.launch {
+            delay(250)
+            activeGestureDirection = null
+        }
+
+        if (direction == activeGestureDirection) return@onPointerEvent
+        activeGestureDirection = direction
+        event.changes.forEach { it.consume() }
+
+        if (direction == BoundaryDirection.ADVANCE) {
+            if (currentPage < currentLastPage) {
+                currentOnNext()
+            } else {
+                currentOnBoundaryNext?.invoke()
+            }
+        } else {
+            if (currentPage > 1) {
+                currentOnPrev()
+            } else {
+                currentOnBoundaryPrev?.invoke()
+            }
+        }
+    }
+}
+
