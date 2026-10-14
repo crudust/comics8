@@ -214,7 +214,7 @@ private fun ComicsAppUiContent(
                                     modifier = Modifier
                                         .fillMaxSize()
                                         .horizontalPageSwipe(
-                                            enabled = currentCatalog?.paginated == true && !state.loading,
+                                            enabled = currentCatalog?.paginated == true && !state.loading && !state.isSearch,
                                             page = state.page,
                                             lastPage = state.lastPage,
                                             onPrevPage = viewModel::prevPage,
