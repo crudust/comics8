@@ -2,10 +2,12 @@
 
 ## Core Boundaries & Invariants
 
-- **Single Release Authority (Linux Server)**:
-  - All official releases MUST be initiated from the Linux development server using `./scripts/deploy-release.sh [versionName] [versionCode] [releaseNotes]`.
+- **Release Pipeline Architecture (Mac Orchestration & Linux Builder Offload)**:
+  - Official releases are orchestrated from the Mac workstation via `./scripts/deploy-release.sh [versionName] [versionCode] [releaseNotes]`.
+  - Heavy Android release builds (`assembleStandaloneRelease bundlePlayRelease`) are offloaded to the Linux build server (`crudust@192.168.0.154`) via SSH, keeping the Mac workstation completely unburdened.
+  - Resulting signed APK and AAB binaries are immediately fetched back to the Mac workstation's local `dist/` directory via `scp`.
+  - Artifacts can be retrieved without rebuilding at any time using `./scripts/deploy-release.sh --fetch`.
   - Release notes MUST be written in English for multi-language client compatibility. If omitted, the deployment script automatically derives English release notes from Git commit history since the previous release tag (falling back to "Bug fixes and performance improvements").
-  - Never run standalone release tags directly from local dev clones without going through the canonical deployment script.
 - **macOS CI Builder Topology (GitHub Actions)**:
   - macOS packaging is performed autonomously in cloud CI via `.github/workflows/release.yml` on `macos-latest`.
   - When release tags (`v*`) are pushed to GitHub, GitHub Actions compiles the macOS distributable (`./gradlew :desktop:createDistributable`), packages `release-artifacts/Comics8-mac.zip` preserving symlinks and POSIX attributes, and uploads directly to GitHub Releases.

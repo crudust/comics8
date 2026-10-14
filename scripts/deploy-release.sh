@@ -2,58 +2,41 @@
 set -euo pipefail
 
 # ==========================================================
-# Comics8 Universal Release & Cloud Deploy Script
-# Builds APK & Windows Zip on Linux, syncs open source to
-# crudust/comics8, pushes release tags, and publishes to GitHub.
+# Comics8 Universal Release & Cloud Deploy Orchestrator
+#
+# Architecture:
+# - Orchestrated from local workstation (Mac) with zero build load.
+# - Android release builds (APK/AAB) are fully offloaded to the
+#   high-performance Linux build server over SSH.
+# - Resulting APK & AAB are automatically fetched back to local dist/.
+# - Desktop binaries (macOS / Windows) are built in cloud CI (GitHub Actions).
 # ==========================================================
 
+# Optional local overrides (e.g. custom host IPs)
 if [[ -f "${HOME}/.comics8-deploy.env" ]]; then
     # shellcheck disable=SC1091
     source "${HOME}/.comics8-deploy.env"
 fi
 
-# Variables loaded by `source` are shell-local unless explicitly exported. Gradle
-# reads signing secrets from the environment and must never receive them on its CLI.
-for signing_var in \
-    COMICS8_SIGNING_STORE_FILE \
-    COMICS8_SIGNING_STORE_PASSWORD \
-    COMICS8_SIGNING_KEY_ALIAS \
-    COMICS8_SIGNING_KEY_PASSWORD; do
-    if [[ -n "${!signing_var:-}" ]]; then
-        export "${signing_var}"
-    fi
-done
+BUILD_HOST="${COMICS8_BUILD_HOST:-crudust@192.168.0.154}"
+BUILD_DIR="${COMICS8_BUILD_DIR:-/home/crudust/projects/comics8}"
+PUBLIC_REPO="${COMICS8_PUBLIC_REPO_URL:-git@github.com:crudust/comics8.git}"
+SYNC_SERVER_HOST="${COMICS8_SERVER_HOST:-192.168.0.136}"
+SYNC_SERVER_USER="${COMICS8_SERVER_USER:-crudust}"
+SYNC_SERVER_DOWNLOAD_DIR="${COMICS8_SERVER_DOWNLOAD_DIR:-/home/crudust/comics8-sync/data/downloads}"
+SYNC_SERVER_VERSION_FILE="${COMICS8_SERVER_VERSION_FILE:-/home/crudust/comics8-sync/data/version.json}"
 
-if [[ -z "${JAVA_HOME:-}" ]]; then
-    if [[ -x "/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home/bin/java" ]]; then
-        export JAVA_HOME="/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"
-    elif [[ -x "/usr/lib/jvm/java-17-openjdk-amd64/bin/java" ]]; then
-        export JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64"
-    fi
-fi
-
-if [[ -z "${ANDROID_SDK_ROOT:-}" ]]; then
-    if [[ -d "/opt/homebrew/share/android-commandlinetools" ]]; then
-        export ANDROID_SDK_ROOT="/opt/homebrew/share/android-commandlinetools"
-    elif [[ -d "${HOME}/android-sdk" ]]; then
-        export ANDROID_SDK_ROOT="${HOME}/android-sdk"
-    fi
-fi
-export ANDROID_HOME="${ANDROID_SDK_ROOT:-}"
-export PATH="${JAVA_HOME:+$JAVA_HOME/bin:}${ANDROID_SDK_ROOT:+$ANDROID_SDK_ROOT/platform-tools:}$HOME/.local/bin:$PATH"
-
-if [[ -z "${JAVA_HOME:-}" || ! -x "${JAVA_HOME}/bin/java" ]]; then
-    echo "❌ JAVA_HOME is not set to a JDK 17 install"
-    exit 1
-fi
 # Parse options and arguments
 TARGET="all"
 NON_FLAG_ARGS=()
+FETCH_ONLY=false
+
 for arg in "$@"; do
     case "$arg" in
         --desktop|-d) TARGET="desktop" ;;
         --android|-a) TARGET="android" ;;
         --all) TARGET="all" ;;
+        --fetch|--pull) FETCH_ONLY=true ;;
         *) NON_FLAG_ARGS+=("$arg") ;;
     esac
 done
@@ -62,12 +45,38 @@ if [[ "${#NON_FLAG_ARGS[@]}" -ge 4 && "${NON_FLAG_ARGS[3]}" =~ ^(all|desktop|and
     TARGET="${NON_FLAG_ARGS[3]}"
 fi
 
-VERSION_NAME="${NON_FLAG_ARGS[0]:-1.0.0}"
-VERSION_CODE="${NON_FLAG_ARGS[1]:-1}"
+VERSION_NAME="${NON_FLAG_ARGS[0]:-}"
+VERSION_CODE="${NON_FLAG_ARGS[1]:-}"
+
+# Read current version from app/build.gradle.kts if not specified
+if [[ -z "${VERSION_NAME}" ]]; then
+    VERSION_NAME=$(grep -oE 'versionName = "[^"]+"' app/build.gradle.kts | cut -d'"' -f2 || echo "1.0.0")
+fi
+if [[ -z "${VERSION_CODE}" ]]; then
+    VERSION_CODE=$(grep -oE 'versionCode = [0-9]+' app/build.gradle.kts | awk '{print $3}' || echo "1")
+fi
+
+DIST_DIR="dist"
+APK_REL_PATH="app/build/outputs/apk/standalone/release/app-standalone-release.apk"
+AAB_REL_PATH="app/build/outputs/bundle/playRelease/app-play-release.aab"
+DIST_APK="${DIST_DIR}/comics8-v${VERSION_NAME}.apk"
+DIST_AAB="${DIST_DIR}/comics8-v${VERSION_NAME}.aab"
+
+# Fast-path: only fetch latest artifacts from remote build server
+if [[ "$FETCH_ONLY" == "true" ]]; then
+    echo "📥 Fetching latest build artifacts from ${BUILD_HOST}..."
+    mkdir -p "${DIST_DIR}"
+    scp "${BUILD_HOST}:${BUILD_DIR}/${APK_REL_PATH}" "${DIST_APK}"
+    scp "${BUILD_HOST}:${BUILD_DIR}/${AAB_REL_PATH}" "${DIST_AAB}"
+    echo "✅ Fetched to local dist/:"
+    ls -lh "${DIST_APK}" "${DIST_AAB}"
+    exit 0
+fi
+
+# Release notes generation
 if [[ -n "${NON_FLAG_ARGS[2]:-}" ]]; then
     RELEASE_NOTES="${NON_FLAG_ARGS[2]}"
 else
-    # Auto-generate English release notes from commit history since previous tag
     PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
     AUTO_NOTES=""
     if [[ -n "${PREV_TAG}" ]]; then
@@ -82,35 +91,23 @@ else
         RELEASE_NOTES="Bug fixes and performance improvements"
     fi
 fi
-PUBLIC_REPO="${COMICS8_PUBLIC_REPO_URL:-git@github.com:crudust/comics8.git}"
-
-REMOTE_BUILD_HOST="${COMICS8_BUILD_HOST:-crudust@192.168.0.154}"
-REMOTE_BUILD_DIR="${COMICS8_BUILD_DIR:-/home/crudust/projects/comics8}"
-NEED_REMOTE_BUILD=false
-
-if [[ "$TARGET" != "desktop" ]]; then
-    if [[ -z "${ANDROID_SDK_ROOT:-}" || ! -d "${ANDROID_SDK_ROOT}" ]] || ! ./gradlew -q :app:validateReleaseSigning >/dev/null 2>&1; then
-        NEED_REMOTE_BUILD=true
-    fi
-
-    if [[ "$NEED_REMOTE_BUILD" == "true" ]]; then
-        echo "📡 Local Android SDK/signing not available. Checking remote Linux build server (${REMOTE_BUILD_HOST})..."
-        if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=3 "${REMOTE_BUILD_HOST}" "test -d ${REMOTE_BUILD_DIR}" >/dev/null 2>&1; then
-            echo "  ✅ Connected to remote build server (${REMOTE_BUILD_HOST}). Android build will be delegated."
-        else
-            echo "❌ ANDROID_SDK_ROOT is not set locally and remote build server (${REMOTE_BUILD_HOST}) is unreachable."
-            exit 1
-        fi
-    fi
-else
-    echo "ℹ️ Target is desktop-only: skipping Android SDK and signing validation."
-fi
 
 echo "=================================================="
 echo "🚀 Comics8 Deploying Release v${VERSION_NAME} (code ${VERSION_CODE})"
-echo "Target: $(echo "$TARGET" | tr '[:lower:]' '[:upper:]')"
-echo "Notes: ${RELEASE_NOTES}"
+echo "Build Server: ${BUILD_HOST}"
+echo "Target:       $(echo "$TARGET" | tr '[:lower:]' '[:upper:]')"
+echo "Notes:        ${RELEASE_NOTES}"
 echo "=================================================="
+
+# Preflight: check build server reachability
+if [[ "$TARGET" != "desktop" ]]; then
+    echo "📡 Verifying connection to Linux build server (${BUILD_HOST})..."
+    if ! ssh -o StrictHostKeyChecking=no -o ConnectTimeout=4 "${BUILD_HOST}" "test -d ${BUILD_DIR}" >/dev/null 2>&1; then
+        echo "❌ Cannot connect to build server ${BUILD_HOST} or ${BUILD_DIR} does not exist."
+        exit 1
+    fi
+    echo "  ✅ Build server connected."
+fi
 
 sed_inplace() {
     if sed --version >/dev/null 2>&1; then
@@ -121,9 +118,10 @@ sed_inplace() {
 }
 
 # 1. Sync version across modules
-echo "🔧 1/5: Syncing codebase version..."
+echo "🔧 1/5: Syncing codebase version to v${VERSION_NAME} (${VERSION_CODE})..."
 sed_inplace "s/versionCode = [0-9]+/versionCode = ${VERSION_CODE}/" app/build.gradle.kts
 sed_inplace "s/versionName = \"[^\"]+\"/versionName = \"${VERSION_NAME}\"/" app/build.gradle.kts
+
 DESKTOP_PKG_VER="${VERSION_NAME%%-*}"
 if [[ "${DESKTOP_PKG_VER}" =~ ^0\. ]]; then
     DESKTOP_PKG_VER="1.${DESKTOP_PKG_VER#0.}"
@@ -139,75 +137,62 @@ object DesktopVersion {
 }
 VERSION_EOF
 
-# 2. Build binaries depending on target
-APK_PATH="app/build/outputs/apk/standalone/release/app-standalone-release.apk"
-AAB_PATH="app/build/outputs/bundle/playRelease/app-play-release.aab"
-DIST_DIR="dist"
-DIST_APK="${DIST_DIR}/comics8-v${VERSION_NAME}.apk"
-DIST_AAB="${DIST_DIR}/comics8-v${VERSION_NAME}.aab"
+# 2. Remote Build & Retrieve Android APK & AAB
+build_android_on_server() {
+    echo "📡 Flushing Mutagen sync before remote build..."
+    if command -v mutagen >/dev/null 2>&1; then
+        mutagen sync flush comics8 2>/dev/null || true
+    fi
 
-build_android() {
-    if [[ "$NEED_REMOTE_BUILD" == "true" ]]; then
-        echo "📡 Flushing Mutagen sync before remote build..."
-        if command -v mutagen >/dev/null 2>&1; then
-            mutagen sync flush comics8 2>/dev/null || true
-        fi
-        echo "🚀 Running Android build on remote host (${REMOTE_BUILD_HOST})..."
-        ssh "${REMOTE_BUILD_HOST}" "bash -lc '
-            cd \"${REMOTE_BUILD_DIR}\" && \
-            set -a && \
-            if [ -f ~/.comics8-deploy.env ]; then source ~/.comics8-deploy.env; fi && \
-            set +a && \
-            export JAVA_HOME=\"\${JAVA_HOME:-/usr/lib/jvm/java-17-openjdk-amd64}\" && \
-            export ANDROID_HOME=\"\${ANDROID_HOME:-\$HOME/android-sdk}\" && \
-            export ANDROID_SDK_ROOT=\"\${ANDROID_SDK_ROOT:-\$HOME/android-sdk}\" && \
-            export PATH=\"\$JAVA_HOME/bin:\$ANDROID_SDK_ROOT/platform-tools:\$PATH\" && \
-            ./gradlew assembleStandaloneRelease bundlePlayRelease
-        '"
-
-        echo "📥 Fetching built APK & AAB from remote host..."
-        mkdir -p "$(dirname "$APK_PATH")" "$(dirname "$AAB_PATH")"
-        scp "${REMOTE_BUILD_HOST}:${REMOTE_BUILD_DIR}/${APK_PATH}" "${APK_PATH}"
-        scp "${REMOTE_BUILD_HOST}:${REMOTE_BUILD_DIR}/${AAB_PATH}" "${AAB_PATH}"
-    else
+    echo "🚀 Delegating Android build to remote server (${BUILD_HOST})..."
+    ssh "${BUILD_HOST}" "bash -lc '
+        cd \"${BUILD_DIR}\" && \
+        set -a && \
+        if [ -f ~/.comics8-deploy.env ]; then source ~/.comics8-deploy.env; fi && \
+        set +a && \
+        export JAVA_HOME=\"\${JAVA_HOME:-/usr/lib/jvm/java-17-openjdk-amd64}\" && \
+        export ANDROID_HOME=\"\${ANDROID_HOME:-\$HOME/android-sdk}\" && \
+        export ANDROID_SDK_ROOT=\"\${ANDROID_SDK_ROOT:-\$HOME/android-sdk}\" && \
+        export PATH=\"\$JAVA_HOME/bin:\$ANDROID_SDK_ROOT/platform-tools:\$PATH\" && \
         ./gradlew assembleStandaloneRelease bundlePlayRelease
-    fi
+    '"
 
-    if [ ! -f "$APK_PATH" ]; then
-        echo "❌ APK file not found: $APK_PATH"
-        exit 1
-    fi
-    if [ ! -f "$AAB_PATH" ]; then
-        echo "❌ AAB file not found: $AAB_PATH"
-        exit 1
-    fi
-
-    # Collect artifacts into project dist/ folder
+    echo "📥 Fetching built APK & AAB from build server into local ${DIST_DIR}/..."
     mkdir -p "${DIST_DIR}"
-    cp "${APK_PATH}" "${DIST_APK}"
-    cp "${AAB_PATH}" "${DIST_AAB}"
-    echo "  📦 Release artifacts collected in ${DIST_DIR}/:"
-    echo "     - ${DIST_APK}"
-    echo "     - ${DIST_AAB}"
+    scp "${BUILD_HOST}:${BUILD_DIR}/${APK_REL_PATH}" "${DIST_APK}"
+    scp "${BUILD_HOST}:${BUILD_DIR}/${AAB_REL_PATH}" "${DIST_AAB}"
+
+    if [[ ! -s "${DIST_APK}" ]]; then
+        echo "❌ APK file was not retrieved or is empty: ${DIST_APK}"
+        exit 1
+    fi
+    if [[ ! -s "${DIST_AAB}" ]]; then
+        echo "❌ AAB file was not retrieved or is empty: ${DIST_AAB}"
+        exit 1
+    fi
+
+    echo "  📦 Local release artifacts successfully collected in ${DIST_DIR}/:"
+    echo "     - ${DIST_APK} ($(du -h "${DIST_APK}" | cut -f1))"
+    echo "     - ${DIST_AAB} ($(du -h "${DIST_AAB}" | cut -f1))"
 }
 
 case "$TARGET" in
     desktop)
-        echo "ℹ️ Desktop binaries (Windows & Mac) are built automatically by GitHub Actions on tag push."
+        echo "ℹ️ Target is desktop-only. Android build skipped."
         ;;
     android|all|*)
-        echo "📦 2/5: Building Android Release APK & AAB (Windows & Mac are built via GitHub Actions)..."
-        build_android
+        echo "📦 2/5: Offloading Android Release build to server..."
+        build_android_on_server
         ;;
 esac
 
-
 # 3. Commit version bump in dev repo
-echo "📝 3/5: Committing version bump to dev repo..."
+echo "📝 3/5: Committing version bump..."
 git add app/build.gradle.kts desktop/build.gradle.kts desktop/src/main/kotlin/DesktopVersion.kt
 if ! git diff --staged --quiet; then
     git commit -m "chore: Bump version to ${VERSION_NAME} (code ${VERSION_CODE})"
 fi
+
 TAG_NAME="v${VERSION_NAME}"
 git tag -f "${TAG_NAME}"
 git push origin main "${TAG_NAME}" -f
@@ -217,19 +202,14 @@ echo "🔄 4/5: Syncing open-source repository..."
 ./scripts/sync-public-repo.sh "${PUBLIC_REPO}"
 
 # 5. Upload binaries and version.json to Sync Server (if reachable)
-SERVER_HOST="${COMICS8_SERVER_HOST:-192.168.0.136}"
-SERVER_USER="${COMICS8_SERVER_USER:-crudust}"
-SERVER_DOWNLOAD_DIR="${COMICS8_SERVER_DOWNLOAD_DIR:-/home/crudust/comics8-sync/data/downloads}"
-SERVER_VERSION_FILE="${COMICS8_SERVER_VERSION_FILE:-/home/crudust/comics8-sync/data/version.json}"
-
-echo "📡 5/5: Uploading to Sync Server ($SERVER_HOST)..."
-if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=3 "${SERVER_USER}@${SERVER_HOST}" "mkdir -p ${SERVER_DOWNLOAD_DIR}" >/dev/null 2>&1; then
+echo "📡 5/5: Uploading to Sync Server ($SYNC_SERVER_HOST)..."
+if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=3 "${SYNC_SERVER_USER}@${SYNC_SERVER_HOST}" "mkdir -p ${SYNC_SERVER_DOWNLOAD_DIR}" >/dev/null 2>&1; then
     if [[ "$TARGET" != "desktop" && -f "$DIST_APK" ]]; then
-        scp "$DIST_APK" "${SERVER_USER}@${SERVER_HOST}:${SERVER_DOWNLOAD_DIR}/comics8-latest.apk"
+        scp "$DIST_APK" "${SYNC_SERVER_USER}@${SYNC_SERVER_HOST}:${SYNC_SERVER_DOWNLOAD_DIR}/comics8-latest.apk"
     fi
 
-    # Retrieve existing version.json to preserve non-targeted platform version
-    scp -o StrictHostKeyChecking=no "${SERVER_USER}@${SERVER_HOST}:${SERVER_VERSION_FILE}" /tmp/comics8-existing-version.json 2>/dev/null || true
+    # Retrieve existing version.json to preserve non-targeted platform versions
+    scp -o StrictHostKeyChecking=no "${SYNC_SERVER_USER}@${SYNC_SERVER_HOST}:${SYNC_SERVER_VERSION_FILE}" /tmp/comics8-existing-version.json 2>/dev/null || true
 
     COMICS8_TARGET="$TARGET" \
     COMICS8_VERSION_NAME="$VERSION_NAME" \
@@ -279,15 +259,15 @@ if "serverUrl" in existing:
 json.dump(payload, sys.stdout, ensure_ascii=False, indent=2)
 print()
 PY
-    scp /tmp/comics8-version.json "${SERVER_USER}@${SERVER_HOST}:${SERVER_VERSION_FILE}"
+    scp /tmp/comics8-version.json "${SYNC_SERVER_USER}@${SYNC_SERVER_HOST}:${SYNC_SERVER_VERSION_FILE}"
     rm -f /tmp/comics8-version.json /tmp/comics8-existing-version.json
-    echo "  ✅ Synced version.json and binaries to ${SERVER_HOST}"
+    echo "  ✅ Synced version.json and binaries to ${SYNC_SERVER_HOST}"
 else
-    echo "  ⚠️ Sync server (${SERVER_HOST}) unreachable via SSH. Skipped server upload."
+    echo "  ⚠️ Sync server (${SYNC_SERVER_HOST}) unreachable via SSH. Skipped server upload."
 fi
 
 # 6. Publish to GitHub Releases (AAB is excluded from public release for security)
-echo "🐙 6/6: Publishing to GitHub Releases (crudust/comics8)..."
+echo "🐙 Publishing to GitHub Releases (crudust/comics8)..."
 RELEASE_FILES=()
 if [[ "$TARGET" != "desktop" && -f "$DIST_APK" ]]; then
     TMP_LATEST_APK="build/release/comics8-latest.apk"

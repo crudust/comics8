@@ -21,14 +21,16 @@ Comics8 Android 프로젝트 작업 시 필요한 환경 정보, 빌드/실행 �
 
 ## 2. 개발 환경 및 필수 경로 (Environment Setup)
 
-릴리즈 배포는 Linux 개발서버에서 합니다. Android SDK와 JDK 17이 필요합니다.
-
-```bash
-export JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64"
-export ANDROID_SDK_ROOT="$HOME/android-sdk"
-export ANDROID_HOME="$ANDROID_SDK_ROOT"
-export PATH="$JAVA_HOME/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
-```
+- **Mac (로컬 개발 워크스테이션)**:
+  - 가벼운 코딩, 테스트, 데스크톱 앱 실행 및 배포 오케스트레이션 전용 (Mac에 무거운 빌드 부하를 주지 않음).
+- **Linux 개발/빌드 서버 (`crudust@192.168.0.154`)**:
+  - Android SDK, JDK 17, 릴리즈 서명 키스토어가 완비되어 있으며 무거운 Android Release 빌드(APK/AAB)를 전담합니다.
+  ```bash
+  export JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64"
+  export ANDROID_SDK_ROOT="$HOME/android-sdk"
+  export ANDROID_HOME="$ANDROID_SDK_ROOT"
+  export PATH="$JAVA_HOME/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
+  ```
 
 Android는 에뮬레이터로 돌리지 않습니다. 폰은 인앱 업데이트로 APK를 받습니다. macOS 앱은 GitHub Actions(`macos-latest`)에서 태그 푸시 시 자동 빌드되어 GitHub Releases에 배포되며, 실행 중인 Mac 앱은 인앱 업데이트로 직접 다운로드받아 갱신됩니다.
 
@@ -36,8 +38,7 @@ Android는 에뮬레이터로 돌리지 않습니다. 폰은 인앱 업데이트
 
 ## 3. 주요 빌드 및 실행 명령어 (Build & Run Commands)
 
-### 3.1. APK, AAB 및 Windows 포터블 단독 빌드
-### 3.1. APK 및 AAB 단독 빌드
+### 3.1. APK 및 AAB 단독 빌드 (Linux 빌드 서버 전용)
 정식 서명된 Release APK/AAB를 빌드할 때 사용합니다:
 ```bash
 # GitHub / 자체 배포용 APK 및 Google Play 배포용 AAB
@@ -56,16 +57,22 @@ Mac 코딩 클론에서:
 ```
 
 ### 3.3. 릴리즈 배포
-`./scripts/deploy-release.sh`를 실행하면 APK와 AAB를 빌드(로컬에 SDK/서명키 부재 시 Linux 빌드 서버 위임)하여 `dist/`에 모으고, 버전을 올린 뒤 `crudust/comics8` 오픈소스 레포와 GitHub Releases에 자동 배포합니다:
+Mac 터미널에서 `./scripts/deploy-release.sh`를 실행하면:
+1. 무거운 Android Release 빌드(APK/AAB)는 고성능 Linux 서버(`192.168.0.154`)에 SSH로 위임하여 실행합니다 (Mac 부하 0%).
+2. 빌드 완료된 산출물은 Mac 로컬 `dist/`로 자동 수거(`scp`)됩니다.
+3. 버전 태그 푸시, GitHub Releases 배포, 오픈소스 레포 동기화가 순차적으로 자동 처리됩니다.
+
 ```bash
 ./scripts/deploy-release.sh [versionName] [versionCode] [releaseNotes]
 # 예시 (릴리즈 노트는 다국어 지원을 위해 영문으로 작성):
 ./scripts/deploy-release.sh 1.5.64 90 "Performance improvements and bug fixes"
 # (releaseNotes 인수를 생략하면 이전 태그 이후의 Git 커밋 히스토리로부터 영문 릴리즈 노트가 자동 생성됩니다)
+# 산출물만 원격 서버에서 다시 가져올 때:
+./scripts/deploy-release.sh --fetch
 ```
 - **배포 아티팩트 보관 (`dist/`)**:
   - `dist/comics8-v{version}.apk`: 독립형 Release APK
-  - `dist/comics8-v{version}.aab`: Google Play Console 전용 AAB (보안상 GitHub 미공개, 로컬 보관)
+  - `dist/comics8-v{version}.aab`: Google Play Console 전용 AAB (보안상 GitHub 미공개, 로컬 dist/ 보관)
 - **GitHub Releases 자동 업로드**:
   - **Android APK**: `crudust/comics8` GitHub Releases에 `comics8-latest.apk`로 자동 업로드
   - **macOS Desktop / Windows Zip**: GitHub Actions (`release.yml`)가 태그 푸시를 감지해 자동 빌드 및 업로드
@@ -122,12 +129,12 @@ Comics8/
 
 ## 5. Agent 작업 지침 및 주의사항 (Guidelines for Agents)
 
-1. **빌드/테스트 전 환경변수 필수**:
-   - `JAVA_HOME`과 `ANDROID_SDK_ROOT`가 셸 세션에 올바르게 잡혀 있어야 `./gradlew`가 정상 동작합니다. Android는 에뮬레이터/`adb`로 실행하지 않습니다.
-2. **릴리즈는 Linux `deploy-release.sh`만 사용**:
-   - 푸시(`origin/main`) 후 배포. Android APK/AAB와 Windows Zip은 Linux 개발서버에서 로컬 빌드하여 배포합니다.
-   - macOS 앱(`Comics8-mac.zip`)은 GitHub Actions(`macos-latest`)에서 자동 빌드되어 GitHub Releases에 직결 업로드됩니다.
-   - 실행 중인 데스크톱/모바일 앱은 인앱 업데이트로 최신 버전을 다운로드받습니다.
+1. **빌드/테스트 전 환경변수 (Linux 서버 및 Mac 데스크톱 실행)**:
+   - Mac에서 데스크톱 앱을 실행할 때는 JDK 17이 필요합니다 (`./scripts/run-desktop.sh`). Android APK/AAB 빌드는 Linux 서버에서 전담합니다.
+2. **릴리즈 배포 실행 (Mac 오케스트레이션 -> Linux 빌드 위임)**:
+   - Mac 터미널에서 `./scripts/deploy-release.sh`를 실행합니다.
+   - 무거운 Android Release 빌드는 Linux 개발서버(`crudust@192.168.0.154`)에 위임되어 Mac에 부하를 주지 않으며, 완성된 APK와 AAB는 Mac 로컬 `dist/`로 자동 수거됩니다.
+   - macOS 앱(`Comics8-mac.zip`)과 Windows 앱(`Comics8-win.zip`)은 GitHub Actions(`release.yml`)가 태그 푸시를 감지해 자동 빌드 및 업로드합니다.
 3. **Room Entity 변경 시 주의**:
    - Room 엔티티나 스키마 수정 시 KSP 코드 생성이 필요하며, DB 버전 업그레이드 시 마이그레이션 전략(`fallbackToDestructiveMigration()` 여부 확인)을 확인해야 합니다.
 4. **테스트 추가 및 검증**:
