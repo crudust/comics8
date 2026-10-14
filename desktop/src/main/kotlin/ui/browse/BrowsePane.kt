@@ -58,7 +58,7 @@ import com.comics8.desktop.ui.components.Badge
 import com.comics8.desktop.ui.components.EmptySourcePane
 import com.comics8.desktop.ui.components.ErrorPane
 import com.comics8.desktop.ui.components.LoadingPane
-import com.comics8.desktop.ui.components.desktopHorizontalPageSwipe
+import com.comics8.desktop.ui.components.desktopDiscreteScrollPaging
 import com.comics8.desktop.ui.components.sourceChipLabel
 import com.comics8.desktop.ui.theme.LocalStrings
 import com.comics8.desktop.ui.theme.MonochromeTheme
@@ -72,50 +72,51 @@ fun BrowsePane(
 ) {
     val strings = LocalStrings.current
     val isLocal = state.activeSourceId == WorkId.LOCAL_SOURCE
-    when {
-        !state.packsReady -> {
-            LoadingPane(modifier = modifier)
-        }
-        state.activeSourceId == null -> {
-            EmptySourcePane(
-                modifier = modifier,
-                onAddSource = viewModel::openAddSourceSheet,
-                onImportJs = {
-                    com.comics8.desktop.ui.components.pickJsFile()?.let(viewModel::importJsFile)
-                },
-            )
-        }
-        isLocal && state.libraryRoots.isEmpty() && !state.loading -> {
-            EmptyLibraryPane(
-                onAddFolder = viewModel::addLibraryRoot,
-                modifier = modifier,
-            )
-        }
-        state.loading && state.items.isEmpty() -> {
-            Column(modifier = modifier.fillMaxSize()) {
-                LoadingPane(Modifier.weight(1f).fillMaxWidth())
-                BrowsePageBar(state, viewModel)
+    val canSwipePage = state.tab?.paginated == true && !state.loading && !state.isSearch && state.lastPage > 1
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .desktopDiscreteScrollPaging(
+                enabled = canSwipePage,
+                onAdvance = { if (state.page < state.lastPage) viewModel.nextPage() },
+                onRetreat = { if (state.page > 1) viewModel.prevPage() },
+            ),
+    ) {
+        when {
+            !state.packsReady -> {
+                LoadingPane(modifier = Modifier.fillMaxSize())
             }
-        }
-        state.error != null && state.items.isEmpty() -> {
-            ErrorPane(
-                message = state.error,
-                onRetry = viewModel::refresh,
-                modifier = modifier,
-            )
-        }
-        else -> {
-            Column(
-                modifier = modifier
-                    .fillMaxSize()
-                    .desktopHorizontalPageSwipe(
-                        enabled = state.tab?.paginated == true && !state.loading && !state.isSearch,
-                        page = state.page,
-                        lastPage = state.lastPage,
-                        onPrevPage = viewModel::prevPage,
-                        onNextPage = viewModel::nextPage,
-                    ),
-            ) {
+            state.activeSourceId == null -> {
+                EmptySourcePane(
+                    modifier = Modifier.fillMaxSize(),
+                    onAddSource = viewModel::openAddSourceSheet,
+                    onImportJs = {
+                        com.comics8.desktop.ui.components.pickJsFile()?.let(viewModel::importJsFile)
+                    },
+                )
+            }
+            isLocal && state.libraryRoots.isEmpty() && !state.loading -> {
+                EmptyLibraryPane(
+                    onAddFolder = viewModel::addLibraryRoot,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            state.loading && state.items.isEmpty() -> {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    LoadingPane(Modifier.weight(1f).fillMaxWidth())
+                    BrowsePageBar(state, viewModel)
+                }
+            }
+            state.error != null && state.items.isEmpty() -> {
+                ErrorPane(
+                    message = state.error,
+                    onRetry = viewModel::refresh,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            else -> {
+                Column(modifier = Modifier.fillMaxSize()) {
                 if (state.tab is BrowseTab.Favorite && state.items.isEmpty() && !state.isSearch) {
                     ErrorPane(
                         message = strings.emptyFavorites,
@@ -163,6 +164,7 @@ fun BrowsePane(
             }
         }
     }
+}
 }
 
 @Composable

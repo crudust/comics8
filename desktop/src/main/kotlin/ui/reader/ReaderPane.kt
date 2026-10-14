@@ -68,8 +68,6 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.utf16CodePoint
-import androidx.compose.ui.input.pointer.PointerEventType
-import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -84,11 +82,11 @@ import com.comics8.core.model.ViewMode
 import com.comics8.core.model.buildDualSpreads
 import com.comics8.core.model.buildSinglePageSlices
 import com.comics8.desktop.ui.DesktopUiState
-import kotlin.math.abs
 import com.comics8.desktop.ui.DesktopViewModel
 import com.comics8.desktop.ui.components.ErrorPane
 import com.comics8.desktop.ui.components.LoadingPane
 import com.comics8.desktop.ui.components.TopBar
+import com.comics8.desktop.ui.components.desktopDiscreteScrollPaging
 import com.comics8.desktop.ui.theme.LocalStrings
 import com.comics8.desktop.ui.util.DesktopAsyncImage
 
@@ -366,20 +364,6 @@ private fun ReaderPagedLayout(
         prevPromptVisible = false
     }
 
-    var activeGestureDirection by remember { mutableStateOf<ReaderDomain.BoundaryDirection?>(null) }
-    var gestureResetJob by remember { mutableStateOf<Job?>(null) }
-
-    LaunchedEffect(state.currentEpisode?.wrId) {
-        gestureResetJob?.cancel()
-        activeGestureDirection = null
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            gestureResetJob?.cancel()
-        }
-    }
-
     LaunchedEffect(pagerState.isScrollInProgress) {
         if (pagerState.isScrollInProgress) {
             controlsVisible = false
@@ -441,36 +425,13 @@ private fun ReaderPagedLayout(
         onRegisterActions(onAdvance, onRetreat)
     }
 
-    @OptIn(ExperimentalComposeUiApi::class)
-    val desktopScrollModifier = Modifier.onPointerEvent(PointerEventType.Scroll) { event ->
-        val deltaX = event.changes.sumOf { it.scrollDelta.x.toDouble() }.toFloat()
-        val deltaY = event.changes.sumOf { it.scrollDelta.y.toDouble() }.toFloat()
-
-        if (abs(deltaX) < 0.2f && abs(deltaY) < 0.2f) {
-            gestureResetJob?.cancel()
-            activeGestureDirection = null
-            return@onPointerEvent
-        }
-
-        val direction = ReaderDomain.resolveScrollDirection(
-            deltaX = deltaX,
-            deltaY = deltaY,
-            isR2L = currentIsR2L,
-            threshold = 1.0f,
-        ) ?: return@onPointerEvent
-
-        gestureResetJob?.cancel()
-        gestureResetJob = scope.launch {
-            delay(200)
-            activeGestureDirection = null
-        }
-
-        if (direction == activeGestureDirection) return@onPointerEvent
-
-        activeGestureDirection = direction
-        event.changes.forEach { it.consume() }
-        navigate(direction)
-    }
+    val desktopScrollModifier = Modifier.desktopDiscreteScrollPaging(
+        enabled = true,
+        isR2L = currentIsR2L,
+        allowVerticalWheel = true,
+        onAdvance = onAdvance,
+        onRetreat = onRetreat,
+    )
 
     val handleTap: (Offset, IntSize) -> Unit = { tapOffset, size ->
         val tapX = tapOffset.x
