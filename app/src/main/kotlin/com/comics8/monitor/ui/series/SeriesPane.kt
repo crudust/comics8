@@ -52,6 +52,7 @@ import com.comics8.monitor.ui.components.ErrorPane
 import com.comics8.core.model.UpdateDates
 import com.comics8.monitor.ui.components.LoadingPane
 import com.comics8.monitor.ui.components.PageBar
+import com.comics8.monitor.ui.components.horizontalPageSwipe
 
 @Composable
 fun SeriesPane(
@@ -86,7 +87,17 @@ fun SeriesPane(
                     listState.scrollToItem(0)
                 }
             }
-            Column(modifier = modifier.fillMaxSize()) {
+            Column(
+                modifier = modifier
+                    .fillMaxSize()
+                    .horizontalPageSwipe(
+                        enabled = !state.episodeLoading,
+                        page = state.episodePage,
+                        lastPage = state.episodeLastPage,
+                        onPrevPage = viewModel::prevEpisodePage,
+                        onNextPage = viewModel::nextEpisodePage,
+                    ),
+            ) {
                 LazyColumn(
                     state = listState,
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
@@ -124,9 +135,10 @@ fun SeriesPane(
                     PageBar(
                         page = state.episodePage,
                         lastPage = state.episodeLastPage,
-                        onPrev = { viewModel.goToEpisodePage(state.episodePage - 1) },
-                        onNext = { viewModel.goToEpisodePage(state.episodePage + 1) },
+                        onPrev = viewModel::prevEpisodePage,
+                        onNext = viewModel::nextEpisodePage,
                         onJump = { viewModel.togglePageJump(true) },
+                        enabled = !state.episodeLoading,
                         modifier = Modifier
                             .fillMaxWidth()
                             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))

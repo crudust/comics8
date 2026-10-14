@@ -1282,6 +1282,16 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         if (current.page > 1) goToPage(current.page - 1)
     }
 
+    fun nextEpisodePage() {
+        val current = _state.value
+        if (current.episodePage < current.episodeLastPage) goToEpisodePage(current.episodePage + 1)
+    }
+
+    fun prevEpisodePage() {
+        val current = _state.value
+        if (current.episodePage > 1) goToEpisodePage(current.episodePage - 1)
+    }
+
     fun togglePageJump(show: Boolean) {
         _state.update { it.copy(showPageJump = show) }
     }

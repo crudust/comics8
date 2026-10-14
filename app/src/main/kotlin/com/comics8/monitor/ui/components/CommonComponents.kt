@@ -7,6 +7,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -41,10 +42,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -227,6 +231,62 @@ fun PageBar(
         IconButton(onClick = onNext, enabled = enabled && page < lastPage) {
             Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = strings.actionNext)
         }
+    }
+}
+
+@Composable
+fun Modifier.horizontalPageSwipe(
+    enabled: Boolean = true,
+    page: Int,
+    lastPage: Int,
+    onPrevPage: () -> Unit,
+    onNextPage: () -> Unit,
+): Modifier {
+    val isEnabled by rememberUpdatedState(enabled && lastPage > 1)
+    val currentPage by rememberUpdatedState(page)
+    val currentLastPage by rememberUpdatedState(lastPage)
+    val currentOnPrev by rememberUpdatedState(onPrevPage)
+    val currentOnNext by rememberUpdatedState(onNextPage)
+
+    return this.pointerInput(Unit) {
+        var totalDragX = 0f
+        val velocityTracker = VelocityTracker()
+
+        detectHorizontalDragGestures(
+            onDragStart = {
+                totalDragX = 0f
+                velocityTracker.resetTracking()
+            },
+            onHorizontalDrag = { change, dragAmount ->
+                if (!isEnabled) return@detectHorizontalDragGestures
+                change.consume()
+                totalDragX += dragAmount
+                velocityTracker.addPosition(change.uptimeMillis, change.position)
+            },
+            onDragEnd = {
+                if (!isEnabled) {
+                    totalDragX = 0f
+                    return@detectHorizontalDragGestures
+                }
+                val velocityX = velocityTracker.calculateVelocity().x
+                val thresholdPx = 50.dp.toPx()
+                val velocityThresholdPx = 300.dp.toPx()
+
+                if (totalDragX < 0f && (totalDragX < -thresholdPx || velocityX < -velocityThresholdPx)) {
+                    if (currentPage < currentLastPage) {
+                        currentOnNext()
+                    }
+                } else if (totalDragX > 0f && (totalDragX > thresholdPx || velocityX > velocityThresholdPx)) {
+                    if (currentPage > 1) {
+                        currentOnPrev()
+                    }
+                }
+                totalDragX = 0f
+            },
+            onDragCancel = {
+                totalDragX = 0f
+            },
+        )
     }
 }
 
