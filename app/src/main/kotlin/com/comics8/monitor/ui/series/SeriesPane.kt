@@ -72,33 +72,36 @@ fun SeriesPane(
         return
     }
 
-    when {
-        state.episodeLoading && state.episodes.isEmpty() -> LoadingPane(modifier)
-        state.episodeError != null && state.episodes.isEmpty() ->
-            ErrorPane(
-                message = state.episodeError,
-                modifier = modifier,
-                onRetry = viewModel::refresh,
-            )
-        else -> {
-            val listState = rememberLazyListState()
-            LaunchedEffect(state.scrollToTopTrigger) {
-                if (state.scrollToTopTrigger > 0) {
-                    listState.scrollToItem(0)
+    val canSwipe = !state.episodeLoading
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .horizontalPageSwipe(
+                enabled = canSwipe,
+                page = state.episodePage,
+                lastPage = state.episodeLastPage,
+                onPrevPage = viewModel::prevEpisodePage,
+                onNextPage = viewModel::nextEpisodePage,
+                onBoundaryPrev = viewModel::closeSeries,
+            ),
+    ) {
+        when {
+            state.episodeLoading && state.episodes.isEmpty() -> LoadingPane(Modifier.fillMaxSize())
+            state.episodeError != null && state.episodes.isEmpty() ->
+                ErrorPane(
+                    message = state.episodeError,
+                    modifier = Modifier.fillMaxSize(),
+                    onRetry = viewModel::refresh,
+                )
+            else -> {
+                val listState = rememberLazyListState()
+                LaunchedEffect(state.scrollToTopTrigger) {
+                    if (state.scrollToTopTrigger > 0) {
+                        listState.scrollToItem(0)
+                    }
                 }
-            }
-            Column(
-                modifier = modifier
-                    .fillMaxSize()
-                    .horizontalPageSwipe(
-                        enabled = !state.episodeLoading,
-                        page = state.episodePage,
-                        lastPage = state.episodeLastPage,
-                        onPrevPage = viewModel::prevEpisodePage,
-                        onNextPage = viewModel::nextEpisodePage,
-                        onBoundaryPrev = viewModel::closeSeries,
-                    ),
-            ) {
+                Column(modifier = Modifier.fillMaxSize()) {
                 LazyColumn(
                     state = listState,
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
@@ -149,6 +152,7 @@ fun SeriesPane(
             }
         }
     }
+}
 }
 
 @Composable

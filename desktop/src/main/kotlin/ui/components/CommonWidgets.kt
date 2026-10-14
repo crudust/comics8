@@ -228,6 +228,7 @@ fun ErrorPane(
 fun Modifier.desktopDiscreteScrollPaging(
     enabled: Boolean = true,
     isR2L: Boolean = false,
+    allowVerticalWheel: Boolean = false,
     threshold: Float = ReaderDomain.SCROLL_PAGE_THRESHOLD,
     idleThreshold: Float = ReaderDomain.SCROLL_IDLE_THRESHOLD,
     cooldownMs: Long = ReaderDomain.SCROLL_LATCH_COOLDOWN_MS,
@@ -255,14 +256,21 @@ fun Modifier.desktopDiscreteScrollPaging(
 
         val deltaX = event.changes.sumOf { it.scrollDelta.x.toDouble() }.toFloat()
         val deltaY = event.changes.sumOf { it.scrollDelta.y.toDouble() }.toFloat()
+        val absX = abs(deltaX)
+        val absY = abs(deltaY)
 
-        // Reset idle timer: if no scroll events arrive for 150ms, the physical gesture stream ended
+        // Reset idle timer: guarantees unlatch after stream has stopped AND cooldown elapsed
         idleJob?.cancel()
         idleJob = scope.launch {
-            delay(150)
-            if (System.currentTimeMillis() - lastTriggerEpoch >= cooldownMs) {
-                isLatched = false
-            }
+            val elapsed = System.currentTimeMillis() - lastTriggerEpoch
+            val remainingCooldown = (cooldownMs - elapsed).coerceAtLeast(0L)
+            delay(maxOf(150L, remainingCooldown))
+            isLatched = false
+        }
+
+        // Guard against vertical scrolling in lists/grids unless explicitly allowed (e.g. reader pane)
+        if (!allowVerticalWheel && absX < absY) {
+            return@onPointerEvent
         }
 
         // If momentum decayed below idle threshold and cooldown has passed, release latch

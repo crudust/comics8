@@ -428,6 +428,7 @@ private fun ReaderPagedLayout(
     val desktopScrollModifier = Modifier.desktopDiscreteScrollPaging(
         enabled = true,
         isR2L = currentIsR2L,
+        allowVerticalWheel = true,
         onAdvance = onAdvance,
         onRetreat = onRetreat,
     )
