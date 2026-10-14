@@ -62,11 +62,18 @@ object ReaderDomain {
         }
     }
 
+    const val SCROLL_PAGE_THRESHOLD = 1.0f
+    const val SCROLL_IDLE_THRESHOLD = 0.2f
+    const val SCROLL_LATCH_COOLDOWN_MS = 350L
+
+    fun isScrollIdle(deltaX: Float, deltaY: Float, threshold: Float = SCROLL_IDLE_THRESHOLD): Boolean =
+        kotlin.math.abs(deltaX) < threshold && kotlin.math.abs(deltaY) < threshold
+
     fun resolveScrollDirection(
         deltaX: Float,
         deltaY: Float,
         isR2L: Boolean,
-        threshold: Float = 0.8f,
+        threshold: Float = SCROLL_PAGE_THRESHOLD,
     ): BoundaryDirection? {
         val absX = kotlin.math.abs(deltaX)
         val absY = kotlin.math.abs(deltaY)

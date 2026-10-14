@@ -46,7 +46,7 @@ import com.comics8.desktop.ui.DesktopViewModel
 import com.comics8.core.model.UpdateDates
 import com.comics8.desktop.ui.components.ErrorPane
 import com.comics8.desktop.ui.components.LoadingPane
-import com.comics8.desktop.ui.components.desktopHorizontalPageSwipe
+import com.comics8.desktop.ui.components.desktopDiscreteScrollPaging
 import com.comics8.desktop.ui.theme.LocalStrings
 import com.comics8.desktop.ui.util.DesktopAsyncImage
 
@@ -68,36 +68,46 @@ fun SeriesPane(
         return
     }
 
-    when {
-        state.episodeLoading && state.episodes.isEmpty() -> {
-            LoadingPane(modifier = modifier)
-        }
-        state.episodeError != null && state.episodes.isEmpty() -> {
-            ErrorPane(
-                message = state.episodeError,
-                onRetry = { viewModel.loadEpisodes(series, state.episodePage) },
-                modifier = modifier,
-            )
-        }
-        else -> {
-            val listState = rememberLazyListState()
-            LaunchedEffect(state.scrollToTopTrigger) {
-                if (state.scrollToTopTrigger > 0) {
-                    listState.scrollToItem(0)
-                }
+    val canSwipePage = !state.episodeLoading
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .desktopDiscreteScrollPaging(
+                enabled = canSwipePage,
+                onAdvance = {
+                    if (state.episodePage < state.episodeLastPage) {
+                        viewModel.nextEpisodePage()
+                    }
+                },
+                onRetreat = {
+                    if (state.episodePage > 1) {
+                        viewModel.prevEpisodePage()
+                    } else {
+                        viewModel.closeSeries()
+                    }
+                },
+            ),
+    ) {
+        when {
+            state.episodeLoading && state.episodes.isEmpty() -> {
+                LoadingPane(modifier = Modifier.fillMaxSize())
             }
-            Column(
-                modifier = modifier
-                    .fillMaxSize()
-                    .desktopHorizontalPageSwipe(
-                        enabled = !state.episodeLoading,
-                        page = state.episodePage,
-                        lastPage = state.episodeLastPage,
-                        onPrevPage = viewModel::prevEpisodePage,
-                        onNextPage = viewModel::nextEpisodePage,
-                        onBoundaryPrev = viewModel::closeSeries,
-                    ),
-            ) {
+            state.episodeError != null && state.episodes.isEmpty() -> {
+                ErrorPane(
+                    message = state.episodeError,
+                    onRetry = { viewModel.loadEpisodes(series, state.episodePage) },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            else -> {
+                val listState = rememberLazyListState()
+                LaunchedEffect(state.scrollToTopTrigger) {
+                    if (state.scrollToTopTrigger > 0) {
+                        listState.scrollToItem(0)
+                    }
+                }
+                Column(modifier = Modifier.fillMaxSize()) {
                 LazyColumn(
                     state = listState,
                     contentPadding = PaddingValues(16.dp),
@@ -172,6 +182,7 @@ fun SeriesPane(
             }
         }
     }
+}
 }
 
 @Composable

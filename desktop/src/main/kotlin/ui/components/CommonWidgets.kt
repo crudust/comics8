@@ -20,7 +20,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -32,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.onPointerEvent
+import com.comics8.core.model.ReaderDomain
 import com.comics8.core.model.ReaderDomain.BoundaryDirection
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -215,67 +218,84 @@ fun ErrorPane(
     }
 }
 
+/**
+ * Discrete Trackpad / Mouse Wheel Scroll Paging Recognizer.
+ * Converts continuous scroll event streams and momentum/inertia drift from macOS trackpads
+ * into discrete, single-turn page transitions with guaranteed single trigger per gesture.
+ */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun Modifier.desktopHorizontalPageSwipe(
+fun Modifier.desktopDiscreteScrollPaging(
     enabled: Boolean = true,
-    page: Int,
-    lastPage: Int,
-    onPrevPage: () -> Unit,
-    onNextPage: () -> Unit,
-    onBoundaryPrev: (() -> Unit)? = null,
-    onBoundaryNext: (() -> Unit)? = null,
+    isR2L: Boolean = false,
+    threshold: Float = ReaderDomain.SCROLL_PAGE_THRESHOLD,
+    idleThreshold: Float = ReaderDomain.SCROLL_IDLE_THRESHOLD,
+    cooldownMs: Long = ReaderDomain.SCROLL_LATCH_COOLDOWN_MS,
+    onAdvance: () -> Unit,
+    onRetreat: () -> Unit,
 ): Modifier {
-    val isEnabled by rememberUpdatedState(enabled && (lastPage > 1 || onBoundaryPrev != null || onBoundaryNext != null))
-    val currentPage by rememberUpdatedState(page)
-    val currentLastPage by rememberUpdatedState(lastPage)
-    val currentOnPrev by rememberUpdatedState(onPrevPage)
-    val currentOnNext by rememberUpdatedState(onNextPage)
-    val currentOnBoundaryPrev by rememberUpdatedState(onBoundaryPrev)
-    val currentOnBoundaryNext by rememberUpdatedState(onBoundaryNext)
+    val isEnabled by rememberUpdatedState(enabled)
+    val currentIsR2L by rememberUpdatedState(isR2L)
+    val currentOnAdvance by rememberUpdatedState(onAdvance)
+    val currentOnRetreat by rememberUpdatedState(onRetreat)
     val scope = rememberCoroutineScope()
-    var gestureResetJob by remember { mutableStateOf<Job?>(null) }
-    var activeGestureDirection by remember { mutableStateOf<BoundaryDirection?>(null) }
+
+    var isLatched by remember { mutableStateOf(false) }
+    var lastTriggerEpoch by remember { mutableLongStateOf(0L) }
+    var idleJob by remember { mutableStateOf<Job?>(null) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            idleJob?.cancel()
+        }
+    }
 
     return this.onPointerEvent(PointerEventType.Scroll) { event ->
         if (!isEnabled) return@onPointerEvent
+
         val deltaX = event.changes.sumOf { it.scrollDelta.x.toDouble() }.toFloat()
         val deltaY = event.changes.sumOf { it.scrollDelta.y.toDouble() }.toFloat()
 
-        val absX = abs(deltaX)
-        val absY = abs(deltaY)
-        if (absX < 0.8f || absX < absY) {
-            if (absX < 0.2f && absY < 0.2f) {
-                gestureResetJob?.cancel()
-                activeGestureDirection = null
+        // Reset idle timer: if no scroll events arrive for 150ms, the physical gesture stream ended
+        idleJob?.cancel()
+        idleJob = scope.launch {
+            delay(150)
+            if (System.currentTimeMillis() - lastTriggerEpoch >= cooldownMs) {
+                isLatched = false
+            }
+        }
+
+        // If momentum decayed below idle threshold and cooldown has passed, release latch
+        if (ReaderDomain.isScrollIdle(deltaX, deltaY, idleThreshold)) {
+            if (System.currentTimeMillis() - lastTriggerEpoch >= cooldownMs) {
+                isLatched = false
             }
             return@onPointerEvent
         }
 
-        val direction = if (deltaX > 0f) BoundaryDirection.ADVANCE else BoundaryDirection.RETREAT
-
-        gestureResetJob?.cancel()
-        gestureResetJob = scope.launch {
-            delay(250)
-            activeGestureDirection = null
+        // If currently latched (action already triggered for this gesture), suppress all continuation/inertia events
+        if (isLatched) {
+            event.changes.forEach { it.consume() }
+            return@onPointerEvent
         }
 
-        if (direction == activeGestureDirection) return@onPointerEvent
-        activeGestureDirection = direction
+        // Resolve dominant direction against threshold
+        val direction = ReaderDomain.resolveScrollDirection(
+            deltaX = deltaX,
+            deltaY = deltaY,
+            isR2L = currentIsR2L,
+            threshold = threshold,
+        ) ?: return@onPointerEvent
+
+        // Latch immediately and trigger discrete action exactly once
+        isLatched = true
+        lastTriggerEpoch = System.currentTimeMillis()
         event.changes.forEach { it.consume() }
 
         if (direction == BoundaryDirection.ADVANCE) {
-            if (currentPage < currentLastPage) {
-                currentOnNext()
-            } else {
-                currentOnBoundaryNext?.invoke()
-            }
+            currentOnAdvance()
         } else {
-            if (currentPage > 1) {
-                currentOnPrev()
-            } else {
-                currentOnBoundaryPrev?.invoke()
-            }
+            currentOnRetreat()
         }
     }
 }

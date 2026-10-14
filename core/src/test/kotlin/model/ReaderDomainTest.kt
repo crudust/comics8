@@ -264,5 +264,26 @@ class ReaderDomainTest {
         assertThat(
             ReaderDomain.resolveScrollDirection(deltaX = 0.1f, deltaY = -1.0f, isR2L = false, threshold = 0.8f)
         ).isEqualTo(ReaderDomain.BoundaryDirection.RETREAT)
+
+        // Default threshold (1.0f) contract
+        assertThat(
+            ReaderDomain.resolveScrollDirection(deltaX = 0.9f, deltaY = 0.1f, isR2L = false)
+        ).isNull()
+        assertThat(
+            ReaderDomain.resolveScrollDirection(deltaX = 1.1f, deltaY = 0.1f, isR2L = false)
+        ).isEqualTo(ReaderDomain.BoundaryDirection.ADVANCE)
+    }
+
+    @Test
+    fun isScrollIdleContract() {
+        // Active motion above threshold (0.2f)
+        assertThat(ReaderDomain.isScrollIdle(deltaX = 0.5f, deltaY = 0.0f)).isFalse()
+        assertThat(ReaderDomain.isScrollIdle(deltaX = 0.0f, deltaY = 0.3f)).isFalse()
+        assertThat(ReaderDomain.isScrollIdle(deltaX = -0.25f, deltaY = 0.0f)).isFalse()
+
+        // Decayed motion below threshold (0.2f)
+        assertThat(ReaderDomain.isScrollIdle(deltaX = 0.15f, deltaY = 0.1f)).isTrue()
+        assertThat(ReaderDomain.isScrollIdle(deltaX = -0.1f, deltaY = 0.0f)).isTrue()
+        assertThat(ReaderDomain.isScrollIdle(deltaX = 0.0f, deltaY = 0.0f)).isTrue()
     }
 }
