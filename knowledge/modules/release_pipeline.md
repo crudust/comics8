@@ -17,7 +17,7 @@
   - Output artifact: `desktop/build/compose/binaries/main/Comics8-win.zip`.
 - **Android Release APK & AAB**:
   - Signed standalone APK is built via `./gradlew assembleStandaloneRelease`; Play AAB uses `./gradlew bundlePlayRelease`.
-  - Artifacts are collected in `dist/comics8-v{version}.apk` and `dist/comics8-v{version}.aab`.
+  - Artifacts are collected in `dist/comics8-v{version}.apk` and `dist/comics8-v{version}.aab`. Older builds in `dist/` are automatically pruned so that only the latest version is retained.
   - Signing credentials and the keystore MUST remain outside the repository and are supplied through `COMICS8_SIGNING_*` environment variables (or the equivalent private Gradle properties).
   - Standalone APK is distributed as `comics8-latest.apk` on GitHub Releases. Play Store AAB is preserved locally in `dist/` only.
 - **Open-Source Repository Sync (`scripts/sync-public-repo.sh`)**:

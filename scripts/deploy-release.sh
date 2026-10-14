@@ -62,14 +62,20 @@ AAB_REL_PATH="app/build/outputs/bundle/playRelease/app-play-release.aab"
 DIST_APK="${DIST_DIR}/comics8-v${VERSION_NAME}.apk"
 DIST_AAB="${DIST_DIR}/comics8-v${VERSION_NAME}.aab"
 
+prune_older_dist_artifacts() {
+    echo "🧹 Pruning older build artifacts in local ${DIST_DIR}/ (keeping latest v${VERSION_NAME} only)..."
+    find "${DIST_DIR}" -type f \( -name "*.apk" -o -name "*.aab" \) ! -name "comics8-v${VERSION_NAME}.*" -delete 2>/dev/null || true
+}
+
 # Fast-path: only fetch latest artifacts from remote build server
 if [[ "$FETCH_ONLY" == "true" ]]; then
     echo "📥 Fetching latest build artifacts from ${BUILD_HOST}..."
     mkdir -p "${DIST_DIR}"
     scp "${BUILD_HOST}:${BUILD_DIR}/${APK_REL_PATH}" "${DIST_APK}"
     scp "${BUILD_HOST}:${BUILD_DIR}/${AAB_REL_PATH}" "${DIST_AAB}"
-    echo "✅ Fetched to local dist/:"
-    ls -lh "${DIST_APK}" "${DIST_AAB}"
+    prune_older_dist_artifacts
+    echo "✅ Fetched to local dist/ (latest only):"
+    ls -lh "${DIST_DIR}"
     exit 0
 fi
 
@@ -154,7 +160,11 @@ build_android_on_server() {
         export ANDROID_HOME=\"\${ANDROID_HOME:-\$HOME/android-sdk}\" && \
         export ANDROID_SDK_ROOT=\"\${ANDROID_SDK_ROOT:-\$HOME/android-sdk}\" && \
         export PATH=\"\$JAVA_HOME/bin:\$ANDROID_SDK_ROOT/platform-tools:\$PATH\" && \
-        ./gradlew assembleStandaloneRelease bundlePlayRelease
+        ./gradlew assembleStandaloneRelease bundlePlayRelease && \
+        mkdir -p dist && \
+        cp \"${APK_REL_PATH}\" \"dist/comics8-v${VERSION_NAME}.apk\" && \
+        cp \"${AAB_REL_PATH}\" \"dist/comics8-v${VERSION_NAME}.aab\" && \
+        find dist -type f \( -name \"*.apk\" -o -name \"*.aab\" \) ! -name \"comics8-v${VERSION_NAME}.*\" -delete 2>/dev/null || true
     '"
 
     echo "📥 Fetching built APK & AAB from build server into local ${DIST_DIR}/..."
@@ -171,7 +181,9 @@ build_android_on_server() {
         exit 1
     fi
 
-    echo "  📦 Local release artifacts successfully collected in ${DIST_DIR}/:"
+    prune_older_dist_artifacts
+
+    echo "  📦 Local release artifacts successfully collected in ${DIST_DIR}/ (latest only):"
     echo "     - ${DIST_APK} ($(du -h "${DIST_APK}" | cut -f1))"
     echo "     - ${DIST_AAB} ($(du -h "${DIST_AAB}" | cut -f1))"
 }

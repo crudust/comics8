@@ -73,10 +73,11 @@ Mac 터미널에서 `./scripts/deploy-release.sh`를 실행하면:
 - **배포 아티팩트 보관 (`dist/`)**:
   - `dist/comics8-v{version}.apk`: 독립형 Release APK
   - `dist/comics8-v{version}.aab`: Google Play Console 전용 AAB (보안상 GitHub 미공개, 로컬 dist/ 보관)
+  - **dist 보관 정책**: 빌드를 누적하지 않고 **최신 1개 버전만 유지** (새 버전 수거 시 이전 빌드 파일 자동 삭제)
 - **GitHub Releases 자동 업로드**:
   - **Android APK**: `crudust/comics8` GitHub Releases에 `comics8-latest.apk`로 자동 업로드
   - **macOS Desktop / Windows Zip**: GitHub Actions (`release.yml`)가 태그 푸시를 감지해 자동 빌드 및 업로드
-- **릴리즈 보관 정책**: 최신 2개 버전만 유지하고 이전 릴리즈는 자동 정리 (용량 최적화)
+- **GitHub Releases 보관 정책**: 최신 2개 버전만 유지하고 이전 릴리즈는 자동 정리 (용량 최적화)
 
 ---
 
