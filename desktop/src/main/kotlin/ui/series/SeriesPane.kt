@@ -46,6 +46,7 @@ import com.comics8.desktop.ui.DesktopViewModel
 import com.comics8.core.model.UpdateDates
 import com.comics8.desktop.ui.components.ErrorPane
 import com.comics8.desktop.ui.components.LoadingPane
+import com.comics8.desktop.ui.components.desktopHorizontalPageSwipe
 import com.comics8.desktop.ui.theme.LocalStrings
 import com.comics8.desktop.ui.util.DesktopAsyncImage
 
@@ -85,7 +86,18 @@ fun SeriesPane(
                     listState.scrollToItem(0)
                 }
             }
-            Column(modifier = modifier.fillMaxSize()) {
+            Column(
+                modifier = modifier
+                    .fillMaxSize()
+                    .desktopHorizontalPageSwipe(
+                        enabled = !state.episodeLoading,
+                        page = state.episodePage,
+                        lastPage = state.episodeLastPage,
+                        onPrevPage = viewModel::prevEpisodePage,
+                        onNextPage = viewModel::nextEpisodePage,
+                        onBoundaryPrev = viewModel::closeSeries,
+                    ),
+            ) {
                 LazyColumn(
                     state = listState,
                     contentPadding = PaddingValues(16.dp),
@@ -130,14 +142,15 @@ fun SeriesPane(
                             .padding(vertical = 8.dp),
                     ) {
                         IconButton(
-                            onClick = { viewModel.goToEpisodePage(state.episodePage - 1) },
-                            enabled = state.episodePage > 1,
+                            onClick = viewModel::prevEpisodePage,
+                            enabled = !state.episodeLoading && state.episodePage > 1,
                         ) {
                             Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = strings.actionPrev)
                         }
 
                         FilledTonalButton(
                             onClick = { viewModel.togglePageJump(true) },
+                            enabled = !state.episodeLoading,
                             shape = RoundedCornerShape(8.dp),
                             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                         ) {
@@ -149,8 +162,8 @@ fun SeriesPane(
                         }
 
                         IconButton(
-                            onClick = { viewModel.goToEpisodePage(state.episodePage + 1) },
-                            enabled = state.episodePage < state.episodeLastPage,
+                            onClick = viewModel::nextEpisodePage,
+                            enabled = !state.episodeLoading && state.episodePage < state.episodeLastPage,
                         ) {
                             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = strings.actionNext)
                         }
