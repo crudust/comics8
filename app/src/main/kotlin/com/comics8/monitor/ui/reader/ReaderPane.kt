@@ -104,6 +104,16 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+private const val READER_SHORT_EDGE_PX = 1800
+private val READER_TARGET_SIZE = coil.size.Size(READER_SHORT_EDGE_PX, READER_SHORT_EDGE_PX)
+private val READER_TARGET_SCALE = coil.size.Scale.FILL
+private val READER_TARGET_PRECISION = coil.size.Precision.INEXACT
+
+private fun coil.request.ImageRequest.Builder.readerImageSizing(): coil.request.ImageRequest.Builder =
+    size(READER_TARGET_SIZE)
+        .scale(READER_TARGET_SCALE)
+        .precision(READER_TARGET_PRECISION)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReaderPane(
@@ -659,7 +669,6 @@ private fun ReaderSinglePagePane(
     val context = LocalContext.current
     LaunchedEffect(pagerState.currentPage, state.readerImages) {
         val imageLoader = coil.Coil.imageLoader(context)
-        val maxEdge = coil.size.Size(1200, 1800)
         val targetUrls = (2..3).mapNotNull { offset ->
             val nextSlice = currentSlices.getOrNull(pagerState.currentPage + offset) ?: return@mapNotNull null
             state.readerImages.getOrNull(nextSlice.imageIndex)
@@ -668,7 +677,7 @@ private fun ReaderSinglePagePane(
             val request = coil.request.ImageRequest.Builder(context)
                 .data(targetUrl)
                 .imageCacheRole(ImageCacheRole.READER, targetUrl)
-                .size(maxEdge)
+                .readerImageSizing()
                 .build()
             imageLoader.execute(request)
         }
@@ -800,7 +809,6 @@ private fun ReaderDualPagePane(
     val context = LocalContext.current
     LaunchedEffect(pagerState.currentPage, state.readerImages) {
         val imageLoader = coil.Coil.imageLoader(context)
-        val maxEdge = coil.size.Size(1200, 1800)
         for (offset in 2..2) {
             val nextSpread = currentSpreads.getOrNull(pagerState.currentPage + offset) ?: continue
             val urls = when (nextSpread) {
@@ -815,7 +823,7 @@ private fun ReaderDualPagePane(
                     coil.request.ImageRequest.Builder(context)
                         .data(url)
                         .imageCacheRole(ImageCacheRole.READER, url)
-                        .size(maxEdge)
+                        .readerImageSizing()
                         .build(),
                 )
             }
@@ -1134,7 +1142,7 @@ private fun ReaderImage(
             coil.request.ImageRequest.Builder(context)
                 .data(model)
                 .imageCacheRole(ImageCacheRole.READER, model)
-                .size(coil.size.Size(1200, 1800))
+                .readerImageSizing()
                 .apply {
                     if (half != ImageHalf.FULL) allowHardware(false)
                     if (retryKey > 0) memoryCachePolicy(coil.request.CachePolicy.WRITE_ONLY)
