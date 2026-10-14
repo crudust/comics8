@@ -252,8 +252,6 @@ fun Modifier.desktopDiscreteScrollPaging(
     }
 
     return this.onPointerEvent(PointerEventType.Scroll) { event ->
-        if (!isEnabled) return@onPointerEvent
-
         val deltaX = event.changes.sumOf { it.scrollDelta.x.toDouble() }.toFloat()
         val deltaY = event.changes.sumOf { it.scrollDelta.y.toDouble() }.toFloat()
         val absX = abs(deltaX)
@@ -282,8 +280,14 @@ fun Modifier.desktopDiscreteScrollPaging(
         }
 
         // If currently latched (action already triggered for this gesture), suppress all continuation/inertia events
+        // even if enabled has been toggled to false by loading state
         if (isLatched) {
             event.changes.forEach { it.consume() }
+            return@onPointerEvent
+        }
+
+        // Only trigger new discrete page turn if enabled AND minimum cooldown elapsed
+        if (!isEnabled || System.currentTimeMillis() - lastTriggerEpoch < cooldownMs) {
             return@onPointerEvent
         }
 
