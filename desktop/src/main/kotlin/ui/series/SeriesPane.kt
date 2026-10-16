@@ -41,9 +41,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.comics8.core.image.ImageCacheRole
 import com.comics8.core.model.EpisodeItem
+import com.comics8.core.model.UpdateDates
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
-import com.comics8.core.model.UpdateDates
+import com.comics8.desktop.ui.components.DesktopPullToRefreshIndicator
 import com.comics8.desktop.ui.components.ErrorPane
 import com.comics8.desktop.ui.components.LoadingPane
 import com.comics8.desktop.ui.components.desktopDiscreteScrollPaging
@@ -69,6 +70,14 @@ fun SeriesPane(
     }
 
     val canSwipePage = !state.episodeLoading
+    val canPullRefresh = !state.episodeLoading && !state.refreshing
+
+    val listState = rememberLazyListState()
+    LaunchedEffect(state.scrollToTopTrigger) {
+        if (state.scrollToTopTrigger > 0) {
+            listState.scrollToItem(0)
+        }
+    }
 
     Box(
         modifier = modifier
@@ -87,6 +96,8 @@ fun SeriesPane(
                         viewModel.closeSeries()
                     }
                 },
+                onPullRefresh = if (canPullRefresh) { { viewModel.refresh() } } else null,
+                isAtTop = { !listState.canScrollBackward },
             ),
     ) {
         when {
@@ -101,12 +112,6 @@ fun SeriesPane(
                 )
             }
             else -> {
-                val listState = rememberLazyListState()
-                LaunchedEffect(state.scrollToTopTrigger) {
-                    if (state.scrollToTopTrigger > 0) {
-                        listState.scrollToItem(0)
-                    }
-                }
                 Column(modifier = Modifier.fillMaxSize()) {
                 LazyColumn(
                     state = listState,
@@ -182,6 +187,11 @@ fun SeriesPane(
             }
         }
     }
+
+    DesktopPullToRefreshIndicator(
+        refreshing = state.refreshing,
+        modifier = Modifier.align(Alignment.TopCenter),
+    )
 }
 }
 

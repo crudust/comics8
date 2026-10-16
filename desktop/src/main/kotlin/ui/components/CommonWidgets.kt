@@ -1,5 +1,8 @@
 package com.comics8.desktop.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -10,13 +13,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -232,18 +238,23 @@ fun Modifier.desktopDiscreteScrollPaging(
     threshold: Float = ReaderDomain.SCROLL_PAGE_THRESHOLD,
     idleThreshold: Float = ReaderDomain.SCROLL_IDLE_THRESHOLD,
     cooldownMs: Long = ReaderDomain.SCROLL_LATCH_COOLDOWN_MS,
-    onAdvance: () -> Unit,
-    onRetreat: () -> Unit,
+    onAdvance: () -> Unit = {},
+    onRetreat: () -> Unit = {},
+    onPullRefresh: (() -> Unit)? = null,
+    isAtTop: () -> Boolean = { false },
 ): Modifier {
     val isEnabled by rememberUpdatedState(enabled)
     val currentIsR2L by rememberUpdatedState(isR2L)
     val currentOnAdvance by rememberUpdatedState(onAdvance)
     val currentOnRetreat by rememberUpdatedState(onRetreat)
+    val currentOnPullRefresh by rememberUpdatedState(onPullRefresh)
+    val currentIsAtTop by rememberUpdatedState(isAtTop)
     val scope = rememberCoroutineScope()
 
     var isLatched by remember { mutableStateOf(false) }
     var lastTriggerEpoch by remember { mutableLongStateOf(0L) }
     var idleJob by remember { mutableStateOf<Job?>(null) }
+    var streamStartedAtTop by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -264,10 +275,18 @@ fun Modifier.desktopDiscreteScrollPaging(
             val remainingCooldown = (cooldownMs - elapsed).coerceAtLeast(0L)
             delay(maxOf(150L, remainingCooldown))
             isLatched = false
+            streamStartedAtTop = false
         }
 
-        // Guard against vertical scrolling in lists/grids unless explicitly allowed (e.g. reader pane)
-        if (!allowVerticalWheel && absX < absY) {
+        // Arm refresh only if this gesture sequence originated while already at the top
+        if (!streamStartedAtTop && currentIsAtTop()) {
+            streamStartedAtTop = true
+        }
+
+        val isVerticalPull = absX < absY && currentOnPullRefresh != null && streamStartedAtTop && currentIsAtTop()
+
+        // Guard against vertical scrolling in lists/grids unless explicitly allowed or pulling at top
+        if (!allowVerticalWheel && absX < absY && !isVerticalPull) {
             return@onPointerEvent
         }
 
@@ -279,19 +298,18 @@ fun Modifier.desktopDiscreteScrollPaging(
             return@onPointerEvent
         }
 
-        // If currently latched (action already triggered for this gesture), suppress all continuation/inertia events
-        // even if enabled has been toggled to false by loading state
+        // If currently latched, suppress continuation/inertia events
         if (isLatched) {
             event.changes.forEach { it.consume() }
             return@onPointerEvent
         }
 
-        // Only trigger new discrete page turn if enabled AND minimum cooldown elapsed
+        // Only trigger new discrete action if enabled AND minimum cooldown elapsed
         if (!isEnabled || System.currentTimeMillis() - lastTriggerEpoch < cooldownMs) {
             return@onPointerEvent
         }
 
-        // Resolve dominant direction against threshold
+        // Resolve dominant direction against threshold (core contract)
         val direction = ReaderDomain.resolveScrollDirection(
             deltaX = deltaX,
             deltaY = deltaY,
@@ -306,9 +324,44 @@ fun Modifier.desktopDiscreteScrollPaging(
 
         if (direction == BoundaryDirection.ADVANCE) {
             currentOnAdvance()
+        } else if (isVerticalPull) {
+            currentOnPullRefresh?.invoke()
         } else {
             currentOnRetreat()
         }
     }
 }
+
+/**
+ * Clean floating pull-to-refresh spinner for desktop lists/grids.
+ */
+@Composable
+fun DesktopPullToRefreshIndicator(
+    refreshing: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    AnimatedVisibility(
+        visible = refreshing,
+        enter = fadeIn(),
+        exit = fadeOut(),
+        modifier = modifier,
+    ) {
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            shadowElevation = 4.dp,
+            modifier = Modifier.padding(top = 12.dp).size(36.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+    }
+}
+
+
 

@@ -24,7 +24,8 @@ Governs the comic/webtoon reading canvas across Android and Desktop platforms, i
   - Platform ViewModels own lifecycle, persistence, repository calls, and UI state mutation only.
 - **Paging Navigation & Gesture Invariant**:
   - `pagerState.pageCount` is the sole authoritative page count across platforms. Redundant `totalPages` parameters and ad-hoc `maxOf` fallbacks are prohibited.
-  - On Desktop, trackpad swipes and mouse wheel events are latched via `desktopDiscreteScrollPaging` across Reader, Browse, and Series views to convert continuous OS scroll streams into discrete page turns.
+  - On Desktop, trackpad swipes and mouse wheel events are latched via `desktopDiscreteScrollPaging` across Reader, Browse, and Series views to convert continuous OS scroll streams into discrete page turns and pull-to-refresh actions.
   - Paging latching enforces a strict contract: single trigger per physical gesture, mandatory cooldown (`SCROLL_LATCH_COOLDOWN_MS`), and momentum decay validation (`isScrollIdle`).
+  - Pull-to-refresh gesture arming requires the stream to originate while already positioned at the top edge (`isAtTop()`), strictly preventing momentum inertia during rapid upward scrolling from triggering accidental refreshes.
   - Gesture recognizers must be hosted at the root container level of the view to guarantee latch state persistence across child component loading/pagination unmounts.
 
