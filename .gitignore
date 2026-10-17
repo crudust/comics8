@@ -21,6 +21,7 @@ __pycache__/
 server/data/
 server/service-account.json
 .env
+.agents/
 
 # Signing material must live outside the repository. Already tracked files must be
 # rotated and removed from Git history separately; ignore rules do not untrack them.
