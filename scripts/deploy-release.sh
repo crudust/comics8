@@ -26,6 +26,22 @@ SYNC_SERVER_USER="${COMICS8_SERVER_USER:-crudust}"
 SYNC_SERVER_DOWNLOAD_DIR="${COMICS8_SERVER_DOWNLOAD_DIR:-/home/crudust/comics8-sync/data/downloads}"
 SYNC_SERVER_VERSION_FILE="${COMICS8_SERVER_VERSION_FILE:-/home/crudust/comics8-sync/data/version.json}"
 
+# SSH/SCP common options. `known_hosts` may be unavailable (read-only home, fresh
+# CI container), so host keys are accepted on first use everywhere.
+SSH_OPTS=(-o StrictHostKeyChecking=no)
+SCP_OPTS=(-o StrictHostKeyChecking=no)
+
+# True when this script already runs on the build server, i.e. its own repository
+# IS BUILD_DIR. Comparing resolved paths is reliable regardless of hostname or IP
+# aliasing. On a Mac BUILD_DIR does not exist, so this stays false.
+is_on_build_host() {
+    [[ -n "${BUILD_DIR}" && -d "${BUILD_DIR}" ]] || return 1
+    local here there
+    here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)" || return 1
+    there="$(cd "${BUILD_DIR}" && pwd -P)" || return 1
+    [[ "${here}" == "${there}" ]]
+}
+
 # Parse options and arguments
 TARGET="all"
 NON_FLAG_ARGS=()
@@ -69,10 +85,16 @@ prune_older_dist_artifacts() {
 
 # Fast-path: only fetch latest artifacts from remote build server
 if [[ "$FETCH_ONLY" == "true" ]]; then
-    echo "📥 Fetching latest build artifacts from ${BUILD_HOST}..."
     mkdir -p "${DIST_DIR}"
-    scp "${BUILD_HOST}:${BUILD_DIR}/${APK_REL_PATH}" "${DIST_APK}"
-    scp "${BUILD_HOST}:${BUILD_DIR}/${AAB_REL_PATH}" "${DIST_AAB}"
+    if is_on_build_host; then
+        echo "📥 Build server detected locally; collecting artifacts from ${BUILD_DIR}..."
+        cp "${BUILD_DIR}/${APK_REL_PATH}" "${DIST_APK}"
+        cp "${BUILD_DIR}/${AAB_REL_PATH}" "${DIST_AAB}"
+    else
+        echo "📥 Fetching latest build artifacts from ${BUILD_HOST}..."
+        scp "${SCP_OPTS[@]}" "${BUILD_HOST}:${BUILD_DIR}/${APK_REL_PATH}" "${DIST_APK}"
+        scp "${SCP_OPTS[@]}" "${BUILD_HOST}:${BUILD_DIR}/${AAB_REL_PATH}" "${DIST_AAB}"
+    fi
     prune_older_dist_artifacts
     echo "✅ Fetched to local dist/ (latest only):"
     ls -lh "${DIST_DIR}"
@@ -100,19 +122,28 @@ fi
 
 echo "=================================================="
 echo "🚀 Comics8 Deploying Release v${VERSION_NAME} (code ${VERSION_CODE})"
-echo "Build Server: ${BUILD_HOST}"
+if is_on_build_host; then
+    echo "Build Mode:   local (already on the build host)"
+else
+    echo "Build Server: ${BUILD_HOST}"
+fi
 echo "Target:       $(echo "$TARGET" | tr '[:lower:]' '[:upper:]')"
 echo "Notes:        ${RELEASE_NOTES}"
 echo "=================================================="
 
 # Preflight: check build server reachability
 if [[ "$TARGET" != "desktop" ]]; then
-    echo "📡 Verifying connection to Linux build server (${BUILD_HOST})..."
-    if ! ssh -o StrictHostKeyChecking=no -o ConnectTimeout=4 "${BUILD_HOST}" "test -d ${BUILD_DIR}" >/dev/null 2>&1; then
-        echo "❌ Cannot connect to build server ${BUILD_HOST} or ${BUILD_DIR} does not exist."
-        exit 1
+    if is_on_build_host; then
+        echo "📡 Build host detected locally; skipping SSH reachability check."
+        echo "  ✅ ${BUILD_DIR}"
+    else
+        echo "📡 Verifying connection to Linux build server (${BUILD_HOST})..."
+        if ! ssh "${SSH_OPTS[@]}" -o ConnectTimeout=4 "${BUILD_HOST}" "test -d ${BUILD_DIR}" >/dev/null 2>&1; then
+            echo "❌ Cannot connect to build server ${BUILD_HOST} or ${BUILD_DIR} does not exist."
+            exit 1
+        fi
+        echo "  ✅ Build server connected."
     fi
-    echo "  ✅ Build server connected."
 fi
 
 sed_inplace() {
@@ -145,32 +176,50 @@ VERSION_EOF
 
 # 2. Remote Build & Retrieve Android APK & AAB
 build_android_on_server() {
-    echo "📡 Flushing Mutagen sync before remote build..."
-    if command -v mutagen >/dev/null 2>&1; then
-        mutagen sync flush comics8 2>/dev/null || true
+    # The build steps are shared by both modes so local and remote builds cannot
+    # drift apart. Kept as a plain string because the remote mode re-parses it
+    # through `ssh ... "bash -lc '...'"`.
+    local build_cmd
+    build_cmd="set -a
+if [ -f ~/.comics8-deploy.env ]; then source ~/.comics8-deploy.env; fi
+set +a
+export JAVA_HOME=\"\${JAVA_HOME:-/usr/lib/jvm/java-17-openjdk-amd64}\"
+export ANDROID_HOME=\"\${ANDROID_HOME:-\$HOME/android-sdk}\"
+export ANDROID_SDK_ROOT=\"\${ANDROID_SDK_ROOT:-\$HOME/android-sdk}\"
+export PATH=\"\$JAVA_HOME/bin:\$ANDROID_SDK_ROOT/platform-tools:\$PATH\"
+./gradlew assembleStandaloneRelease bundlePlayRelease
+mkdir -p dist
+cp \"${APK_REL_PATH}\" \"dist/comics8-v${VERSION_NAME}.apk\"
+cp \"${AAB_REL_PATH}\" \"dist/comics8-v${VERSION_NAME}.aab\"
+find dist -type f \( -name \"*.apk\" -o -name \"*.aab\" \) ! -name \"comics8-v${VERSION_NAME}.*\" -delete 2>/dev/null || true"
+
+    if is_on_build_host; then
+        # Already on the build host: run the same steps in place. Going through
+        # SSH would require host keys for the local machine itself and buys
+        # nothing.
+        echo "🚀 Building Android release locally (${BUILD_DIR})..."
+        ( cd "${BUILD_DIR}" && eval "${build_cmd}" )
+        echo "📥 Collecting built APK & AAB into local ${DIST_DIR}/..."
+        mkdir -p "${DIST_DIR}"
+        cp "${BUILD_DIR}/${APK_REL_PATH}" "${DIST_APK}"
+        cp "${BUILD_DIR}/${AAB_REL_PATH}" "${DIST_AAB}"
+    else
+        echo "📡 Flushing Mutagen sync before remote build..."
+        if command -v mutagen >/dev/null 2>&1; then
+            mutagen sync flush comics8 2>/dev/null || true
+        fi
+
+        echo "🚀 Delegating Android build to remote server (${BUILD_HOST})..."
+        # shellcheck disable=SC2029
+        ssh "${SSH_OPTS[@]}" "${BUILD_HOST}" "bash -lc '
+            cd \"${BUILD_DIR}\" && ${build_cmd}
+        '"
+
+        echo "📥 Fetching built APK & AAB from build server into local ${DIST_DIR}/..."
+        mkdir -p "${DIST_DIR}"
+        scp "${SCP_OPTS[@]}" "${BUILD_HOST}:${BUILD_DIR}/${APK_REL_PATH}" "${DIST_APK}"
+        scp "${SCP_OPTS[@]}" "${BUILD_HOST}:${BUILD_DIR}/${AAB_REL_PATH}" "${DIST_AAB}"
     fi
-
-    echo "🚀 Delegating Android build to remote server (${BUILD_HOST})..."
-    ssh "${BUILD_HOST}" "bash -lc '
-        cd \"${BUILD_DIR}\" && \
-        set -a && \
-        if [ -f ~/.comics8-deploy.env ]; then source ~/.comics8-deploy.env; fi && \
-        set +a && \
-        export JAVA_HOME=\"\${JAVA_HOME:-/usr/lib/jvm/java-17-openjdk-amd64}\" && \
-        export ANDROID_HOME=\"\${ANDROID_HOME:-\$HOME/android-sdk}\" && \
-        export ANDROID_SDK_ROOT=\"\${ANDROID_SDK_ROOT:-\$HOME/android-sdk}\" && \
-        export PATH=\"\$JAVA_HOME/bin:\$ANDROID_SDK_ROOT/platform-tools:\$PATH\" && \
-        ./gradlew assembleStandaloneRelease bundlePlayRelease && \
-        mkdir -p dist && \
-        cp \"${APK_REL_PATH}\" \"dist/comics8-v${VERSION_NAME}.apk\" && \
-        cp \"${AAB_REL_PATH}\" \"dist/comics8-v${VERSION_NAME}.aab\" && \
-        find dist -type f \( -name \"*.apk\" -o -name \"*.aab\" \) ! -name \"comics8-v${VERSION_NAME}.*\" -delete 2>/dev/null || true
-    '"
-
-    echo "📥 Fetching built APK & AAB from build server into local ${DIST_DIR}/..."
-    mkdir -p "${DIST_DIR}"
-    scp "${BUILD_HOST}:${BUILD_DIR}/${APK_REL_PATH}" "${DIST_APK}"
-    scp "${BUILD_HOST}:${BUILD_DIR}/${AAB_REL_PATH}" "${DIST_AAB}"
 
     if [[ ! -s "${DIST_APK}" ]]; then
         echo "❌ APK file was not retrieved or is empty: ${DIST_APK}"
@@ -193,7 +242,7 @@ case "$TARGET" in
         echo "ℹ️ Target is desktop-only. Android build skipped."
         ;;
     android|all|*)
-        echo "📦 2/5: Offloading Android Release build to server..."
+        echo "📦 2/5: Building Android release..."
         build_android_on_server
         ;;
 esac
@@ -215,13 +264,13 @@ echo "🔄 4/5: Syncing open-source repository..."
 
 # 5. Upload binaries and version.json to Sync Server (if reachable)
 echo "📡 5/5: Uploading to Sync Server ($SYNC_SERVER_HOST)..."
-if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=3 "${SYNC_SERVER_USER}@${SYNC_SERVER_HOST}" "mkdir -p ${SYNC_SERVER_DOWNLOAD_DIR}" >/dev/null 2>&1; then
+if ssh "${SSH_OPTS[@]}" -o ConnectTimeout=3 "${SYNC_SERVER_USER}@${SYNC_SERVER_HOST}" "mkdir -p ${SYNC_SERVER_DOWNLOAD_DIR}" >/dev/null 2>&1; then
     if [[ "$TARGET" != "desktop" && -f "$DIST_APK" ]]; then
-        scp "$DIST_APK" "${SYNC_SERVER_USER}@${SYNC_SERVER_HOST}:${SYNC_SERVER_DOWNLOAD_DIR}/comics8-latest.apk"
+        scp "${SCP_OPTS[@]}" "$DIST_APK" "${SYNC_SERVER_USER}@${SYNC_SERVER_HOST}:${SYNC_SERVER_DOWNLOAD_DIR}/comics8-latest.apk"
     fi
 
     # Retrieve existing version.json to preserve non-targeted platform versions
-    scp -o StrictHostKeyChecking=no "${SYNC_SERVER_USER}@${SYNC_SERVER_HOST}:${SYNC_SERVER_VERSION_FILE}" /tmp/comics8-existing-version.json 2>/dev/null || true
+    scp "${SCP_OPTS[@]}" "${SYNC_SERVER_USER}@${SYNC_SERVER_HOST}:${SYNC_SERVER_VERSION_FILE}" /tmp/comics8-existing-version.json 2>/dev/null || true
 
     COMICS8_TARGET="$TARGET" \
     COMICS8_VERSION_NAME="$VERSION_NAME" \
@@ -311,7 +360,7 @@ payload["history"] = merged[:MAX_HISTORY_ENTRIES]
 json.dump(payload, sys.stdout, ensure_ascii=False, indent=2)
 print()
 PY
-    scp /tmp/comics8-version.json "${SYNC_SERVER_USER}@${SYNC_SERVER_HOST}:${SYNC_SERVER_VERSION_FILE}"
+    scp "${SCP_OPTS[@]}" /tmp/comics8-version.json "${SYNC_SERVER_USER}@${SYNC_SERVER_HOST}:${SYNC_SERVER_VERSION_FILE}"
     rm -f /tmp/comics8-version.json /tmp/comics8-existing-version.json
     echo "  ✅ Synced version.json and binaries to ${SYNC_SERVER_HOST}"
 else
