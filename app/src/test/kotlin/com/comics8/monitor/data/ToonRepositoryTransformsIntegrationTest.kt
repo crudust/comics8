@@ -218,20 +218,22 @@ class ToonRepositoryTransformsIntegrationTest {
                 )
             }
 
-            var callbackCount = 0
+            // onUpdated is invoked from several concurrent coroutines, so the counter
+            // must be atomic or increments get lost (3 callbacks occasionally read as 2).
+            val callbackCount = java.util.concurrent.atomic.AtomicInteger()
             repository.syncEpisodeCounts(items) { _, total, progress ->
-                callbackCount++
+                callbackCount.incrementAndGet()
                 assertThat(total).isEqualTo(15)
                 assertThat(progress).isEqualTo("15화")
             }
 
             var attempts = 0
-            while (callbackCount < 3 && attempts < 100) {
+            while (callbackCount.get() < 3 && attempts < 100) {
                 kotlinx.coroutines.delay(50)
                 attempts++
             }
 
-            assertThat(callbackCount).isEqualTo(3)
+            assertThat(callbackCount.get()).isEqualTo(3)
             for (item in items) {
                 val entry = database.toonCatalogDao().get(item.workId())
                 assertThat(entry).isNotNull()
@@ -239,12 +241,12 @@ class ToonRepositoryTransformsIntegrationTest {
             }
 
             // Once populated, re-running syncEpisodeCounts should skip since needsCatalog is now false
-            var secondCallbackCount = 0
+            val secondCallbackCount = java.util.concurrent.atomic.AtomicInteger()
             repository.syncEpisodeCounts(items) { _, _, _ ->
-                secondCallbackCount++
+                secondCallbackCount.incrementAndGet()
             }
             kotlinx.coroutines.delay(200)
-            assertThat(secondCallbackCount).isEqualTo(0)
+            assertThat(secondCallbackCount.get()).isEqualTo(0)
         } finally {
             database.close()
         }

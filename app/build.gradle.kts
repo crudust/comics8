@@ -182,3 +182,12 @@ dependencies {
     testImplementation(libs.test.core.ktx)
     testImplementation(libs.robolectric)
 }
+
+// The `distribution` flavor dimension makes plain `:app:testDebugUnitTest` ambiguous,
+// while the documented verification command is exactly `:app:testDebugUnitTest`.
+// Aggregate every shipping flavor's debug unit tests under that name.
+tasks.register("testDebugUnitTest") {
+    group = "verification"
+    description = "Runs debug unit tests for every distribution flavor (standalone, play)."
+    dependsOn("testStandaloneDebugUnitTest", "testPlayDebugUnitTest")
+}
