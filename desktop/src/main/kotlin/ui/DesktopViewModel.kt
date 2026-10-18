@@ -392,12 +392,14 @@ class DesktopViewModel(
             _state.update { it.copy(updateState = it.updateState.copy(isChecking = true)) }
             val currentVersionName = DesktopVersion.VERSION_NAME
             val currentVersionCode = DesktopVersion.VERSION_CODE
+            val strings = I18n.strings(_state.value.appLanguage)
             val serverUrl = _state.value.syncState.serverUrl.ifBlank { SyncConstants.DEFAULT_SERVER_URL }
             val updateState = withContext(Dispatchers.IO) {
                 AppUpdateChecker.checkDesktopUpdate(
                     currentVersionName = currentVersionName,
                     currentVersionCode = currentVersionCode,
                     serverUrl = serverUrl,
+                    strings = strings,
                 )
             }
             val newServerUrl = updateState.newServerUrl
@@ -412,9 +414,9 @@ class DesktopViewModel(
             }
             if (manual) {
                 if (updateState.error != null) {
-                    onFeedback?.invoke(updateState.error ?: "업데이트 확인 실패")
+                    onFeedback?.invoke(updateState.error ?: strings.msgUpdateCheckFailed)
                 } else if (!updateState.hasUpdate) {
-                    onFeedback?.invoke("현재 최신 버전(v${currentVersionName})을 사용 중입니다.")
+                    onFeedback?.invoke(strings.msgLatestVersionInUse(currentVersionName))
                 }
             }
         }
@@ -452,11 +454,14 @@ class DesktopViewModel(
                     _state.update { it.copy(updateState = it.updateState.copy(isDownloading = false)) }
                 },
                 onFailure = { err ->
+                    val strings = I18n.strings(_state.value.appLanguage)
+                    val detail = err.localizedMessage ?: err.message
+                    val errorMsg = if (detail.isNullOrBlank()) strings.msgUpdateDownloadFailed else "${strings.msgUpdateDownloadFailed}: $detail"
                     _state.update {
                         it.copy(
                             updateState = it.updateState.copy(
                                 isDownloading = false,
-                                error = "업데이트 실패: ${err.localizedMessage ?: err.message}"
+                                error = errorMsg,
                             )
                         )
                     }

@@ -570,14 +570,21 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             val currentVersionName = BuildConfig.VERSION_NAME
             val currentVersionCode = BuildConfig.VERSION_CODE
 
+            val strings = I18n.strings(_state.value.appLanguage)
+            val serverUrl = _state.value.syncState.serverUrl.ifBlank { SyncConstants.DEFAULT_SERVER_URL }
+
             val updateState = if (BuildConfig.IS_PLAY_STORE) {
                 val playResult = com.comics8.monitor.data.PlayUpdateManager.checkPlayUpdate(getApplication())
+                val history = withContext(Dispatchers.IO) {
+                    AppUpdateChecker.fetchHistory("android", serverUrl)
+                }
                 if (playResult.hasUpdate) {
                     com.comics8.core.model.AppUpdateState(
                         hasUpdate = true,
                         latestVersion = if (playResult.availableVersionCode > 0) "Build ${playResult.availableVersionCode}" else currentVersionName,
                         currentVersion = currentVersionName,
                         isChecking = false,
+                        history = history,
                     )
                 } else {
                     com.comics8.core.model.AppUpdateState(
@@ -586,15 +593,16 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                         latestVersion = currentVersionName,
                         isChecking = false,
                         error = playResult.error,
+                        history = history,
                     )
                 }
             } else {
-                val serverUrl = _state.value.syncState.serverUrl.ifBlank { SyncConstants.DEFAULT_SERVER_URL }
                 withContext(Dispatchers.IO) {
                     AppUpdateChecker.checkAndroidUpdate(
                         currentVersionName = currentVersionName,
                         currentVersionCode = currentVersionCode,
                         serverUrl = serverUrl,
+                        strings = strings,
                     )
                 }
             }
@@ -612,9 +620,9 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             }
             if (manual) {
                 if (updateState.error != null && !BuildConfig.IS_PLAY_STORE) {
-                    onFeedback?.invoke(updateState.error ?: "업데이트 확인 실패")
+                    onFeedback?.invoke(updateState.error ?: strings.msgUpdateCheckFailed)
                 } else if (!updateState.hasUpdate) {
-                    onFeedback?.invoke("현재 최신 버전(v${currentVersionName})을 사용 중입니다.")
+                    onFeedback?.invoke(strings.msgLatestVersionInUse(currentVersionName))
                 }
             }
         }
@@ -663,11 +671,14 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                     _state.update { it.copy(updateState = it.updateState.copy(isDownloading = false)) }
                 },
                 onFailure = { err ->
+                    val strings = I18n.strings(_state.value.appLanguage)
+                    val detail = err.localizedMessage ?: err.message
+                    val errorMsg = if (detail.isNullOrBlank()) strings.msgUpdateDownloadFailed else "${strings.msgUpdateDownloadFailed}: $detail"
                     _state.update {
                         it.copy(
                             updateState = it.updateState.copy(
                                 isDownloading = false,
-                                error = "업데이트 실패: ${err.localizedMessage ?: err.message}"
+                                error = errorMsg,
                             )
                         )
                     }

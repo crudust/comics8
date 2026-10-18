@@ -118,13 +118,10 @@ fun AboutSettingsPane(
             }
         }
 
-        // Play Store 빌드는 인앱 업데이터를 쓰지 않으므로 이력을 노출하지 않는다.
-        if (!BuildConfig.IS_PLAY_STORE) {
-            UpdateHistorySection(
-                history = state.updateState.history,
-                currentVersion = BuildConfig.VERSION_NAME,
-            )
-        }
+        UpdateHistorySection(
+            history = state.updateState.history,
+            currentVersion = BuildConfig.VERSION_NAME,
+        )
     }
 }
 

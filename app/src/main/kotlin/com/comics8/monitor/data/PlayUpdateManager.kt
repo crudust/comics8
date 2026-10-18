@@ -87,7 +87,7 @@ object PlayUpdateManager {
         } catch (e: Exception) {
             PlayUpdateResult(
                 hasUpdate = false,
-                error = e.localizedMessage ?: e.message ?: "Google Play 업데이트 확인 실패",
+                error = e.localizedMessage ?: e.message ?: "Google Play update check failed",
             )
         }
     }
