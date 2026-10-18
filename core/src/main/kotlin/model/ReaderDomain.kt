@@ -66,8 +66,46 @@ object ReaderDomain {
     const val SCROLL_IDLE_THRESHOLD = 0.2f
     const val SCROLL_LATCH_COOLDOWN_MS = 350L
 
+    /** Dominant axis of a single physical scroll/trackpad gesture stream. */
+    enum class ScrollGestureAxis {
+        HORIZONTAL,
+        VERTICAL,
+        UNDECIDED,
+    }
+
     fun isScrollIdle(deltaX: Float, deltaY: Float, threshold: Float = SCROLL_IDLE_THRESHOLD): Boolean =
         kotlin.math.abs(deltaX) < threshold && kotlin.math.abs(deltaY) < threshold
+
+    /**
+     * Locks the axis of a gesture stream once one delta clearly dominates the other.
+     * Ambiguous (diagonal) deltas stay [ScrollGestureAxis.UNDECIDED] so a single noisy event
+     * cannot misclassify the whole gesture.
+     */
+    fun resolveScrollGestureAxis(
+        deltaX: Float,
+        deltaY: Float,
+        threshold: Float = SCROLL_IDLE_THRESHOLD,
+    ): ScrollGestureAxis {
+        val absX = kotlin.math.abs(deltaX)
+        val absY = kotlin.math.abs(deltaY)
+        if (maxOf(absX, absY) < threshold) return ScrollGestureAxis.UNDECIDED
+        return when {
+            absY - absX > threshold -> ScrollGestureAxis.VERTICAL
+            absX - absY > threshold -> ScrollGestureAxis.HORIZONTAL
+            else -> ScrollGestureAxis.UNDECIDED
+        }
+    }
+
+    /**
+     * Pull-to-refresh is only an upward drag (negative deltaY) that starts while already at the
+     * top edge. Scroll-down at the top edge must scroll the list, never navigate or refresh.
+     */
+    fun isPullRefreshGesture(
+        deltaX: Float,
+        deltaY: Float,
+        isStreamArmedAtTop: Boolean,
+        isAtTop: Boolean,
+    ): Boolean = isStreamArmedAtTop && isAtTop && deltaY < 0f && kotlin.math.abs(deltaY) > kotlin.math.abs(deltaX)
 
     fun resolveScrollDirection(
         deltaX: Float,

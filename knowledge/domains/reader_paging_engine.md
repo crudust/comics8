@@ -31,6 +31,8 @@
 - **Sole Authority**: `pagerState.pageCount`가 뷰어 전체의 유일한 정규 페이지 수입니다. 중복된 `totalPages` 파라미터나 임의의 `maxOf` 폴백 연산은 엄격히 금지됩니다.
 - **Discrete Scroll Paging Latch**: 데스크톱의 연속 트랙패드/마우스 휠 스트림은 `desktopDiscreteScrollPaging`을 통해 단일 페이지 넘김으로 래칭됩니다.
 - **Gesture Contract**: 단일 물리 제스처당 1회 트리거, 강제 쿨다운(`SCROLL_LATCH_COOLDOWN_MS`), 관성 감쇠 검증(`isScrollIdle`), 최상단 상태에서만 새로고침을 무장하는 `isAtTop()` 조건을 만족해야 하며, 래치 상태는 뷰의 루트 컨테이너에 상주해야 합니다.
+- **Stream Ownership**: 스크롤 이벤트는 `PointerEventPass.Initial`에서 관찰해 페이지 넘김/새로고침으로 확정된 이벤트를 내부 스크롤러보다 먼저 소비합니다(스크롤과 페이지 넘김 동시 적용 금지). 또한 `resolveScrollGestureAxis`로 스트림의 우세 축을 1회 고정하며, 세로 우세 스트림은 `allowVerticalWheel=false` 컨테이너에서 절대 페이지를 넘기지 않습니다.
+- **Pull Direction**: 새로고침은 최상단에서 시작된 **위쪽(음수 deltaY)** 드래그에서만 발동합니다(`isPullRefreshGesture`). 최상단에서의 아래쪽 스크롤은 목록 스크롤이며, 페이지 넘김/새로고침으로 해석해서는 안 됩니다.
 
 ### 5. Progress Synchronization Settlement
 - **Settlement Emission**: 정확한 스크롤 오프셋과 페이지 번호는 페이지 전환이 완료되고 뷰포트가 안착(settlement)된 시점에만 기록됩니다.
