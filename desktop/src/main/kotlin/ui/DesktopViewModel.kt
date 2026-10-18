@@ -2127,11 +2127,7 @@ class DesktopViewModel(
             pageSize = series?.let { repository.sourceOrNull(it.sourceId)?.episodePageSize } ?: 100,
         )
         val nextEp = position.nextEpisodeIndex?.let(rawEpisodes::get)
-
-        val restoredMode = preAutoSwitchViewMode ?: _state.value.viewMode
-        preAutoSwitchViewMode = null
-        autoSwitchedEpisodeId = null
-        readerToastJob?.cancel()
+        val restoredMode = restoreAutoSwitchedViewMode()
 
         val startPage = com.comics8.core.model.ReaderProgress.startPageOnOpen(episode.lastReadPage)
         _state.update { curr ->
@@ -2557,7 +2553,7 @@ class DesktopViewModel(
         _state.update {
             it.copy(imageAspectRatios = it.imageAspectRatios + (index to ratio))
         }
-        if (index == 0) {
+        if (ReaderDomain.isAutoScrollCandidate(index)) {
             checkAndAutoSwitchToScroll(width, height)
         }
     }
@@ -2586,15 +2582,21 @@ class DesktopViewModel(
         }
     }
 
+    private fun restoreAutoSwitchedViewMode(): ViewMode {
+        val mode = preAutoSwitchViewMode ?: _state.value.viewMode
+        preAutoSwitchViewMode = null
+        autoSwitchedEpisodeId = null
+        readerToastJob?.cancel()
+        return mode
+    }
+
     fun closeReader() {
         val externalSession = externalReaderSession
         if (externalSession != null) {
             externalReaderSession = null
             readerJob?.cancel()
             DesktopImageCache.clear(ImageCacheRole.READER)
-            preAutoSwitchViewMode = null
-            autoSwitchedEpisodeId = null
-            readerToastJob?.cancel()
+            restoreAutoSwitchedViewMode()
             _state.update {
                 it.copy(
                     screen = externalSession.returnScreen,
@@ -2616,10 +2618,7 @@ class DesktopViewModel(
         DesktopImageCache.clear(ImageCacheRole.READER)
         val current = _state.value
         lastViewedEpisode = current.currentEpisode
-        val restoredMode = preAutoSwitchViewMode ?: current.viewMode
-        preAutoSwitchViewMode = null
-        autoSwitchedEpisodeId = null
-        readerToastJob?.cancel()
+        val restoredMode = restoreAutoSwitchedViewMode()
         _state.update {
             it.copy(
                 screen = Screen.Series,

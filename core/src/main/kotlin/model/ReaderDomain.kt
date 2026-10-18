@@ -121,6 +121,10 @@ object ReaderDomain {
         if (width <= 0 || height <= 0) null else width.toFloat() / height.toFloat()
 
     const val AUTO_SCROLL_HEIGHT_RATIO_THRESHOLD = 2.0f
+    const val AUTO_SCROLL_MAX_CHECK_PAGES = 2
+
+    fun isAutoScrollCandidate(pageIndex: Int): Boolean =
+        pageIndex in 0 until AUTO_SCROLL_MAX_CHECK_PAGES
 
     fun isWebtoonStrip(
         width: Int,

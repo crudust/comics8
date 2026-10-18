@@ -118,4 +118,60 @@ class DesktopAutoScrollTest {
         assertThat(viewModel.state.value.viewMode).isEqualTo(ViewMode.PAGE)
         assertThat(viewModel.state.value.readerToastMessage).isNull()
     }
+
+    @Test
+    fun autoSwitchesToScrollWhenSecondPageIsWebtoon() = runBlocking(Dispatchers.Main) {
+        val series = ToonItem(
+            id = "test_toon2",
+            title = "Test Toon 2",
+            thumbUrl = "thumb",
+            href = "href",
+            sourceId = "local",
+        )
+        val ep1 = EpisodeItem(wrId = "ep1", title = "1화", date = "2026-01-01", thumbUrl = null, href = "href1")
+
+        viewModel.openSeries(series)
+        viewModel.setViewMode(ViewMode.PAGE)
+
+        viewModel.openEpisode(ep1)
+        assertThat(viewModel.state.value.viewMode).isEqualTo(ViewMode.PAGE)
+
+        // First page is a normal cover/notice image (1000 x 1000, ratio 1.0 < 2.0)
+        viewModel.recordImageAspectRatio(0, 1000, 1000)
+        assertThat(viewModel.state.value.viewMode).isEqualTo(ViewMode.PAGE)
+
+        // Second page (index 1) is a tall webtoon strip (800 x 4000, ratio 5.0 >= 2.0)
+        viewModel.recordImageAspectRatio(1, 800, 4000)
+
+        // Should switch to SCROLL!
+        assertThat(viewModel.state.value.viewMode).isEqualTo(ViewMode.SCROLL)
+        assertThat(viewModel.state.value.readerToastMessage).isEqualTo("웹툰 형식 감지: 스크롤 모드로 전환되었습니다")
+    }
+
+    @Test
+    fun doesNotAutoSwitchWhenOnlyThirdPageIsWebtoon() = runBlocking(Dispatchers.Main) {
+        val series = ToonItem(
+            id = "test_toon3",
+            title = "Test Toon 3",
+            thumbUrl = "thumb",
+            href = "href",
+            sourceId = "local",
+        )
+        val ep1 = EpisodeItem(wrId = "ep1", title = "1화", date = "2026-01-01", thumbUrl = null, href = "href1")
+
+        viewModel.openSeries(series)
+        viewModel.setViewMode(ViewMode.PAGE)
+
+        viewModel.openEpisode(ep1)
+
+        // First and second pages are normal manga
+        viewModel.recordImageAspectRatio(0, 1000, 1400)
+        viewModel.recordImageAspectRatio(1, 1000, 1400)
+        assertThat(viewModel.state.value.viewMode).isEqualTo(ViewMode.PAGE)
+
+        // Third page (index 2) is tall, but candidate is only first 2 pages (index 0, 1)
+        viewModel.recordImageAspectRatio(2, 800, 4000)
+        assertThat(viewModel.state.value.viewMode).isEqualTo(ViewMode.PAGE)
+        assertThat(viewModel.state.value.readerToastMessage).isNull()
+    }
 }

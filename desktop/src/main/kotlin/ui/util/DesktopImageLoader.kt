@@ -548,37 +548,6 @@ object DesktopImageCache {
         }
     }
 
-    internal fun decodeForDisplay(bytes: ByteArray, maxLongEdge: Int): ImageBitmap? {
-        return try {
-            val src = decodeToSkiaImage(bytes) ?: return null
-            src.use {
-                val w = src.width.coerceAtLeast(1)
-                val h = src.height.coerceAtLeast(1)
-                val longEdge = maxOf(w, h)
-                if (longEdge <= maxLongEdge) {
-                    return src.toComposeImageBitmap()
-                }
-                val scale = maxLongEdge.toFloat() / longEdge
-                val tw = (w * scale).toInt().coerceAtLeast(1)
-                val th = (h * scale).toInt().coerceAtLeast(1)
-                return Surface.makeRasterN32Premul(tw, th).use { surface ->
-                    surface.canvas.clear(0xFFFFFFFF.toInt())
-                    surface.canvas.drawImageRect(
-                        src,
-                        Rect.makeWH(w.toFloat(), h.toFloat()),
-                        Rect.makeWH(tw.toFloat(), th.toFloat()),
-                        SamplingMode.LINEAR,
-                        null,
-                        true,
-                    )
-                    surface.makeImageSnapshot().use { it.toComposeImageBitmap() }
-                }
-            }
-        } catch (_: Exception) {
-            null
-        }
-    }
-
     suspend fun preload(role: ImageCacheRole, urls: List<String>) = withContext(Dispatchers.IO) {
         for (url in urls) {
             if (url.isNotBlank() && !containsMemory(role, url)) {
