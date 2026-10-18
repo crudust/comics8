@@ -81,6 +81,26 @@ class DesktopImageCacheTest {
         }
     }
 
+    @Test
+    fun decodesReaderWithShortEdgeRetention() {
+        val surface = org.jetbrains.skia.Surface.makeRasterN32Premul(200, 3000)
+        val image = surface.makeImageSnapshot()
+        val data = image.encodeToData(org.jetbrains.skia.EncodedImageFormat.PNG, 100)!!
+        val bytes = data.bytes
+        surface.close()
+        image.close()
+
+        val decodedReader = DesktopImageCache.decodeForDisplay(bytes, com.comics8.core.image.ImageCacheRole.READER)
+        assertThat(decodedReader).isNotNull()
+        assertThat(decodedReader!!.width).isEqualTo(200)
+        assertThat(decodedReader.height).isEqualTo(3000)
+
+        val decodedGrid = DesktopImageCache.decodeForDisplay(bytes, com.comics8.core.image.ImageCacheRole.GRID)
+        assertThat(decodedGrid).isNotNull()
+        assertThat(decodedGrid!!.height).isEqualTo(480)
+        assertThat(decodedGrid.width).isEqualTo(32)
+    }
+
     companion object {
         private val ONE_PIXEL_PNG = byteArrayOf(
             0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,

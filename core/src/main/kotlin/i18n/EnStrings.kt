@@ -151,6 +151,7 @@ object EnStrings : AppStrings {
     override val errorCannotLoadImage: String = "Cannot load image"
     override val errorNoImagesToLoad: String = "No images to display."
     override val errorFailedToLoadImages: String = "Failed to load comic images."
+    override val toastAutoSwitchedToScroll: String = "Webtoon format detected: switched to scroll mode"
 
     // 6. Downloads & History
     override val titleOfflineDownload: String = "Offline Download"

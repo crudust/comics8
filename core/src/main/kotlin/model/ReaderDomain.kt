@@ -120,6 +120,14 @@ object ReaderDomain {
     fun imageAspectRatio(width: Int, height: Int): Float? =
         if (width <= 0 || height <= 0) null else width.toFloat() / height.toFloat()
 
+    const val AUTO_SCROLL_HEIGHT_RATIO_THRESHOLD = 2.0f
+
+    fun isWebtoonStrip(
+        width: Int,
+        height: Int,
+        threshold: Float = AUTO_SCROLL_HEIGHT_RATIO_THRESHOLD,
+    ): Boolean = width > 0 && height > 0 && (height.toFloat() / width.toFloat()) >= threshold
+
     /**
      * Resolves the read order for an episode list ordered newest-to-oldest, as returned by sources.
      */

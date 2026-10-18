@@ -120,6 +120,19 @@ class ReaderDomainTest {
     }
 
     @Test
+    fun isWebtoonStripDetectsExtremeVerticalRatio() {
+        // Standard manga page (width 1000, height 1450) -> ratio = 1.45 < 2.0 -> false
+        assertThat(ReaderDomain.isWebtoonStrip(1000, 1450)).isFalse()
+        // Boundary case: exactly 2.0x -> true
+        assertThat(ReaderDomain.isWebtoonStrip(1000, 2000)).isTrue()
+        // Webtoon strip (width 800, height 5000) -> 6.25x -> true
+        assertThat(ReaderDomain.isWebtoonStrip(800, 5000)).isTrue()
+        // Invalid dimensions
+        assertThat(ReaderDomain.isWebtoonStrip(0, 5000)).isFalse()
+        assertThat(ReaderDomain.isWebtoonStrip(800, 0)).isFalse()
+    }
+
+    @Test
     fun episodePositionAndNavigationRemainConsistentWithAscendingSortOrder() {
         val rawEpisodes = listOf(
             EpisodeItem(wrId = "300", title = "3화", date = "2026-03-01", thumbUrl = null, href = "ep/3"),

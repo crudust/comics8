@@ -151,6 +151,7 @@ object KoStrings : AppStrings {
     override val errorCannotLoadImage: String = "이미지를 불러올 수 없습니다"
     override val errorNoImagesToLoad: String = "불러올 이미지가 없습니다."
     override val errorFailedToLoadImages: String = "만화 이미지를 불러오지 못했습니다."
+    override val toastAutoSwitchedToScroll: String = "웹툰 형식 감지: 스크롤 모드로 전환되었습니다"
 
     // 6. Downloads & History
     override val titleOfflineDownload: String = "오프라인 다운로드"

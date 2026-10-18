@@ -69,6 +69,7 @@ data class DesktopUiState(
     val imageAspectRatios: Map<Int, Float> = emptyMap(),
     val readerLoading: Boolean = false,
     val readerError: String? = null,
+    val readerToastMessage: String? = null,
     val viewMode: ViewMode = ViewMode.DUAL,
     val readDirection: ReadDirection = ReadDirection.RIGHT_TO_LEFT,
     val splitMode: SplitMode = SplitMode.FIT,

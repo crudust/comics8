@@ -151,7 +151,8 @@ internal fun decodeAvifToSkiaImage(bytes: ByteArray): Image? {
 
 object DesktopImageCache {
     private const val MEMORY_MAX_BYTES = 160L * 1024L * 1024L
-    private const val DISPLAY_LONG_EDGE = 2048
+    private const val DISPLAY_SHORT_EDGE = 1800
+    private const val DISPLAY_MAX_LONG_EDGE = 16384
     private const val THUMBNAIL_LONG_EDGE = 480
     private const val DISK_HARD_LIMIT_BYTES = 500L * 1024 * 1024
     private const val DISK_TARGET_BYTES = 400L * 1024 * 1024
@@ -444,10 +445,6 @@ object DesktopImageCache {
 
             val generation = roleGenerations[role.ordinal]
             val requestId = requestIds.incrementAndGet()
-            val maxLongEdge = when (role) {
-                ImageCacheRole.GRID, ImageCacheRole.EPISODE -> THUMBNAIL_LONG_EDGE
-                ImageCacheRole.READER -> DISPLAY_LONG_EDGE
-            }
             val def = loadScope.async(start = CoroutineStart.LAZY) {
                 try {
                     if (!isActive) return@async null
@@ -455,7 +452,7 @@ object DesktopImageCache {
                         if (!isActive) return@async null
                         val bytes = readImageBytes(url, forceRetry = forceRetry)
                         if (bytes != null && bytes.isNotEmpty()) {
-                            val bitmap = decodeForDisplay(bytes, maxLongEdge)
+                            val bitmap = decodeForDisplay(bytes, role)
                             if (bitmap != null) {
                                 synchronized(inFlightLock) {
                                     if (roleGenerations[role.ordinal] == generation && isActive) {
@@ -499,7 +496,59 @@ object DesktopImageCache {
     }
 
 
-    internal fun decodeForDisplay(bytes: ByteArray, maxLongEdge: Int = DISPLAY_LONG_EDGE): ImageBitmap? {
+    internal fun decodeForDisplay(
+        bytes: ByteArray,
+        role: ImageCacheRole = ImageCacheRole.READER,
+    ): ImageBitmap? {
+        return try {
+            val src = decodeToSkiaImage(bytes) ?: return null
+            src.use {
+                val w = src.width.coerceAtLeast(1)
+                val h = src.height.coerceAtLeast(1)
+                val shortEdge = minOf(w, h)
+                val longEdge = maxOf(w, h)
+
+                val scale = when (role) {
+                    ImageCacheRole.GRID, ImageCacheRole.EPISODE -> {
+                        if (longEdge <= THUMBNAIL_LONG_EDGE) 1.0f
+                        else THUMBNAIL_LONG_EDGE.toFloat() / longEdge
+                    }
+                    ImageCacheRole.READER -> {
+                        var s = 1.0f
+                        if (shortEdge > DISPLAY_SHORT_EDGE) {
+                            s = minOf(s, DISPLAY_SHORT_EDGE.toFloat() / shortEdge)
+                        }
+                        if (longEdge * s > DISPLAY_MAX_LONG_EDGE) {
+                            s = minOf(s, DISPLAY_MAX_LONG_EDGE.toFloat() / longEdge)
+                        }
+                        s
+                    }
+                }
+
+                if (scale >= 1.0f) {
+                    return src.toComposeImageBitmap()
+                }
+                val tw = (w * scale).toInt().coerceAtLeast(1)
+                val th = (h * scale).toInt().coerceAtLeast(1)
+                return Surface.makeRasterN32Premul(tw, th).use { surface ->
+                    surface.canvas.clear(0xFFFFFFFF.toInt())
+                    surface.canvas.drawImageRect(
+                        src,
+                        Rect.makeWH(w.toFloat(), h.toFloat()),
+                        Rect.makeWH(tw.toFloat(), th.toFloat()),
+                        SamplingMode.LINEAR,
+                        null,
+                        true,
+                    )
+                    surface.makeImageSnapshot().use { it.toComposeImageBitmap() }
+                }
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    internal fun decodeForDisplay(bytes: ByteArray, maxLongEdge: Int): ImageBitmap? {
         return try {
             val src = decodeToSkiaImage(bytes) ?: return null
             src.use {

@@ -57,6 +57,7 @@ import com.comics8.desktop.ui.DesktopViewModel
 import com.comics8.desktop.ui.components.Badge
 import com.comics8.desktop.ui.components.EmptySourcePane
 import com.comics8.desktop.ui.components.ErrorPane
+import com.comics8.desktop.ui.components.DesktopPullToRefreshIndicator
 import com.comics8.desktop.ui.components.LoadingPane
 import com.comics8.desktop.ui.components.desktopDiscreteScrollPaging
 import com.comics8.desktop.ui.components.sourceChipLabel
@@ -73,6 +74,14 @@ fun BrowsePane(
     val strings = LocalStrings.current
     val isLocal = state.activeSourceId == WorkId.LOCAL_SOURCE
     val canSwipePage = state.tab?.paginated == true && !state.loading && !state.isSearch && state.lastPage > 1
+    val canPullRefresh = state.packsReady && state.activeSourceId != null && !state.loading
+
+    val gridState = rememberLazyGridState()
+    LaunchedEffect(state.scrollToTopTrigger) {
+        if (state.scrollToTopTrigger > 0) {
+            gridState.scrollToItem(0)
+        }
+    }
 
     Box(
         modifier = modifier
@@ -81,6 +90,8 @@ fun BrowsePane(
                 enabled = canSwipePage,
                 onAdvance = { if (state.page < state.lastPage) viewModel.nextPage() },
                 onRetreat = { if (state.page > 1) viewModel.prevPage() },
+                onPullRefresh = if (canPullRefresh) { { viewModel.refresh() } } else null,
+                isAtTop = { !gridState.canScrollBackward },
             ),
     ) {
         when {
@@ -130,12 +141,6 @@ fun BrowsePane(
                 } else if (isLocal && state.items.isEmpty() && !state.isSearch) {
                     EmptyLibraryScanHint(modifier = Modifier.weight(1f).fillMaxWidth())
                 } else {
-                    val gridState = rememberLazyGridState()
-                    LaunchedEffect(state.scrollToTopTrigger) {
-                        if (state.scrollToTopTrigger > 0) {
-                            gridState.scrollToItem(0)
-                        }
-                    }
                     val distinctItems = remember(state.items) {
                         state.items.distinctBy { it.listingKey() }
                     }
@@ -164,6 +169,11 @@ fun BrowsePane(
             }
         }
     }
+
+    DesktopPullToRefreshIndicator(
+        refreshing = state.refreshing,
+        modifier = Modifier.align(Alignment.TopCenter),
+    )
 }
 }
 
