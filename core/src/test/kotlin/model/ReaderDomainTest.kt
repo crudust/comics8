@@ -307,4 +307,66 @@ class ReaderDomainTest {
         assertThat(ReaderDomain.isScrollIdle(deltaX = -0.1f, deltaY = 0.0f)).isTrue()
         assertThat(ReaderDomain.isScrollIdle(deltaX = 0.0f, deltaY = 0.0f)).isTrue()
     }
+
+    @Test
+    fun resolveScrollGestureAxisContract() {
+        // Vertical-dominant stream locks to VERTICAL
+        assertThat(ReaderDomain.resolveScrollGestureAxis(deltaX = 0.05f, deltaY = 0.8f))
+            .isEqualTo(ReaderDomain.ScrollGestureAxis.VERTICAL)
+        assertThat(ReaderDomain.resolveScrollGestureAxis(deltaX = 0.05f, deltaY = -0.8f))
+            .isEqualTo(ReaderDomain.ScrollGestureAxis.VERTICAL)
+
+        // Horizontal-dominant stream locks to HORIZONTAL
+        assertThat(ReaderDomain.resolveScrollGestureAxis(deltaX = 0.8f, deltaY = 0.05f))
+            .isEqualTo(ReaderDomain.ScrollGestureAxis.HORIZONTAL)
+
+        // Diagonal / tiny deltas stay undecided so noise cannot flip the axis
+        assertThat(ReaderDomain.resolveScrollGestureAxis(deltaX = 0.3f, deltaY = 0.3f))
+            .isEqualTo(ReaderDomain.ScrollGestureAxis.UNDECIDED)
+        assertThat(ReaderDomain.resolveScrollGestureAxis(deltaX = 0.0f, deltaY = 0.0f))
+            .isEqualTo(ReaderDomain.ScrollGestureAxis.UNDECIDED)
+    }
+
+    @Test
+    fun isPullRefreshGestureRequiresUpwardDragFromTop() {
+        // Scroll down at the top edge must scroll the list, not refresh nor page-turn
+        assertThat(
+            ReaderDomain.isPullRefreshGesture(
+                deltaX = 0.0f,
+                deltaY = 0.6f,
+                isStreamArmedAtTop = true,
+                isAtTop = true,
+            )
+        ).isFalse()
+
+        // Upward drag that started at the top edge arms the refresh
+        assertThat(
+            ReaderDomain.isPullRefreshGesture(
+                deltaX = 0.0f,
+                deltaY = -0.6f,
+                isStreamArmedAtTop = true,
+                isAtTop = true,
+            )
+        ).isTrue()
+
+        // Stream not armed at the top edge (list was mid-scroll) stays scroll-only
+        assertThat(
+            ReaderDomain.isPullRefreshGesture(
+                deltaX = 0.0f,
+                deltaY = -0.6f,
+                isStreamArmedAtTop = false,
+                isAtTop = true,
+            )
+        ).isFalse()
+
+        // Horizontal-dominant stream is never a pull refresh
+        assertThat(
+            ReaderDomain.isPullRefreshGesture(
+                deltaX = 0.8f,
+                deltaY = -0.3f,
+                isStreamArmedAtTop = true,
+                isAtTop = true,
+            )
+        ).isFalse()
+    }
 }

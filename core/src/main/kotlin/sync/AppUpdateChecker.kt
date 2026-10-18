@@ -1,5 +1,6 @@
 package com.comics8.core.sync
 
+import com.comics8.core.i18n.AppStrings
 import com.comics8.core.model.AppUpdateState
 import com.comics8.core.model.PlatformUpdateInfo
 import com.comics8.core.model.ReleaseHistoryEntry
@@ -95,6 +96,17 @@ object AppUpdateChecker {
         .filter { it.platform.equals("all", ignoreCase = true) || it.platform.equals(platform, ignoreCase = true) }
         .sortedByDescending { it.versionCode }
 
+    /**
+     * 원격 서버에서 업데이트 이력을 가져와 [platform] 에 맞게 필터링하여 돌려줍니다.
+     */
+    fun fetchHistory(
+        platform: String = "android",
+        serverUrl: String = SyncConstants.DEFAULT_SERVER_URL,
+    ): List<ReleaseHistoryEntry> {
+        val response = fetchVersionInfo(serverUrl) ?: return emptyList()
+        return historyForPlatform(response.history, platform)
+    }
+
     private fun isNewerVersion(remoteVersion: String, remoteCode: Int, currentVersion: String, currentCode: Int): Boolean {
         if (remoteCode > 0 && currentCode > 0) {
             return remoteCode > currentCode
@@ -115,58 +127,49 @@ object AppUpdateChecker {
         currentVersionName: String,
         currentVersionCode: Int,
         serverUrl: String = SyncConstants.DEFAULT_SERVER_URL,
-    ): AppUpdateState {
-        val response = fetchVersionInfo(serverUrl) ?: return AppUpdateState(
-            currentVersion = currentVersionName,
-            currentVersionCode = currentVersionCode,
-            error = "업데이트 정보를 확인할 수 없습니다",
-        )
-        val effectiveServerUrl = response.serverUrl ?: serverUrl
-        val info = response.android ?: return AppUpdateState(
-            currentVersion = currentVersionName,
-            currentVersionCode = currentVersionCode,
-            newServerUrl = response.serverUrl,
-            error = "Android 버전 정보가 없습니다",
-        )
-
-        val hasUpdate = isNewerVersion(
-            remoteVersion = info.versionName,
-            remoteCode = info.versionCode,
-            currentVersion = currentVersionName,
-            currentCode = currentVersionCode,
-        )
-
-        val resolvedUrl = SyncConstants.resolveDownloadUrl(info.downloadUrl, effectiveServerUrl)
-
-        return AppUpdateState(
-            hasUpdate = hasUpdate,
-            currentVersion = currentVersionName,
-            currentVersionCode = currentVersionCode,
-            latestVersion = info.versionName,
-            latestVersionCode = info.versionCode,
-            downloadUrl = resolvedUrl,
-            releaseNotes = info.releaseNotes,
-            newServerUrl = response.serverUrl,
-            history = historyForPlatform(response.history, "android"),
-        )
-    }
+        strings: AppStrings? = null,
+    ): AppUpdateState = checkPlatformUpdate(
+        platform = "android",
+        currentVersionName = currentVersionName,
+        currentVersionCode = currentVersionCode,
+        serverUrl = serverUrl,
+        strings = strings,
+    )
 
     fun checkDesktopUpdate(
         currentVersionName: String,
         currentVersionCode: Int,
         serverUrl: String = SyncConstants.DEFAULT_SERVER_URL,
+        strings: AppStrings? = null,
+    ): AppUpdateState = checkPlatformUpdate(
+        platform = "desktop",
+        currentVersionName = currentVersionName,
+        currentVersionCode = currentVersionCode,
+        serverUrl = serverUrl,
+        strings = strings,
+    )
+
+    private fun checkPlatformUpdate(
+        platform: String,
+        currentVersionName: String,
+        currentVersionCode: Int,
+        serverUrl: String,
+        strings: AppStrings?,
     ): AppUpdateState {
+        val checkFailedMsg = strings?.msgUpdateCheckFailed ?: "Failed to check for updates"
         val response = fetchVersionInfo(serverUrl) ?: return AppUpdateState(
             currentVersion = currentVersionName,
             currentVersionCode = currentVersionCode,
-            error = "업데이트 정보를 확인할 수 없습니다",
+            error = checkFailedMsg,
         )
         val effectiveServerUrl = response.serverUrl ?: serverUrl
-        val info = response.desktop ?: return AppUpdateState(
+        val history = historyForPlatform(response.history, platform)
+        val info = (if (platform == "android") response.android else response.desktop) ?: return AppUpdateState(
             currentVersion = currentVersionName,
             currentVersionCode = currentVersionCode,
             newServerUrl = response.serverUrl,
-            error = "Desktop 버전 정보가 없습니다",
+            history = history,
+            error = checkFailedMsg,
         )
 
         val hasUpdate = isNewerVersion(
@@ -176,7 +179,7 @@ object AppUpdateChecker {
             currentCode = currentVersionCode,
         )
 
-        val isWindows = System.getProperty("os.name", "").lowercase().contains("win")
+        val isWindows = platform == "desktop" && System.getProperty("os.name", "").lowercase().contains("win")
         val rawUrl = if (isWindows && info.windowsDownloadUrl.isNotBlank()) {
             info.windowsDownloadUrl
         } else {
@@ -193,7 +196,7 @@ object AppUpdateChecker {
             downloadUrl = resolvedUrl,
             releaseNotes = info.releaseNotes,
             newServerUrl = response.serverUrl,
-            history = historyForPlatform(response.history, "desktop"),
+            history = history,
         )
     }
 }

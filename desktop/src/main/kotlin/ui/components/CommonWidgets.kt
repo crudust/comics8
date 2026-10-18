@@ -38,7 +38,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.isCtrlPressed
+import androidx.compose.ui.input.pointer.isMetaPressed
 import androidx.compose.ui.input.pointer.onPointerEvent
 import com.comics8.core.model.ReaderDomain
 import com.comics8.core.model.ReaderDomain.BoundaryDirection
@@ -228,6 +231,12 @@ fun ErrorPane(
  * Discrete Trackpad / Mouse Wheel Scroll Paging Recognizer.
  * Converts continuous scroll event streams and momentum/inertia drift from macOS trackpads
  * into discrete, single-turn page transitions with guaranteed single trigger per gesture.
+ *
+ * Gesture ownership contract:
+ * - Scroll events are observed on [PointerEventPass.Initial] so a recognised page turn / pull-to-refresh
+ *   is consumed before the inner scrollable applies it (no scroll + page turn double-apply).
+ * - A stream locks its dominant axis once; a vertical list stream never turns pages.
+ * - Pull-to-refresh requires an upward drag that started at the top edge.
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -255,6 +264,7 @@ fun Modifier.desktopDiscreteScrollPaging(
     var lastTriggerEpoch by remember { mutableLongStateOf(0L) }
     var idleJob by remember { mutableStateOf<Job?>(null) }
     var streamStartedAtTop by remember { mutableStateOf(false) }
+    var streamAxis by remember { mutableStateOf(ReaderDomain.ScrollGestureAxis.UNDECIDED) }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -262,7 +272,11 @@ fun Modifier.desktopDiscreteScrollPaging(
         }
     }
 
-    return this.onPointerEvent(PointerEventType.Scroll) { event ->
+    return this.onPointerEvent(PointerEventType.Scroll, PointerEventPass.Initial) { event ->
+        // Zoom/pan gestures belong to the inner ZoomableBox; never turn pages for them.
+        if (event.keyboardModifiers.isCtrlPressed || event.keyboardModifiers.isMetaPressed) {
+            return@onPointerEvent
+        }
         val deltaX = event.changes.sumOf { it.scrollDelta.x.toDouble() }.toFloat()
         val deltaY = event.changes.sumOf { it.scrollDelta.y.toDouble() }.toFloat()
         val absX = abs(deltaX)
@@ -276,6 +290,13 @@ fun Modifier.desktopDiscreteScrollPaging(
             delay(maxOf(150L, remainingCooldown))
             isLatched = false
             streamStartedAtTop = false
+            streamAxis = ReaderDomain.ScrollGestureAxis.UNDECIDED
+        }
+
+        // Lock the gesture axis on the first clearly dominant delta; a vertical stream stays vertical
+        // until the stream ends, so trackpad noise cannot flip a list scroll into a page turn.
+        if (streamAxis == ReaderDomain.ScrollGestureAxis.UNDECIDED) {
+            streamAxis = ReaderDomain.resolveScrollGestureAxis(deltaX, deltaY, idleThreshold)
         }
 
         // Arm refresh only if this gesture sequence originated while already at the top
@@ -283,10 +304,20 @@ fun Modifier.desktopDiscreteScrollPaging(
             streamStartedAtTop = true
         }
 
-        val isVerticalPull = absX < absY && currentOnPullRefresh != null && streamStartedAtTop && currentIsAtTop()
+        val isAtTop = currentIsAtTop()
+        val isVerticalPull = currentOnPullRefresh != null && ReaderDomain.isPullRefreshGesture(
+            deltaX = deltaX,
+            deltaY = deltaY,
+            isStreamArmedAtTop = streamStartedAtTop,
+            isAtTop = isAtTop,
+        )
+        // Vertical streams may pull-to-refresh; only a horizontal-locked stream may turn pages.
+        val isHorizontalPageTurnStream =
+            streamAxis == ReaderDomain.ScrollGestureAxis.HORIZONTAL && absX > absY
 
-        // Guard against vertical scrolling in lists/grids unless explicitly allowed or pulling at top
-        if (!allowVerticalWheel && absX < absY && !isVerticalPull) {
+        // List/grid containers never page-turn a vertical stream: that gesture is owned by the
+        // inner scrollable (scroll) or by pull-to-refresh (upward drag at the top edge).
+        if (!allowVerticalWheel && !isVerticalPull && !isHorizontalPageTurnStream) {
             return@onPointerEvent
         }
 
@@ -309,7 +340,16 @@ fun Modifier.desktopDiscreteScrollPaging(
             return@onPointerEvent
         }
 
-        // Resolve dominant direction against threshold (core contract)
+        if (isVerticalPull) {
+            isLatched = true
+            lastTriggerEpoch = System.currentTimeMillis()
+            event.changes.forEach { it.consume() }
+            currentOnPullRefresh?.invoke()
+            return@onPointerEvent
+        }
+
+        // A vertical stream that is allowed (reader paged mode) is resolved as a page turn;
+        // a vertical list stream was already excluded by the guard above.
         val direction = ReaderDomain.resolveScrollDirection(
             deltaX = deltaX,
             deltaY = deltaY,
@@ -324,8 +364,6 @@ fun Modifier.desktopDiscreteScrollPaging(
 
         if (direction == BoundaryDirection.ADVANCE) {
             currentOnAdvance()
-        } else if (isVerticalPull) {
-            currentOnPullRefresh?.invoke()
         } else {
             currentOnRetreat()
         }
