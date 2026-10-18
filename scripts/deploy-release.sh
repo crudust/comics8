@@ -228,7 +228,7 @@ if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=3 "${SYNC_SERVER_USER}@${SY
     COMICS8_VERSION_CODE="$VERSION_CODE" \
     COMICS8_RELEASE_NOTES="$RELEASE_NOTES" \
     python3 - <<'PY' >/tmp/comics8-version.json
-import json, os, sys
+import datetime, json, os, sys
 
 target = os.environ.get("COMICS8_TARGET", "all")
 version_name = os.environ["COMICS8_VERSION_NAME"]
@@ -267,6 +267,46 @@ if target in ("all", "desktop"):
 payload = {"android": android, "desktop": desktop}
 if "serverUrl" in existing:
     payload["serverUrl"] = existing["serverUrl"]
+
+# --- Update history (consumed by the in-app "About" screen) --------------
+# Existing entries MUST be preserved, otherwise every deploy wipes history.
+MAX_HISTORY_ENTRIES = 30
+today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+history = existing.get("history")
+if not isinstance(history, list):
+    history = []
+
+new_entry = {
+    "versionName": version_name,
+    "versionCode": version_code,
+    "date": today,
+    "platform": target if target in ("android", "desktop") else "all",
+    "releaseNotes": notes,
+}
+
+merged = []
+found = False
+for entry in history:
+    if not isinstance(entry, dict):
+        continue
+    # Re-releasing the same version for the other platform must not create a
+    # duplicate row; promote it to "all" instead.
+    if entry.get("versionName") == version_name:
+        existing_platform = entry.get("platform", "all")
+        promoted = "all" if existing_platform != new_entry["platform"] else existing_platform
+        entry = dict(entry)
+        entry["platform"] = promoted
+        entry["date"] = today
+        entry["versionCode"] = version_code
+        if notes:
+            entry["releaseNotes"] = notes
+        found = True
+    merged.append(entry)
+
+if not found:
+    merged.insert(0, new_entry)
+
+payload["history"] = merged[:MAX_HISTORY_ENTRIES]
 
 json.dump(payload, sys.stdout, ensure_ascii=False, indent=2)
 print()
