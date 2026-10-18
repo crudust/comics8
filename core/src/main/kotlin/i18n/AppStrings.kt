@@ -336,6 +336,11 @@ interface AppStrings {
     fun labelAppVersion(name: String): String
     val statusCheckingUpdate: String
     val actionCheckUpdate: String
+    val sectionUpdateHistory: String
+    val labelUpdateHistoryEmpty: String
+    val actionShowMore: String
+    val actionShowLess: String
+    val labelCurrentVersion: String
     val titleUpdateDialog: String
     fun descNewVersionAvailable(version: String): String
     fun labelVersionComparison(curr: String, latest: String): String

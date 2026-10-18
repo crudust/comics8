@@ -2,6 +2,7 @@ package com.comics8.core.sync
 
 import com.comics8.core.model.AppUpdateState
 import com.comics8.core.model.PlatformUpdateInfo
+import com.comics8.core.model.ReleaseHistoryEntry
 import com.comics8.core.model.VersionResponse
 import com.comics8.core.network.FallbackDns
 import okhttp3.OkHttpClient
@@ -56,11 +57,43 @@ object AppUpdateChecker {
                 android = androidInfo,
                 desktop = desktopInfo,
                 serverUrl = remoteServerUrl,
+                history = parseHistory(root),
             )
         } catch (_: Exception) {
             null
         }
     }
+
+    private fun parseHistory(root: JSONObject): List<ReleaseHistoryEntry> {
+        val array = root.optJSONArray("history") ?: return emptyList()
+        val entries = ArrayList<ReleaseHistoryEntry>(array.length())
+        for (i in 0 until array.length()) {
+            val obj = array.optJSONObject(i) ?: continue
+            val versionName = obj.optString("versionName", "").trim()
+            if (versionName.isEmpty()) continue
+            entries.add(
+                ReleaseHistoryEntry(
+                    versionName = versionName,
+                    versionCode = obj.optInt("versionCode", 0),
+                    date = obj.optString("date", "").trim(),
+                    platform = obj.optString("platform", "").trim().ifBlank { "all" },
+                    releaseNotes = obj.optString("releaseNotes", "").trim(),
+                )
+            )
+        }
+        return entries
+    }
+
+    /**
+     * 이력 중 [platform] 에 노출할 항목만 최신순으로 정렬해 돌려줍니다.
+     * `versionCode` 가 같으면 서버가 내려준 순서를 유지합니다(안정 정렬).
+     */
+    fun historyForPlatform(
+        history: List<ReleaseHistoryEntry>,
+        platform: String,
+    ): List<ReleaseHistoryEntry> = history
+        .filter { it.platform.equals("all", ignoreCase = true) || it.platform.equals(platform, ignoreCase = true) }
+        .sortedByDescending { it.versionCode }
 
     private fun isNewerVersion(remoteVersion: String, remoteCode: Int, currentVersion: String, currentCode: Int): Boolean {
         if (remoteCode > 0 && currentCode > 0) {
@@ -114,6 +147,7 @@ object AppUpdateChecker {
             downloadUrl = resolvedUrl,
             releaseNotes = info.releaseNotes,
             newServerUrl = response.serverUrl,
+            history = historyForPlatform(response.history, "android"),
         )
     }
 
@@ -159,6 +193,7 @@ object AppUpdateChecker {
             downloadUrl = resolvedUrl,
             releaseNotes = info.releaseNotes,
             newServerUrl = response.serverUrl,
+            history = historyForPlatform(response.history, "desktop"),
         )
     }
 }
