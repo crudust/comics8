@@ -18,7 +18,7 @@ object DesktopUpdateManager {
     private val httpClient = OkHttpClient.Builder()
         .dns(FallbackDns)
         .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(180, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
 
