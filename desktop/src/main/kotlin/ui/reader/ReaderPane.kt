@@ -10,7 +10,6 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -20,29 +19,28 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,15 +48,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isAltPressed
@@ -70,6 +65,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.utf16CodePoint
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.comics8.core.image.ImageCacheRole
 import com.comics8.core.model.DualSpread
@@ -90,14 +86,9 @@ import com.comics8.desktop.ui.components.ZoomableBox
 import com.comics8.desktop.ui.components.desktopDiscreteScrollPaging
 import com.comics8.desktop.ui.theme.LocalStrings
 import com.comics8.desktop.ui.util.DesktopAsyncImage
-
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.PagerState
-import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.unit.IntSize
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 
 @Composable
@@ -303,6 +294,19 @@ private fun ReaderScrollView(
         }
     }
 
+    val totalImages = state.readerImages.size
+    val currentRangeText = remember(listState.firstVisibleItemIndex, totalImages) {
+        if (totalImages > 0) {
+            "${(listState.firstVisibleItemIndex + 1).coerceAtMost(totalImages)} / $totalImages"
+        } else ""
+    }
+
+    LaunchedEffect(listState.isScrollInProgress) {
+        if (listState.isScrollInProgress) {
+            controlsVisible = false
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         ZoomableBox(
             modifier = Modifier.fillMaxSize(),
@@ -355,15 +359,18 @@ private fun ReaderScrollView(
             }
         }
 
-        // Overlay TopBar
-        if (controlsVisible) {
-            TopBar(
-                state = state,
-                viewModel = viewModel,
-                inOverlay = true,
-                modifier = Modifier.align(Alignment.TopCenter),
-            )
-        }
+        ReaderOverlayControls(
+            state = state,
+            viewModel = viewModel,
+            controlsVisible = controlsVisible,
+            currentRangeText = currentRangeText,
+            currentPage = (listState.firstVisibleItemIndex + 1).coerceIn(1, totalImages.coerceAtLeast(1)),
+            maxPages = totalImages,
+            onPageChange = { targetPage ->
+                val pageIdx = (targetPage - 1).coerceIn(0, (totalImages - 1).coerceAtLeast(0))
+                scope.launch { listState.scrollToItem(pageIdx) }
+            },
+        )
     }
 }
 
@@ -495,24 +502,6 @@ private fun ReaderPagedLayout(
             }
         }
 
-        // Floating Page Indicator (Visible when controls are hidden)
-        if (!controlsVisible && state.readerImages.isNotEmpty()) {
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(16.dp),
-            ) {
-                Text(
-                    text = currentRangeText,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                )
-            }
-        }
-
         // Boundary Confirmation Prompts
         EpisodeBoundaryPrompt(
             visible = nextPromptVisible,
@@ -542,40 +531,18 @@ private fun ReaderPagedLayout(
             },
         )
 
-        AnimatedVisibility(
-            visible = controlsVisible,
-            enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
-            modifier = Modifier.align(Alignment.TopCenter),
-        ) {
-            TopBar(
-                state = state,
-                viewModel = viewModel,
-                inOverlay = true,
-            )
-        }
-
-        AnimatedVisibility(
-            visible = controlsVisible,
-            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter),
-        ) {
-            ReaderBottomBar(
-                currentRangeText = currentRangeText,
-                currentPage = pagerState.currentPage + 1,
-                maxPages = pagerState.pageCount,
-                hasPrevEpisode = state.hasPrevEpisode,
-                hasNextEpisode = state.hasNextEpisode,
-                onPageChange = { targetPage ->
-                    val pageIdx = (targetPage - 1).coerceIn(0, pagerState.pageCount - 1)
-                    scope.launch { pagerState.scrollToPage(pageIdx) }
-                },
-                onPrevEp = viewModel::openPrevEpisode,
-                onNextEp = viewModel::openNextEpisode,
-                onClose = viewModel::closeReader,
-            )
-        }
+        ReaderOverlayControls(
+            state = state,
+            viewModel = viewModel,
+            controlsVisible = controlsVisible,
+            currentRangeText = currentRangeText,
+            currentPage = pagerState.currentPage + 1,
+            maxPages = pagerState.pageCount,
+            onPageChange = { targetPage ->
+                val pageIdx = (targetPage - 1).coerceIn(0, pagerState.pageCount - 1)
+                scope.launch { pagerState.scrollToPage(pageIdx) }
+            },
+        )
     }
 }
 
@@ -983,6 +950,66 @@ private fun BoxScope.EpisodeBoundaryPrompt(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun BoxScope.ReaderOverlayControls(
+    state: DesktopUiState,
+    viewModel: DesktopViewModel,
+    controlsVisible: Boolean,
+    currentRangeText: String,
+    currentPage: Int,
+    maxPages: Int,
+    onPageChange: (Int) -> Unit,
+) {
+    if (!controlsVisible && maxPages > 0 && currentRangeText.isNotEmpty()) {
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(16.dp),
+        ) {
+            Text(
+                text = currentRangeText,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            )
+        }
+    }
+
+    AnimatedVisibility(
+        visible = controlsVisible,
+        enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
+        exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
+        modifier = Modifier.align(Alignment.TopCenter),
+    ) {
+        TopBar(
+            state = state,
+            viewModel = viewModel,
+            inOverlay = true,
+        )
+    }
+
+    AnimatedVisibility(
+        visible = controlsVisible,
+        enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+        exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+        modifier = Modifier.align(Alignment.BottomCenter),
+    ) {
+        ReaderBottomBar(
+            currentRangeText = currentRangeText,
+            currentPage = currentPage,
+            maxPages = maxPages,
+            hasPrevEpisode = state.hasPrevEpisode,
+            hasNextEpisode = state.hasNextEpisode,
+            onPageChange = onPageChange,
+            onPrevEp = viewModel::openPrevEpisode,
+            onNextEp = viewModel::openNextEpisode,
+            onClose = viewModel::closeReader,
+        )
     }
 }
 

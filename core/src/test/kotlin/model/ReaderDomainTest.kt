@@ -133,6 +133,14 @@ class ReaderDomainTest {
     }
 
     @Test
+    fun isAutoScrollCandidateOnlyAllowsFirstTwoPages() {
+        assertThat(ReaderDomain.isAutoScrollCandidate(0)).isTrue()
+        assertThat(ReaderDomain.isAutoScrollCandidate(1)).isTrue()
+        assertThat(ReaderDomain.isAutoScrollCandidate(2)).isFalse()
+        assertThat(ReaderDomain.isAutoScrollCandidate(-1)).isFalse()
+    }
+
+    @Test
     fun episodePositionAndNavigationRemainConsistentWithAscendingSortOrder() {
         val rawEpisodes = listOf(
             EpisodeItem(wrId = "300", title = "3화", date = "2026-03-01", thumbUrl = null, href = "ep/3"),
