@@ -151,6 +151,7 @@ object JaStrings : AppStrings {
     override val errorCannotLoadImage: String = "画像を読み込めません"
     override val errorNoImagesToLoad: String = "表示する画像がありません。"
     override val errorFailedToLoadImages: String = "マンガ画像の取得に失敗しました。"
+    override val toastAutoSwitchedToScroll: String = "Webtoon形式を検出: スクロールモードに切り替えました"
 
     // 6. Downloads & History
     override val titleOfflineDownload: String = "オフラインダウンロード"

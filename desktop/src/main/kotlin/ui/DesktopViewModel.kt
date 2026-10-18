@@ -54,10 +54,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import java.io.File
 import java.nio.file.Files
 
 import com.comics8.core.i18n.AppLanguage
+import com.comics8.core.i18n.I18n
 import java.util.prefs.Preferences
 
 private data class ExternalReaderSession(
@@ -137,6 +139,9 @@ class DesktopViewModel(
     private var pageSaveJob: Job? = null
     private var pendingPageSave: Triple<WorkId, String, Int>? = null
     private var externalReaderSession: ExternalReaderSession? = null
+    private var autoSwitchedEpisodeId: String? = null
+    private var preAutoSwitchViewMode: ViewMode? = null
+    private var readerToastJob: Job? = null
 
     private val catalogCache = mutableMapOf<BrowseTab, List<ToonItem>>()
     private val catalogPages = mutableMapOf<BrowseTab, Pair<Int, Int>>()
@@ -2123,6 +2128,11 @@ class DesktopViewModel(
         )
         val nextEp = position.nextEpisodeIndex?.let(rawEpisodes::get)
 
+        val restoredMode = preAutoSwitchViewMode ?: _state.value.viewMode
+        preAutoSwitchViewMode = null
+        autoSwitchedEpisodeId = null
+        readerToastJob?.cancel()
+
         val startPage = com.comics8.core.model.ReaderProgress.startPageOnOpen(episode.lastReadPage)
         _state.update { curr ->
             val updatedRaw = curr.rawEpisodes.map {
@@ -2140,6 +2150,8 @@ class DesktopViewModel(
                 imageAspectRatios = emptyMap(),
                 readerLoading = true,
                 readerError = null,
+                readerToastMessage = null,
+                viewMode = restoredMode,
             )
         }
         loadReaderImages(episode)
@@ -2507,6 +2519,7 @@ class DesktopViewModel(
     }
 
     fun setViewMode(mode: ViewMode) {
+        preAutoSwitchViewMode = null
         _state.update { it.copy(viewMode = mode) }
         if (externalReaderSession != null) return
         val series = _state.value.series ?: return
@@ -2544,6 +2557,33 @@ class DesktopViewModel(
         _state.update {
             it.copy(imageAspectRatios = it.imageAspectRatios + (index to ratio))
         }
+        if (index == 0) {
+            checkAndAutoSwitchToScroll(width, height)
+        }
+    }
+
+    private fun checkAndAutoSwitchToScroll(width: Int, height: Int) {
+        val currentEp = _state.value.currentEpisode ?: return
+        if (autoSwitchedEpisodeId == currentEp.wrId) return
+        val currentMode = _state.value.viewMode
+        if (currentMode == ViewMode.SCROLL) return
+
+        if (ReaderDomain.isWebtoonStrip(width, height)) {
+            autoSwitchedEpisodeId = currentEp.wrId
+            preAutoSwitchViewMode = currentMode
+            val toast = I18n.strings(_state.value.appLanguage).toastAutoSwitchedToScroll
+            _state.update {
+                it.copy(
+                    viewMode = ViewMode.SCROLL,
+                    readerToastMessage = toast,
+                )
+            }
+            readerToastJob?.cancel()
+            readerToastJob = scope.launch {
+                delay(1000)
+                _state.update { it.copy(readerToastMessage = null) }
+            }
+        }
     }
 
     fun closeReader() {
@@ -2552,6 +2592,9 @@ class DesktopViewModel(
             externalReaderSession = null
             readerJob?.cancel()
             DesktopImageCache.clear(ImageCacheRole.READER)
+            preAutoSwitchViewMode = null
+            autoSwitchedEpisodeId = null
+            readerToastJob?.cancel()
             _state.update {
                 it.copy(
                     screen = externalSession.returnScreen,
@@ -2560,6 +2603,7 @@ class DesktopViewModel(
                     imageAspectRatios = emptyMap(),
                     readerLoading = false,
                     readerError = null,
+                    readerToastMessage = null,
                     viewMode = externalSession.viewMode,
                     readDirection = externalSession.readDirection,
                     splitMode = externalSession.splitMode,
@@ -2572,6 +2616,10 @@ class DesktopViewModel(
         DesktopImageCache.clear(ImageCacheRole.READER)
         val current = _state.value
         lastViewedEpisode = current.currentEpisode
+        val restoredMode = preAutoSwitchViewMode ?: current.viewMode
+        preAutoSwitchViewMode = null
+        autoSwitchedEpisodeId = null
+        readerToastJob?.cancel()
         _state.update {
             it.copy(
                 screen = Screen.Series,
@@ -2580,6 +2628,8 @@ class DesktopViewModel(
                 imageAspectRatios = emptyMap(),
                 readerLoading = false,
                 readerError = null,
+                readerToastMessage = null,
+                viewMode = restoredMode,
             )
         }
         repository.syncManager?.triggerDebouncedPush()

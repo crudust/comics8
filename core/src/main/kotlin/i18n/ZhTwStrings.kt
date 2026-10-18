@@ -151,6 +151,7 @@ object ZhTwStrings : AppStrings {
     override val errorCannotLoadImage: String = "無法載入圖片"
     override val errorNoImagesToLoad: String = "沒有可顯示的圖片。"
     override val errorFailedToLoadImages: String = "載入漫畫圖片失敗。"
+    override val toastAutoSwitchedToScroll: String = "偵測到條漫格式：已切換為滾動模式"
 
     // 6. Downloads & History
     override val titleOfflineDownload: String = "離線下載"

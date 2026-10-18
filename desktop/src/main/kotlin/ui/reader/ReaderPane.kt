@@ -86,6 +86,7 @@ import com.comics8.desktop.ui.DesktopViewModel
 import com.comics8.desktop.ui.components.ErrorPane
 import com.comics8.desktop.ui.components.LoadingPane
 import com.comics8.desktop.ui.components.TopBar
+import com.comics8.desktop.ui.components.ZoomableBox
 import com.comics8.desktop.ui.components.desktopDiscreteScrollPaging
 import com.comics8.desktop.ui.theme.LocalStrings
 import com.comics8.desktop.ui.util.DesktopAsyncImage
@@ -218,6 +219,32 @@ fun ReaderPane(
                 onRetry = { state.currentEpisode?.let { viewModel.openEpisode(it) } },
             )
         }
+
+        val toast = state.readerToastMessage
+        AnimatedVisibility(
+            visible = toast != null,
+            enter = fadeIn() + slideInVertically(initialOffsetY = { -it }),
+            exit = fadeOut() + slideOutVertically(targetOffsetY = { -it }),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 28.dp),
+        ) {
+            if (toast != null) {
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.92f),
+                    shadowElevation = 6.dp,
+                ) {
+                    Text(
+                        text = toast,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.inverseOnSurface,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -277,52 +304,51 @@ private fun ReaderScrollView(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        LazyColumn(
-            state = listState,
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier
-                .fillMaxSize()
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                ) {
-                    controlsVisible = !controlsVisible
-                },
+        ZoomableBox(
+            modifier = Modifier.fillMaxSize(),
+            resetKey = state.currentEpisode?.wrId,
+            onTap = { _, _ -> controlsVisible = !controlsVisible },
         ) {
-            itemsIndexed(state.readerImages, key = { idx, url -> "$idx-$url" }) { index, url ->
-                DesktopAsyncImage(
-                    cacheRole = ImageCacheRole.READER,
-                    url = url,
-                    contentDescription = strings.labelPageNumber(index + 1),
-                    contentScale = ContentScale.FillWidth,
-                    modifier = Modifier
-                        .fillMaxWidth(0.65f)
-                        .padding(vertical = 2.dp),
-                )
-            }
+            LazyColumn(
+                state = listState,
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                itemsIndexed(state.readerImages, key = { idx, url -> "$idx-$url" }) { index, url ->
+                    DesktopAsyncImage(
+                        cacheRole = ImageCacheRole.READER,
+                        url = url,
+                        contentDescription = strings.labelPageNumber(index + 1),
+                        contentScale = ContentScale.FillWidth,
+                        modifier = Modifier
+                            .fillMaxWidth(0.65f)
+                            .padding(vertical = 2.dp),
+                    )
+                }
 
-            // Next / Prev episode footer
-            item {
-                Row(
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(32.dp),
-                ) {
-                    if (state.hasPrevEpisode) {
-                        FilledTonalButton(onClick = viewModel::openPrevEpisode) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text(strings.actionPrevEpisode)
+                // Next / Prev episode footer
+                item {
+                    Row(
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(32.dp),
+                    ) {
+                        if (state.hasPrevEpisode) {
+                            FilledTonalButton(onClick = viewModel::openPrevEpisode) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text(strings.actionPrevEpisode)
+                            }
                         }
-                    }
-                    Spacer(Modifier.width(16.dp))
-                    if (state.hasNextEpisode) {
-                        Button(onClick = viewModel::openNextEpisode) {
-                            Text(strings.actionNextEpisode)
-                            Spacer(Modifier.width(8.dp))
-                            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null)
+                        Spacer(Modifier.width(16.dp))
+                        if (state.hasNextEpisode) {
+                            Button(onClick = viewModel::openNextEpisode) {
+                                Text(strings.actionNextEpisode)
+                                Spacer(Modifier.width(8.dp))
+                                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null)
+                            }
                         }
                     }
                 }
@@ -350,7 +376,7 @@ private fun ReaderPagedLayout(
     currentRangeText: String,
     onRegisterActions: (onAdvance: () -> Unit, onRetreat: () -> Unit) -> Unit,
     modifier: Modifier = Modifier,
-    content: @Composable (page: Int) -> Unit,
+    content: @Composable (page: Int, handleTap: (Offset, IntSize) -> Unit, onScaleChanged: (Float) -> Unit) -> Unit,
 ) {
     val strings = LocalStrings.current
     val scope = rememberCoroutineScope()
@@ -358,10 +384,12 @@ private fun ReaderPagedLayout(
     var nextPromptVisible by remember { mutableStateOf(false) }
     var prevPromptVisible by remember { mutableStateOf(false) }
     var promptJob by remember { mutableStateOf<Job?>(null) }
+    var isCurrentPageZoomed by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.currentEpisode?.wrId, pagerState.currentPage) {
         nextPromptVisible = false
         prevPromptVisible = false
+        isCurrentPageZoomed = false
     }
 
     LaunchedEffect(pagerState.isScrollInProgress) {
@@ -426,7 +454,7 @@ private fun ReaderPagedLayout(
     }
 
     val desktopScrollModifier = Modifier.desktopDiscreteScrollPaging(
-        enabled = true,
+        enabled = !isCurrentPageZoomed,
         isR2L = currentIsR2L,
         allowVerticalWheel = true,
         onAdvance = onAdvance,
@@ -460,16 +488,10 @@ private fun ReaderPagedLayout(
             beyondViewportPageCount = 1,
             modifier = Modifier.fillMaxSize(),
         ) { page ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(page, isR2L) {
-                        detectTapGestures { offset ->
-                            handleTap(offset, size)
-                        }
-                    },
-            ) {
-                content(page)
+            content(page, handleTap) { scale ->
+                if (page == pagerState.currentPage) {
+                    isCurrentPageZoomed = (scale > 1.05f)
+                }
             }
         }
 
@@ -638,27 +660,34 @@ private fun ReaderSingleView(
         currentRangeText = "${pagerState.currentPage + 1} / $totalSlices",
         onRegisterActions = onRegisterActions,
         modifier = modifier,
-    ) { page ->
+    ) { page, handleTap, onScaleChanged ->
         val currentSlice = slices.getOrNull(page)
         val currentImage = currentSlice?.let { state.readerImages.getOrNull(it.imageIndex) }
         val currentHalf = currentSlice?.half ?: ImageHalf.FULL
 
-        if (currentImage != null) {
-            DesktopAsyncImage(
-                cacheRole = ImageCacheRole.READER,
-                url = currentImage,
-                half = currentHalf,
-                contentDescription = strings.labelPageNumber(page + 1),
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize(),
-                onLoaded = { bitmap ->
-                    val w = bitmap.width
-                    val h = bitmap.height
-                    if (w > 0 && h > 0) {
-                        viewModel.recordImageAspectRatio(currentSlice.imageIndex, w, h)
-                    }
-                },
-            )
+        ZoomableBox(
+            modifier = Modifier.fillMaxSize(),
+            resetKey = page,
+            onTap = handleTap,
+            onScaleChanged = onScaleChanged,
+        ) { scale ->
+            if (currentImage != null) {
+                DesktopAsyncImage(
+                    cacheRole = ImageCacheRole.READER,
+                    url = currentImage,
+                    half = currentHalf,
+                    contentDescription = strings.labelPageNumber(page + 1),
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize(),
+                    onLoaded = { bitmap ->
+                        val w = bitmap.width
+                        val h = bitmap.height
+                        if (w > 0 && h > 0) {
+                            viewModel.recordImageAspectRatio(currentSlice.imageIndex, w, h)
+                        }
+                    },
+                )
+            }
         }
     }
 }
@@ -760,8 +789,14 @@ private fun ReaderDualView(
         currentRangeText = currentRangeText,
         onRegisterActions = onRegisterActions,
         modifier = modifier,
-    ) { page ->
-        when (val spread = spreads.getOrNull(page)) {
+    ) { page, handleTap, onScaleChanged ->
+        ZoomableBox(
+            modifier = Modifier.fillMaxSize(),
+            resetKey = page,
+            onTap = handleTap,
+            onScaleChanged = onScaleChanged,
+        ) { scale ->
+            when (val spread = spreads.getOrNull(page)) {
                 is DualSpread.Single -> {
                     val ratio = state.imageAspectRatios[spread.index]
                     val isWide = ratio != null && ratio >= 1.0f
@@ -903,6 +938,7 @@ private fun ReaderDualView(
                 }
                 null -> {}
             }
+        }
     }
 }
 

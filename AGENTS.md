@@ -15,7 +15,7 @@ Entry points: `app/src/main/kotlin/.../MainActivity.kt`, `desktop/src/main/kotli
 
 ## Codebase exploration discipline
 
-- **Semantic code search**: Prioritize `codebase-search` MCP (`search_codebase`) before running broad text greps.
+- **Semantic code search**: Prioritize `codebase-search` MCP (`search_codebase`) before running broad text greps. It accepts natural-language intent queries in Korean or English against the indexed codebase. Use `index_codebase` to refresh or rebuild the local vector index (`.agents/embeddings.db`) after major changes.
 - **Map intent to architectural layer before searching**: Never grep user phrasing or localized UI labels verbatim. First map the intent to the owning architectural layer (UI, ViewModel, Room DAO, ToonClient, ComicSource, Server Route) and translate into concrete technical identifiers.
 - **Top-down boundary tracing**: Begin investigation at explicit system boundaries and follow logic down to the canonical owner, rather than rummaging upward from arbitrary leaf components.
 - **High-precision targeting**: Avoid high-frequency single words that produce log flood. Scope searches to specific directories or distinctive identifier combinations.

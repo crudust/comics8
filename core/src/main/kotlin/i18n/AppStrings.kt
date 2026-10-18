@@ -151,6 +151,7 @@ interface AppStrings {
     val errorCannotLoadImage: String
     val errorNoImagesToLoad: String
     val errorFailedToLoadImages: String
+    val toastAutoSwitchedToScroll: String
 
     // 6. Downloads & History
     val titleOfflineDownload: String
