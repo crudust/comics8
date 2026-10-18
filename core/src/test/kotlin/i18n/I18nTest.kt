@@ -58,6 +58,13 @@ class I18nTest {
             assertThat(lang.sectionAppInfoAndAbout).isNotEmpty()
             assertThat(lang.descAppInfoAndAbout).isNotEmpty()
 
+            // Update history strings
+            assertThat(lang.sectionUpdateHistory).isNotEmpty()
+            assertThat(lang.labelUpdateHistoryEmpty).isNotEmpty()
+            assertThat(lang.actionShowMore).isNotEmpty()
+            assertThat(lang.actionShowLess).isNotEmpty()
+            assertThat(lang.labelCurrentVersion).isNotEmpty()
+
             // Page Tap Zone & Volume Key & Quick Settings strings
             assertThat(lang.labelPageTapZone).isNotEmpty()
             assertThat(lang.descPageTapZone).isNotEmpty()
