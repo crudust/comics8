@@ -203,11 +203,16 @@ CREATE TABLE IF NOT EXISTS toon_sources (
 
 CREATE INDEX IF NOT EXISTS idx_toon_sources_primary_host ON toon_sources(primary_host);
 
--- Seed well-known sources and mirrors
-INSERT INTO toon_sources (id, display_name, primary_host, known_hosts, id_pattern)
+-- Seed well-known sources and mirrors.
+-- created_at/updated_at are NOT NULL without a server default, so the seed must supply them;
+-- otherwise a fresh schema.sql run fails halfway through and leaves the table empty.
+INSERT INTO toon_sources (id, display_name, primary_host, known_hosts, id_pattern, created_at, updated_at)
 VALUES
-    ('eleven', '11toon', '11toon.com', '["11toon.com", "update.spotv24.com", "spotv24.com", "103.204.13.68", "fu01.11toon24.com", "update.11toon24.com", "11toon24.com", "11toon8.com"]'::jsonb, '^\d+$'),
-    ('hitomi', 'Hitomi', 'hitomi.la', '["hitomi.la"]'::jsonb, '^artist:.+$'),
-    ('rawkuma', 'Rawkuma', 'rawkuma.net', '["rawkuma.net"]'::jsonb, '^[a-zA-Z0-9%_-]+$')
+    ('eleven', '11toon', '11toon.com', '["11toon.com", "update.spotv24.com", "spotv24.com", "103.204.13.68", "fu01.11toon24.com", "update.11toon24.com", "11toon24.com", "11toon8.com"]'::jsonb, '^\d+$', 0, 0),
+    ('hitomi', 'Hitomi', 'hitomi.la', '["hitomi.la"]'::jsonb, '^artist:.+$', 0, 0),
+    ('rawkuma', 'Rawkuma', 'rawkuma.net', '["rawkuma.net"]'::jsonb, '^[a-zA-Z0-9%_-]+$', 0, 0)
 ON CONFLICT (id) DO UPDATE SET
-    known_hosts = EXCLUDED.known_hosts;
+    display_name = EXCLUDED.display_name,
+    primary_host = EXCLUDED.primary_host,
+    known_hosts = EXCLUDED.known_hosts,
+    id_pattern = EXCLUDED.id_pattern;
