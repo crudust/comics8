@@ -27,24 +27,19 @@ interface ComicSource {
     val emptyListingOk: Boolean get() = kind == SourceKind.LOCAL
     val emptyEpisodesOk: Boolean get() = false
     val defaultLanguage: String? get() = null
-    val defaultProgressDisplayMode: com.comics8.core.model.ProgressDisplayMode
-        get() = when (progressDisplay) {
-            ProgressDisplay.READ_COUNT -> com.comics8.core.model.ProgressDisplayMode.READ_COUNT
-            else -> com.comics8.core.model.ProgressDisplayMode.defaultFor(id)
-        }
-
+    /** What a JS pack declared; the only place legacy `ProgressDisplay` is read. */
     val progressDisplay: ProgressDisplay
-        get() = when (com.comics8.core.model.ProgressDisplayMode.defaultFor(id)) {
-            com.comics8.core.model.ProgressDisplayMode.READ_COUNT -> ProgressDisplay.READ_COUNT
-            else -> ProgressDisplay.LAST_READ_ORDER
-        }
+        get() = ProgressDisplay.fromMode(com.comics8.core.model.ProgressDisplayMode.defaultFor(id))
+
+    val defaultProgressDisplayMode: com.comics8.core.model.ProgressDisplayMode
+        get() = progressDisplay.mode
 
     fun formatReadProgress(
         lastReadOrder: Int,
-        totalEpisodes: Int,
+        total: com.comics8.core.model.EpisodeTotal,
         readCount: Int,
         mode: com.comics8.core.model.ProgressDisplayMode = defaultProgressDisplayMode,
-    ): String = mode.format(lastReadOrder, totalEpisodes, readCount).orEmpty()
+    ): String = mode.format(lastReadOrder, total, readCount).orEmpty()
 
     suspend fun loadListing(catalogId: String, page: Int, http: SourceHttp): ListingPage
     suspend fun search(query: SearchQuery, http: SourceHttp): List<ToonItem>

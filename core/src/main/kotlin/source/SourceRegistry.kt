@@ -60,16 +60,13 @@ class SourceRegistry(initial: List<ComicSource> = emptyList()) {
     fun progressDisplayMode(sourceId: String, settings: SourceSettings? = null): com.comics8.core.model.ProgressDisplayMode =
         settings?.progressDisplayMode(sourceId) ?: defaultProgressDisplayMode(sourceId)
 
-    fun progressDisplay(sourceId: String): ProgressDisplay =
-        getOrNull(sourceId)?.progressDisplay ?: ProgressDisplay.LAST_READ_ORDER
-
     fun formatReadProgress(
         sourceId: String,
         lastReadOrder: Int,
-        totalEpisodes: Int,
+        total: com.comics8.core.model.EpisodeTotal,
         readCount: Int,
         mode: com.comics8.core.model.ProgressDisplayMode? = null,
-    ): String = (mode ?: defaultProgressDisplayMode(sourceId)).format(lastReadOrder, totalEpisodes, readCount).orEmpty()
+    ): String = (mode ?: defaultProgressDisplayMode(sourceId)).format(lastReadOrder, total, readCount).orEmpty()
 
     /**
      * Restore a stored active id only if it is loaded (and installed, when given).

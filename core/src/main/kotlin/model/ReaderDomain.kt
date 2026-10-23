@@ -6,10 +6,12 @@ object ReaderDomain {
     private const val DEFAULT_DUAL_MIN_WIDTH_DP = 600
 
     data class EpisodePosition(
-        val totalEpisodes: Int,
+        val total: EpisodeTotal,
         val readOrder: Int?,
         val nextEpisodeIndex: Int?,
-    )
+    ) {
+        val totalEpisodes: Int get() = total.count
+    }
 
     enum class PageEdge {
         FIRST,
@@ -178,47 +180,35 @@ object ReaderDomain {
         currentEpisodeId: String,
         currentPage: Int,
         lastPage: Int,
-        knownLastPageCount: Int? = null,
-        knownTotalCount: Int? = null,
+        knownTotal: EpisodeTotal? = null,
         pageSize: Int = DEFAULT_EPISODE_PAGE_SIZE,
     ): EpisodePosition {
         val safeLastPage = lastPage.coerceAtLeast(1)
         val safeCurrentPage = clampPage(currentPage, safeLastPage)
         val itemCount = episodeIds.size
         val currentIndex = episodeIds.indexOf(currentEpisodeId)
+        val safePageSize = pageSize.coerceAtLeast(1)
 
-        val totalEpisodes = when {
-            knownTotalCount != null && knownTotalCount > 0 -> knownTotalCount
-            safeLastPage <= 1 -> itemCount.coerceAtLeast(1)
-            safeCurrentPage == safeLastPage && itemCount > 0 ->
-                RepositoryTransforms.estimateTotalEpisodes(safeLastPage, pageSize, itemCount, itemCount)
-            knownLastPageCount != null ->
-                RepositoryTransforms.estimateTotalEpisodes(safeLastPage, pageSize, knownLastPageCount, itemCount)
-            else ->
-                RepositoryTransforms.estimateTotalEpisodes(safeLastPage, pageSize, null, itemCount)
-        }.coerceAtLeast(1)
+        val observed = when {
+            itemCount <= 0 -> EpisodeTotal.Unknown
+            safeCurrentPage == safeLastPage -> EpisodeTotal.Exact((safeLastPage - 1) * safePageSize + itemCount)
+            else -> EpisodeTotal.AtLeast((safeCurrentPage - 1) * safePageSize + itemCount)
+        }
+        val total = EpisodeTotal.merge(knownTotal, observed)
 
         val readOrder = if (currentIndex >= 0 && itemCount > 0) {
-            val olderCount = if (safeCurrentPage == safeLastPage) {
-                0
-            } else {
-                val lastPageItems = knownLastPageCount
-                    ?: if (knownTotalCount != null && safeLastPage > 1) {
-                        (knownTotalCount - (safeLastPage - 1) * pageSize).coerceIn(1, pageSize)
-                    } else {
-                        pageSize
-                    }
-                val middlePagesCount = (safeLastPage - 1 - safeCurrentPage).coerceAtLeast(0) * pageSize
-                lastPageItems + middlePagesCount
-            }
+            // Unseen pages below the current one may hold up to pageSize items each.
+            val unseenOlder = (safeLastPage - safeCurrentPage).coerceAtLeast(0) * safePageSize
             val onPageOrder = (itemCount - currentIndex).coerceAtLeast(1)
-            (olderCount + onPageOrder).coerceIn(1, totalEpisodes)
+            val order = (unseenOlder + onPageOrder).coerceAtLeast(1)
+            // Only an exact total may bound the order; a lower bound truncates real progress.
+            if (total.isExact) order.coerceAtMost(total.count) else order
         } else {
             null
         }
 
         return EpisodePosition(
-            totalEpisodes = totalEpisodes,
+            total = total,
             readOrder = readOrder,
             nextEpisodeIndex = (currentIndex - 1).takeIf { currentIndex in 1 until itemCount },
         )

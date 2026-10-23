@@ -53,42 +53,81 @@ class RepositoryTransformsTest {
     }
 
     @Test
-    fun estimateTotalEpisodes_usesLastPageCountOrFirstPageFallback() {
+    fun episodeTotalObservationOnlyTrustsTheLastPage() {
+        // Page 1 of a 4-page listing proves 2 episodes exist, not 4 * pageSize.
         val first = EpisodePage(
             items = listOf(episode("1", "one"), episode("2", "two")),
             currentPage = 1,
             lastPage = 4,
         )
+        assertThat(EpisodeTotal.from(first, pageSize = 20))
+            .isEqualTo(EpisodeTotal.AtLeast(2))
 
-        assertThat(RepositoryTransforms.estimateTotalEpisodes(first, pageSize = 20, lastPageItemCount = 3))
-            .isEqualTo(63)
-        assertThat(RepositoryTransforms.estimateTotalEpisodes(first, pageSize = 20))
-            .isEqualTo(62)
-        assertThat(
-            RepositoryTransforms.estimateTotalEpisodes(
-                EpisodePage(emptyList(), currentPage = 1, lastPage = 8),
-                pageSize = 20,
-            ),
-        ).isEqualTo(0)
+        // The last page is authoritative: 3 pages * 20 + 3 -> 63.
+        val last = EpisodePage(
+            items = List(3) { episode("${it + 61}", "e${it + 61}") },
+            currentPage = 4,
+            lastPage = 4,
+        )
+        assertThat(EpisodeTotal.from(last, pageSize = 20))
+            .isEqualTo(EpisodeTotal.Exact(63))
 
-        // Unified overload tests (e.g. 11toon 2 pages with 100 on page 1 and 52 on page 2)
-        assertThat(
-            RepositoryTransforms.estimateTotalEpisodes(
-                lastPage = 2,
-                pageSize = 100,
-                lastPageItemCount = 52,
-                fallbackCount = 100,
-            ),
-        ).isEqualTo(152)
+        // A single-page listing is exact by construction.
+        val single = EpisodePage(
+            items = List(42) { episode("$it", "e$it") },
+            currentPage = 1,
+            lastPage = 1,
+        )
+        assertThat(EpisodeTotal.from(single, pageSize = 100)).isEqualTo(EpisodeTotal.Exact(42))
 
-        assertThat(
-            RepositoryTransforms.estimateTotalEpisodes(
-                lastPage = 1,
-                pageSize = 100,
-                lastPageItemCount = null,
-                fallbackCount = 42,
-            ),
-        ).isEqualTo(42)
+        assertThat(EpisodeTotal.from(EpisodePage(emptyList(), currentPage = 1, lastPage = 8), pageSize = 20))
+            .isEqualTo(EpisodeTotal.Unknown)
+    }
+
+    @Test
+    fun episodeTotalMergeLetsExactCorrectDownwardAndKeepsLowerBoundsMonotonic() {
+        // Exact always wins, including a lower count (episodes were deleted or renamed).
+        assertThat(EpisodeTotal.merge(EpisodeTotal.AtLeast(200), EpisodeTotal.Exact(199)))
+            .isEqualTo(EpisodeTotal.Exact(199))
+        assertThat(EpisodeTotal.merge(EpisodeTotal.Exact(200), EpisodeTotal.Exact(199)))
+            .isEqualTo(EpisodeTotal.Exact(199))
+        // A lower bound never replaces an exact total.
+        assertThat(EpisodeTotal.merge(EpisodeTotal.Exact(199), EpisodeTotal.AtLeast(250)))
+            .isEqualTo(EpisodeTotal.Exact(199))
+        // Lower bounds only grow.
+        assertThat(EpisodeTotal.merge(EpisodeTotal.AtLeast(100), EpisodeTotal.AtLeast(52)))
+            .isEqualTo(EpisodeTotal.AtLeast(100))
+        assertThat(EpisodeTotal.merge(EpisodeTotal.AtLeast(100), EpisodeTotal.AtLeast(300)))
+            .isEqualTo(EpisodeTotal.AtLeast(300))
+    }
+
+    @Test
+    fun mergeHistoryProgressNeverClampsOrderAgainstALowerBound() {
+        val exact = RepositoryTransforms.mergeHistoryProgress(
+            lastReadOrder = 199,
+            storedTotal = 200,
+            observed = EpisodeTotal.Exact(199),
+        )
+        assertThat(exact.total).isEqualTo(EpisodeTotal.Exact(199))
+        assertThat(exact.lastReadOrder).isEqualTo(199)
+        assertThat(exact.hasNew).isFalse()
+
+        // An unfinished work must not be reported as fully read just because the total is unknown.
+        val lowerBound = RepositoryTransforms.mergeHistoryProgress(
+            lastReadOrder = 100,
+            storedTotal = 100,
+            observed = EpisodeTotal.AtLeast(100),
+        )
+        assertThat(lowerBound.hasNew).isTrue()
+
+        // A lower bound must not truncate how far the user actually read.
+        val ahead = RepositoryTransforms.mergeHistoryProgress(
+            lastReadOrder = 120,
+            storedTotal = 100,
+            observed = EpisodeTotal.AtLeast(100),
+        )
+        assertThat(ahead.lastReadOrder).isEqualTo(120)
+        assertThat(ahead.hasNew).isTrue()
     }
 
     @Test
@@ -127,15 +166,76 @@ class RepositoryTransformsTest {
             seenByKey = emptyMap<String, String>(),
             historyByKey = emptyMap<String, Pair<Int, Int>>(),
             readCountsByKey = emptyMap(),
-            catalogTotalsByKey = mapOf(key to 104),
+            catalogTotalsByKey = mapOf(key to EpisodeTotal.Exact(104)),
             seenUpdatedAt = { it: String -> it },
-        ) { _, history, _, catalogTotal ->
-            val total = if (history != null && history.second > 0) history.second else catalogTotal
-            val lastOrder = history?.first ?: 0
-            if (total > 0 && lastOrder == 0) "${total}화" else null
+        ) { _, _, _, catalogTotal ->
+            if (catalogTotal.count > 0) "${catalogTotal.count}화" else null
         }
 
         assertThat(result[0].readProgress).isEqualTo("104화")
+    }
+
+    @Test
+    fun needsEpisodeSyncIsDrivenByUnreadEpisodesNotByMissingCatalog() {
+        // Unread episodes remain -> refresh even though a total is already known.
+        assertThat(
+            RepositoryTransforms.needsEpisodeSync(
+                knownTotal = EpisodeTotal.Exact(10),
+                lastReadOrder = 3,
+                thumbUrl = "thumb",
+                isFavorite = false,
+            ),
+        ).isTrue()
+
+        // Fully read and known -> nothing to refresh.
+        assertThat(
+            RepositoryTransforms.needsEpisodeSync(
+                knownTotal = EpisodeTotal.Exact(10),
+                lastReadOrder = 10,
+                thumbUrl = "thumb",
+                isFavorite = false,
+            ),
+        ).isFalse()
+
+        // An unknown total is itself an unread signal, so no separate "needsCatalog" flag is needed.
+        assertThat(
+            RepositoryTransforms.needsEpisodeSync(
+                knownTotal = EpisodeTotal.Unknown,
+                lastReadOrder = 10,
+                thumbUrl = "thumb",
+                isFavorite = false,
+            ),
+        ).isTrue()
+
+        // A lower bound never proves the work is finished.
+        assertThat(
+            RepositoryTransforms.needsEpisodeSync(
+                knownTotal = EpisodeTotal.AtLeast(10),
+                lastReadOrder = 10,
+                thumbUrl = "thumb",
+                isFavorite = false,
+            ),
+        ).isTrue()
+    }
+
+    @Test
+    fun needsEpisodeSyncAlsoCoversMissingThumbnailAndFavorites() {
+        assertThat(
+            RepositoryTransforms.needsEpisodeSync(
+                knownTotal = EpisodeTotal.Exact(10),
+                lastReadOrder = 10,
+                thumbUrl = "",
+                isFavorite = false,
+            ),
+        ).isTrue()
+        assertThat(
+            RepositoryTransforms.needsEpisodeSync(
+                knownTotal = EpisodeTotal.Exact(10),
+                lastReadOrder = 10,
+                thumbUrl = "thumb",
+                isFavorite = true,
+            ),
+        ).isTrue()
     }
 
     @Test
