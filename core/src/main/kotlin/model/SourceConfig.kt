@@ -12,33 +12,23 @@ enum class ProgressDisplayMode(val label: String, val description: String) {
         this == READ_COUNT || (this == PERCENTAGE && defaultFor(sourceId) == READ_COUNT)
 
     /**
-     * Renders a progress badge.
+     * Renders a progress badge, or null when the work has no counted total.
      *
-     * The denominator always comes from [total] and is never re-derived from [lastReadOrder] or
-     * [readCount]: those are facts about the user, not about the work. Padding the denominator
-     * here would mask a corrupt stored total and make "read everything" and "99% read"
-     * indistinguishable.
+     * A total only exists after the whole listing was counted, so there is no approximate
+     * denominator and no "at least" marker to render: an uncounted work shows no badge at all
+     * rather than a number nobody verified.
      */
-    fun format(lastReadOrder: Int, total: EpisodeTotal, readCount: Int): String? {
-        val known = total.count > 0
+    fun format(lastReadOrder: Int, total: EpisodeListingTotal?, readCount: Int): String? {
+        val count = total?.takeIf { it.isValid }?.count ?: return null
         return when (this) {
-            LATEST_EPISODE -> when {
-                lastReadOrder > 0 && known -> "$lastReadOrder/${total.totalLabel()}"
-                lastReadOrder > 0 -> "${lastReadOrder}화"
-                known -> "${total.count}화"
-                else -> null
-            }
+            LATEST_EPISODE -> if (lastReadOrder > 0) "$lastReadOrder/$count" else "${count}화"
             READ_COUNT -> when {
-                readCount > 0 && known -> "$readCount/${total.totalLabel()}"
-                readCount > 0 -> "${readCount}개"
-                known -> "${total.count}화"
-                else -> null
+                readCount > 0 -> "$readCount/$count"
+                else -> "${count}화"
             }
-            PERCENTAGE -> if (known && (lastReadOrder > 0 || readCount > 0)) {
+            PERCENTAGE -> {
                 val progress = if (lastReadOrder > 0) lastReadOrder else readCount
-                "${(progress * 100 / total.count).coerceIn(0, 100)}%"
-            } else {
-                null
+                if (progress > 0) "${(progress * 100 / count).coerceIn(0, 100)}%" else null
             }
             HIDDEN -> null
         }

@@ -36,7 +36,7 @@ interface ComicSource {
 
     fun formatReadProgress(
         lastReadOrder: Int,
-        total: com.comics8.core.model.EpisodeTotal,
+        total: com.comics8.core.model.EpisodeListingTotal?,
         readCount: Int,
         mode: com.comics8.core.model.ProgressDisplayMode = defaultProgressDisplayMode,
     ): String = mode.format(lastReadOrder, total, readCount).orEmpty()

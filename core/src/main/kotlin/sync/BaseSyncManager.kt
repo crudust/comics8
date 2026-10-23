@@ -498,11 +498,9 @@ open class BaseSyncManager(
                                 put("toonId", update.toonId)
                                 put("totalEpisodes", update.totalEpisodes)
                                 put("updatedAt", update.updatedAt)
-                                put("exact", update.exact)
-                                if (update.lastPage > 0) {
-                                    put("lastPage", update.lastPage)
-                                    put("lastPageItemCount", update.lastPageItemCount)
-                                }
+                                put("lastPage", update.lastPage)
+                                put("pageSize", update.pageSize)
+                                put("delta", update.delta)
                             })
                         }
                     })
@@ -524,11 +522,11 @@ open class BaseSyncManager(
                         toonId = obj.optString("toonId"),
                         totalEpisodes = obj.optInt("totalEpisodes", 0),
                         updatedAt = obj.optLong("updatedAt", 0L),
-                        exact = obj.optBoolean("exact", false),
                         lastPage = obj.optInt("lastPage", 0),
-                        lastPageItemCount = obj.optInt("lastPageItemCount", -1),
+                        pageSize = obj.optInt("pageSize", 0),
+                        delta = obj.optInt("delta", 0),
                     )
-                }.filter { it.totalEpisodes > 0 && it.sourceId.isNotBlank() && it.toonId.isNotBlank() }
+                }.filter { it.total() != null && it.sourceId.isNotBlank() && it.toonId.isNotBlank() }
             }
         } catch (_: Exception) {
             emptyList()
@@ -548,11 +546,9 @@ open class BaseSyncManager(
                             put("toonId", entry.toonId)
                             put("totalEpisodes", entry.totalEpisodes)
                             put("updatedAt", entry.updatedAt)
-                            put("exact", entry.exact)
-                            if (entry.lastPage > 0) {
-                                put("lastPage", entry.lastPage)
-                                put("lastPageItemCount", entry.lastPageItemCount)
-                            }
+                            put("lastPage", entry.lastPage)
+                            put("pageSize", entry.pageSize)
+                            put("delta", entry.delta)
                         })
                     }
                 })

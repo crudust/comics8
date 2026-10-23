@@ -50,7 +50,15 @@ class SyncPayloadCodecTest {
     fun catalogEncodingAndDecodingPreservesTotals() {
         val payload = SyncPayload(
             catalog = listOf(
-                SyncCatalogWire(sourceId = "eleven", toonId = "comic1", totalEpisodes = 104, updatedAt = 1000L),
+                SyncCatalogWire(
+                    sourceId = "eleven",
+                    toonId = "comic1",
+                    totalEpisodes = 104,
+                    updatedAt = 1000L,
+                    lastPage = 2,
+                    pageSize = 100,
+                    delta = -96,
+                ),
             ),
         )
         val encoded = SyncPayloadCodec.encode(payload)
@@ -60,5 +68,7 @@ class SyncPayloadCodecTest {
         assertThat(decoded.catalog.first().toonId).isEqualTo("comic1")
         assertThat(decoded.catalog.first().totalEpisodes).isEqualTo(104)
         assertThat(decoded.catalog.first().updatedAt).isEqualTo(1000L)
+        assertThat(decoded.catalog.first().total())
+            .isEqualTo(com.comics8.core.model.EpisodeListingTotal(104, 2, 100, -96))
     }
 }

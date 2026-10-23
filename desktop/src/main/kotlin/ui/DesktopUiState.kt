@@ -76,6 +76,8 @@ data class DesktopUiState(
     val seriesHistory: ReadHistoryRecord? = null,
     val historyItems: List<ReadHistoryRecord> = emptyList(),
     val readCounts: Map<String, Int> = emptyMap(),
+    /** Counted totals keyed by work, so history rows can render a badge without guessing. */
+    val catalogTotals: Map<String, com.comics8.core.model.EpisodeListingTotal> = emptyMap(),
     val historyLoading: Boolean = false,
     val selectedSettingsCategory: SettingsCategory? = null,
     val showSyncDialog: Boolean = false,
@@ -128,7 +130,7 @@ data class DesktopUiState(
         sourceRegistry.formatReadProgress(
             history.sourceId,
             history.lastReadOrder,
-            com.comics8.core.model.EpisodeTotal.fromStored(history.totalEpisodes),
+            catalogTotals[history.workId().storageKey()],
             readCounts[history.workId().storageKey()] ?: 0,
         )
 }

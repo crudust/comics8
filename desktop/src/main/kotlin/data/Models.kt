@@ -88,41 +88,34 @@ data class DownloadedEpisodeRecord(
 data class ToonCatalogRecord(
     val sourceId: String = WorkId.DEFAULT_SOURCE,
     val toonId: String,
+    /** Counted episode total; 0 means the listing has never been counted. */
     val totalEpisodes: Int = 0,
     val updatedAt: Long = 0L,
-    /** True when [totalEpisodes] was derived from the last page of the listing. */
-    val exact: Boolean = false,
-    /** Page count of the listing when it was verified; 0 when never swept in full. */
+    /** Page count of the listing when it was counted (0 = never counted). */
     val lastPage: Int = 0,
-    /** Items on the last page at verification time; the single unknown of the total formula. */
-    val lastPageItemCount: Int = -1,
+    /** Page size in effect when it was counted (0 = never counted). */
+    val pageSize: Int = 0,
+    /** Correction learned by the counting sweep (see EpisodeListingTotal.delta). */
+    val delta: Int = 0,
 ) {
     fun workId(): WorkId = WorkId(sourceId, toonId)
 
-    fun total(): com.comics8.core.model.EpisodeTotal =
-        com.comics8.core.model.EpisodeTotal.fromStored(totalEpisodes, exact)
-
-    fun snapshot(): com.comics8.core.model.EpisodeListingSnapshot? =
-        if (lastPage > 0 && lastPageItemCount >= 0) {
-            com.comics8.core.model.EpisodeListingSnapshot(lastPage, lastPageItemCount)
-        } else {
-            null
-        }
+    fun total(): com.comics8.core.model.EpisodeListingTotal? =
+        com.comics8.core.model.EpisodeListingTotal.fromStored(totalEpisodes, lastPage, pageSize, delta)
 
     companion object {
         fun of(
             workId: WorkId,
-            total: com.comics8.core.model.EpisodeTotal,
+            total: com.comics8.core.model.EpisodeListingTotal?,
             updatedAt: Long,
-            snapshot: com.comics8.core.model.EpisodeListingSnapshot? = null,
         ): ToonCatalogRecord = ToonCatalogRecord(
             sourceId = workId.sourceId,
             toonId = workId.toonId,
-            totalEpisodes = total.count,
+            totalEpisodes = total?.count ?: 0,
             updatedAt = updatedAt,
-            exact = total.isExact,
-            lastPage = snapshot?.lastPage ?: 0,
-            lastPageItemCount = snapshot?.lastPageItemCount ?: -1,
+            lastPage = total?.lastPage ?: 0,
+            pageSize = total?.pageSize ?: 0,
+            delta = total?.delta ?: 0,
         )
     }
 }

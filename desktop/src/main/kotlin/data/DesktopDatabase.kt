@@ -273,25 +273,27 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
                     toonId TEXT NOT NULL,
                     totalEpisodes INTEGER NOT NULL DEFAULT 0,
                     updatedAt INTEGER NOT NULL DEFAULT 0,
-                    exact INTEGER NOT NULL DEFAULT 0,
                     lastPage INTEGER NOT NULL DEFAULT 0,
-                    lastPageItemCount INTEGER NOT NULL DEFAULT -1,
+                    pageSize INTEGER NOT NULL DEFAULT 0,
+                    delta INTEGER NOT NULL DEFAULT 0,
                     PRIMARY KEY (sourceId, toonId)
                 )
                 """.trimIndent(),
             )
             stmt.execute("CREATE INDEX IF NOT EXISTS index_toon_catalog_toonId ON toon_catalog(toonId)")
-            // Databases created before exactness tracking keep their counts as lower bounds, so the
-            // first exact observation can still correct an inflated total downward.
-            if (!hasColumn(conn, "toon_catalog", "exact")) {
-                stmt.execute("ALTER TABLE toon_catalog ADD COLUMN exact INTEGER NOT NULL DEFAULT 0")
-            }
+            // Databases created before counting existed keep counts that were page-arithmetic guesses.
             if (!hasColumn(conn, "toon_catalog", "lastPage")) {
                 stmt.execute("ALTER TABLE toon_catalog ADD COLUMN lastPage INTEGER NOT NULL DEFAULT 0")
             }
-            if (!hasColumn(conn, "toon_catalog", "lastPageItemCount")) {
-                stmt.execute("ALTER TABLE toon_catalog ADD COLUMN lastPageItemCount INTEGER NOT NULL DEFAULT -1")
+            if (!hasColumn(conn, "toon_catalog", "pageSize")) {
+                stmt.execute("ALTER TABLE toon_catalog ADD COLUMN pageSize INTEGER NOT NULL DEFAULT 0")
             }
+            if (!hasColumn(conn, "toon_catalog", "delta")) {
+                stmt.execute("ALTER TABLE toon_catalog ADD COLUMN delta INTEGER NOT NULL DEFAULT 0")
+            }
+            // Counts written before full sweeps carry no correction: reset them to "uncounted" so
+            // they are re-counted instead of being shown as a total.
+            stmt.execute("UPDATE toon_catalog SET totalEpisodes = 0, lastPage = 0, pageSize = 0, delta = 0 WHERE lastPage = 0 OR pageSize = 0")
         }
     }
 
@@ -1206,15 +1208,15 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
         return null
     }
 
-    fun getCatalogTotalsByToonIds(ids: List<WorkId>): Map<String, com.comics8.core.model.EpisodeTotal> {
+    fun getCatalogTotalsByToonIds(ids: List<WorkId>): Map<String, com.comics8.core.model.EpisodeListingTotal> {
         if (ids.isEmpty()) return emptyMap()
         val wanted = ids.map { it.storageKey() }.toSet()
         val toonIds = ids.map { it.toonId }.distinct()
-        val map = mutableMapOf<String, com.comics8.core.model.EpisodeTotal>()
+        val map = mutableMapOf<String, com.comics8.core.model.EpisodeListingTotal>()
         withConnection { conn ->
             for (chunk in toonIds.chunked(400)) {
                 val placeholders = chunk.joinToString(",") { "?" }
-                conn.prepareStatement("SELECT sourceId, toonId, totalEpisodes, exact FROM toon_catalog WHERE toonId IN ($placeholders)").use { stmt ->
+                conn.prepareStatement("SELECT sourceId, toonId, totalEpisodes, lastPage, pageSize, delta FROM toon_catalog WHERE toonId IN ($placeholders)").use { stmt ->
                     chunk.forEachIndexed { index, id -> stmt.setString(index + 1, id) }
                     val rs = stmt.executeQuery()
                     while (rs.next()) {
@@ -1222,10 +1224,12 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
                         val tid = rs.getString("toonId")
                         val key = WorkId(sid, tid).storageKey()
                         if (key in wanted) {
-                            map[key] = com.comics8.core.model.EpisodeTotal.fromStored(
+                            com.comics8.core.model.EpisodeListingTotal.fromStored(
                                 rs.getInt("totalEpisodes"),
-                                rs.getInt("exact") == 1,
-                            )
+                                rs.getInt("lastPage"),
+                                rs.getInt("pageSize"),
+                                rs.getInt("delta"),
+                            )?.let { map[key] = it }
                         }
                     }
                 }
@@ -1235,57 +1239,60 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
     }
 
     /**
-     * Persists an observed total through [com.comics8.core.model.EpisodeTotal.merge].
-     * The old `WHERE excluded.totalEpisodes > totalEpisodes` guard is gone on purpose: it turned
-     * every over-estimate into a permanent value.
+     * Persists a counted listing total. Only counts produced by counting every page (or re-derived
+     * from such a count whose shape still matches) are accepted, and a null observation never erases
+     * a count that was actually taken.
      */
     fun recordCatalogTotal(
         workId: WorkId,
-        total: com.comics8.core.model.EpisodeTotal,
+        total: com.comics8.core.model.EpisodeListingTotal?,
         updatedAt: Long = System.currentTimeMillis(),
-        snapshot: com.comics8.core.model.EpisodeListingSnapshot? = null,
-    ) {
-        if (total.count <= 0) return
-        val existing = getCatalog(workId)
-        val merged = com.comics8.core.model.EpisodeTotal.merge(existing?.total(), total)
-        // A sweep only ships a snapshot together with an exact total, so the shape always belongs to
-        // whichever row actually gains exactness.
-        val mergedSnapshot = snapshot ?: existing?.snapshot()
-        if (existing != null && merged == existing.total() && mergedSnapshot == existing.snapshot()) return
-        upsertCatalog(ToonCatalogRecord.of(workId, merged, updatedAt, mergedSnapshot))
+    ): Boolean {
+        if (total == null || !total.isValid) return false
+        if (getCatalog(workId)?.total() == total) return false
+        upsertCatalog(ToonCatalogRecord.of(workId, total, updatedAt))
+        return true
     }
 
     private fun upsertCatalog(record: ToonCatalogRecord) {
         withConnection { conn ->
             conn.prepareStatement(
                 """
-                INSERT INTO toon_catalog (sourceId, toonId, totalEpisodes, updatedAt, exact, lastPage, lastPageItemCount)
+                INSERT INTO toon_catalog (sourceId, toonId, totalEpisodes, updatedAt, lastPage, pageSize, delta)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(sourceId, toonId) DO UPDATE SET
                     totalEpisodes = excluded.totalEpisodes,
                     updatedAt = excluded.updatedAt,
-                    exact = excluded.exact,
                     lastPage = excluded.lastPage,
-                    lastPageItemCount = excluded.lastPageItemCount
+                    pageSize = excluded.pageSize,
+                    delta = excluded.delta
                 """.trimIndent(),
             ).use { stmt ->
                 stmt.setString(1, record.sourceId)
                 stmt.setString(2, record.toonId)
                 stmt.setInt(3, record.totalEpisodes)
                 stmt.setLong(4, record.updatedAt)
-                stmt.setInt(5, if (record.exact) 1 else 0)
-                stmt.setInt(6, record.lastPage)
-                stmt.setInt(7, record.lastPageItemCount)
+                stmt.setInt(5, record.lastPage)
+                stmt.setInt(6, record.pageSize)
+                stmt.setInt(7, record.delta)
                 stmt.executeUpdate()
             }
         }
     }
 
+    /** Batch form of [recordCatalogTotal]: validates every row as a counted total, skips no-ops. */
     fun saveAllCatalog(items: List<ToonCatalogRecord>) {
-        if (items.isEmpty()) return
+        val accepted = items.mapNotNull { record ->
+            record.total()?.let { total -> record.workId() to (total to record.updatedAt) }
+        }
+        if (accepted.isEmpty()) return
+        val existing = getCatalogTotalsByToonIds(accepted.map { it.first })
+        val changed = accepted.filter { (workId, value) -> existing[workId.storageKey()] != value.first }
+        if (changed.isEmpty()) return
         withTransaction {
-            for (item in items) {
-                recordCatalogTotal(item.workId(), item.total(), item.updatedAt, item.snapshot())
+            for ((workId, value) in changed) {
+                val (total, updatedAt) = value
+                recordCatalogTotal(workId, total, updatedAt)
             }
         }
     }
@@ -1295,9 +1302,9 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
         toonId = rs.getString("toonId"),
         totalEpisodes = rs.getInt("totalEpisodes"),
         updatedAt = rs.getLong("updatedAt"),
-        exact = rs.getInt("exact") == 1,
         lastPage = rs.getInt("lastPage"),
-        lastPageItemCount = rs.getInt("lastPageItemCount"),
+        pageSize = rs.getInt("pageSize"),
+        delta = rs.getInt("delta"),
     )
 
     private fun hasColumn(conn: Connection, table: String, column: String): Boolean {

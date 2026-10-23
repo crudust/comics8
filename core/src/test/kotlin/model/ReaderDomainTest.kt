@@ -33,16 +33,16 @@ class ReaderDomainTest {
 
     @Test
     fun episodePositionUsesNewestFirstOrderingAcrossPages() {
-        // Page 2 of 3 is not the last page, so older items are only known to exist, not counted.
+        val counted = EpisodeListingTotal(count = 205, lastPage = 3, pageSize = 100)
         val position = ReaderDomain.episodePosition(
             episodeIds = listOf("205", "204", "203"),
             currentEpisodeId = "204",
             currentPage = 2,
             lastPage = 3,
-            knownTotal = EpisodeTotal.AtLeast(205),
+            knownTotal = counted,
         )
 
-        assertThat(position.total).isEqualTo(EpisodeTotal.AtLeast(205))
+        assertThat(position.total).isEqualTo(counted)
         assertThat(position.readOrder).isEqualTo(102)
         assertThat(position.nextEpisodeIndex).isEqualTo(0)
     }
@@ -50,21 +50,22 @@ class ReaderDomainTest {
     @Test
     fun episodePositionOnLastPageIsExactAndDerivesReadOrder() {
         // 205 total episodes, 3 pages, pageSize = 100 -> page 3 holds 5 episodes.
+        val counted = EpisodeListingTotal(count = 205, lastPage = 3, pageSize = 100)
         val position = ReaderDomain.episodePosition(
             episodeIds = listOf("205", "204", "203", "202", "201"),
             currentEpisodeId = "204",
             currentPage = 3,
             lastPage = 3,
-            knownTotal = EpisodeTotal.Exact(205),
+            knownTotal = counted,
         )
 
-        assertThat(position.total).isEqualTo(EpisodeTotal.Exact(205))
+        assertThat(position.total).isEqualTo(counted)
         assertThat(position.readOrder).isEqualTo(4)
         assertThat(position.nextEpisodeIndex).isEqualTo(0)
     }
 
     @Test
-    fun episodePositionNeverInflatesTotalFromUnseenPages() {
+    fun episodePositionNeverInventsATotalFromUnseenPages() {
         // Regression: page 1 of a 3-page listing used to report 300 episodes, which then froze.
         val position = ReaderDomain.episodePosition(
             episodeIds = listOf("201", "200", "199"),
@@ -73,32 +74,26 @@ class ReaderDomainTest {
             lastPage = 3,
             pageSize = 100,
         )
-        assertThat(position.total).isEqualTo(EpisodeTotal.AtLeast(3))
+        assertThat(position.total).isNull()
+        // The order itself is still derived from the page position: 2 unseen pages of 100 plus this
+        // page's position, which is all an uncounted listing can honestly say.
+        assertThat(position.readOrder).isEqualTo(203)
     }
 
     @Test
-    fun episodePositionPrefersALowerBoundOverStaleExactTotal() {
-        // An inspected last page is the authority: it wins over a stored total even when smaller,
-        // which is how an inflated "200 of a 199-episode work" gets corrected.
-        val exactWins = ReaderDomain.episodePosition(
+    fun episodePositionKeepsTheStoredCountEvenWhenSmallerThanTheDerivedOrder() {
+        // A shrunk listing keeps its counted total; the read order is clamped to it rather than
+        // letting the badge show "203/199".
+        val counted = EpisodeListingTotal(count = 199, lastPage = 2, pageSize = 100)
+        val shrunk = ReaderDomain.episodePosition(
             episodeIds = listOf("3", "2", "1"),
             currentEpisodeId = "2",
             currentPage = 1,
             lastPage = 1,
-            knownTotal = EpisodeTotal.Exact(10),
+            knownTotal = counted,
         )
-        assertThat(exactWins.total).isEqualTo(EpisodeTotal.Exact(3))
-        assertThat(exactWins.readOrder).isEqualTo(2)
-
-        // A lower bound never replaces a known exact total.
-        val lowerBound = ReaderDomain.episodePosition(
-            episodeIds = listOf("10", "9"),
-            currentEpisodeId = "10",
-            currentPage = 1,
-            lastPage = 4,
-            knownTotal = EpisodeTotal.Exact(40),
-        )
-        assertThat(lowerBound.total).isEqualTo(EpisodeTotal.Exact(40))
+        assertThat(shrunk.total).isEqualTo(counted)
+        assertThat(shrunk.readOrder).isEqualTo(2)
     }
 
     @Test
@@ -108,10 +103,10 @@ class ReaderDomainTest {
             currentEpisodeId = "missing",
             currentPage = 1,
             lastPage = 1,
-            knownTotal = EpisodeTotal.Exact(10),
+            knownTotal = EpisodeListingTotal(count = 10, lastPage = 1, pageSize = 100),
         )
 
-        assertThat(position.total).isEqualTo(EpisodeTotal.Exact(3))
+        assertThat(position.total).isEqualTo(EpisodeListingTotal(count = 10, lastPage = 1, pageSize = 100))
         assertThat(position.readOrder).isNull()
         assertThat(position.nextEpisodeIndex).isNull()
     }
@@ -193,10 +188,10 @@ class ReaderDomainTest {
             currentEpisodeId = "100",
             currentPage = 1,
             lastPage = 1,
-            knownTotal = EpisodeTotal.Exact(3),
+            knownTotal = EpisodeListingTotal(count = 3, lastPage = 1, pageSize = 100),
         )
         assertThat(pos1.readOrder).isEqualTo(1)
-        assertThat(pos1.total).isEqualTo(EpisodeTotal.Exact(3))
+        assertThat(pos1.total).isEqualTo(EpisodeListingTotal(count = 3, lastPage = 1, pageSize = 100))
         assertThat(pos1.nextEpisodeIndex?.let { rawIds[it] }).isEqualTo("200")
 
         // UI sorted list navigation

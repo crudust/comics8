@@ -63,7 +63,7 @@ class SourceRegistry(initial: List<ComicSource> = emptyList()) {
     fun formatReadProgress(
         sourceId: String,
         lastReadOrder: Int,
-        total: com.comics8.core.model.EpisodeTotal,
+        total: com.comics8.core.model.EpisodeListingTotal?,
         readCount: Int,
         mode: com.comics8.core.model.ProgressDisplayMode? = null,
     ): String = (mode ?: defaultProgressDisplayMode(sourceId)).format(lastReadOrder, total, readCount).orEmpty()

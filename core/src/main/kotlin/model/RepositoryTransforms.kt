@@ -12,28 +12,23 @@ object RepositoryTransforms {
     )
 
     data class HistoryProgress(
-        val total: EpisodeTotal,
         val lastReadOrder: Int,
         val hasNew: Boolean,
     )
 
     /**
-     * Single merge rule for stored history vs. a fresh observation.
+     * Derives read progress from a counted total.
      *
-     * A lower bound of the total must not clamp [lastReadOrder]: clamping against an incomplete
-     * count truncates how far the user actually read. Only an exact total bounds the order.
+     * A missing total means "not counted yet", not "fully read": [hasNew] stays false so the work
+     * does not claim unread episodes, and nothing is clamped because there is nothing to clamp to.
      */
-    fun mergeHistoryProgress(
-        lastReadOrder: Int,
-        storedTotal: Int,
-        observed: EpisodeTotal = EpisodeTotal.Unknown,
-    ): HistoryProgress {
-        val total = EpisodeTotal.merge(EpisodeTotal.fromStored(storedTotal), observed)
+    fun historyProgress(lastReadOrder: Int, total: EpisodeListingTotal?): HistoryProgress {
         val order = lastReadOrder.coerceAtLeast(0)
-        // An exact total may bound the order: a verified sweep is the authority on how many
-        // episodes a work actually has.
-        val boundedOrder = if (total.isExact) order.coerceAtMost(total.count) else order
-        return HistoryProgress(total, boundedOrder, total.needsRefresh(boundedOrder))
+        val valid = total?.takeIf { it.isValid }
+        return HistoryProgress(
+            lastReadOrder = order,
+            hasNew = valid?.needsRefresh(order) ?: false,
+        )
     }
 
     data class ReaderSettingValues(
@@ -43,25 +38,10 @@ object RepositoryTransforms {
     )
 
     data class EpisodeMetadata(
-        val total: EpisodeTotal = EpisodeTotal.Unknown,
+        /** Null until the listing has been counted end to end. */
+        val total: EpisodeListingTotal? = null,
         val thumbUrl: String? = null,
-        val snapshot: EpisodeListingSnapshot? = null,
-    ) {
-        val totalEpisodes: Int get() = total.count
-
-        companion object {
-            /** Builds metadata from a fresh full sweep, keeping the learned shape with the total. */
-            fun fromSweep(
-                sweep: EpisodeTotalObservation,
-                stored: EpisodeTotal = EpisodeTotal.Unknown,
-                thumbUrl: String? = null,
-            ): EpisodeMetadata = EpisodeMetadata(
-                total = EpisodeTotal.merge(stored, sweep.total),
-                thumbUrl = thumbUrl,
-                snapshot = sweep.snapshot,
-            )
-        }
-    }
+    )
 
     fun installedSources(
         allSources: List<ComicSource>,
@@ -107,126 +87,96 @@ object RepositoryTransforms {
     )
 
     /**
-     * Single request path: derive the total from one page plus a verified [snapshot].
-     */
-    fun totalFromPage(
-        page: EpisodePage,
-        pageSize: Int,
-        snapshot: EpisodeListingSnapshot?,
-    ): EpisodeTotal = EpisodeTotal.from(page, pageSize, snapshot)
-
-    /**
-     * Full sweep used to *learn* a listing shape. Reading every page is the only way to prove that
-     * [EpisodeListingSnapshot.lastPageItemCount] is right, and it is done rarely: only when no
-     * snapshot exists or when the reported page count changed.
+     * Counts every page of an episode listing. This is the only way a total is ever produced.
      *
-     * Returns a lower bound (no snapshot) if any page fails, so a partial sweep can never rewrite a
-     * verified total.
+     * Returns null when any page cannot be read (or a middle page is unexpectedly empty): a partial
+     * sweep must never be turned into a total, because the missing pages are exactly the ones that
+     * would be guessed.
      */
-    suspend fun verifyEpisodeListing(
+    suspend fun countEpisodeListing(
         pageSize: Int,
         loadPage: suspend (Int) -> EpisodePage,
-    ): EpisodeTotalObservation {
+    ): EpisodeListingTotal? {
+        val safePageSize = pageSize.coerceAtLeast(1)
         val first = loadPage(1)
         val lastPage = first.lastPage.coerceAtLeast(1)
-        if (first.items.isEmpty()) {
-            return EpisodeTotalObservation(EpisodeTotal.Unknown, null)
-        }
-        if (lastPage <= 1) {
-            val total = EpisodeTotal.Exact(first.items.size)
-            return EpisodeTotalObservation(total, EpisodeListingSnapshot(lastPage = 1, lastPageItemCount = first.items.size))
-        }
+        if (first.items.isEmpty()) return null
 
-        val safePageSize = pageSize.coerceAtLeast(1)
-        var observed = first.items.size
-        var lastPageItemCount: Int? = null
+        var counted = first.items.size
+        var tailItems = if (lastPage == 1) first.items.size else 0
         for (page in 2..lastPage) {
             val loaded = try {
                 loadPage(page)
             } catch (_: Exception) {
-                return EpisodeTotalObservation(EpisodeTotal.AtLeast(observed.coerceAtLeast(1)), null)
+                return null
             }
-            if (loaded.items.isEmpty() && page < lastPage) {
-                // A hole in the middle means the sweep proved nothing about the tail.
-                return EpisodeTotalObservation(EpisodeTotal.AtLeast(observed.coerceAtLeast(1)), null)
-            }
-            observed += loaded.items.size
-            if (page == lastPage) lastPageItemCount = loaded.items.size
+            if (loaded.items.isEmpty()) return null
+            counted += loaded.items.size
+            if (page == lastPage) tailItems = loaded.items.size
         }
-
-        val tail = lastPageItemCount
-        if (tail == null || tail > safePageSize) {
-            return EpisodeTotalObservation(EpisodeTotal.AtLeast(observed.coerceAtLeast(1)), null)
-        }
-        // The sweep is authoritative for both the total and the shape it was derived from.
-        return EpisodeTotalObservation(
-            total = EpisodeTotal.Exact(observed),
-            snapshot = EpisodeListingSnapshot(lastPage = lastPage, lastPageItemCount = tail),
+        // naive = every page full except the tail. Anything shorter than that (middle pages) lands in
+        // delta, while the tail itself stays a live value so added/removed newest episodes still move
+        // the total even when the page count does not change.
+        val naive = (lastPage - 1) * safePageSize + tailItems
+        return EpisodeListingTotal(
+            count = counted,
+            lastPage = lastPage,
+            pageSize = safePageSize,
+            delta = counted - naive,
         )
+    }
+
+    /**
+     * Recomputes the total from the freshly loaded tail page using the correction learned by
+     * [countEpisodeListing]. When the listing has only one page, the page itself is the entire
+     * listing and produces a verified total directly without a prior stored shape.
+     *
+     * Returns null when the page is not the listing's tail, or when its shape no longer matches the
+     * count. Both mean the correction describes a different listing and it has to be recounted.
+     */
+    fun totalFromPage(page: EpisodePage, pageSize: Int, known: EpisodeListingTotal?): EpisodeListingTotal? {
+        val lastPage = page.lastPage.coerceAtLeast(1)
+        val safePageSize = pageSize.coerceAtLeast(1)
+        if (page.currentPage.coerceIn(1, lastPage) != lastPage) return null
+        if (lastPage == 1) {
+            return EpisodeListingTotal(
+                count = page.items.size,
+                lastPage = 1,
+                pageSize = safePageSize,
+                delta = 0,
+            ).takeIf { it.isValid }
+        }
+        if (known == null || !known.describes(lastPage, safePageSize)) return null
+
+        return EpisodeListingTotal(
+            count = ((lastPage - 1) * safePageSize + page.items.size + known.delta).coerceAtLeast(0),
+            lastPage = lastPage,
+            pageSize = safePageSize,
+            delta = known.delta,
+        ).takeIf { it.isValid }
     }
 
     /**
      * Whether a background refresh is worth a listing request for this work.
      *
-     * The four inputs are deliberately separate axes, not aliases:
-     * - [knownTotal] unknown or below the read order means unread episodes may exist. An unknown
-     *   total already implies this (`needsRefresh` is true for any lower bound), so a missing
-     *   catalog needs no separate condition.
-     * - [thumbUrl] blank means the listing cannot be rendered and the episode list can supply a
-     *   cover instead.
+     * The four inputs are separate axes, not aliases:
+     * - [knownTotal] null means the listing was never counted. That is itself a reason to fetch:
+     *   without a count there is no badge and no way to tell whether episodes are unread.
+     * - [thumbUrl] blank means the listing cannot be rendered and the episode list can supply a cover.
      * - [isFavorite] keeps favorites accurate because they are the notification targets.
      *
-     * `isNew` is intentionally absent: it is a *result* of comparing a work against its seen row,
-     * not a reason to scrape, and works that qualify for it already qualify here.
+     * `isNew` is intentionally absent: it is a *result* of comparing a work against its seen row, not
+     * a reason to scrape, and works that qualify for it already qualify here.
      */
     fun needsEpisodeSync(
-        knownTotal: EpisodeTotal,
+        knownTotal: EpisodeListingTotal?,
         lastReadOrder: Int,
         thumbUrl: String,
         isFavorite: Boolean,
-    ): Boolean = knownTotal.needsRefresh(lastReadOrder) || thumbUrl.isBlank() || isFavorite
-
-    /** One catalog observation applied to the cached totals and to a persisted history row. */
-    data class CatalogApplication<History>(
-        val total: EpisodeTotal,
-        val history: History?,
-        val changed: Boolean,
-    )
-
-    /**
-     * Applies a catalog observation (server batch row, crowdsourced report or local sweep) to the
-     * totals already known for a work.
-     *
-     * Both platforms previously duplicated this merge plus the "history total/hasNew drifted" check.
-     * Keeping it here means a server row, a local sweep and a history-derived lower bound all resolve
-     * through exactly one rule.
-     */
-    fun <History> applyCatalogTotal(
-        known: EpisodeTotal?,
-        storedHistoryTotal: Int,
-        observation: EpisodeTotal,
-        history: History?,
-        readHistoryOrder: (History) -> Int,
-        readHistoryTotal: (History) -> Int,
-        readHistoryHasNew: (History) -> Boolean,
-        copyHistory: (History, total: Int, order: Int, hasNew: Boolean) -> History,
-    ): CatalogApplication<History> {
-        val effective = EpisodeTotal.merge(
-            EpisodeTotal.merge(known ?: EpisodeTotal.Unknown, EpisodeTotal.fromStored(storedHistoryTotal)),
-            observation,
-        )
-        if (history == null) {
-            return CatalogApplication(effective, null, false)
-        }
-        val merged = mergeHistoryProgress(readHistoryOrder(history), readHistoryTotal(history), effective)
-        val changed = readHistoryTotal(history) != merged.total.count || readHistoryHasNew(history) != merged.hasNew
-        val updated = if (changed) {
-            copyHistory(history, merged.total.count, merged.lastReadOrder, merged.hasNew)
-        } else {
-            history
-        }
-        return CatalogApplication(effective, updated, changed)
-    }
+    ): Boolean = knownTotal == null ||
+        knownTotal.needsRefresh(lastReadOrder) ||
+        thumbUrl.isBlank() ||
+        isFavorite
 
     fun <Seen, History> applyListingFlags(
         items: List<ToonItem>,
@@ -235,21 +185,21 @@ object RepositoryTransforms {
         seenByKey: Map<String, Seen>,
         historyByKey: Map<String, History>,
         readCountsByKey: Map<String, Int>,
-        catalogTotalsByKey: Map<String, EpisodeTotal> = emptyMap(),
+        totalsByKey: Map<String, EpisodeListingTotal> = emptyMap(),
         seenUpdatedAt: (Seen) -> String?,
-        formatProgress: (ToonItem, History?, Int, EpisodeTotal) -> String?,
+        formatProgress: (ToonItem, History?, EpisodeListingTotal?, Int) -> String?,
     ): List<ToonItem> = items.map { item ->
         val key = item.workId().storageKey()
         val seen = seenByKey[key]
         val history = historyByKey[key]
-        val catalogTotal = catalogTotalsByKey[key] ?: EpisodeTotal.Unknown
+        val total = totalsByKey[key]
         val isUpdated = seen != null &&
             !item.updatedAt.isNullOrBlank() &&
             seenUpdatedAt(seen) != item.updatedAt
         item.copy(
             isNew = item.isNew || (seenCount > 0 && (seen == null || isUpdated)),
             isFavorite = key in favoriteKeys,
-            readProgress = formatProgress(item, history, readCountsByKey[key] ?: 0, catalogTotal)?.ifBlank { null },
+            readProgress = formatProgress(item, history, total, readCountsByKey[key] ?: 0)?.ifBlank { null },
         )
     }
 

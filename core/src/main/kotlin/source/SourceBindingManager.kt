@@ -20,6 +20,10 @@ class SourceBindingManager(private val storageFile: File? = null) {
         return bindings[localSourceId] ?: localSourceId
     }
 
+    fun getLocalSourceId(canonicalSourceId: String): String {
+        return bindings.entries.firstOrNull { it.value == canonicalSourceId }?.key ?: canonicalSourceId
+    }
+
     fun hasBinding(localSourceId: String): Boolean = bindings.containsKey(localSourceId)
 
     fun bind(localSourceId: String, canonicalSourceId: String) {
@@ -66,6 +70,7 @@ class SourceBindingManager(private val storageFile: File? = null) {
 
     companion object {
         val global = SourceBindingManager()
+        val desktopGlobal by lazy { desktopDefault() }
 
         fun desktopDefault(home: File = File(System.getProperty("user.home"))): SourceBindingManager =
             SourceBindingManager(File(home, ".comics8/source_bindings.json"))

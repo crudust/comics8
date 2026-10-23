@@ -30,6 +30,7 @@ typealias DesktopSyncResult = SyncResult
 
 class DesktopSyncStorageAdapter(
     private val database: DesktopDatabase,
+    private val bindingManager: com.comics8.core.source.SourceBindingManager = com.comics8.core.source.SourceBindingManager.desktopGlobal,
 ) : SyncStorageAdapter {
 
     private val configFile = File(System.getProperty("user.home"), ".comics8/sync.properties")
@@ -241,31 +242,20 @@ class DesktopSyncStorageAdapter(
 
         database.applySyncBatch(deletions, favorites, historyToSave, episodes, settings)
 
-        val catalogFromHistory = history.filter { it.totalEpisodes > 0 }.map {
-            // History only carries a count, so it merges as a lower bound; the catalog payload keeps
-            // its exactness flag and can therefore correct an inflated total downward.
-            ToonCatalogRecord(
-                sourceId = it.sourceId,
-                toonId = it.toonId,
-                totalEpisodes = it.totalEpisodes,
-                updatedAt = it.lastReadAt,
-                exact = false,
-            )
+        // Totals only come from counting a listing, so history rows (which merely echo a count) are
+        // not a catalog source. A wire row is adopted only when it carries the listing shape.
+        val directCatalog = payload.catalog.mapNotNull { wire ->
+            wire.total()?.let { counted ->
+                val localSourceId = bindingManager.getLocalSourceId(wire.sourceId)
+                ToonCatalogRecord.of(
+                    WorkId(localSourceId, wire.toonId),
+                    counted,
+                    wire.updatedAt,
+                )
+            }
         }
-        val directCatalog = payload.catalog.map {
-            ToonCatalogRecord(
-                sourceId = it.sourceId,
-                toonId = it.toonId,
-                totalEpisodes = it.totalEpisodes,
-                updatedAt = it.updatedAt,
-                exact = it.exact,
-                lastPage = it.lastPage,
-                lastPageItemCount = it.lastPageItemCount,
-            )
-        }
-        val allCatalog = catalogFromHistory + directCatalog
-        if (allCatalog.isNotEmpty()) {
-            database.saveAllCatalog(allCatalog)
+        if (directCatalog.isNotEmpty()) {
+            database.saveAllCatalog(directCatalog)
         }
 
         return SyncApplyCounts(favorites = favorites.size, history = historyToSave.size, episodes = episodes.size)

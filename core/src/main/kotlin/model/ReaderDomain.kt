@@ -6,12 +6,10 @@ object ReaderDomain {
     private const val DEFAULT_DUAL_MIN_WIDTH_DP = 600
 
     data class EpisodePosition(
-        val total: EpisodeTotal,
+        val total: EpisodeListingTotal?,
         val readOrder: Int?,
         val nextEpisodeIndex: Int?,
-    ) {
-        val totalEpisodes: Int get() = total.count
-    }
+    )
 
     enum class PageEdge {
         FIRST,
@@ -180,7 +178,7 @@ object ReaderDomain {
         currentEpisodeId: String,
         currentPage: Int,
         lastPage: Int,
-        knownTotal: EpisodeTotal? = null,
+        knownTotal: EpisodeListingTotal? = null,
         pageSize: Int = DEFAULT_EPISODE_PAGE_SIZE,
     ): EpisodePosition {
         val safeLastPage = lastPage.coerceAtLeast(1)
@@ -189,20 +187,16 @@ object ReaderDomain {
         val currentIndex = episodeIds.indexOf(currentEpisodeId)
         val safePageSize = pageSize.coerceAtLeast(1)
 
-        val observed = when {
-            itemCount <= 0 -> EpisodeTotal.Unknown
-            safeCurrentPage == safeLastPage -> EpisodeTotal.Exact((safeLastPage - 1) * safePageSize + itemCount)
-            else -> EpisodeTotal.AtLeast((safeCurrentPage - 1) * safePageSize + itemCount)
-        }
-        val total = EpisodeTotal.merge(knownTotal, observed)
+        // Only a counted total may bound the order: clamping against a guess truncates how far the
+        // user actually read.
+        val total = knownTotal?.takeIf { it.isValid }
 
         val readOrder = if (currentIndex >= 0 && itemCount > 0) {
             // Unseen pages below the current one may hold up to pageSize items each.
             val unseenOlder = (safeLastPage - safeCurrentPage).coerceAtLeast(0) * safePageSize
             val onPageOrder = (itemCount - currentIndex).coerceAtLeast(1)
             val order = (unseenOlder + onPageOrder).coerceAtLeast(1)
-            // Only an exact total may bound the order; a lower bound truncates real progress.
-            if (total.isExact) order.coerceAtMost(total.count) else order
+            if (total != null) order.coerceAtMost(total.count) else order
         } else {
             null
         }

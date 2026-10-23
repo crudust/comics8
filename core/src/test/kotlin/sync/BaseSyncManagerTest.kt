@@ -197,6 +197,8 @@ class BaseSyncManagerTest {
                             put("toonId", "toon1")
                             put("totalEpisodes", 42)
                             put("updatedAt", 1700000000000L)
+                            put("lastPage", 1)
+                            put("pageSize", 100)
                         })
                     })
                 }

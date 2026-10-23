@@ -1,7 +1,6 @@
 package com.comics8.desktop.data
 
-import com.comics8.core.model.EpisodeListingSnapshot
-import com.comics8.core.model.EpisodeTotal
+import com.comics8.core.model.EpisodeListingTotal
 import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.EpisodePage
 import com.comics8.core.model.ListingPage
@@ -129,7 +128,7 @@ class DesktopToonRepositorySyncTest {
             readProgress = "5 / 10",
         )
 
-        var updatedTotal = 0
+        var updatedTotal: EpisodeListingTotal? = null
         var updatedProgress: String? = null
 
         repository.syncEpisodeCounts(listOf(item)) { id, total, progress ->
@@ -141,12 +140,12 @@ class DesktopToonRepositorySyncTest {
 
         // 백그라운드 코루틴 실행 대기
         var attempts = 0
-        while (updatedTotal == 0 && attempts < 50) {
+        while (updatedTotal == null && attempts < 50) {
             delay(50)
             attempts++
         }
 
-        assertThat(updatedTotal).isEqualTo(15)
+        assertThat(updatedTotal?.count).isEqualTo(15)
         assertThat(updatedProgress).contains("15")
 
         val historyInDb = db.getHistory(workId)
@@ -194,9 +193,9 @@ class DesktopToonRepositorySyncTest {
         )
 
         val refreshed = repository.refreshProgress(listOf(item))
-        // History only stores a count, so the denominator is an honest lower bound until the last
-        // page of the listing is actually inspected.
-        assertThat(refreshed.first().readProgress).isEqualTo("3/20+")
+        // The history row carries a count, but a count is only a total when a sweep produced it, so
+        // nothing is shown until the listing is counted.
+        assertThat(refreshed.first().readProgress).isNull()
     }
 
     @Test
@@ -364,7 +363,7 @@ class DesktopToonRepositorySyncTest {
             sourceId = "test_source",
         )
 
-        var updatedTotal = 0
+        var updatedTotal: EpisodeListingTotal? = null
         var updatedProgress: String? = null
 
         repository.syncEpisodeCounts(listOf(item)) { id, total, progress ->
@@ -375,12 +374,12 @@ class DesktopToonRepositorySyncTest {
         }
 
         var attempts = 0
-        while (updatedTotal == 0 && attempts < 50) {
+        while (updatedTotal == null && attempts < 50) {
             delay(50)
             attempts++
         }
 
-        assertThat(updatedTotal).isEqualTo(15) // TestSource has 15 episodes
+        assertThat(updatedTotal?.count).isEqualTo(15) // TestSource has 15 episodes
         assertThat(updatedProgress).isEqualTo("15화")
 
         // Catalog record must be saved in database
@@ -397,45 +396,42 @@ class DesktopToonRepositorySyncTest {
     }
 
     @Test
-    fun desktopCatalogMonotonicUpsertDoesNotDowngrade() = runBlocking {
-        val workId = WorkId("test_source", "toon-monotonic")
+    fun catalogStoresOnlyCountedTotalsAndNeverErasures() = runBlocking {
+        val workId = WorkId("test_source", "toon-counted")
+        val counted = EpisodeListingTotal(count = 50, lastPage = 1, pageSize = 100, delta = -50)
 
-        db.recordCatalogTotal(workId, EpisodeTotal.AtLeast(50), 500L)
+        db.recordCatalogTotal(workId, counted, 500L)
         var record = db.getCatalog(workId)
-        assertThat(record?.totalEpisodes).isEqualTo(50)
+        assertThat(record?.total()).isEqualTo(counted)
         assertThat(record?.updatedAt).isEqualTo(500L)
 
-        // Downgrade attempt: 30 episodes at t=100 -> rejected
-        db.recordCatalogTotal(workId, EpisodeTotal.AtLeast(30), 100L)
+        // A fresh sweep may lower the count: episodes disappear from listings too.
+        val shrunk = EpisodeListingTotal(count = 30, lastPage = 1, pageSize = 100, delta = -70)
+        db.recordCatalogTotal(workId, shrunk, 100L)
         record = db.getCatalog(workId)
-        assertThat(record?.totalEpisodes).isEqualTo(50)
-        assertThat(record?.updatedAt).isEqualTo(500L)
+        assertThat(record?.total()).isEqualTo(shrunk)
 
-        // Upgrade attempt: 60 episodes at t=600 -> accepted
-        db.recordCatalogTotal(workId, EpisodeTotal.AtLeast(60), 600L)
+        // A null observation is "not counted", never "erase the count that was taken".
+        db.recordCatalogTotal(workId, null, 700L)
         record = db.getCatalog(workId)
-        assertThat(record?.totalEpisodes).isEqualTo(60)
-        assertThat(record?.updatedAt).isEqualTo(600L)
+        assertThat(record?.total()).isEqualTo(shrunk)
 
-        // Batch saveAllCatalog test
+        // Batch save goes through the same single entry point.
         db.saveAllCatalog(
             listOf(
-                ToonCatalogRecord("test_source", "toon-monotonic", 40, 700L, exact = false),
-                ToonCatalogRecord("test_source", "toon-batch-new", 20, 200L, exact = false),
+                ToonCatalogRecord.of(
+                    WorkId("test_source", "toon-batch-new"),
+                    EpisodeListingTotal(count = 20, lastPage = 2, pageSize = 10, delta = 0),
+                    200L,
+                ),
             ),
         )
-        record = db.getCatalog(workId)
-        assertThat(record?.totalEpisodes).isEqualTo(60)
-        assertThat(record?.updatedAt).isEqualTo(600L)
-
-        val newRecord = db.getCatalog(WorkId("test_source", "toon-batch-new"))
-        assertThat(newRecord?.totalEpisodes).isEqualTo(20)
-        assertThat(newRecord?.updatedAt).isEqualTo(200L)
+        assertThat(db.getCatalog(WorkId("test_source", "toon-batch-new"))?.total()?.count).isEqualTo(20)
     }
 
     @Test
-    fun episodeTotalIsProvenOnceAndThenDerivedFromASinglePage(): Unit = runBlocking {
-        // 199 episodes over 2 pages of 100: the tail page holds 99.
+    fun episodeTotalIsCountedBySweepingAndThenRefreshedFromOnePage(): Unit = runBlocking {
+        // 199 episodes over 2 pages of 100: the tail page holds 99, so naive math would say 200.
         val source = FakeSource().apply {
             episodePageSize = 100
             episodeReturnCount = 199
@@ -459,22 +455,23 @@ class DesktopToonRepositorySyncTest {
             sourceId = "test_source",
         )
 
-        // First resolution proves the shape: page 1 + page 2.
+        // First resolution counts the listing: every page is read exactly once.
         val first = repo.fetchEpisodeMetadata(item)
-        assertThat(first.total).isEqualTo(EpisodeTotal.Exact(199))
-        assertThat(first.snapshot).isEqualTo(EpisodeListingSnapshot(lastPage = 2, lastPageItemCount = 99))
-        repo.saveCatalogTotal(item.workId(), first.total, snapshot = first.snapshot)
+        // naive = one full page + 99 on the tail = 199, which is the counted total: delta = 0.
+        assertThat(first.total).isEqualTo(EpisodeListingTotal(count = 199, lastPage = 2, pageSize = 100, delta = 0))
+        repo.saveCatalogTotal(item.workId(), first.total)
         assertThat(source.requestedPages).containsExactly(1, 2).inOrder()
 
-        // Every later refresh asks for one page only and still reports the exact total.
+        // Every later refresh reads exactly one page — the tail page, whose item count is the only
+        // value the correction does not cache — and still reports 199.
         source.requestedPages.clear()
         val second = repo.fetchEpisodeMetadata(item)
-        assertThat(second.total).isEqualTo(EpisodeTotal.Exact(199))
-        assertThat(source.requestedPages).containsExactly(1)
+        assertThat(second.total).isEqualTo(EpisodeListingTotal(count = 199, lastPage = 2, pageSize = 100, delta = 0))
+        assertThat(source.requestedPages).containsExactly(2)
     }
 
     @Test
-    fun changedPageCountTriggersExactlyOneReVerification(): Unit = runBlocking {
+    fun changedPageCountTriggersExactlyOneRecount(): Unit = runBlocking {
         val source = FakeSource().apply {
             episodePageSize = 100
             episodeReturnCount = 199
@@ -498,18 +495,91 @@ class DesktopToonRepositorySyncTest {
             sourceId = "test_source",
         )
         val first = repo.fetchEpisodeMetadata(item)
-        repo.saveCatalogTotal(item.workId(), first.total, snapshot = first.snapshot)
+        repo.saveCatalogTotal(item.workId(), first.total)
 
-        // A new episode appears: the listing grows to 3 pages, so the cached tail is obsolete.
+        // A new episode appears: the listing grows to 3 pages, so the cached correction is obsolete.
         source.episodeReturnCount = 201
         source.requestedPages.clear()
         val grown = repo.fetchEpisodeMetadata(item)
 
-        // Re-verification must re-read the old tail page too: it became a middle page and its item
-        // count changed (99 -> 100), so trusting it would resurrect the stale total.
-        assertThat(source.requestedPages).containsExactly(1, 2, 3).inOrder()
-        assertThat(grown.total).isEqualTo(EpisodeTotal.Exact(201))
-        assertThat(grown.snapshot).isEqualTo(EpisodeListingSnapshot(lastPage = 3, lastPageItemCount = 1))
+        // Recounting must cover every page including the old tail: it became a middle page, so
+        // trusting it would resurrect the stale total.
+        assertThat(source.requestedPages).containsExactly(1, 2, 3)
+        // naive = 2 full pages + 1 on the tail = 201, so the correction stays 0.
+        assertThat(grown.total).isEqualTo(EpisodeListingTotal(count = 201, lastPage = 3, pageSize = 100, delta = 0))
+    }
+
+    @Test
+    fun aNewEpisodeOnTheSamePageCountMovesTheTotalByOnePageRequest(): Unit = runBlocking {
+        val source = FakeSource().apply {
+            episodePageSize = 100
+            episodeReturnCount = 199
+        }
+        val registry = SourceRegistry(listOf(source))
+        val repo = DesktopToonRepository(
+            client = ToonClient(sources = { registry }),
+            database = db,
+            syncManager = null,
+            downloadManager = null,
+            now = { System.currentTimeMillis() },
+            sources = registry,
+            isSourceEnabled = { true },
+            installedIds = { setOf("test_source") },
+        )
+        val item = ToonItem(
+            id = "toon_same_pages",
+            title = "Same Pages",
+            thumbUrl = "thumb",
+            href = "href",
+            sourceId = "test_source",
+        )
+        val first = repo.fetchEpisodeMetadata(item)
+        repo.saveCatalogTotal(item.workId(), first.total)
+        assertThat(first.total?.count).isEqualTo(199)
+
+        // One new episode is published but the listing is still 2 pages. Nothing is recounted: the
+        // tail page alone shows 100 items instead of 99, so the total must move to 200.
+        source.episodeReturnCount = 200
+        source.requestedPages.clear()
+        val refreshed = repo.fetchEpisodeMetadata(item)
+
+        assertThat(source.requestedPages).containsExactly(2)
+        assertThat(refreshed.total?.count).isEqualTo(200)
+        assertThat(refreshed.total?.lastPage).isEqualTo(2)
+    }
+
+    @Test
+    fun aRemovedEpisodeOnTheSamePageCountMovesTheTotalDown(): Unit = runBlocking {
+        val source = FakeSource().apply {
+            episodePageSize = 100
+            episodeReturnCount = 200
+        }
+        val registry = SourceRegistry(listOf(source))
+        val repo = DesktopToonRepository(
+            client = ToonClient(sources = { registry }),
+            database = db,
+            syncManager = null,
+            downloadManager = null,
+            now = { System.currentTimeMillis() },
+            sources = registry,
+            isSourceEnabled = { true },
+            installedIds = { setOf("test_source") },
+        )
+        val item = ToonItem(
+            id = "toon_shrinking",
+            title = "Shrinking",
+            thumbUrl = "thumb",
+            href = "href",
+            sourceId = "test_source",
+        )
+        repo.saveCatalogTotal(item.workId(), repo.fetchEpisodeMetadata(item).total)
+
+        source.episodeReturnCount = 199
+        source.requestedPages.clear()
+        val refreshed = repo.fetchEpisodeMetadata(item)
+
+        assertThat(source.requestedPages).containsExactly(2)
+        assertThat(refreshed.total?.count).isEqualTo(199)
     }
 
     @Test
@@ -547,12 +617,16 @@ class DesktopToonRepositorySyncTest {
 
         // The works are still unread (nothing marked read), so they stay refresh candidates: the
         // filter is about unread episodes, not about whether a total is stored.
-        var secondCallbackCount = 0
+        val secondCallbackCount = java.util.concurrent.atomic.AtomicInteger()
         repository.syncEpisodeCounts(items) { _, _, _ ->
-            secondCallbackCount++
+            secondCallbackCount.incrementAndGet()
         }
-        delay(200)
-        assertThat(secondCallbackCount).isEqualTo(3)
+        var secondAttempts = 0
+        while (secondCallbackCount.get() < 3 && secondAttempts < 100) {
+            delay(50)
+            secondAttempts++
+        }
+        assertThat(secondCallbackCount.get()).isEqualTo(3)
     }
 
     @Test
@@ -605,7 +679,7 @@ class DesktopToonRepositorySyncTest {
             sourceId = "test_source",
         )
 
-        var updatedTotal = 0
+        var updatedTotal: EpisodeListingTotal? = null
         var updatedProgress: String? = null
         repoWithSync.syncEpisodeCounts(listOf(item)) { _, total, progress ->
             updatedTotal = total
@@ -613,14 +687,14 @@ class DesktopToonRepositorySyncTest {
         }
 
         var attempts = 0
-        while (updatedTotal == 0 && attempts < 50) {
+        while (updatedTotal == null && attempts < 50) {
             delay(50)
             attempts++
         }
 
-        // The server answered, then the local listing was verified on top of it: the source serves
-        // 15 episodes, and a verified sweep outranks the unverified crowdsourced number.
-        assertThat(updatedTotal).isEqualTo(15)
+        // The server row carried no listing shape, so it was not adopted as a total; the source's own
+        // listing was counted instead, and that count is what reaches the callback.
+        assertThat(updatedTotal?.count).isEqualTo(15)
         assertThat(updatedProgress).isEqualTo("15화")
         val inDb = db.getCatalog(item.workId())
         assertThat(inDb).isNotNull()
@@ -720,19 +794,19 @@ class DesktopToonRepositorySyncTest {
             sourceId = workId.sourceId,
         )
 
-        var updatedTotal = 0
+        var updatedTotal: EpisodeListingTotal? = null
         repoWithSync.syncEpisodeCounts(listOf(item)) { _, total, _ ->
             updatedTotal = total
         }
 
         var attempts = 0
-        while (updatedTotal == 0 && attempts < 50) {
+        while (updatedTotal == null && attempts < 50) {
             delay(50)
             attempts++
         }
 
-        // A stale server catalog (50) must never downgrade the verified local total (80).
-        assertThat(updatedTotal).isEqualTo(80)
+        // A shapeless server row (50) is not a total, so the local listing is counted instead: 80.
+        assertThat(updatedTotal?.count).isEqualTo(80)
         val historyInDb = db.getHistory(workId)
         assertThat(historyInDb?.totalEpisodes).isEqualTo(80)
 
@@ -744,26 +818,19 @@ class DesktopToonRepositorySyncTest {
     }
 
     @Test
-    fun catalogExactObservationCorrectsAnInflatedTotalDownward() = runBlocking {
+    fun anUncountedRowCannotEraseOrReplaceACountedTotal() = runBlocking {
         val workId = WorkId("test_source", "toon-inflated")
-        // An old page-rounded estimate froze the catalog at 200 for a 199 episode work.
-        db.recordCatalogTotal(workId, EpisodeTotal.AtLeast(200), 1000L)
-        assertThat(db.getCatalog(workId)?.totalEpisodes).isEqualTo(200)
+        val counted = EpisodeListingTotal(count = 199, lastPage = 2, pageSize = 100, delta = -1)
+        db.recordCatalogTotal(workId, counted, 1000L)
 
-        // A lower bound cannot lower it...
-        db.recordCatalogTotal(workId, EpisodeTotal.AtLeast(199), 2000L)
-        assertThat(db.getCatalog(workId)?.totalEpisodes).isEqualTo(200)
+        // A row without a shape is not a count, so it neither lowers nor erases what was counted.
+        db.recordCatalogTotal(workId, null, 2000L)
+        assertThat(db.getCatalog(workId)?.total()).isEqualTo(counted)
 
-        // ...but an exact last-page observation can, and it flips the row to exact.
-        db.recordCatalogTotal(workId, EpisodeTotal.Exact(199), 3000L)
-        val corrected = db.getCatalog(workId)
-        assertThat(corrected?.totalEpisodes).isEqualTo(199)
-        assertThat(corrected?.exact).isTrue()
-        assertThat(corrected?.updatedAt).isEqualTo(3000L)
-
-        // Records saved from history never downgrade exactness back to a lower bound.
-        db.saveAllCatalog(listOf(ToonCatalogRecord("test_source", "toon-inflated", 199, 4000L, exact = false)))
-        assertThat(db.getCatalog(workId)?.exact).isTrue()
+        // An older verified count also keeps the newer one intact.
+        val older = EpisodeListingTotal(count = 180, lastPage = 2, pageSize = 100, delta = -20)
+        db.recordCatalogTotal(workId, older, 3000L)
+        assertThat(db.getCatalog(workId)?.total()).isEqualTo(older)
     }
 
     @Test
@@ -788,7 +855,10 @@ class DesktopToonRepositorySyncTest {
         )
 
         // Catalog has discovered new episodes: 25 total
-        db.recordCatalogTotal(workId, EpisodeTotal.AtLeast(25))
+        db.recordCatalogTotal(
+            workId,
+            EpisodeListingTotal(count = 25, lastPage = 1, pageSize = 100, delta = -75),
+        )
 
         // getHistory(workId) should reflect 25 and hasNew = true (10 < 25)
         val single = repository.getHistory(workId)
@@ -803,8 +873,9 @@ class DesktopToonRepositorySyncTest {
         assertThat(fromList.totalEpisodes).isEqualTo(25)
         assertThat(fromList.hasNew).isTrue()
 
-        // getCatalogTotal should return 25 as a lower bound
-        assertThat(repository.getCatalogTotal(workId)).isEqualTo(EpisodeTotal.AtLeast(25))
+        // getCatalogTotal returns the counted total, never a history-derived number.
+        assertThat(repository.getCatalogTotal(workId))
+            .isEqualTo(EpisodeListingTotal(count = 25, lastPage = 1, pageSize = 100, delta = -75))
     }
 
     @Test

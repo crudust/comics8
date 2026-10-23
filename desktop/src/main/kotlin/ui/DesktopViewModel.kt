@@ -4,7 +4,7 @@ import com.comics8.core.image.ImageCacheRole
 import com.comics8.core.model.ArtistRef
 import com.comics8.core.model.BrowseTab
 import com.comics8.core.model.EpisodeItem
-import com.comics8.core.model.EpisodeTotal
+import com.comics8.core.model.EpisodeListingTotal
 import com.comics8.core.model.EpisodeSortOrder
 import com.comics8.core.model.ProgressDisplayMode
 import com.comics8.core.model.ReadDirection
@@ -145,8 +145,6 @@ class DesktopViewModel(
 
     private val catalogCache = mutableMapOf<BrowseTab, List<ToonItem>>()
     private val catalogPages = mutableMapOf<BrowseTab, Pair<Int, Int>>()
-
-    private val toonTotalCounts = java.util.concurrent.ConcurrentHashMap<String, EpisodeTotal>()
 
     // 계층적 내비게이션 상태 (그리드 <-> 회차리스트 <-> 뷰어)
     private var lastViewedSeries: ToonItem? = null
@@ -925,8 +923,7 @@ class DesktopViewModel(
         repository.syncEpisodeCounts(
             items,
             onThumbnailResolved = ::updateThumbnailIfBlank,
-            onUpdated = { workId, totalEpisodes, progressText ->
-                toonTotalCounts[workId.storageKey()] = EpisodeTotal.fromStored(totalEpisodes)
+            onUpdated = { workId, total, progressText ->
                 _state.update { curr ->
                     val updatedItems = curr.items.map { row ->
                         if (row.workId() == workId) row.copy(readProgress = progressText) else row
@@ -942,15 +939,12 @@ class DesktopViewModel(
                     }
                     curr.copy(
                         items = updatedItems,
+                        catalogTotals = curr.catalogTotals + (workId.storageKey() to total),
                         seriesHistory = if (curr.series?.workId() == workId) {
                             curr.seriesHistory?.let { currHist ->
-                                val merged = RepositoryTransforms.mergeHistoryProgress(
-                                    currHist.lastReadOrder,
-                                    currHist.totalEpisodes,
-                                    EpisodeTotal.fromStored(totalEpisodes),
-                                )
+                                val merged = RepositoryTransforms.historyProgress(currHist.lastReadOrder, total)
                                 currHist.copy(
-                                    totalEpisodes = merged.total.count,
+                                    totalEpisodes = total.count,
                                     lastReadOrder = merged.lastReadOrder,
                                     hasNew = merged.hasNew,
                                 )
@@ -1164,18 +1158,21 @@ class DesktopViewModel(
             val readCount = countIfNeeded(item.workId())
             val catalogTotal = repository.getCatalogTotal(item.workId())
             val itemKey = item.workId().storageKey()
-            if (catalogTotal.count > 0 && toonTotalCounts[itemKey] == null) {
-                toonTotalCounts[itemKey] = catalogTotal
-            }
             _state.update { current ->
+                val nextTotals = if (catalogTotal != null && current.catalogTotals[itemKey] == null) {
+                    current.catalogTotals + (itemKey to catalogTotal)
+                } else {
+                    current.catalogTotals
+                }
                 if (current.series?.workId() == item.workId()) {
                     current.copy(
                         seriesFavorited = favorited,
                         seriesHistory = history,
                         readCounts = current.readCounts.withCount(item.workId(), readCount),
+                        catalogTotals = nextTotals,
                     )
                 } else {
-                    current
+                    current.copy(catalogTotals = nextTotals)
                 }
             }
         }
@@ -1224,15 +1221,13 @@ class DesktopViewModel(
                     if (!firstThumb.isNullOrBlank() && item.thumbUrl.isBlank()) {
                         updateThumbnailIfBlank(item.workId(), firstThumb)
                     }
-                    val pageSize = repository.sourceOrNull(item.sourceId)?.episodePageSize ?: 100
-                    val itemKey = item.workId().storageKey()
-
-                    val observedTotal = EpisodeTotal.merge(
-                        toonTotalCounts[itemKey],
-                        EpisodeTotal.from(result, pageSize),
-                    )
-                    toonTotalCounts[itemKey] = observedTotal
-                    updateHistoryAndProgress(item, observedTotal)
+                    // One page cannot produce a count: reuse the learned correction or count again.
+                    // The page just loaded is handed over so the tail page is not fetched twice.
+                    val metadata = repository.fetchEpisodeMetadata(item, knownPage = result)
+                    metadata.total?.let { t ->
+                        _state.update { it.copy(catalogTotals = it.catalogTotals + (item.workId().storageKey() to t)) }
+                    }
+                    updateHistoryAndProgress(item, metadata.total)
                 }
             } catch (e: Exception) {
                 if (e is CancellationException) return@launch
@@ -1251,9 +1246,14 @@ class DesktopViewModel(
         }
     }
 
-    private suspend fun updateHistoryAndProgress(item: ToonItem, observedTotal: EpisodeTotal) {
-        if (observedTotal.count <= 0) return
-        repository.saveCatalogTotal(item.workId(), observedTotal)
+    /**
+     * Persists the counted total and keeps the history row's copy plus hasNew in sync. When the
+     * listing has not been counted ([counted] null) nothing is written: an uncounted work simply has
+     * no badge instead of a guessed one.
+     */
+    private suspend fun updateHistoryAndProgress(item: ToonItem, counted: EpisodeListingTotal?) {
+        val total = counted?.takeIf { it.isValid } ?: return
+        repository.saveCatalogTotal(item.workId(), total)
         val rawEpisodes = _state.value.rawEpisodes.ifEmpty { _state.value.episodes }
         val latestRead = rawEpisodes.firstOrNull { it.isRead }
         val seriesKey = item.workId().storageKey()
@@ -1263,7 +1263,7 @@ class DesktopViewModel(
                 currentEpisodeId = latestRead.wrId,
                 currentPage = _state.value.episodePage,
                 lastPage = _state.value.episodeLastPage,
-                knownTotal = toonTotalCounts[seriesKey] ?: observedTotal,
+                knownTotal = _state.value.catalogTotals[seriesKey] ?: total,
                 pageSize = repository.sourceOrNull(item.sourceId)?.episodePageSize ?: 100,
             )
         } else null
@@ -1273,11 +1273,7 @@ class DesktopViewModel(
         if (existing == null) {
             if (latestRead != null && derivedOrder != null) {
                 val nextEp = derivedPosition.nextEpisodeIndex?.let { rawEpisodes.getOrNull(it) }
-                val progress = RepositoryTransforms.mergeHistoryProgress(
-                    lastReadOrder = derivedOrder,
-                    storedTotal = 0,
-                    observed = observedTotal,
-                )
+                val progress = RepositoryTransforms.historyProgress(derivedOrder, total)
                 val created = ReadHistoryRecord(
                     sourceId = item.sourceId,
                     toonId = item.id,
@@ -1288,7 +1284,7 @@ class DesktopViewModel(
                     lastEpisodeTitle = latestRead.title,
                     lastEpisodeHref = latestRead.href,
                     lastReadOrder = progress.lastReadOrder,
-                    totalEpisodes = progress.total.count,
+                    totalEpisodes = total.count,
                     lastReadAt = latestRead.readAt ?: System.currentTimeMillis(),
                     nextWrId = nextEp?.wrId,
                     nextEpisodeTitle = nextEp?.title,
@@ -1299,7 +1295,7 @@ class DesktopViewModel(
                 val (progressText, readCount) = listingProgress(
                     item.sourceId,
                     created.lastReadOrder,
-                    progress.total,
+                    total,
                     item.workId(),
                 )
                 _state.update { curr ->
@@ -1316,7 +1312,7 @@ class DesktopViewModel(
                 val (progressText, _) = listingProgress(
                     item.sourceId,
                     0,
-                    observedTotal,
+                    total,
                     item.workId(),
                 )
                 if (progressText.isNotBlank()) {
@@ -1331,16 +1327,11 @@ class DesktopViewModel(
             return
         }
 
-        val mergedProgress = RepositoryTransforms.mergeHistoryProgress(
-            lastReadOrder = existing.lastReadOrder,
-            storedTotal = existing.totalEpisodes,
-            observed = observedTotal,
-        )
-        val effectiveTotal = mergedProgress.total
+        val mergedProgress = RepositoryTransforms.historyProgress(existing.lastReadOrder, total)
         val candidateOrder = mergedProgress.lastReadOrder
         val shouldElevate = derivedOrder != null && derivedOrder > candidateOrder
         val safeOrder = if (shouldElevate) derivedOrder!! else candidateOrder
-        val hasNew = if (shouldElevate) effectiveTotal.needsRefresh(safeOrder) else mergedProgress.hasNew
+        val hasNew = if (shouldElevate) total.needsRefresh(safeOrder) else mergedProgress.hasNew
 
         val updatedWrId = if (shouldElevate && latestRead != null) latestRead.wrId else existing.lastWrId
         val updatedTitle = if (shouldElevate && latestRead != null) latestRead.title else existing.lastEpisodeTitle
@@ -1358,14 +1349,14 @@ class DesktopViewModel(
             rawEpisodes.getOrNull(derivedPosition.nextEpisodeIndex!!)?.href ?: existing.nextEpisodeHref
         } else existing.nextEpisodeHref
 
-        if (existing.totalEpisodes != effectiveTotal.count ||
+        if (existing.totalEpisodes != total.count ||
             existing.lastReadOrder != safeOrder ||
             existing.hasNew != hasNew ||
             existing.lastWrId != updatedWrId ||
             existing.lastReadAt != updatedReadAt
         ) {
             val updated = existing.copy(
-                totalEpisodes = effectiveTotal.count,
+                totalEpisodes = total.count,
                 lastReadOrder = safeOrder,
                 hasNew = hasNew,
                 lastWrId = updatedWrId,
@@ -1380,7 +1371,7 @@ class DesktopViewModel(
             val (progressText, readCount) = listingProgress(
                 item.sourceId,
                 updated.lastReadOrder,
-                effectiveTotal,
+                total,
                 item.workId(),
             )
             _state.update { curr ->
@@ -1506,8 +1497,7 @@ class DesktopViewModel(
                 // Resolve the total through the single-page + verified-shape path, then load the
                 // page we actually need. No total arithmetic belongs in the view model.
                 val metadata = repository.fetchEpisodeMetadata(series)
-                toonTotalCounts[seriesKey] = metadata.total
-                repository.saveCatalogTotal(series.workId(), metadata.total, snapshot = metadata.snapshot)
+                repository.saveCatalogTotal(series.workId(), metadata.total)
 
                 val result = repository.loadEpisodes(series, lastPage.coerceAtLeast(1))
                 _state.update {
@@ -1516,6 +1506,7 @@ class DesktopViewModel(
                         episodes = result.items.sortedWithOrder(it.episodeSortOrder),
                         episodePage = result.currentPage,
                         episodeLastPage = result.lastPage,
+                        catalogTotals = metadata.total?.let { t -> it.catalogTotals + (seriesKey to t) } ?: it.catalogTotals,
                     )
                 }
                 result.items.lastOrNull()?.let(::openEpisode)
@@ -1583,12 +1574,15 @@ class DesktopViewModel(
         scope.launch {
             _state.update { it.copy(historyLoading = it.historyItems.isEmpty()) }
             val items = repository.getHistory(sourceId)
-            val counts = countIfNeeded(items.map { item -> item.workId() }, sourceId)
+            val workIds = items.map { item -> item.workId() }
+            val counts = countIfNeeded(workIds, sourceId)
+            val totals = repository.getCatalogTotals(workIds)
             _state.update {
                 it.copy(
                     historyItems = items,
                     historyLoading = false,
                     readCounts = it.readCounts + counts,
+                    catalogTotals = it.catalogTotals + totals,
                     scrollToTopTrigger = it.scrollToTopTrigger + 1,
                 )
             }
@@ -2118,8 +2112,7 @@ class DesktopViewModel(
             currentEpisodeId = episode.wrId,
             currentPage = current.episodePage,
             lastPage = current.episodeLastPage,
-            knownTotal = toonTotalCounts[seriesKey]
-                ?: EpisodeTotal.fromStored(current.seriesHistory?.totalEpisodes ?: 0),
+            knownTotal = current.catalogTotals[seriesKey],
             pageSize = series?.let { repository.sourceOrNull(it.sourceId)?.episodePageSize } ?: 100,
         )
         val nextEp = position.nextEpisodeIndex?.let(rawEpisodes::get)
@@ -2162,18 +2155,18 @@ class DesktopViewModel(
                 repository.markEpisodeRead(series.workId(), episode.wrId, episode.lastReadPage)
                 val existingHistory = repository.getHistory(series.workId())
 
-                val merged = RepositoryTransforms.mergeHistoryProgress(
-                    lastReadOrder = position.readOrder ?: existingHistory?.lastReadOrder ?: 1,
-                    storedTotal = existingHistory?.totalEpisodes ?: 0,
-                    observed = position.total,
+                val counted = _state.value.catalogTotals[seriesKey]
+                val progress = RepositoryTransforms.historyProgress(
+                    position.readOrder ?: existingHistory?.lastReadOrder ?: 1,
+                    counted,
                 )
-                val finalOrder = merged.lastReadOrder
-                val finalTotal = merged.total.count
+                val finalOrder = progress.lastReadOrder
+                val finalTotal = counted?.count ?: 0
 
                 val (progressText, readCount) = listingProgress(
                     series.sourceId,
                     finalOrder,
-                    merged.total,
+                    counted,
                     series.workId(),
                 )
                 val savedHistory = ReadHistoryRecord(
@@ -2191,7 +2184,7 @@ class DesktopViewModel(
                     nextWrId = nextEp?.wrId ?: existingHistory?.nextWrId,
                     nextEpisodeTitle = nextEp?.title ?: existingHistory?.nextEpisodeTitle,
                     nextEpisodeHref = nextEp?.href ?: existingHistory?.nextEpisodeHref,
-                    hasNew = merged.hasNew,
+                    hasNew = progress.hasNew,
                 )
                 repository.saveHistory(savedHistory)
                 _state.update { curr ->
@@ -2437,12 +2430,6 @@ class DesktopViewModel(
     ) {
         try {
             val result = repository.loadEpisodes(series, page)
-            val pageSize = repository.sourceOrNull(series.sourceId)?.episodePageSize ?: 100
-            val seriesKey = series.workId().storageKey()
-
-            // EpisodeTotal.from already yields a lower bound unless this page is the last one.
-            toonTotalCounts[seriesKey] = EpisodeTotal.from(result, pageSize)
-
             _state.update {
                 it.copy(
                     rawEpisodes = result.items,
@@ -2635,7 +2622,7 @@ class DesktopViewModel(
     private suspend fun listingProgress(
         sourceId: String,
         lastReadOrder: Int,
-        total: EpisodeTotal,
+        total: EpisodeListingTotal?,
         workId: WorkId,
     ): Pair<String, Int> {
         val readCount = countIfNeeded(workId)
@@ -2671,7 +2658,7 @@ class DesktopViewModel(
         readProgress = repository.formatReadProgress(
             sourceId = sourceId,
             lastReadOrder = lastReadOrder,
-            total = EpisodeTotal.fromStored(totalEpisodes),
+            total = _state.value.catalogTotals[workId().storageKey()],
             readCount = _state.value.readCounts[workId().storageKey()] ?: 0,
         ),
     )
