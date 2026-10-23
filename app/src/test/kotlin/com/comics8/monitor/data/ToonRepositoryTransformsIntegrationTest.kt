@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import com.comics8.core.model.EpisodeTotal
 import com.comics8.core.model.ReadDirection
 import com.comics8.core.model.SplitMode
 import com.comics8.core.model.ViewMode
@@ -14,7 +15,7 @@ import com.comics8.monitor.data.local.AppDatabase
 import com.comics8.monitor.data.local.ReaderSetting
 import com.comics8.monitor.data.local.ToonCatalogEntry
 import com.comics8.monitor.data.local.get
-import com.comics8.monitor.data.local.upsertMonotonic
+import com.comics8.monitor.data.local.recordTotal
 import com.comics8.monitor.data.local.upsertAllMonotonic
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.runBlocking
@@ -85,7 +86,7 @@ class ToonRepositoryTransformsIntegrationTest {
                 sources = registry,
             )
             val workId = WorkId("eleven", "unread-catalog-test")
-            repository.saveCatalogTotal(workId, 104)
+            repository.saveCatalogTotal(workId, EpisodeTotal.Exact(104))
 
             val item = com.comics8.core.model.ToonItem(
                 id = workId.toonId,
@@ -103,6 +104,37 @@ class ToonRepositoryTransformsIntegrationTest {
     }
 
     @Test
+    fun toonCatalogAcceptsExactObservationAsDownwardCorrection() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        try {
+            val dao = database.toonCatalogDao()
+            val workId = WorkId("source1", "toon-exact")
+
+            // A page-rounded estimate froze the catalog at 200 for a 199 episode work.
+            dao.recordTotal(workId, EpisodeTotal.AtLeast(200), 1000L)
+            assertThat(dao.get(workId)?.totalEpisodes).isEqualTo(200)
+            assertThat(dao.get(workId)?.exact).isFalse()
+
+            // Lower bounds can never lower it...
+            dao.recordTotal(workId, EpisodeTotal.AtLeast(199), 2000L)
+            assertThat(dao.get(workId)?.totalEpisodes).isEqualTo(200)
+            assertThat(dao.get(workId)?.updatedAt).isEqualTo(1000L)
+
+            // ...but the last page of the listing can.
+            dao.recordTotal(workId, EpisodeTotal.Exact(199), 3000L)
+            val corrected = dao.get(workId)
+            assertThat(corrected?.totalEpisodes).isEqualTo(199)
+            assertThat(corrected?.exact).isTrue()
+            assertThat(corrected?.updatedAt).isEqualTo(3000L)
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun toonCatalogMonotonicUpsertDoesNotDowngradeTotalEpisodesOrUpdatedAt() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
@@ -113,28 +145,28 @@ class ToonRepositoryTransformsIntegrationTest {
             val workId = WorkId("source1", "toon1")
 
             // 1. Initial insert: 50 episodes at t=500
-            dao.upsertMonotonic(workId, totalEpisodes = 50, updatedAt = 500L)
+            dao.recordTotal(workId, EpisodeTotal.AtLeast(50), 500L)
             var entry = dao.get(workId)
             assertThat(entry).isNotNull()
             assertThat(entry?.totalEpisodes).isEqualTo(50)
             assertThat(entry?.updatedAt).isEqualTo(500L)
 
             // 2. Attempt downgrade: 30 episodes at t=100 -> should be rejected/ignored
-            dao.upsertMonotonic(workId, totalEpisodes = 30, updatedAt = 100L)
+            dao.recordTotal(workId, EpisodeTotal.AtLeast(30), 100L)
             entry = dao.get(workId)
             assertThat(entry?.totalEpisodes).isEqualTo(50)
             assertThat(entry?.updatedAt).isEqualTo(500L)
 
             // 3. Upgrade: 60 episodes at t=600 -> should be accepted
-            dao.upsertMonotonic(workId, totalEpisodes = 60, updatedAt = 600L)
+            dao.recordTotal(workId, EpisodeTotal.AtLeast(60), 600L)
             entry = dao.get(workId)
             assertThat(entry?.totalEpisodes).isEqualTo(60)
             assertThat(entry?.updatedAt).isEqualTo(600L)
 
             // 4. Batch upsertAllMonotonic: downgrade should be ignored, upgrade should apply
             val batchEntries = listOf(
-                ToonCatalogEntry("source1", "toon1", 40, 700L),
-                ToonCatalogEntry("source1", "toon2", 20, 200L),
+                ToonCatalogEntry("source1", "toon1", 40, 700L, exact = false),
+                ToonCatalogEntry("source1", "toon2", 20, 200L, exact = false),
             )
             dao.upsertAllMonotonic(batchEntries)
 
@@ -240,13 +272,14 @@ class ToonRepositoryTransformsIntegrationTest {
                 assertThat(entry?.totalEpisodes).isEqualTo(15)
             }
 
-            // Once populated, re-running syncEpisodeCounts should skip since needsCatalog is now false
+            // The works are still unread (nothing was marked read), so they remain refresh candidates:
+            // the filter is about unread episodes, not about whether a total is already stored.
             val secondCallbackCount = java.util.concurrent.atomic.AtomicInteger()
             repository.syncEpisodeCounts(items) { _, _, _ ->
                 secondCallbackCount.incrementAndGet()
             }
             kotlinx.coroutines.delay(200)
-            assertThat(secondCallbackCount.get()).isEqualTo(0)
+            assertThat(secondCallbackCount.get()).isEqualTo(3)
         } finally {
             database.close()
         }

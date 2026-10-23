@@ -21,7 +21,22 @@ data class SyncCatalogWire(
     val toonId: String,
     val totalEpisodes: Int,
     val updatedAt: Long = 0L,
-)
+    /** True when [totalEpisodes] came from the last page of the listing (see EpisodeTotal). */
+    val exact: Boolean = false,
+    /** Verified listing shape, so another device can recompute the total from a single page. */
+    val lastPage: Int = 0,
+    val lastPageItemCount: Int = -1,
+) {
+    fun total(): com.comics8.core.model.EpisodeTotal =
+        com.comics8.core.model.EpisodeTotal.fromStored(totalEpisodes, exact)
+
+    fun snapshot(): com.comics8.core.model.EpisodeListingSnapshot? =
+        if (lastPage > 0 && lastPageItemCount >= 0) {
+            com.comics8.core.model.EpisodeListingSnapshot(lastPage, lastPageItemCount)
+        } else {
+            null
+        }
+}
 
 data class SourceResolveWire(
     val clientSourceId: String,
@@ -90,6 +105,11 @@ object SyncPayloadCodec {
                         put("toonId", entry.toonId)
                         put("totalEpisodes", entry.totalEpisodes)
                         put("updatedAt", entry.updatedAt)
+                        put("exact", entry.exact)
+                        if (entry.lastPage > 0) {
+                            put("lastPage", entry.lastPage)
+                            put("lastPageItemCount", entry.lastPageItemCount)
+                        }
                     })
                 }
             })
@@ -125,6 +145,9 @@ object SyncPayloadCodec {
                     toonId = item.optString("toonId", ""),
                     totalEpisodes = item.optInt("totalEpisodes", 0),
                     updatedAt = item.optLong("updatedAt", serverTime),
+                    exact = item.optBoolean("exact", false),
+                    lastPage = item.optInt("lastPage", 0),
+                    lastPageItemCount = item.optInt("lastPageItemCount", -1),
                 )
             }.filter { it.toonId.isNotBlank() && it.totalEpisodes > 0 },
         )

@@ -56,13 +56,28 @@ object HostApi {
     const val LEVEL: Int = 1
 }
 
+/**
+ * JS-plugin-facing mirror of [com.comics8.core.model.ProgressDisplayMode] for the two legacy modes.
+ * It exists only so `source.progressDisplay` in a JS pack keeps parsing. The value is mapped to
+ * [com.comics8.core.model.ProgressDisplayMode] at the source boundary; no formatting or comparison
+ * happens on this enum.
+ */
 enum class ProgressDisplay {
     LAST_READ_ORDER,
     READ_COUNT,
     ;
 
-    fun format(lastReadOrder: Int, totalEpisodes: Int, readCount: Int): String = when (this) {
-        LAST_READ_ORDER -> "$lastReadOrder/$totalEpisodes"
-        READ_COUNT -> "$readCount/$totalEpisodes"
+    val mode: com.comics8.core.model.ProgressDisplayMode
+        get() = when (this) {
+            LAST_READ_ORDER -> com.comics8.core.model.ProgressDisplayMode.LATEST_EPISODE
+            READ_COUNT -> com.comics8.core.model.ProgressDisplayMode.READ_COUNT
+        }
+
+    companion object {
+        fun fromMode(mode: com.comics8.core.model.ProgressDisplayMode): ProgressDisplay =
+            when (mode) {
+                com.comics8.core.model.ProgressDisplayMode.READ_COUNT -> READ_COUNT
+                else -> LAST_READ_ORDER
+            }
     }
 }

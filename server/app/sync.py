@@ -415,6 +415,19 @@ async def export_snapshot_for_user(session: AsyncSession, user_id: str) -> dict[
     }
 
 
+def emit_catalog(c: ToonCatalog) -> dict[str, Any]:
+    """Single wire shape for a catalog row, including the verified listing shape."""
+    return {
+        "sourceId": c.source_id,
+        "toonId": c.toon_id,
+        "totalEpisodes": c.total_episodes,
+        "updatedAt": c.updated_at,
+        "exact": bool(c.exact),
+        "lastPage": c.last_page,
+        "lastPageItemCount": c.last_page_item_count,
+    }
+
+
 async def upsert_catalog_from_payload(
     session: AsyncSession,
     history_rows: list[dict[str, Any]],
@@ -423,26 +436,56 @@ async def upsert_catalog_from_payload(
 ) -> None:
     merged: dict[tuple[str, str], dict[str, Any]] = {}
 
-    def add_entry(source_id: str, toon_id: str, total_episodes: int, updated_at: int) -> None:
+    # Mirrors EpisodeTotal.merge on the clients: an exact observation wins outright (it may lower a
+    # stale total), while a lower bound may only raise another lower bound.
+    def add_entry(
+        source_id: str,
+        toon_id: str,
+        total_episodes: int,
+        updated_at: int,
+        exact: bool,
+        last_page: int,
+        last_page_item_count: int,
+    ) -> None:
         if not toon_id or not (0 < total_episodes <= 100_000):
             return
         if len(source_id) > 255 or len(toon_id) > 512:
             return
         key = (source_id, toon_id)
-        if key not in merged:
+        # A listing shape is only meaningful together with an exact total.
+        # The shape must be able to reproduce the total; otherwise it is noise, not a verification.
+        shape_ok = (
+            exact
+            and 0 < last_page <= 100_000
+            and 0 <= last_page_item_count <= 100_000
+            # A listing reported as multi-page cannot have an empty tail, and the shape must be able
+            # to reproduce the total it is stored with.
+            and (last_page == 1 or 1 <= last_page_item_count < total_episodes)
+        )
+        prev = merged.get(key)
+        if prev is None:
             merged[key] = {
                 "source_id": source_id,
                 "toon_id": toon_id,
                 "total_episodes": total_episodes,
                 "updated_at": updated_at,
+                "exact": bool(exact),
+                "last_page": last_page if shape_ok else 0,
+                "last_page_item_count": last_page_item_count if shape_ok else -1,
             }
-        else:
-            prev = merged[key]
-            if total_episodes > prev["total_episodes"]:
-                prev["total_episodes"] = total_episodes
-                prev["updated_at"] = updated_at
-            elif total_episodes == prev["total_episodes"]:
-                prev["updated_at"] = max(prev["updated_at"], updated_at)
+            return
+        if exact:
+            prev["total_episodes"] = total_episodes
+            prev["updated_at"] = updated_at
+            prev["exact"] = True
+            if shape_ok:
+                prev["last_page"] = last_page
+                prev["last_page_item_count"] = last_page_item_count
+        elif not prev["exact"] and total_episodes > prev["total_episodes"]:
+            prev["total_episodes"] = total_episodes
+            prev["updated_at"] = updated_at
+        elif total_episodes == prev["total_episodes"]:
+            prev["updated_at"] = max(prev["updated_at"], updated_at)
 
     for h in history_rows:
         tid = str(h.get("toonId") or h.get("id") or "").strip()
@@ -451,6 +494,9 @@ async def upsert_catalog_from_payload(
             toon_id=tid,
             total_episodes=int(h.get("totalEpisodes", 0)),
             updated_at=int(h.get("lastReadAt", now_ms)),
+            exact=False,
+            last_page=0,
+            last_page_item_count=-1,
         )
 
     for c in catalog_rows:
@@ -460,19 +506,33 @@ async def upsert_catalog_from_payload(
             toon_id=tid,
             total_episodes=int(c.get("totalEpisodes", 0)),
             updated_at=int(c.get("updatedAt", now_ms)),
+            exact=bool(c.get("exact", False)),
+            last_page=int(c.get("lastPage", 0) or 0),
+            last_page_item_count=int(c.get("lastPageItemCount", -1) or -1),
         )
 
     if not merged:
         return
 
     cat_stmt = pg_insert(ToonCatalog).values(list(merged.values()))
+    # An exact row always wins so a deleted/renamed episode range can correct the catalog; a lower
+    # bound may only overwrite another lower bound with a bigger count.
     cat_stmt = cat_stmt.on_conflict_do_update(
         index_elements=[ToonCatalog.source_id, ToonCatalog.toon_id],
         set_={
-            "total_episodes": func.greatest(ToonCatalog.total_episodes, cat_stmt.excluded.total_episodes),
+            "total_episodes": cat_stmt.excluded.total_episodes,
             "updated_at": cat_stmt.excluded.updated_at,
+            "exact": cat_stmt.excluded.exact,
+            "last_page": cat_stmt.excluded.last_page,
+            "last_page_item_count": cat_stmt.excluded.last_page_item_count,
         },
-        where=(cat_stmt.excluded.total_episodes > ToonCatalog.total_episodes),
+        where=(
+            cat_stmt.excluded.exact
+            | (
+                (ToonCatalog.exact == False)  # noqa: E712 - SQL boolean expression
+                & (cat_stmt.excluded.total_episodes > ToonCatalog.total_episodes)
+            )
+        ),
     )
     await session.execute(cat_stmt)
 
@@ -965,15 +1025,7 @@ async def collect_delta_for_user(session: AsyncSession, user_id: str, since: int
         .limit(500)
     )
     cat_res = await session.execute(cat_stmt)
-    catalog = [
-        {
-            "sourceId": c.source_id,
-            "toonId": c.toon_id,
-            "totalEpisodes": c.total_episodes,
-            "updatedAt": c.updated_at,
-        }
-        for c in cat_res.scalars().all()
-    ]
+    catalog = [emit_catalog(c) for c in cat_res.scalars().all()]
 
     return {
         "favorites": favs,
@@ -1267,17 +1319,7 @@ async def get_catalog_batch(
     )
     res = await session.execute(stmt)
     records = res.scalars().all()
-    return {
-        "catalog": [
-            {
-                "sourceId": r.source_id,
-                "toonId": r.toon_id,
-                "totalEpisodes": r.total_episodes,
-                "updatedAt": r.updated_at,
-            }
-            for r in records
-        ]
-    }
+    return {"catalog": [emit_catalog(r) for r in records]}
 
 
 @router.post("/catalog/report")

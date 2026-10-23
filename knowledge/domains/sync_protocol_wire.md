@@ -24,12 +24,20 @@
 - **4-Tier Resolution Pipeline**: 임의의 클라이언트 JS 소스 ID는 4단계 파이프라인(호스트 매칭 O(1) -> 누적 Toon ID 교집합 15% 이상 및 도메인 자가 치유 -> 타이틀 시맨틱 폴백 -> 고립 신규 소스 생성)을 거쳐 서버의 정규 소스 클러스터로 매핑됩니다.
 - **Local Source Binding**: 클라이언트는 최초 발견 시 `SourceBindingManager`를 통해 로컬에 매핑 결과를 바인딩하여 후속 배치 카탈로그 질의의 부하를 0으로 유지합니다.
 
-### 4. Server Account Materialization & Credential Transport
+### 4. Episode Total Shape Cache (`EpisodeTotal`)
+- **Contract Owners**: `core/src/main/kotlin/model/EpisodeTotal.kt` (`Exact | AtLeast` + `EpisodeListingSnapshot`)와 `RepositoryTransforms.verifyEpisodeListing`이 "전체 회차수"의 값과 그 신뢰도를 소유합니다.
+- **Single-Request Derivation**: 목록의 페이지 수(`lastPage`)는 사이트가 페이지네이션으로 보고하는 권위 값이고, 총합 `(lastPage - 1) * pageSize + lastPageItemCount`에서 미지수는 마지막 페이지 개수 하나뿐입니다. `EpisodeListingSnapshot(lastPage, lastPageItemCount)`를 카탈로그에 캐시하면 이후 갱신은 1페이지 1회 요청으로 정확한 총합을 얻습니다.
+- **Sweep Only To Learn**: 전 페이지 순회(`verifyEpisodeListing`)는 스냅샷이 없거나 보고된 페이지 수가 캐시와 다를 때만 실행합니다. 중간 페이지가 비었거나 요청이 실패하면 스냅샷 없이 하한만 반환하므로, 부분 스윕이 검증된 총합을 덮어쓸 수 없습니다.
+- **Merge Asymmetry**: `EpisodeTotal.merge`는 Exact가 이전 값의 Exactness와 무관하게 승리(하향 정정 허용)하고, AtLeast는 AtLeast끼리만 상향 병합합니다. Android `ToonCatalogDao.recordTotal`, Desktop `DesktopDatabase.recordCatalogTotal`, 서버 `upsert_catalog_from_payload`가 동일 규칙을 구현해야 하며 SQL `MAX()` 단독 사용은 금지됩니다.
+- **Refresh Trigger**: 목록 갱신 시 백그라운드 스크래핑 대상은 `RepositoryTransforms.needsEpisodeSync`가 단독 판정합니다. 조건은 "미독 회차 존재(`EpisodeTotal.needsRefresh`)·썸네일 공백·즐겨찾기" 세 가지이며, 카탈로그 유무(`needsCatalog`)는 미독 판정에 이미 포함되고 `isNew`는 seen 비교의 결과값이므로 트리거에서 제외됩니다.
+- **Wire Field**: 카탈로그 와이어는 `exact`, `lastPage`, `lastPageItemCount`를 전송합니다. 히스토리에서 파생된 항목은 항상 하한이고 스냅샷을 지니지 않으므로, 다른 기기는 카탈로그 항목으로만 1회 요청 계산이 가능합니다.
+
+### 5. Server Account Materialization & Credential Transport
 - **Transactional Materialization**: 마스터 동기화 키 해석은 부수효과가 없습니다 (단순 읽기나 페어링 요청으로 `users` 행을 생성하지 않음). 유효한 동기화 엔티티 저장이나 검증된 구독 결제 시에만 원자적으로 유저 행이 실체화됩니다.
 - **Immutable Sync Key**: 비어있지 않은 저장된 `sync_key`는 인증 도중 불변이며, 동일 `user_id`로 정규화되는 다른 원시 키는 재바인딩되지 않고 거부됩니다.
 - **Secure Transport Perimeter**: 동기화 자격증명은 `Authorization: Bearer` 또는 `X-Sync-Key` 헤더로만 전송되며 URL 쿼리 스트링 전송은 금지됩니다. 6자리 페어링 코드는 원자적으로 1회만 소비됩니다.
 
-### 5. Storage Adapter Abstraction
+### 6. Storage Adapter Abstraction
 - **Adapter Invariant**: `BaseSyncManager`는 오직 `SyncStorageAdapter` 인터페이스만을 통해 로컬 저장소와 상호작용합니다.
 - **Platform Bindings**: Android는 Room 기반의 `AndroidSyncManager`, Desktop은 SQLite JDBC 기반의 `DesktopSyncManager`가 각각의 스토리지 어댑터를 구현합니다.
 

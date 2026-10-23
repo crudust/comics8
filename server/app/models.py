@@ -301,6 +301,9 @@ class ToonCatalog(Base):
     toon_id: Mapped[str] = mapped_column(Text, primary_key=True)
     total_episodes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     updated_at: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, index=True)
+    exact: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    last_page: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_page_item_count: Mapped[int] = mapped_column(Integer, nullable=False, default=-1)
 
     __table_args__ = (
         Index("idx_toon_catalog_updated", "updated_at"),

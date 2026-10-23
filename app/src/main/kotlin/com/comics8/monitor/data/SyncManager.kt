@@ -250,12 +250,15 @@ class AndroidRoomSyncStorageAdapter(
             if (episodes.isNotEmpty()) database.readEpisodeDao().markReadAll(episodes)
             if (settings.isNotEmpty()) database.readerSettingDao().saveAll(settings)
 
+            // History only carries a count, so it merges as a lower bound; the catalog payload keeps
+            // its exactness flag and can therefore correct an inflated total downward.
             val catalogFromHistory = history.filter { it.totalEpisodes > 0 }.map {
                 com.comics8.monitor.data.local.ToonCatalogEntry(
                     sourceId = it.sourceId,
                     id = it.toonId,
                     totalEpisodes = it.totalEpisodes,
                     updatedAt = it.lastReadAt,
+                    exact = false,
                 )
             }
             val directCatalog = payload.catalog.map {
@@ -264,6 +267,9 @@ class AndroidRoomSyncStorageAdapter(
                     id = it.toonId,
                     totalEpisodes = it.totalEpisodes,
                     updatedAt = it.updatedAt,
+                    exact = it.exact,
+                    lastPage = it.lastPage,
+                    lastPageItemCount = it.lastPageItemCount,
                 )
             }
             val allCatalog = catalogFromHistory + directCatalog

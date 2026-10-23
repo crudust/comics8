@@ -169,13 +169,19 @@ CREATE TABLE IF NOT EXISTS pairing_codes (
 CREATE INDEX IF NOT EXISTS idx_pairing_codes_expiry ON pairing_codes(expires_at);
 
 -- -----------------------------------------------------------------------------
--- 10. Global Toon Catalog Table (Crowdsourced monotonic episode counts)
+-- 10. Global Toon Catalog Table (Crowdsourced episode counts, exact-or-lower-bound)
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS toon_catalog (
     source_id TEXT NOT NULL DEFAULT 'eleven',
     toon_id TEXT NOT NULL,
     total_episodes INT NOT NULL DEFAULT 0,
     updated_at BIGINT NOT NULL DEFAULT 0,
+    -- true when total_episodes was read from the last page of the listing; only exact counts may
+    -- correct a previously stored value downward.
+    exact BOOLEAN NOT NULL DEFAULT FALSE,
+    -- verified listing shape, so any client can recompute the total from a single page request
+    last_page INT NOT NULL DEFAULT 0,
+    last_page_item_count INT NOT NULL DEFAULT -1,
     PRIMARY KEY (source_id, toon_id)
 );
 

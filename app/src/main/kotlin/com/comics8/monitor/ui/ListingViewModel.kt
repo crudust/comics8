@@ -11,6 +11,7 @@ import com.comics8.core.model.AppUpdateState
 import com.comics8.core.model.ArtistRef
 import com.comics8.core.model.BrowseTab
 import com.comics8.core.model.EpisodeItem
+import com.comics8.core.model.EpisodeTotal
 import com.comics8.core.model.EpisodeSortOrder
 import com.comics8.core.model.ProgressDisplayMode
 import com.comics8.core.model.ReadDirection
@@ -21,7 +22,6 @@ import com.comics8.core.model.SplitMode
 import com.comics8.core.model.ToonItem
 import com.comics8.core.model.ViewMode
 import com.comics8.core.source.ComicSource
-import com.comics8.core.source.ProgressDisplay
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
 import com.comics8.core.source.js.JsPackStore
@@ -164,7 +164,7 @@ data class ListingUiState(
         sourceRegistry.formatReadProgress(
             history.sourceId,
             history.lastReadOrder,
-            history.totalEpisodes,
+            EpisodeTotal.fromStored(history.totalEpisodes),
             readCounts[history.workId().storageKey()] ?: 0,
         )
 }
@@ -351,7 +351,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     private val catalogCache = mutableMapOf<BrowseTab, List<ToonItem>>()
     private val catalogPages = mutableMapOf<BrowseTab, Pair<Int, Int>>()
 
-    private val toonTotalCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
+    private val toonTotalCounts = java.util.concurrent.ConcurrentHashMap<String, EpisodeTotal>()
 
     // 계층적 내비게이션 상태 (그리드 <-> 회차리스트 <-> 뷰어)
     private var lastViewedSeries: ToonItem? = null
@@ -1357,7 +1357,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             val readCount = countIfNeeded(item.workId())
             val catalogTotal = repository.getCatalogTotal(item.workId())
             val itemKey = item.workId().storageKey()
-            if (catalogTotal > 0 && toonTotalCounts[itemKey] == null) {
+            if (catalogTotal.count > 0 && toonTotalCounts[itemKey] == null) {
                 toonTotalCounts[itemKey] = catalogTotal
             }
             _state.update { current ->
@@ -1430,47 +1430,28 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             val firstEp = raw.lastOrNull()
             if (firstEp != null) {
                 openEpisode(firstEp)
-            } else {
-                viewModelScope.launch {
-                    try {
-                        val result = repository.loadEpisodes(series, 1)
-                        toonTotalCounts[seriesKey] = result.items.size
-                        repository.saveCatalogTotal(series.workId(), result.items.size)
-                        _state.update {
-                            it.copy(
-                                rawEpisodes = result.items,
-                                episodes = result.items.sortedWithOrder(it.episodeSortOrder),
-                                episodePage = result.currentPage,
-                                episodeLastPage = result.lastPage,
-                            )
-                        }
-                        result.items.lastOrNull()?.let { openEpisode(it) }
-                    } catch (_: Exception) {
-                    }
-                }
+                return
             }
-        } else {
-            viewModelScope.launch {
-                try {
-                    val result = repository.loadEpisodes(series, lastPage)
-                    val pageSize = repository.sourceOrNull(series.sourceId)?.episodePageSize ?: 100
-                    val exactTotal = RepositoryTransforms.estimateTotalEpisodes(result, pageSize, result.items.size)
-                    toonTotalCounts[seriesKey] = exactTotal
-                    repository.saveCatalogTotal(series.workId(), exactTotal)
-                    _state.update {
-                        it.copy(
-                            rawEpisodes = result.items,
-                            episodes = result.items.sortedWithOrder(it.episodeSortOrder),
-                            episodePage = result.currentPage,
-                            episodeLastPage = result.lastPage,
-                        )
-                    }
-                    val firstEp = result.items.lastOrNull()
-                    if (firstEp != null) {
-                        openEpisode(firstEp)
-                    }
-                } catch (_: Exception) {
+        }
+        viewModelScope.launch {
+            try {
+                // Resolve the total through the single-page + verified-shape path, then load the
+                // page we actually need. No total arithmetic belongs in the view model.
+                val metadata = repository.fetchEpisodeMetadata(series)
+                toonTotalCounts[seriesKey] = metadata.total
+                repository.saveCatalogTotal(series.workId(), metadata.total, snapshot = metadata.snapshot)
+
+                val result = repository.loadEpisodes(series, lastPage.coerceAtLeast(1))
+                _state.update {
+                    it.copy(
+                        rawEpisodes = result.items,
+                        episodes = result.items.sortedWithOrder(it.episodeSortOrder),
+                        episodePage = result.currentPage,
+                        episodeLastPage = result.lastPage,
+                    )
                 }
+                result.items.lastOrNull()?.let(::openEpisode)
+            } catch (_: Exception) {
             }
         }
     }
@@ -2143,7 +2124,8 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             currentEpisodeId = episode.wrId,
             currentPage = current.episodePage,
             lastPage = current.episodeLastPage,
-            knownTotalCount = toonTotalCounts[seriesKey] ?: current.seriesHistory?.totalEpisodes?.takeIf { it > 1 },
+            knownTotal = toonTotalCounts[seriesKey]
+                ?: EpisodeTotal.fromStored(current.seriesHistory?.totalEpisodes ?: 0),
             pageSize = series?.let { repository.sourceOrNull(it.sourceId)?.episodePageSize } ?: 100,
         )
         val nextEp = position.nextEpisodeIndex?.let(rawEpisodes::get)
@@ -2182,15 +2164,18 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 repository.markEpisodeRead(series.workId(), episode.wrId, episode.lastReadPage)
                 val existingHistory = repository.getHistory(series.workId())
 
-                val finalOrder = position.readOrder
-                    ?: existingHistory?.lastReadOrder
-                    ?: 1
-                val finalTotal = maxOf(position.totalEpisodes, existingHistory?.totalEpisodes ?: 1, finalOrder)
+                val merged = RepositoryTransforms.mergeHistoryProgress(
+                    lastReadOrder = position.readOrder ?: existingHistory?.lastReadOrder ?: 1,
+                    storedTotal = existingHistory?.totalEpisodes ?: 0,
+                    observed = position.total,
+                )
+                val finalOrder = merged.lastReadOrder
+                val finalTotal = merged.total.count
 
                 val (progressText, readCount) = listingProgress(
                     series.sourceId,
                     finalOrder,
-                    finalTotal,
+                    merged.total,
                     series.workId(),
                 )
                 val savedHistory = ReadHistory(
@@ -2208,7 +2193,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                     nextWrId = nextEp?.wrId ?: existingHistory?.nextWrId,
                     nextEpisodeTitle = nextEp?.title ?: existingHistory?.nextEpisodeTitle,
                     nextEpisodeHref = nextEp?.href ?: existingHistory?.nextEpisodeHref,
-                    hasNew = finalOrder < finalTotal,
+                    hasNew = merged.hasNew,
                 )
                 repository.saveHistory(savedHistory)
                 _state.update { curr ->
@@ -2345,16 +2330,11 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     ) {
         try {
             val result = repository.loadEpisodes(series, page)
-            val lastP = result.lastPage.coerceAtLeast(1)
-            val currP = ReaderDomain.clampPage(result.currentPage, lastP)
             val pageSize = repository.sourceOrNull(series.sourceId)?.episodePageSize ?: 100
             val seriesKey = series.workId().storageKey()
 
-            if (lastP <= 1) {
-                toonTotalCounts[seriesKey] = result.items.size
-            } else if (currP == lastP) {
-                toonTotalCounts[seriesKey] = RepositoryTransforms.estimateTotalEpisodes(result, pageSize, result.items.size)
-            }
+            // EpisodeTotal.from already yields a lower bound unless this page is the last one.
+            toonTotalCounts[seriesKey] = EpisodeTotal.from(result, pageSize)
 
             _state.update {
                 it.copy(
@@ -2445,7 +2425,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             items,
             onThumbnailResolved = ::updateThumbnailIfBlank,
             onUpdated = { workId, totalEpisodes, progressText ->
-                toonTotalCounts[workId.storageKey()] = totalEpisodes
+                toonTotalCounts[workId.storageKey()] = EpisodeTotal.fromStored(totalEpisodes)
                 _state.update { curr ->
                     val updatedItems = curr.items.map { row ->
                         if (row.workId() == workId) row.copy(readProgress = progressText) else row
@@ -2463,11 +2443,15 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                         items = updatedItems,
                         seriesHistory = if (curr.series?.workId() == workId) {
                             curr.seriesHistory?.let { currHist ->
-                                val effectiveTotal = maxOf(currHist.totalEpisodes, totalEpisodes)
+                                val merged = RepositoryTransforms.mergeHistoryProgress(
+                                    currHist.lastReadOrder,
+                                    currHist.totalEpisodes,
+                                    EpisodeTotal.fromStored(totalEpisodes),
+                                )
                                 currHist.copy(
-                                    totalEpisodes = effectiveTotal,
-                                    lastReadOrder = currHist.lastReadOrder.coerceIn(0, effectiveTotal),
-                                    hasNew = currHist.lastReadOrder < effectiveTotal,
+                                    totalEpisodes = merged.total.count,
+                                    lastReadOrder = merged.lastReadOrder,
+                                    hasNew = merged.hasNew,
                                 )
                             }
                         } else curr.seriesHistory,
@@ -2608,20 +2592,15 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                     if (!firstThumb.isNullOrBlank() && item.thumbUrl.isBlank()) {
                         updateThumbnailIfBlank(item.workId(), firstThumb)
                     }
-                    val lastP = result.lastPage.coerceAtLeast(1)
-                    val currP = ReaderDomain.clampPage(result.currentPage, lastP)
                     val pageSize = repository.sourceOrNull(item.sourceId)?.episodePageSize ?: 100
                     val itemKey = item.workId().storageKey()
 
-                    val exactTotal = when {
-                        lastP <= 1 -> result.items.size
-                        currP == lastP -> RepositoryTransforms.estimateTotalEpisodes(result, pageSize, result.items.size)
-                        else -> toonTotalCounts[itemKey]
-                            ?: repository.getCatalogTotal(item.workId()).takeIf { it > 0 }
-                            ?: RepositoryTransforms.estimateTotalEpisodes(result, pageSize)
-                    }
-                    toonTotalCounts[itemKey] = exactTotal
-                    updateHistoryAndProgress(item, exactTotal)
+                    val observedTotal = EpisodeTotal.merge(
+                        toonTotalCounts[itemKey],
+                        EpisodeTotal.from(result, pageSize),
+                    )
+                    toonTotalCounts[itemKey] = observedTotal
+                    updateHistoryAndProgress(item, observedTotal)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -2638,9 +2617,9 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private suspend fun updateHistoryAndProgress(item: ToonItem, exactTotal: Int) {
-        if (exactTotal <= 0) return
-        repository.saveCatalogTotal(item.workId(), exactTotal)
+    private suspend fun updateHistoryAndProgress(item: ToonItem, observedTotal: EpisodeTotal) {
+        if (observedTotal.count <= 0) return
+        repository.saveCatalogTotal(item.workId(), observedTotal)
         val rawEpisodes = _state.value.rawEpisodes.ifEmpty { _state.value.episodes }
         val latestRead = rawEpisodes.firstOrNull { it.isRead }
         val seriesKey = item.workId().storageKey()
@@ -2650,7 +2629,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 currentEpisodeId = latestRead.wrId,
                 currentPage = _state.value.episodePage,
                 lastPage = _state.value.episodeLastPage,
-                knownTotalCount = toonTotalCounts[seriesKey] ?: exactTotal,
+                knownTotal = toonTotalCounts[seriesKey] ?: observedTotal,
                 pageSize = repository.sourceOrNull(item.sourceId)?.episodePageSize ?: 100,
             )
         } else null
@@ -2660,6 +2639,11 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         if (existing == null) {
             if (latestRead != null && derivedOrder != null) {
                 val nextEp = derivedPosition.nextEpisodeIndex?.let { rawEpisodes.getOrNull(it) }
+                val progress = RepositoryTransforms.mergeHistoryProgress(
+                    lastReadOrder = derivedOrder,
+                    storedTotal = 0,
+                    observed = observedTotal,
+                )
                 val created = ReadHistory(
                     sourceId = item.sourceId,
                     toonId = item.id,
@@ -2669,19 +2653,19 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                     lastWrId = latestRead.wrId,
                     lastEpisodeTitle = latestRead.title,
                     lastEpisodeHref = latestRead.href,
-                    lastReadOrder = derivedOrder,
-                    totalEpisodes = exactTotal,
+                    lastReadOrder = progress.lastReadOrder,
+                    totalEpisodes = progress.total.count,
                     lastReadAt = latestRead.readAt ?: System.currentTimeMillis(),
                     nextWrId = nextEp?.wrId,
                     nextEpisodeTitle = nextEp?.title,
                     nextEpisodeHref = nextEp?.href,
-                    hasNew = derivedOrder < exactTotal,
+                    hasNew = progress.hasNew,
                 )
                 repository.saveHistory(created)
                 val (progressText, readCount) = listingProgress(
                     item.sourceId,
                     created.lastReadOrder,
-                    created.totalEpisodes,
+                    progress.total,
                     item.workId(),
                 )
                 _state.update { curr ->
@@ -2698,7 +2682,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
                 val (progressText, _) = listingProgress(
                     item.sourceId,
                     0,
-                    exactTotal,
+                    observedTotal,
                     item.workId(),
                 )
                 if (progressText.isNotBlank()) {
@@ -2713,11 +2697,16 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             return
         }
 
-        val effectiveTotal = maxOf(existing.totalEpisodes, exactTotal)
-        val candidateOrder = existing.lastReadOrder.coerceIn(0, effectiveTotal)
+        val mergedProgress = RepositoryTransforms.mergeHistoryProgress(
+            lastReadOrder = existing.lastReadOrder,
+            storedTotal = existing.totalEpisodes,
+            observed = observedTotal,
+        )
+        val effectiveTotal = mergedProgress.total
+        val candidateOrder = mergedProgress.lastReadOrder
         val shouldElevate = derivedOrder != null && derivedOrder > candidateOrder
         val safeOrder = if (shouldElevate) derivedOrder!! else candidateOrder
-        val hasNew = safeOrder < effectiveTotal
+        val hasNew = if (shouldElevate) effectiveTotal.needsRefresh(safeOrder) else mergedProgress.hasNew
 
         val updatedWrId = if (shouldElevate && latestRead != null) latestRead.wrId else existing.lastWrId
         val updatedTitle = if (shouldElevate && latestRead != null) latestRead.title else existing.lastEpisodeTitle
@@ -2735,14 +2724,14 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             rawEpisodes.getOrNull(derivedPosition.nextEpisodeIndex!!)?.href ?: existing.nextEpisodeHref
         } else existing.nextEpisodeHref
 
-        if (existing.totalEpisodes != effectiveTotal ||
+        if (existing.totalEpisodes != effectiveTotal.count ||
             existing.lastReadOrder != safeOrder ||
             existing.hasNew != hasNew ||
             existing.lastWrId != updatedWrId ||
             existing.lastReadAt != updatedReadAt
         ) {
             val updated = existing.copy(
-                totalEpisodes = effectiveTotal,
+                totalEpisodes = effectiveTotal.count,
                 lastReadOrder = safeOrder,
                 hasNew = hasNew,
                 lastWrId = updatedWrId,
@@ -2757,7 +2746,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
             val (progressText, readCount) = listingProgress(
                 item.sourceId,
                 updated.lastReadOrder,
-                updated.totalEpisodes,
+                effectiveTotal,
                 item.workId(),
             )
             _state.update { curr ->
@@ -2825,11 +2814,11 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
     private suspend fun listingProgress(
         sourceId: String,
         lastReadOrder: Int,
-        totalEpisodes: Int,
+        total: EpisodeTotal,
         workId: WorkId,
     ): Pair<String, Int> {
         val readCount = countIfNeeded(workId)
-        return repository.formatReadProgress(sourceId, lastReadOrder, totalEpisodes, readCount) to readCount
+        return repository.formatReadProgress(sourceId, lastReadOrder, total, readCount) to readCount
     }
 
     private suspend fun countIfNeeded(workId: WorkId): Int {
@@ -2861,7 +2850,7 @@ class ListingViewModel(application: Application) : AndroidViewModel(application)
         readProgress = repository.formatReadProgress(
             sourceId = sourceId,
             lastReadOrder = lastReadOrder,
-            totalEpisodes = totalEpisodes,
+            total = EpisodeTotal.fromStored(totalEpisodes),
             readCount = _state.value.readCounts[workId().storageKey()] ?: 0,
         ),
     )

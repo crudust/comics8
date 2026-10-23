@@ -273,11 +273,25 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
                     toonId TEXT NOT NULL,
                     totalEpisodes INTEGER NOT NULL DEFAULT 0,
                     updatedAt INTEGER NOT NULL DEFAULT 0,
+                    exact INTEGER NOT NULL DEFAULT 0,
+                    lastPage INTEGER NOT NULL DEFAULT 0,
+                    lastPageItemCount INTEGER NOT NULL DEFAULT -1,
                     PRIMARY KEY (sourceId, toonId)
                 )
                 """.trimIndent(),
             )
             stmt.execute("CREATE INDEX IF NOT EXISTS index_toon_catalog_toonId ON toon_catalog(toonId)")
+            // Databases created before exactness tracking keep their counts as lower bounds, so the
+            // first exact observation can still correct an inflated total downward.
+            if (!hasColumn(conn, "toon_catalog", "exact")) {
+                stmt.execute("ALTER TABLE toon_catalog ADD COLUMN exact INTEGER NOT NULL DEFAULT 0")
+            }
+            if (!hasColumn(conn, "toon_catalog", "lastPage")) {
+                stmt.execute("ALTER TABLE toon_catalog ADD COLUMN lastPage INTEGER NOT NULL DEFAULT 0")
+            }
+            if (!hasColumn(conn, "toon_catalog", "lastPageItemCount")) {
+                stmt.execute("ALTER TABLE toon_catalog ADD COLUMN lastPageItemCount INTEGER NOT NULL DEFAULT -1")
+            }
         }
     }
 
@@ -1192,15 +1206,15 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
         return null
     }
 
-    fun getCatalogTotalsByToonIds(ids: List<WorkId>): Map<String, Int> {
+    fun getCatalogTotalsByToonIds(ids: List<WorkId>): Map<String, com.comics8.core.model.EpisodeTotal> {
         if (ids.isEmpty()) return emptyMap()
         val wanted = ids.map { it.storageKey() }.toSet()
         val toonIds = ids.map { it.toonId }.distinct()
-        val map = mutableMapOf<String, Int>()
+        val map = mutableMapOf<String, com.comics8.core.model.EpisodeTotal>()
         withConnection { conn ->
             for (chunk in toonIds.chunked(400)) {
                 val placeholders = chunk.joinToString(",") { "?" }
-                conn.prepareStatement("SELECT sourceId, toonId, totalEpisodes FROM toon_catalog WHERE toonId IN ($placeholders)").use { stmt ->
+                conn.prepareStatement("SELECT sourceId, toonId, totalEpisodes, exact FROM toon_catalog WHERE toonId IN ($placeholders)").use { stmt ->
                     chunk.forEachIndexed { index, id -> stmt.setString(index + 1, id) }
                     val rs = stmt.executeQuery()
                     while (rs.next()) {
@@ -1208,7 +1222,10 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
                         val tid = rs.getString("toonId")
                         val key = WorkId(sid, tid).storageKey()
                         if (key in wanted) {
-                            map[key] = rs.getInt("totalEpisodes")
+                            map[key] = com.comics8.core.model.EpisodeTotal.fromStored(
+                                rs.getInt("totalEpisodes"),
+                                rs.getInt("exact") == 1,
+                            )
                         }
                     }
                 }
@@ -1217,23 +1234,48 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
         return map
     }
 
-    fun upsertCatalogMonotonic(workId: WorkId, totalEpisodes: Int, updatedAt: Long = System.currentTimeMillis()) {
-        if (totalEpisodes <= 0) return
+    /**
+     * Persists an observed total through [com.comics8.core.model.EpisodeTotal.merge].
+     * The old `WHERE excluded.totalEpisodes > totalEpisodes` guard is gone on purpose: it turned
+     * every over-estimate into a permanent value.
+     */
+    fun recordCatalogTotal(
+        workId: WorkId,
+        total: com.comics8.core.model.EpisodeTotal,
+        updatedAt: Long = System.currentTimeMillis(),
+        snapshot: com.comics8.core.model.EpisodeListingSnapshot? = null,
+    ) {
+        if (total.count <= 0) return
+        val existing = getCatalog(workId)
+        val merged = com.comics8.core.model.EpisodeTotal.merge(existing?.total(), total)
+        // A sweep only ships a snapshot together with an exact total, so the shape always belongs to
+        // whichever row actually gains exactness.
+        val mergedSnapshot = snapshot ?: existing?.snapshot()
+        if (existing != null && merged == existing.total() && mergedSnapshot == existing.snapshot()) return
+        upsertCatalog(ToonCatalogRecord.of(workId, merged, updatedAt, mergedSnapshot))
+    }
+
+    private fun upsertCatalog(record: ToonCatalogRecord) {
         withConnection { conn ->
             conn.prepareStatement(
                 """
-                INSERT INTO toon_catalog (sourceId, toonId, totalEpisodes, updatedAt)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO toon_catalog (sourceId, toonId, totalEpisodes, updatedAt, exact, lastPage, lastPageItemCount)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(sourceId, toonId) DO UPDATE SET
                     totalEpisodes = excluded.totalEpisodes,
-                    updatedAt = excluded.updatedAt
-                WHERE excluded.totalEpisodes > toon_catalog.totalEpisodes
+                    updatedAt = excluded.updatedAt,
+                    exact = excluded.exact,
+                    lastPage = excluded.lastPage,
+                    lastPageItemCount = excluded.lastPageItemCount
                 """.trimIndent(),
             ).use { stmt ->
-                stmt.setString(1, workId.sourceId)
-                stmt.setString(2, workId.toonId)
-                stmt.setInt(3, totalEpisodes)
-                stmt.setLong(4, updatedAt)
+                stmt.setString(1, record.sourceId)
+                stmt.setString(2, record.toonId)
+                stmt.setInt(3, record.totalEpisodes)
+                stmt.setLong(4, record.updatedAt)
+                stmt.setInt(5, if (record.exact) 1 else 0)
+                stmt.setInt(6, record.lastPage)
+                stmt.setInt(7, record.lastPageItemCount)
                 stmt.executeUpdate()
             }
         }
@@ -1241,26 +1283,9 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
 
     fun saveAllCatalog(items: List<ToonCatalogRecord>) {
         if (items.isEmpty()) return
-        withTransaction { conn ->
-            conn.prepareStatement(
-                """
-                INSERT INTO toon_catalog (sourceId, toonId, totalEpisodes, updatedAt)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(sourceId, toonId) DO UPDATE SET
-                    totalEpisodes = excluded.totalEpisodes,
-                    updatedAt = excluded.updatedAt
-                WHERE excluded.totalEpisodes > toon_catalog.totalEpisodes
-                """.trimIndent(),
-            ).use { stmt ->
-                for (item in items) {
-                    if (item.totalEpisodes <= 0) continue
-                    stmt.setString(1, item.sourceId)
-                    stmt.setString(2, item.toonId)
-                    stmt.setInt(3, item.totalEpisodes)
-                    stmt.setLong(4, item.updatedAt)
-                    stmt.addBatch()
-                }
-                stmt.executeBatch()
+        withTransaction {
+            for (item in items) {
+                recordCatalogTotal(item.workId(), item.total(), item.updatedAt, item.snapshot())
             }
         }
     }
@@ -1270,5 +1295,19 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
         toonId = rs.getString("toonId"),
         totalEpisodes = rs.getInt("totalEpisodes"),
         updatedAt = rs.getLong("updatedAt"),
+        exact = rs.getInt("exact") == 1,
+        lastPage = rs.getInt("lastPage"),
+        lastPageItemCount = rs.getInt("lastPageItemCount"),
     )
+
+    private fun hasColumn(conn: Connection, table: String, column: String): Boolean {
+        conn.createStatement().use { stmt ->
+            stmt.executeQuery("PRAGMA table_info($table)").use { rs ->
+                while (rs.next()) {
+                    if (rs.getString("name").equals(column, ignoreCase = true)) return true
+                }
+            }
+        }
+        return false
+    }
 }

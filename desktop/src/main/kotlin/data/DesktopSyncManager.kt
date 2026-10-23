@@ -242,11 +242,14 @@ class DesktopSyncStorageAdapter(
         database.applySyncBatch(deletions, favorites, historyToSave, episodes, settings)
 
         val catalogFromHistory = history.filter { it.totalEpisodes > 0 }.map {
+            // History only carries a count, so it merges as a lower bound; the catalog payload keeps
+            // its exactness flag and can therefore correct an inflated total downward.
             ToonCatalogRecord(
                 sourceId = it.sourceId,
                 toonId = it.toonId,
                 totalEpisodes = it.totalEpisodes,
                 updatedAt = it.lastReadAt,
+                exact = false,
             )
         }
         val directCatalog = payload.catalog.map {
@@ -255,6 +258,9 @@ class DesktopSyncStorageAdapter(
                 toonId = it.toonId,
                 totalEpisodes = it.totalEpisodes,
                 updatedAt = it.updatedAt,
+                exact = it.exact,
+                lastPage = it.lastPage,
+                lastPageItemCount = it.lastPageItemCount,
             )
         }
         val allCatalog = catalogFromHistory + directCatalog

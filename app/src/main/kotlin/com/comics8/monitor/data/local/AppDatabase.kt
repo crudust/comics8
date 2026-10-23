@@ -11,6 +11,8 @@ import androidx.room.Query
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.comics8.core.model.EpisodeListingSnapshot
+import com.comics8.core.model.EpisodeTotal
 import com.comics8.core.source.WorkId
 
 @Entity(
@@ -406,8 +408,40 @@ data class ToonCatalogEntry(
     @ColumnInfo(name = "toonId") val id: String,
     val totalEpisodes: Int = 0,
     val updatedAt: Long = 0L,
+    /** True when [totalEpisodes] was derived from the last page of the listing. */
+    val exact: Boolean = false,
+    /** Page count of the listing when it was verified; 0 when never swept in full. */
+    val lastPage: Int = 0,
+    /** Items on the last page at verification time; the single unknown of the total formula. */
+    val lastPageItemCount: Int = -1,
 ) {
     fun workId(): WorkId = WorkId(sourceId, id)
+
+    fun total(): EpisodeTotal = EpisodeTotal.fromStored(totalEpisodes, exact)
+
+    fun snapshot(): EpisodeListingSnapshot? =
+        if (lastPage > 0 && lastPageItemCount >= 0) {
+            EpisodeListingSnapshot(lastPage = lastPage, lastPageItemCount = lastPageItemCount)
+        } else {
+            null
+        }
+
+    companion object {
+        fun of(
+            workId: WorkId,
+            total: EpisodeTotal,
+            updatedAt: Long,
+            snapshot: EpisodeListingSnapshot? = null,
+        ): ToonCatalogEntry = ToonCatalogEntry(
+            sourceId = workId.sourceId,
+            id = workId.toonId,
+            totalEpisodes = total.count,
+            updatedAt = updatedAt,
+            exact = total.isExact,
+            lastPage = snapshot?.lastPage ?: 0,
+            lastPageItemCount = snapshot?.lastPageItemCount ?: -1,
+        )
+    }
 }
 
 @Dao
@@ -423,26 +457,34 @@ interface ToonCatalogDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(entries: List<ToonCatalogEntry>)
-
-    @Query("UPDATE toon_catalog SET totalEpisodes = MAX(totalEpisodes, :totalEpisodes), updatedAt = CASE WHEN :totalEpisodes > totalEpisodes THEN :updatedAt ELSE updatedAt END WHERE sourceId = :sourceId AND toonId = :toonId")
-    suspend fun updateMonotonic(sourceId: String, toonId: String, totalEpisodes: Int, updatedAt: Long): Int
 }
 
 suspend fun ToonCatalogDao.get(workId: WorkId): ToonCatalogEntry? = get(workId.sourceId, workId.toonId)
 
-suspend fun ToonCatalogDao.upsertMonotonic(workId: WorkId, totalEpisodes: Int, updatedAt: Long = System.currentTimeMillis()) {
-    if (totalEpisodes <= 0) return
-    val updated = updateMonotonic(workId.sourceId, workId.toonId, totalEpisodes, updatedAt)
-    if (updated == 0) {
-        upsert(ToonCatalogEntry(workId.sourceId, workId.toonId, totalEpisodes, updatedAt))
-    }
+/**
+ * Persists an observed total through [EpisodeTotal.merge], so an exact observation can correct a
+ * previously inflated count downward and a lower bound can only raise a lower bound.
+ * SQL-level `MAX()` is deliberately gone: it made every bad estimate permanent.
+ */
+suspend fun ToonCatalogDao.recordTotal(
+    workId: WorkId,
+    total: EpisodeTotal,
+    updatedAt: Long,
+    snapshot: EpisodeListingSnapshot? = null,
+) {
+    if (total.count <= 0) return
+    val existing = get(workId)
+    val merged = EpisodeTotal.merge(existing?.total(), total)
+    // A sweep only ships a snapshot together with an exact total, so the shape always belongs to
+    // whichever row actually gains exactness.
+    val mergedSnapshot = snapshot ?: existing?.snapshot()
+    if (existing != null && merged == existing.total() && mergedSnapshot == existing.snapshot()) return
+    upsert(ToonCatalogEntry.of(workId, merged, updatedAt, mergedSnapshot))
 }
 
 suspend fun ToonCatalogDao.upsertAllMonotonic(entries: List<ToonCatalogEntry>) {
     for (entry in entries) {
-        if (entry.totalEpisodes > 0) {
-            upsertMonotonic(entry.workId(), entry.totalEpisodes, entry.updatedAt)
-        }
+        recordTotal(entry.workId(), entry.total(), entry.updatedAt, entry.snapshot())
     }
 }
 
@@ -457,7 +499,7 @@ suspend fun ToonCatalogDao.upsertAllMonotonic(entries: List<ToonCatalogEntry>) {
         DownloadedEpisode::class,
         ToonCatalogEntry::class,
     ],
-    version = 13,
+    version = 14,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -494,6 +536,8 @@ abstract class AppDatabase : RoomDatabase() {
         }
         val MIGRATION_12_13: Migration = object : Migration(12, 13) {
             override fun migrate(db: SupportSQLiteDatabase) {
+                // Ships without `exact`: 12->13 is history, 13->14 adds exactness tracking. Changing
+                // a released migration in place would duplicate the column on real upgrades.
                 db.execSQL(
                     """
                     CREATE TABLE IF NOT EXISTS toon_catalog (
@@ -512,6 +556,15 @@ abstract class AppDatabase : RoomDatabase() {
                     SELECT sourceId, toonId, totalEpisodes, lastReadAt FROM read_history WHERE totalEpisodes > 0
                     """.trimIndent(),
                 )
+            }
+        }
+        val MIGRATION_13_14: Migration = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Counts written before exactness tracking are treated as lower bounds, so the first
+                // exact observation can correct an inflated total downward.
+                db.execSQL("ALTER TABLE toon_catalog ADD COLUMN exact INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE toon_catalog ADD COLUMN lastPage INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE toon_catalog ADD COLUMN lastPageItemCount INTEGER NOT NULL DEFAULT -1")
             }
         }
     }

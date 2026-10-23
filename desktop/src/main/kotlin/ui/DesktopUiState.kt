@@ -128,7 +128,7 @@ data class DesktopUiState(
         sourceRegistry.formatReadProgress(
             history.sourceId,
             history.lastReadOrder,
-            history.totalEpisodes,
+            com.comics8.core.model.EpisodeTotal.fromStored(history.totalEpisodes),
             readCounts[history.workId().storageKey()] ?: 0,
         )
 }

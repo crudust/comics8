@@ -4,6 +4,8 @@ import com.comics8.core.model.BrowseTab
 import com.comics8.core.model.EpisodeCatalog
 import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.EpisodePage
+import com.comics8.core.model.EpisodeListingSnapshot
+import com.comics8.core.model.EpisodeTotal
 import com.comics8.core.model.FavoriteListing
 import com.comics8.core.model.ListingPage
 import com.comics8.core.model.OfflineEpisodeRef
@@ -18,7 +20,6 @@ import com.comics8.core.network.ToonClient
 import com.comics8.core.source.ComicSource
 import com.comics8.core.source.LatestUpdateSelection
 import com.comics8.core.source.NotificationMode
-import com.comics8.core.source.ProgressDisplay
 import com.comics8.core.source.SearchQuery
 import com.comics8.core.source.SourceAccess
 import com.comics8.core.source.SourceBindingManager
@@ -48,8 +49,8 @@ import com.comics8.monitor.data.local.updateLastPage
 import com.comics8.core.sync.SyncCatalogWire
 import com.comics8.monitor.data.local.ToonCatalogDao
 import com.comics8.monitor.data.local.ToonCatalogEntry
+import com.comics8.monitor.data.local.recordTotal
 import com.comics8.monitor.data.local.upsertAllMonotonic
-import com.comics8.monitor.data.local.upsertMonotonic
 import com.comics8.monitor.data.local.updateUpdatedAt
 import com.comics8.monitor.data.local.updateThumbUrlIfBlank
 import kotlinx.coroutines.CoroutineScope
@@ -86,26 +87,43 @@ class ToonRepository(
 
     fun sourceRegistry(): SourceRegistry = sources
 
-    suspend fun saveCatalogTotal(workId: WorkId, totalEpisodes: Int, updatedAt: Long = System.currentTimeMillis()) =
-        withContext(Dispatchers.IO) {
-            toonCatalogDao?.upsertMonotonic(workId, totalEpisodes, updatedAt)
-            if (syncManager != null && totalEpisodes > 0 && sources.syncParticipates(workId.sourceId)) {
-                try {
-                    val cSid = bindingManager.getCanonicalSourceId(workId.sourceId)
-                    syncManager.reportCatalog(
-                        listOf(
-                            SyncCatalogWire(
-                                sourceId = cSid,
-                                toonId = workId.toonId,
-                                totalEpisodes = totalEpisodes,
-                                updatedAt = updatedAt,
-                            )
+    /**
+     * Persists an observed total. Only [EpisodeTotal.Exact] observations are reported to the shared
+     * catalog: a lower bound is a local certainty, not something other clients should inherit.
+     */
+    suspend fun saveCatalogTotal(
+        workId: WorkId,
+        total: EpisodeTotal,
+        updatedAt: Long = System.currentTimeMillis(),
+        snapshot: EpisodeListingSnapshot? = null,
+    ) = withContext(Dispatchers.IO) {
+        if (total.count <= 0) return@withContext
+        toonCatalogDao?.recordTotal(workId, total, updatedAt, snapshot)
+        if (syncManager != null && total.isExact && sources.syncParticipates(workId.sourceId)) {
+            try {
+                val cSid = bindingManager.getCanonicalSourceId(workId.sourceId)
+                syncManager.reportCatalog(
+                    listOf(
+                        SyncCatalogWire(
+                            sourceId = cSid,
+                            toonId = workId.toonId,
+                            totalEpisodes = total.count,
+                            updatedAt = updatedAt,
+                            exact = true,
+                            lastPage = snapshot?.lastPage ?: 0,
+                            lastPageItemCount = snapshot?.lastPageItemCount ?: -1,
                         )
                     )
-                } catch (_: Exception) {
-                }
+                )
+            } catch (_: Exception) {
             }
         }
+    }
+
+    /** Reads the stored total without taking an opinion on its exactness. */
+    suspend fun getCatalogTotal(workId: WorkId): EpisodeTotal = withContext(Dispatchers.IO) {
+        toonCatalogDao?.get(workId)?.total() ?: EpisodeTotal.Unknown
+    }
 
     fun source(id: String) = sources.get(id)
 
@@ -251,7 +269,7 @@ class ToonRepository(
                 if (ids.isEmpty()) mutableMapOf() else {
                     toonCatalogDao?.byToonIds(ids)
                         ?.filter { it.workId().storageKey() in wanted }
-                        ?.associate { it.workId().storageKey() to it.totalEpisodes }
+                        ?.associate { it.workId().storageKey() to it.total() }
                         ?.toMutableMap()
                         ?: mutableMapOf()
                 }
@@ -287,7 +305,7 @@ class ToonRepository(
             }
 
             // 1. Server-First: Batch query global catalog for items missing from local DB
-            val missingFromLocal = workIds.filter { (catalogTotals[it.storageKey()] ?: 0) == 0 }
+            val missingFromLocal = workIds.filter { (catalogTotals[it.storageKey()]?.count ?: 0) == 0 }
             if (missingFromLocal.isNotEmpty() && syncManager != null) {
                 try {
                     val canonicalQueries = missingFromLocal.map {
@@ -307,45 +325,44 @@ class ToonRepository(
                         toonCatalogDao?.upsertAllMonotonic(catalogEntries)
                         for (entry in catalogEntries) {
                             val key = entry.workId().storageKey()
-                            val prev = catalogTotals[key] ?: 0
+                            val prev = catalogTotals[key] ?: EpisodeTotal.Unknown
                             val prevHist = historyMap[key]?.totalEpisodes ?: 0
-                            val effectiveTotal = maxOf(prev, prevHist, entry.totalEpisodes)
-                            if (effectiveTotal > prev) {
+                            val applied = RepositoryTransforms.applyCatalogTotal(
+                                known = prev,
+                                storedHistoryTotal = prevHist,
+                                observation = entry.total(),
+                                history = historyMap[key],
+                                readHistoryOrder = { it.lastReadOrder },
+                                readHistoryTotal = { it.totalEpisodes },
+                                readHistoryHasNew = { it.hasNew },
+                                copyHistory = { hist, total, order, hasNew ->
+                                    hist.copy(totalEpisodes = total, lastReadOrder = order, hasNew = hasNew)
+                                },
+                            )
+                            val effectiveTotal = applied.total
+                            if (effectiveTotal.count > prev.count || effectiveTotal.isExact != prev.isExact) {
                                 catalogTotals[key] = effectiveTotal
-                                val hist = historyMap[key]
-                                if (hist != null) {
-                                    val safeOrder = hist.lastReadOrder.coerceIn(0, effectiveTotal)
-                                    val hasNew = safeOrder < effectiveTotal
-                                    if (hist.totalEpisodes != effectiveTotal || hist.hasNew != hasNew) {
-                                        val updatedHist = hist.copy(
-                                            totalEpisodes = effectiveTotal,
-                                            lastReadOrder = safeOrder,
-                                            hasNew = hasNew,
-                                        )
-                                        saveHistory(updatedHist)
-                                        historyMap[key] = updatedHist
-                                    }
+                                applied.history?.takeIf { applied.changed }?.let { updatedHist ->
+                                    saveHistory(updatedHist)
+                                    historyMap[key] = updatedHist
                                 }
-                                val readCounts = countReadEpisodesNow(listOf(entry.workId()))
-                                val readCount = readCounts[key] ?: 0
                                 val progressText = formatReadProgress(
                                     entry.sourceId,
-                                    historyMap[key]?.lastReadOrder ?: 0,
+                                    applied.history?.lastReadOrder ?: 0,
                                     effectiveTotal,
-                                    readCount,
+                                    countReadEpisodesNow(listOf(entry.workId()))[key] ?: 0,
                                 )
-                                onUpdated?.invoke(entry.workId(), effectiveTotal, progressText)
-
-                                if (prevHist > entry.totalEpisodes) {
-                                    discoveredUpdates.add(
-                                        SyncCatalogWire(
-                                            sourceId = entry.sourceId,
-                                            toonId = entry.id,
-                                            totalEpisodes = prevHist,
-                                            updatedAt = System.currentTimeMillis(),
-                                        )
+                                onUpdated?.invoke(entry.workId(), effectiveTotal.count, progressText)
+                            }
+                            if (prevHist > entry.totalEpisodes) {
+                                discoveredUpdates.add(
+                                    SyncCatalogWire(
+                                        sourceId = entry.sourceId,
+                                        toonId = entry.id,
+                                        totalEpisodes = prevHist,
+                                        updatedAt = System.currentTimeMillis(),
                                     )
-                                }
+                                )
                             }
                         }
                     }
@@ -356,15 +373,12 @@ class ToonRepository(
             // 2. Incremental Web Scraping (Fallback for newly updated or explicitly requested items)
             val targets = items.filter { item ->
                 val key = item.workId().storageKey()
-                val hist = historyMap[key]
-                val hasHistory = hist != null
-                val needsCatalog = (catalogTotals[key] ?: 0) == 0
-                val needsThumb = item.thumbUrl.isBlank()
-                val shouldSync = needsCatalog ||
-                    needsThumb ||
-                    item.isNew ||
-                    (hasHistory && hist?.hasNew == true) ||
-                    item.isFavorite
+                val shouldSync = RepositoryTransforms.needsEpisodeSync(
+                    knownTotal = catalogTotals[key] ?: EpisodeTotal.Unknown,
+                    lastReadOrder = historyMap[key]?.lastReadOrder ?: 0,
+                    thumbUrl = item.thumbUrl,
+                    isFavorite = item.isFavorite,
+                )
                 shouldSync && activeSyncKeys.add(key)
             }
 
@@ -378,22 +392,35 @@ class ToonRepository(
                         val key = target.workId().storageKey()
                         try {
                             semaphore.withPermit {
-                                val needsCatalogNow = (catalogTotals[key] ?: 0) == 0
-                                val needsThumbNow = target.thumbUrl.isBlank()
-                                if (encounteredUpToDate && !needsCatalogNow && !needsThumbNow && !target.isFavorite && historyMap[key]?.hasNew != true) {
+                                // Once an up-to-date entry is met, the remaining listing rows are older
+                                // still; only works with a real reason (unread / no cover / favorite)
+                                // are worth the request.
+                                val stillNeeded = RepositoryTransforms.needsEpisodeSync(
+                                    knownTotal = catalogTotals[key] ?: EpisodeTotal.Unknown,
+                                    lastReadOrder = historyMap[key]?.lastReadOrder ?: 0,
+                                    thumbUrl = target.thumbUrl,
+                                    isFavorite = target.isFavorite,
+                                )
+                                if (encounteredUpToDate && !stillNeeded) {
                                     return@withPermit
                                 }
                                 val metadata = fetchEpisodeMetadata(target)
-                                val exactTotal = metadata.totalEpisodes
+                                val observedTotal = metadata.total
+                                val snapshot = metadata.snapshot
                                 val thumb = metadata.thumbUrl
                                 if (!thumb.isNullOrBlank()) {
                                     onThumbnailResolved?.invoke(target.workId(), thumb)
                                 }
-                                if (exactTotal > 0) {
-                                    val prev = catalogTotals[key] ?: 0
-                                    val isIncreased = exactTotal > prev
-                                    val effectiveTotal = maxOf(prev, exactTotal)
-                                    toonCatalogDao?.upsertMonotonic(target.workId(), exactTotal)
+                                if (observedTotal.count > 0) {
+                                    val prev = catalogTotals[key] ?: EpisodeTotal.Unknown
+                                    val isIncreased = observedTotal.count > prev.count
+                                    val effectiveTotal = EpisodeTotal.merge(prev, observedTotal)
+                                    toonCatalogDao?.recordTotal(
+                                        target.workId(),
+                                        observedTotal,
+                                        System.currentTimeMillis(),
+                                        snapshot,
+                                    )
                                     catalogTotals[key] = effectiveTotal
 
                                     if (isIncreased) {
@@ -401,8 +428,9 @@ class ToonRepository(
                                             SyncCatalogWire(
                                                 sourceId = target.sourceId,
                                                 toonId = target.id,
-                                                totalEpisodes = exactTotal,
+                                                totalEpisodes = observedTotal.count,
                                                 updatedAt = System.currentTimeMillis(),
+                                                exact = observedTotal.isExact,
                                             )
                                         )
                                     } else {
@@ -411,15 +439,21 @@ class ToonRepository(
                                         }
                                     }
 
+                                    // Fresh read on purpose: this path REPLACEs the whole history row,
+                                    // so writing back a map snapshot could roll back a lastReadOrder
+                                    // that a concurrent reader update already committed.
                                     val existing = readHistoryDao.get(target.workId())
                                     if (existing != null) {
-                                        val safeOrder = existing.lastReadOrder.coerceIn(0, effectiveTotal)
-                                        val hasNew = safeOrder < effectiveTotal
-                                        if (existing.totalEpisodes != effectiveTotal || existing.hasNew != hasNew) {
+                                        val merged = RepositoryTransforms.mergeHistoryProgress(
+                                            existing.lastReadOrder,
+                                            existing.totalEpisodes,
+                                            effectiveTotal,
+                                        )
+                                        if (existing.totalEpisodes != merged.total.count || existing.hasNew != merged.hasNew) {
                                             val updated = existing.copy(
-                                                totalEpisodes = effectiveTotal,
-                                                lastReadOrder = safeOrder,
-                                                hasNew = hasNew,
+                                                totalEpisodes = merged.total.count,
+                                                lastReadOrder = merged.lastReadOrder,
+                                                hasNew = merged.hasNew,
                                             )
                                             saveHistory(updated)
                                             historyMap[key] = updated
@@ -428,10 +462,10 @@ class ToonRepository(
                                             val progressText = formatReadProgress(
                                                 target.sourceId,
                                                 updated.lastReadOrder,
-                                                updated.totalEpisodes,
+                                                merged.total,
                                                 readCount,
                                             )
-                                            onUpdated?.invoke(target.workId(), effectiveTotal, progressText)
+                                            onUpdated?.invoke(target.workId(), merged.total.count, progressText)
                                         }
                                     } else {
                                         val progressText = formatReadProgress(
@@ -441,7 +475,7 @@ class ToonRepository(
                                             0,
                                         )
                                         if (progressText.isNotBlank()) {
-                                            onUpdated?.invoke(target.workId(), effectiveTotal, progressText)
+                                            onUpdated?.invoke(target.workId(), effectiveTotal.count, progressText)
                                         }
                                     }
                                 }
@@ -469,26 +503,35 @@ class ToonRepository(
         }
     }
 
-    suspend fun fetchEpisodeMetadata(item: ToonItem): RepositoryTransforms.EpisodeMetadata = withContext(Dispatchers.IO) {
-        val firstPage = loadEpisodes(item, 1)
-        val firstThumb = firstPage.items.firstOrNull()?.thumbUrl?.ifBlank { null }
-        val lastP = firstPage.lastPage.coerceAtLeast(1)
-        if (firstPage.items.isEmpty() || lastP <= 1) {
-            val total = RepositoryTransforms.estimateTotalEpisodes(firstPage, 1)
-            return@withContext RepositoryTransforms.EpisodeMetadata(total, firstThumb)
-        }
-        val pageSize = sourceFor(item).episodePageSize
-        val lastPageItemCount = try {
-            loadEpisodes(item, lastP).items.size
-        } catch (_: Exception) {
-            null
-        }
-        val total = RepositoryTransforms.estimateTotalEpisodes(firstPage, pageSize, lastPageItemCount)
-        RepositoryTransforms.EpisodeMetadata(total, firstThumb)
-    }
+    /**
+     * Resolves the episode total for one work.
+     *
+     * The normal path is a single page request combined with the stored listing shape. A full sweep
+     * is only run when the shape is unknown or the reported page count changed, which keeps regular
+     * refreshes at one request while never multiplying an incomplete page up to a page-sized guess.
+     */
+    suspend fun fetchEpisodeMetadata(item: ToonItem): RepositoryTransforms.EpisodeMetadata =
+        withContext(Dispatchers.IO) {
+            val pageSize = sourceFor(item).episodePageSize
+            val firstPage = loadEpisodes(item, 1)
+            val thumb = firstPage.items.firstOrNull()?.thumbUrl?.ifBlank { null }
+            // One catalog read: the row carries both the total and the verified shape.
+            val storedEntry = toonCatalogDao?.get(item.workId())
+            val stored = storedEntry?.total() ?: EpisodeTotal.Unknown
+            val storedShape = storedEntry?.snapshot()
 
-    suspend fun fetchTotalEpisodes(item: ToonItem): Int =
-        fetchEpisodeMetadata(item).totalEpisodes
+            // Fast path: one page plus a verified shape proves the total.
+            val quick = RepositoryTransforms.totalFromPage(firstPage, pageSize, storedShape)
+            if (quick.isExact) {
+                return@withContext RepositoryTransforms.EpisodeMetadata(quick, thumb, storedShape)
+            }
+
+            // No verified shape, or the site changed the page count: prove it with one full sweep.
+            val swept = RepositoryTransforms.verifyEpisodeListing(pageSize) { page ->
+                if (page == 1) firstPage else loadEpisodes(item, page)
+            }
+            RepositoryTransforms.EpisodeMetadata.fromSweep(swept, stored = stored, thumbUrl = thumb)
+        }
 
     suspend fun loadImages(episode: EpisodeItem, workId: WorkId? = null): List<String> = withContext(Dispatchers.IO) {
         if (workId != null && downloadManager != null) {
@@ -597,31 +640,36 @@ class ToonRepository(
                                     return@withPermit null
                                 }
 
+                                // One read of the history row feeds all three decisions below.
+                                val workHistory = readHistoryDao.get(workId)
                                 val isRead = readEpisodeDao.getReadEpisode(workId, latestWrId) != null ||
-                                    readHistoryDao.get(workId)?.lastWrId == latestWrId
+                                    workHistory?.lastWrId == latestWrId
 
-                                val lastP = epPage.lastPage.coerceAtLeast(1)
                                 val pageSize = source.episodePageSize
-                                val existingTotal = toonCatalogDao?.get(workId)?.totalEpisodes?.takeIf { it > 0 }
-                                    ?: readHistoryDao.get(workId)?.totalEpisodes?.takeIf { it > 1 }
-                                val exactTotal = when {
-                                    lastP <= 1 -> epPage.items.size
-                                    existingTotal != null -> maxOf(existingTotal, RepositoryTransforms.estimateTotalEpisodes(epPage, pageSize))
-                                    else -> RepositoryTransforms.estimateTotalEpisodes(epPage, pageSize)
-                                }
+                                val knownTotal = EpisodeTotal.merge(
+                                    toonCatalogDao?.get(workId)?.total() ?: EpisodeTotal.Unknown,
+                                    EpisodeTotal.fromStored(workHistory?.totalEpisodes ?: 0),
+                                )
+                                val observedTotal = EpisodeTotal.merge(
+                                    knownTotal,
+                                    EpisodeTotal.from(epPage, pageSize),
+                                )
 
                                 var changed = false
-                                if (exactTotal > 0) {
-                                    val existingHist = readHistoryDao.get(workId)
+                                if (observedTotal.count > 0) {
+                                    val existingHist = workHistory
                                     if (existingHist != null) {
-                                        val safeOrder = existingHist.lastReadOrder.coerceIn(0, exactTotal)
-                                        val hasNew = safeOrder < exactTotal
-                                        if (existingHist.totalEpisodes != exactTotal || existingHist.hasNew != hasNew) {
+                                        val merged = RepositoryTransforms.mergeHistoryProgress(
+                                            existingHist.lastReadOrder,
+                                            existingHist.totalEpisodes,
+                                            observedTotal,
+                                        )
+                                        if (existingHist.totalEpisodes != merged.total.count || existingHist.hasNew != merged.hasNew) {
                                             readHistoryDao.upsert(
                                                 existingHist.copy(
-                                                    totalEpisodes = exactTotal,
-                                                    lastReadOrder = safeOrder,
-                                                    hasNew = hasNew,
+                                                    totalEpisodes = merged.total.count,
+                                                    lastReadOrder = merged.lastReadOrder,
+                                                    hasNew = merged.hasNew,
                                                 )
                                             )
                                             changed = true
@@ -708,7 +756,7 @@ class ToonRepository(
             if (ids.isEmpty()) emptyMap() else {
                 toonCatalogDao?.byToonIds(ids)
                     ?.filter { it.workId().storageKey() in wanted }
-                    ?.associate { it.workId().storageKey() to it.totalEpisodes }
+                    ?.associate { it.workId().storageKey() to it.total() }
                     ?: emptyMap()
             }
         } catch (_: Exception) {
@@ -731,9 +779,11 @@ class ToonRepository(
             catalogTotalsByKey = catalogTotals,
             seenUpdatedAt = { it.updatedAt },
         ) { item, history, readCount, catalogTotal ->
-            val totalEp = maxOf(history?.totalEpisodes ?: 0, catalogTotal)
-            val lastOrder = history?.lastReadOrder ?: 0
-            formatReadProgress(item.sourceId, lastOrder, totalEp, readCount)
+            val total = EpisodeTotal.merge(
+                catalogTotal,
+                EpisodeTotal.fromStored(history?.totalEpisodes ?: 0),
+            )
+            formatReadProgress(item.sourceId, history?.lastReadOrder ?: 0, total, readCount)
         }
     }
 
@@ -829,9 +879,9 @@ class ToonRepository(
         readEpisodeDao.getReadEpisode(workId, wrId)
     }
 
-    fun formatReadProgress(sourceId: String, lastReadOrder: Int, totalEpisodes: Int, readCount: Int): String {
+    fun formatReadProgress(sourceId: String, lastReadOrder: Int, total: EpisodeTotal, readCount: Int): String {
         val mode = sourceSettings?.progressDisplayMode(sourceId)
-        return sources.formatReadProgress(sourceId, lastReadOrder, totalEpisodes, readCount, mode)
+        return sources.formatReadProgress(sourceId, lastReadOrder, total, readCount, mode)
     }
 
     suspend fun countReadEpisodes(workId: WorkId): Int = withContext(Dispatchers.IO) {
@@ -848,36 +898,30 @@ class ToonRepository(
         if (rows.isEmpty()) return@withContext emptyList()
         val toonIds = rows.map { it.toonId }.distinct()
         val catMap = toonCatalogDao?.byToonIds(toonIds)
-            ?.associate { it.workId().storageKey() to it.totalEpisodes }
+            ?.associate { it.workId().storageKey() to it.total() }
             ?: emptyMap()
         rows.map { row ->
-            val catTotal = catMap[row.workId().storageKey()] ?: 0
-            if (catTotal > row.totalEpisodes) {
-                row.copy(
-                    totalEpisodes = catTotal,
-                    hasNew = row.lastReadOrder < catTotal,
-                )
-            } else {
-                row
-            }
+            val catTotal = catMap[row.workId().storageKey()] ?: EpisodeTotal.Unknown
+            row.withMergedTotal(catTotal)
         }
     }
 
     suspend fun getHistory(workId: WorkId): ReadHistory? = withContext(Dispatchers.IO) {
         val row = readHistoryDao.get(workId) ?: return@withContext null
-        val catTotal = toonCatalogDao?.get(workId)?.totalEpisodes ?: 0
-        if (catTotal > row.totalEpisodes) {
-            row.copy(
-                totalEpisodes = catTotal,
-                hasNew = row.lastReadOrder < catTotal,
-            )
-        } else {
-            row
-        }
+        row.withMergedTotal(toonCatalogDao?.get(workId)?.total() ?: EpisodeTotal.Unknown)
     }
 
-    suspend fun getCatalogTotal(workId: WorkId): Int = withContext(Dispatchers.IO) {
-        toonCatalogDao?.get(workId)?.totalEpisodes ?: 0
+    private fun ReadHistory.withMergedTotal(catalogTotal: EpisodeTotal): ReadHistory {
+        val merged = RepositoryTransforms.mergeHistoryProgress(lastReadOrder, totalEpisodes, catalogTotal)
+        return if (merged.total.count == totalEpisodes && merged.hasNew == hasNew && merged.lastReadOrder == lastReadOrder) {
+            this
+        } else {
+            copy(
+                totalEpisodes = merged.total.count,
+                lastReadOrder = merged.lastReadOrder,
+                hasNew = merged.hasNew,
+            )
+        }
     }
 
     suspend fun saveHistory(history: ReadHistory) = withContext(Dispatchers.IO) {
@@ -885,7 +929,8 @@ class ToonRepository(
         val stored = if (history.sourceId == workId.sourceId) history else history.copy(sourceId = workId.sourceId)
         readHistoryDao.upsert(stored)
         if (stored.totalEpisodes > 0) {
-            toonCatalogDao?.upsertMonotonic(workId, stored.totalEpisodes, stored.lastReadAt)
+            // History only ever carries a total, not its exactness, so it is a lower-bound source.
+            toonCatalogDao?.recordTotal(workId, EpisodeTotal.AtLeast(stored.totalEpisodes), stored.lastReadAt)
         }
         database?.tombstoneDao()?.delete("HISTORY", workId.storageKey())
         val nowMs = now()

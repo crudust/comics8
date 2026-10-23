@@ -11,25 +11,35 @@ enum class ProgressDisplayMode(val label: String, val description: String) {
     fun requiresReadCount(sourceId: String): Boolean =
         this == READ_COUNT || (this == PERCENTAGE && defaultFor(sourceId) == READ_COUNT)
 
-    fun format(lastReadOrder: Int, totalEpisodes: Int, readCount: Int): String? {
-        val effectiveTotal = maxOf(totalEpisodes, lastReadOrder, readCount)
+    /**
+     * Renders a progress badge.
+     *
+     * The denominator always comes from [total] and is never re-derived from [lastReadOrder] or
+     * [readCount]: those are facts about the user, not about the work. Padding the denominator
+     * here would mask a corrupt stored total and make "read everything" and "99% read"
+     * indistinguishable.
+     */
+    fun format(lastReadOrder: Int, total: EpisodeTotal, readCount: Int): String? {
+        val known = total.count > 0
         return when (this) {
             LATEST_EPISODE -> when {
-                lastReadOrder > 0 && effectiveTotal > 0 -> "$lastReadOrder/$effectiveTotal"
+                lastReadOrder > 0 && known -> "$lastReadOrder/${total.totalLabel()}"
                 lastReadOrder > 0 -> "${lastReadOrder}화"
-                effectiveTotal > 0 -> "${effectiveTotal}화"
+                known -> "${total.count}화"
                 else -> null
             }
             READ_COUNT -> when {
-                readCount > 0 && effectiveTotal > 0 -> "$readCount/$effectiveTotal"
+                readCount > 0 && known -> "$readCount/${total.totalLabel()}"
                 readCount > 0 -> "${readCount}개"
-                effectiveTotal > 0 -> "${effectiveTotal}화"
+                known -> "${total.count}화"
                 else -> null
             }
-            PERCENTAGE -> if (effectiveTotal > 0 && (lastReadOrder > 0 || readCount > 0)) {
+            PERCENTAGE -> if (known && (lastReadOrder > 0 || readCount > 0)) {
                 val progress = if (lastReadOrder > 0) lastReadOrder else readCount
-                "${(progress * 100 / effectiveTotal).coerceIn(0, 100)}%"
-            } else null
+                "${(progress * 100 / total.count).coerceIn(0, 100)}%"
+            } else {
+                null
+            }
             HIDDEN -> null
         }
     }
