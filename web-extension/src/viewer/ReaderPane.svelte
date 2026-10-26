@@ -98,7 +98,7 @@
   const SCROLL_PAGE_THRESHOLD = 12.0;
   const SCROLL_IDLE_THRESHOLD = 4.0;
   const SCROLL_LATCH_COOLDOWN_MS = 250;
-  const SCROLL_STREAM_IDLE_MS = 100;
+  const SCROLL_STREAM_IDLE_MS = 120;
   /** `ZoomableBox` treats a drag beyond 8px as a pan, never a tap. */
   const TAP_SLOP_PX = 8;
 
@@ -406,6 +406,9 @@
 
   let isWheelLatched = false;
   let lastWheelTriggerTime = 0;
+  let lastWheelEventTime = 0;
+  let lastWheelDeltaX = 0;
+  let lastWheelDeltaY = 0;
   let wheelIdleTimer: ReturnType<typeof setTimeout> | null = null;
   let wheelStreamAxis: 'HORIZONTAL' | 'VERTICAL' | 'UNDECIDED' = 'UNDECIDED';
 
@@ -418,8 +421,31 @@
     const deltaY = event.deltaY;
     const absX = Math.abs(deltaX);
     const absY = Math.abs(deltaY);
+    const dominantDelta = absX >= absY ? absX : absY;
+    const prevDominantDelta = absX >= absY ? Math.abs(lastWheelDeltaX) : Math.abs(lastWheelDeltaY);
 
     const now = Date.now();
+    const timeSinceLastEvent = now - lastWheelEventTime;
+    const timeSinceLastTrigger = now - lastWheelTriggerTime;
+
+    // A gesture is human-initiated (not decaying momentum) if:
+    // 1) The stream paused and restarted (> SCROLL_STREAM_IDLE_MS)
+    // 2) Direction reversed (e.g. forward then backward)
+    // 3) Re-acceleration occurred (delta sharply accelerated above previous event,
+    //    distinguishing a fresh physical finger flick from decaying inertia).
+    const isStreamRestart = timeSinceLastEvent > SCROLL_STREAM_IDLE_MS;
+    const isDirectionReversed =
+      (deltaX > 0 && lastWheelDeltaX < 0) ||
+      (deltaX < 0 && lastWheelDeltaX > 0) ||
+      (deltaY > 0 && lastWheelDeltaY < 0) ||
+      (deltaY < 0 && lastWheelDeltaY > 0);
+    const isAccelerating =
+      dominantDelta >= SCROLL_PAGE_THRESHOLD &&
+      (dominantDelta > prevDominantDelta * 1.25 || dominantDelta - prevDominantDelta > 8);
+
+    lastWheelEventTime = now;
+    lastWheelDeltaX = deltaX;
+    lastWheelDeltaY = deltaY;
 
     // 1. Reset idle timer: guarantees unlatch after stream has stopped AND cooldown elapsed
     // (parity with `CommonWidgets.kt` lines 285-294 `idleJob`)
@@ -427,11 +453,12 @@
       clearTimeout(wheelIdleTimer);
       wheelIdleTimer = null;
     }
-    const elapsed = now - lastWheelTriggerTime;
-    const remainingCooldown = Math.max(0, SCROLL_LATCH_COOLDOWN_MS - elapsed);
+    const remainingCooldown = Math.max(0, SCROLL_LATCH_COOLDOWN_MS - timeSinceLastTrigger);
     wheelIdleTimer = setTimeout(() => {
       isWheelLatched = false;
       wheelStreamAxis = 'UNDECIDED';
+      lastWheelDeltaX = 0;
+      lastWheelDeltaY = 0;
       wheelIdleTimer = null;
     }, Math.max(SCROLL_STREAM_IDLE_MS, remainingCooldown));
 
@@ -446,8 +473,8 @@
       }
     }
 
-    // 3. Cooldown and re-acceleration evaluation:
-    const isCooldownElapsed = now - lastWheelTriggerTime >= SCROLL_LATCH_COOLDOWN_MS;
+    // 3. Cooldown and gesture evaluation:
+    const isCooldownElapsed = timeSinceLastTrigger >= SCROLL_LATCH_COOLDOWN_MS;
 
     if (isCooldownElapsed) {
       // If momentum decayed below idle threshold, release latch
@@ -455,9 +482,10 @@
         isWheelLatched = false;
         return;
       }
-      // If a new deliberate stroke arrives (re-acceleration above page threshold),
-      // release latch immediately to accept the fresh swipe without requiring silence.
-      if (absX >= SCROLL_PAGE_THRESHOLD || absY >= SCROLL_PAGE_THRESHOLD) {
+      // Release latch ONLY for a true new gesture (stream restart, direction flip, or physical re-acceleration).
+      // Continuous decaying inertia (dominantDelta <= prevDominantDelta) remains strictly latched
+      // so a long momentum tail from a single hard swipe can NEVER turn multiple pages!
+      if (isStreamRestart || isDirectionReversed || isAccelerating) {
         isWheelLatched = false;
       }
     }
@@ -471,7 +499,7 @@
     // 5. Must meet threshold
     if (absX < SCROLL_PAGE_THRESHOLD && absY < SCROLL_PAGE_THRESHOLD) return;
 
-    // 7. Resolve direction (`ReaderDomain.resolveScrollDirection`):
+    // 6. Resolve direction (`ReaderDomain.resolveScrollDirection`):
     // Horizontal streams follow reading direction, vertical streams treat down as forward.
     let direction: 'advance' | 'retreat' | null = null;
     if (absX >= absY) {
@@ -483,7 +511,7 @@
 
     if (!direction) return;
 
-    // 8. Latch immediately and trigger discrete action exactly once
+    // 7. Latch immediately and trigger discrete action exactly once
     // (`CommonWidgets.kt` lines 360-369)
     isWheelLatched = true;
     lastWheelTriggerTime = now;

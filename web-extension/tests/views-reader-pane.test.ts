@@ -678,23 +678,23 @@ describe("ReaderPane page jump dialog", () => {
 
     const stageEl = target.querySelector(".reader-stage") as HTMLElement;
 
-    // First swipe turn: deltaX = 25 (swiping forward in LTR)
-    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 25, deltaY: 0, bubbles: true, cancelable: true }));
+    // Hard swipe: initial flick deltaX = 80
+    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 80, deltaY: 0, bubbles: true, cancelable: true }));
     await tick();
     expect(pillLabel()).toBe("2 / 3");
 
-    // Continuous momentum/inertia stream coming in rapidly: should be suppressed by the latch
-    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 18, deltaY: 0, bubbles: true, cancelable: true }));
-    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 10, deltaY: 0, bubbles: true, cancelable: true }));
-    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 5, deltaY: 0, bubbles: true, cancelable: true }));
-    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 2, deltaY: 0, bubbles: true, cancelable: true }));
+    // Continuous momentum stream: decaying deltas arriving rapidly (every 40ms) extending past the 250ms cooldown.
+    // Total elapsed = 280ms (> 250ms), and deltas are still strong (30px > 12px), but strictly decaying:
+    // must NOT trigger a second page turn!
+    for (const delta of [65, 55, 45, 40, 35, 30]) {
+      await new Promise((resolve) => setTimeout(resolve, 45));
+      stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: delta, deltaY: 0, bubbles: true, cancelable: true }));
+    }
     await tick();
     expect(pillLabel()).toBe("2 / 3");
 
-    // Consecutive swipe: after 260ms (> 250ms cooldown), user swipes again (re-acceleration deltaX = 22)
-    // even without waiting for complete stream silence
-    await new Promise((resolve) => setTimeout(resolve, 260));
-    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 22, deltaY: 0, bubbles: true, cancelable: true }));
+    // Second deliberate swipe: user flicks again, causing delta to accelerate upwards (30 -> 65)
+    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 65, deltaY: 0, bubbles: true, cancelable: true }));
     await tick();
     expect(pillLabel()).toBe("3 / 3");
   });
