@@ -314,6 +314,13 @@ object DesktopImageCache {
         System.gc()
     }
 
+    fun evict(role: ImageCacheRole, url: String) {
+        if (url.isBlank()) return
+        synchronized(memoryLock) {
+            memoryCaches.getValue(role).remove(url)
+        }
+    }
+
     internal fun readImageBytes(url: String, forceRetry: Boolean = false): ByteArray? {
         if (url.isBlank()) return null
         val hash = hashUrl(url)

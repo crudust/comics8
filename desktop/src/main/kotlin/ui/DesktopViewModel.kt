@@ -1133,6 +1133,7 @@ class DesktopViewModel(
         }
         lastViewedSeries = item
         DesktopImageCache.cancelPendingPreviews()
+        DesktopImageCache.clear(ImageCacheRole.EPISODE)
         episodeJob?.cancel()
         val sortOrder = DesktopSourcePrefs.episodeSortOrder(item.sourceId)
         _state.update {
@@ -1517,6 +1518,7 @@ class DesktopViewModel(
 
     fun closeSeries() {
         DesktopImageCache.cancelPendingPreviews()
+        DesktopImageCache.clear(ImageCacheRole.EPISODE)
         readerJob?.cancel()
         episodeJob?.cancel()
         val current = _state.value
@@ -1557,6 +1559,9 @@ class DesktopViewModel(
     }
 
     fun openHistory() {
+        if (_state.value.screen == Screen.Series) {
+            DesktopImageCache.clear(ImageCacheRole.EPISODE)
+        }
         loadHistory()
         _state.update { it.copy(screen = Screen.History) }
     }
@@ -1670,6 +1675,9 @@ class DesktopViewModel(
 
     fun openDownloads() {
         if (!_state.value.writesDownloads) return
+        if (_state.value.screen == Screen.Series) {
+            DesktopImageCache.clear(ImageCacheRole.EPISODE)
+        }
         readerJob?.cancel()
         episodeJob?.cancel()
         _state.update {
@@ -2613,6 +2621,10 @@ class DesktopViewModel(
             )
         }
         repository.syncManager?.triggerDebouncedPush()
+    }
+
+    fun evictReaderImage(url: String) {
+        DesktopImageCache.evict(ImageCacheRole.READER, url)
     }
 
     fun toggleFullscreen() {

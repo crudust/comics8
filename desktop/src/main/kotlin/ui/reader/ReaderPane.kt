@@ -48,6 +48,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -305,6 +307,24 @@ private fun ReaderScrollView(
         if (listState.isScrollInProgress) {
             controlsVisible = false
         }
+    }
+
+    LaunchedEffect(listState, state.readerImages) {
+        snapshotFlow { listState.firstVisibleItemIndex }
+            .distinctUntilChanged()
+            .collect { firstIndex ->
+                if (state.readerImages.isEmpty()) return@collect
+                val minKeep = (firstIndex - 6).coerceAtLeast(0)
+                val maxKeep = (firstIndex + 10).coerceAtMost(state.readerImages.size - 1)
+                for (i in 0 until minKeep) {
+                    val url = state.readerImages.getOrNull(i) ?: continue
+                    viewModel.evictReaderImage(url)
+                }
+                for (i in (maxKeep + 1) until state.readerImages.size) {
+                    val url = state.readerImages.getOrNull(i) ?: continue
+                    viewModel.evictReaderImage(url)
+                }
+            }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
