@@ -882,7 +882,7 @@ private fun ReaderDualView(
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxHeight(),
-                            contentAlignment = Alignment.Center,
+                            contentAlignment = Alignment.CenterEnd,
                         ) {
                             val url = state.readerImages.getOrNull(leftIndex)
                             if (url != null) {
@@ -891,7 +891,7 @@ private fun ReaderDualView(
                                     url = url,
                                     contentDescription = strings.labelPageNumber(leftIndex + 1),
                                     contentScale = ContentScale.Fit,
-                                    alignment = Alignment.Center,
+                                    alignment = Alignment.CenterEnd,
                                     modifier = Modifier.fillMaxSize(),
                                     onLoaded = { bmp ->
                                         viewModel.recordImageAspectRatio(leftIndex, bmp.width, bmp.height)
@@ -904,7 +904,7 @@ private fun ReaderDualView(
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxHeight(),
-                            contentAlignment = Alignment.Center,
+                            contentAlignment = Alignment.CenterStart,
                         ) {
                             val url = state.readerImages.getOrNull(rightIndex)
                             if (url != null) {
@@ -913,7 +913,7 @@ private fun ReaderDualView(
                                     url = url,
                                     contentDescription = strings.labelPageNumber(rightIndex + 1),
                                     contentScale = ContentScale.Fit,
-                                    alignment = Alignment.Center,
+                                    alignment = Alignment.CenterStart,
                                     modifier = Modifier.fillMaxSize(),
                                     onLoaded = { bmp ->
                                         viewModel.recordImageAspectRatio(rightIndex, bmp.width, bmp.height)

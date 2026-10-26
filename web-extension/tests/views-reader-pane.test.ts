@@ -684,8 +684,8 @@ describe("ReaderPane page jump dialog", () => {
     expect(pillLabel()).toBe("2 / 3");
 
     // Continuous momentum stream: decaying deltas arriving rapidly (every 40ms) extending past the 250ms cooldown.
-    // Total elapsed = 280ms (> 250ms), and deltas are still strong (30px > 12px), but strictly decaying:
-    // must NOT trigger a second page turn!
+    // Total elapsed = 280ms (> 250ms), and deltas are still running (30px > 15px):
+    // must NOT trigger a second page turn while still latched!
     for (const delta of [65, 55, 45, 40, 35, 30]) {
       await new Promise((resolve) => setTimeout(resolve, 45));
       stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: delta, deltaY: 0, bubbles: true, cancelable: true }));
@@ -693,7 +693,12 @@ describe("ReaderPane page jump dialog", () => {
     await tick();
     expect(pillLabel()).toBe("2 / 3");
 
-    // Second deliberate swipe: user flicks again, causing delta to accelerate upwards (30 -> 65)
+    // Once momentum slows below idle threshold (8px) after cooldown, latch releases cleanly
+    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 5, deltaY: 0, bubbles: true, cancelable: true }));
+    await tick();
+    expect(pillLabel()).toBe("2 / 3");
+
+    // Second deliberate swipe: user flicks again, turning the next page
     stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 65, deltaY: 0, bubbles: true, cancelable: true }));
     await tick();
     expect(pillLabel()).toBe("3 / 3");
