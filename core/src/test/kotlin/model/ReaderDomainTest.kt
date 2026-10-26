@@ -97,9 +97,8 @@ class ReaderDomainTest {
             pageSize = 100,
         )
         assertThat(position.total).isNull()
-        // The order itself is still derived from the page position: 2 unseen pages of 100 plus this
-        // page's position, which is all an uncounted listing can honestly say.
-        assertThat(position.readOrder).isEqualTo(203)
+        // Without a verified total, unseen older pages cannot be guessed, so order stays null.
+        assertThat(position.readOrder).isNull()
     }
 
     @Test

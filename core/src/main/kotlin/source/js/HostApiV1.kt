@@ -401,13 +401,12 @@ internal class HostApiV1Impl(
         for (m in matches) {
             val body = m.groupValues[1]
             val urls = mutableListOf<String>()
-            val seen = mutableSetOf<String>()
             val urlMatches = JS_ARRAY_STRING_RE.findAll(body)
             for (um in urlMatches) {
                 val rawUrl = um.groupValues[1].trim().replace("\\/", "/")
                 if (isValidArrayImageUrl(rawUrl)) {
                     val full = absUrl(rawUrl, baseUri)
-                    if (seen.add(full)) urls.add(full)
+                    urls.add(full)
                 }
             }
             if (urls.isNotEmpty()) result.add(urls)

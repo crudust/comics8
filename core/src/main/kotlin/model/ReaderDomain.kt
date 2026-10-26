@@ -198,11 +198,7 @@ object ReaderDomain {
                     val newerEpisodes = (safeCurrentPage - 1) * safePageSize + currentIndex
                     (total.count - newerEpisodes).coerceIn(1, total.count)
                 }
-                else -> {
-                    val unseenOlder = (safeLastPage - safeCurrentPage).coerceAtLeast(0) * safePageSize
-                    val onPageOrder = (itemCount - currentIndex).coerceAtLeast(1)
-                    (unseenOlder + onPageOrder).coerceAtLeast(1)
-                }
+                else -> null
             }
         } else {
             null

@@ -1,0 +1,43 @@
+{
+  "manifest_version": 3,
+  "name": "Comics8 Web Reader",
+  "description": "Comics8 comic reader: site source plugins, local/WebDAV libraries and reading progress sync.",
+  "version": "0.2.48",
+  "minimum_chrome_version": "116",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png",
+    "512": "icons/icon-512.png"
+  },
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "declarativeNetRequest"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "src/background/service-worker.ts",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Comics8",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "sandbox": {
+    "pages": [
+      "src/sandbox.html"
+    ]
+  },
+  "content_security_policy": {
+    "sandbox": "sandbox allow-scripts; script-src 'self' 'unsafe-eval' 'unsafe-inline';"
+  }
+}

@@ -427,6 +427,41 @@ class HostApiV1Test {
             "https://cdn.example.com/v2/image?id=123",
         )
 
+        // 5-2. host.extractImages preserves duplicate entries from JS array to maintain original site order
+        val htmlWithDuplicateScript = """
+            <html>
+                <script>
+                    var img_list = [
+                        "https://example.com/data/004.webp",
+                        "https://example.com/data/001.webp",
+                        "https://example.com/data/002.webp",
+                        "https://example.com/data/003.webp",
+                        "https://example.com/data/004.webp",
+                        "https://example.com/data/005.webp"
+                    ];
+                </script>
+            </html>
+        """.trimIndent()
+        val jsonDuplicateImgs = evalJsonOn(
+            engine,
+            handle,
+            """
+            (function() {
+                return { images: host.extractImages(${jsString(htmlWithDuplicateScript)}) };
+            })()
+            """.trimIndent(),
+        )
+        val arrDuplicate = jsonDuplicateImgs.getJSONArray("images")
+        val duplicateImgList = (0 until arrDuplicate.length()).map { arrDuplicate.getString(it) }
+        assertThat(duplicateImgList).containsExactly(
+            "https://example.com/data/004.webp",
+            "https://example.com/data/001.webp",
+            "https://example.com/data/002.webp",
+            "https://example.com/data/003.webp",
+            "https://example.com/data/004.webp",
+            "https://example.com/data/005.webp",
+        )
+
         // 6. selectFirst, textOf, attrOf
         val htmlDoc = """
             <div class="item" data-id="999" style="background: url('/thumb.jpg')">

@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+/*
+ * Comics8 design tokens.
+ *
+ * The viewer components ship their own scoped styles (they own the page geometry), so this file only
+ * carries the global shell: the dark canvas, typography and the few Tailwind v4 theme variables the
+ * markup references via utilities such as `bg-surface`.
+ */
+@theme {
+  --color-canvas: #0b0b0d;
+  --color-surface: #141418;
+  --color-surface-strong: #1c1c22;
+  --color-line: rgba(255, 255, 255, 0.08);
+  --color-ink: #e9e9ee;
+  --color-ink-muted: rgba(233, 233, 238, 0.64);
+  --color-accent: #f0563a;
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  #app {
+    height: 100%;
+  }
+
+  /* The reader surface must never bounce the whole extension page. */
+  body.app-body {
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+}

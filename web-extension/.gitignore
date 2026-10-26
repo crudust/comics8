@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Vite / crxjs build output (`pnpm build` writes the unpacked extension here)
+dist/
+.vite/
+
+# Test and tooling caches
+coverage/
+*.tsbuildinfo
+
+# Local environment
+.env
+.env.*
+!.env.example
