@@ -90,9 +90,14 @@
   const PROMPT_FIRST_EPISODE = '첫 번째 회차입니다';
   /** `delay(3000)` in `promptJob`. */
   const PROMPT_TIMEOUT_MS = 3000;
-  /** `ReaderDomain.SCROLL_PAGE_THRESHOLD` / `SCROLL_LATCH_COOLDOWN_MS`. */
-  const WHEEL_PAGE_THRESHOLD = 1;
-  const WHEEL_COOLDOWN_MS = 350;
+  /**
+   * `ReaderDomain.SCROLL_PAGE_THRESHOLD` / `SCROLL_IDLE_THRESHOLD` / `SCROLL_LATCH_COOLDOWN_MS`.
+   * Parity with macOS trackpad discrete paging engine in `desktop/.../CommonWidgets.kt`.
+   */
+  const SCROLL_PAGE_THRESHOLD = 1.0;
+  const SCROLL_IDLE_THRESHOLD = 0.2;
+  const SCROLL_LATCH_COOLDOWN_MS = 350;
+  const SCROLL_STREAM_IDLE_MS = 150;
   /** `ZoomableBox` treats a drag beyond 8px as a pan, never a tap. */
   const TAP_SLOP_PX = 8;
 
@@ -396,9 +401,12 @@
     clearPrompts();
   }
 
-  // --- wheel paging (`desktopDiscreteScrollPaging`) ---------------------------------------------
+  // --- wheel paging (`desktopDiscreteScrollPaging` parity) ---------------------------------------
 
-  let wheelLatchUntil = 0;
+  let isWheelLatched = false;
+  let lastWheelTriggerTime = 0;
+  let wheelIdleTimer: ReturnType<typeof setTimeout> | null = null;
+  let wheelStreamAxis: 'HORIZONTAL' | 'VERTICAL' | 'UNDECIDED' = 'UNDECIDED';
 
   function handleWheel(event: WheelEvent): void {
     // SCROLL owns its own scrolling; zoom chords belong to the browser/ZoomableBox.
@@ -409,22 +417,83 @@
     const deltaY = event.deltaY;
     const absX = Math.abs(deltaX);
     const absY = Math.abs(deltaY);
-    if (absX < WHEEL_PAGE_THRESHOLD && absY < WHEEL_PAGE_THRESHOLD) return;
 
     const now = Date.now();
-    if (now < wheelLatchUntil) return;
-    wheelLatchUntil = now + WHEEL_COOLDOWN_MS;
 
-    // `ReaderDomain.resolveScrollDirection`: horizontal streams follow the reading direction,
-    // vertical streams always treat "down" as forward.
-    if (absX >= absY) {
-      const forward = isR2L ? deltaX < 0 : deltaX > 0;
-      if (forward) advance();
-      else retreat();
+    // 1. Reset idle timer: guarantees unlatch after stream has stopped AND cooldown elapsed
+    // (parity with `CommonWidgets.kt` lines 285-294 `idleJob`)
+    if (wheelIdleTimer) {
+      clearTimeout(wheelIdleTimer);
+      wheelIdleTimer = null;
+    }
+    const elapsed = now - lastWheelTriggerTime;
+    const remainingCooldown = Math.max(0, SCROLL_LATCH_COOLDOWN_MS - elapsed);
+    wheelIdleTimer = setTimeout(() => {
+      isWheelLatched = false;
+      wheelStreamAxis = 'UNDECIDED';
+      wheelIdleTimer = null;
+    }, Math.max(SCROLL_STREAM_IDLE_MS, remainingCooldown));
+
+    // 2. Lock the gesture axis on the first clearly dominant delta (`resolveScrollGestureAxis`)
+    if (wheelStreamAxis === 'UNDECIDED') {
+      if (Math.max(absX, absY) >= SCROLL_IDLE_THRESHOLD) {
+        if (absX - absY > SCROLL_IDLE_THRESHOLD) {
+          wheelStreamAxis = 'HORIZONTAL';
+        } else if (absY - absX > SCROLL_IDLE_THRESHOLD) {
+          wheelStreamAxis = 'VERTICAL';
+        }
+      }
+    }
+
+    // 3. If momentum decayed below idle threshold and cooldown has passed, release latch early
+    // (`CommonWidgets.kt` lines 324-329)
+    if (absX < SCROLL_IDLE_THRESHOLD && absY < SCROLL_IDLE_THRESHOLD) {
+      if (now - lastWheelTriggerTime >= SCROLL_LATCH_COOLDOWN_MS) {
+        isWheelLatched = false;
+      }
       return;
     }
-    if (deltaY > 0) advance();
-    else retreat();
+
+    // 4. If currently latched, suppress continuation/inertia events from the same swipe
+    // (`CommonWidgets.kt` lines 332-336)
+    if (isWheelLatched) {
+      event.preventDefault();
+      return;
+    }
+
+    // 5. Only trigger new discrete action if minimum cooldown elapsed
+    // (`CommonWidgets.kt` lines 338-341)
+    if (now - lastWheelTriggerTime < SCROLL_LATCH_COOLDOWN_MS) {
+      event.preventDefault();
+      return;
+    }
+
+    // 6. Must meet threshold
+    if (absX < SCROLL_PAGE_THRESHOLD && absY < SCROLL_PAGE_THRESHOLD) return;
+
+    // 7. Resolve direction (`ReaderDomain.resolveScrollDirection`):
+    // Horizontal streams follow reading direction, vertical streams treat down as forward.
+    let direction: 'advance' | 'retreat' | null = null;
+    if (absX >= absY) {
+      const isForward = isR2L ? deltaX < 0 : deltaX > 0;
+      direction = isForward ? 'advance' : 'retreat';
+    } else {
+      direction = deltaY > 0 ? 'advance' : 'retreat';
+    }
+
+    if (!direction) return;
+
+    // 8. Latch immediately and trigger discrete action exactly once
+    // (`CommonWidgets.kt` lines 360-369)
+    isWheelLatched = true;
+    lastWheelTriggerTime = now;
+    event.preventDefault();
+
+    if (direction === 'advance') {
+      advance();
+    } else {
+      retreat();
+    }
   }
 
   // --- keyboard (lines 124-173) -----------------------------------------------------------------
@@ -666,6 +735,7 @@
 
   onDestroy(() => {
     if (promptTimer) clearTimeout(promptTimer);
+    if (wheelIdleTimer) clearTimeout(wheelIdleTimer);
     if (typeof document !== 'undefined') {
       document.removeEventListener('fullscreenchange', onFullscreenChange);
     }

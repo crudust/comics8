@@ -669,4 +669,34 @@ describe("ReaderPane page jump dialog", () => {
     // Cancelling keeps the page the jump left it on.
     expect(target.querySelector(".range-text")?.textContent?.trim()).toBe("3 / 3");
   });
+
+  it("latches continuous trackpad momentum wheel events to a single page turn", async () => {
+    const { store } = await openReader({ viewMode: "PAGE", direction: "LEFT_TO_RIGHT", lastReadPage: 0 });
+    mountPane(store);
+    await tick();
+    expect(pillLabel()).toBe("1 / 3");
+
+    const stageEl = target.querySelector(".reader-stage") as HTMLElement;
+
+    // First swipe turn: deltaX = 15 (swiping forward in LTR)
+    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 15, deltaY: 0, bubbles: true, cancelable: true }));
+    await tick();
+    expect(pillLabel()).toBe("2 / 3");
+
+    // Continuous momentum/inertia stream coming in rapidly: should be suppressed by the latch
+    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 12, deltaY: 0, bubbles: true, cancelable: true }));
+    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 8, deltaY: 0, bubbles: true, cancelable: true }));
+    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 4, deltaY: 0, bubbles: true, cancelable: true }));
+    await tick();
+    expect(pillLabel()).toBe("2 / 3");
+
+    // After the stream stops and cooldown elapses (150ms stream idle + 350ms cooldown)
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await tick();
+
+    // Next deliberate swipe turns the next page
+    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 15, deltaY: 0, bubbles: true, cancelable: true }));
+    await tick();
+    expect(pillLabel()).toBe("3 / 3");
+  });
 });
