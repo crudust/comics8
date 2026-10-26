@@ -92,12 +92,13 @@
   const PROMPT_TIMEOUT_MS = 3000;
   /**
    * `ReaderDomain.SCROLL_PAGE_THRESHOLD` / `SCROLL_IDLE_THRESHOLD` / `SCROLL_LATCH_COOLDOWN_MS`.
-   * Parity with macOS trackpad discrete paging engine in `desktop/.../CommonWidgets.kt`.
+   * Parity with macOS trackpad discrete paging engine in `desktop/.../CommonWidgets.kt`,
+   * scaled for browser WheelEvent pixel deltas and snappy consecutive swiping.
    */
-  const SCROLL_PAGE_THRESHOLD = 1.0;
-  const SCROLL_IDLE_THRESHOLD = 0.2;
-  const SCROLL_LATCH_COOLDOWN_MS = 350;
-  const SCROLL_STREAM_IDLE_MS = 150;
+  const SCROLL_PAGE_THRESHOLD = 12.0;
+  const SCROLL_IDLE_THRESHOLD = 4.0;
+  const SCROLL_LATCH_COOLDOWN_MS = 250;
+  const SCROLL_STREAM_IDLE_MS = 100;
   /** `ZoomableBox` treats a drag beyond 8px as a pan, never a tap. */
   const TAP_SLOP_PX = 8;
 
@@ -445,30 +446,29 @@
       }
     }
 
-    // 3. If momentum decayed below idle threshold and cooldown has passed, release latch early
-    // (`CommonWidgets.kt` lines 324-329)
-    if (absX < SCROLL_IDLE_THRESHOLD && absY < SCROLL_IDLE_THRESHOLD) {
-      if (now - lastWheelTriggerTime >= SCROLL_LATCH_COOLDOWN_MS) {
+    // 3. Cooldown and re-acceleration evaluation:
+    const isCooldownElapsed = now - lastWheelTriggerTime >= SCROLL_LATCH_COOLDOWN_MS;
+
+    if (isCooldownElapsed) {
+      // If momentum decayed below idle threshold, release latch
+      if (absX < SCROLL_IDLE_THRESHOLD && absY < SCROLL_IDLE_THRESHOLD) {
+        isWheelLatched = false;
+        return;
+      }
+      // If a new deliberate stroke arrives (re-acceleration above page threshold),
+      // release latch immediately to accept the fresh swipe without requiring silence.
+      if (absX >= SCROLL_PAGE_THRESHOLD || absY >= SCROLL_PAGE_THRESHOLD) {
         isWheelLatched = false;
       }
-      return;
     }
 
-    // 4. If currently latched, suppress continuation/inertia events from the same swipe
-    // (`CommonWidgets.kt` lines 332-336)
-    if (isWheelLatched) {
+    // 4. If still latched or within cooldown, suppress continuation/inertia events
+    if (isWheelLatched || !isCooldownElapsed) {
       event.preventDefault();
       return;
     }
 
-    // 5. Only trigger new discrete action if minimum cooldown elapsed
-    // (`CommonWidgets.kt` lines 338-341)
-    if (now - lastWheelTriggerTime < SCROLL_LATCH_COOLDOWN_MS) {
-      event.preventDefault();
-      return;
-    }
-
-    // 6. Must meet threshold
+    // 5. Must meet threshold
     if (absX < SCROLL_PAGE_THRESHOLD && absY < SCROLL_PAGE_THRESHOLD) return;
 
     // 7. Resolve direction (`ReaderDomain.resolveScrollDirection`):

@@ -678,24 +678,23 @@ describe("ReaderPane page jump dialog", () => {
 
     const stageEl = target.querySelector(".reader-stage") as HTMLElement;
 
-    // First swipe turn: deltaX = 15 (swiping forward in LTR)
-    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 15, deltaY: 0, bubbles: true, cancelable: true }));
+    // First swipe turn: deltaX = 25 (swiping forward in LTR)
+    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 25, deltaY: 0, bubbles: true, cancelable: true }));
     await tick();
     expect(pillLabel()).toBe("2 / 3");
 
     // Continuous momentum/inertia stream coming in rapidly: should be suppressed by the latch
-    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 12, deltaY: 0, bubbles: true, cancelable: true }));
-    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 8, deltaY: 0, bubbles: true, cancelable: true }));
-    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 4, deltaY: 0, bubbles: true, cancelable: true }));
+    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 18, deltaY: 0, bubbles: true, cancelable: true }));
+    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 10, deltaY: 0, bubbles: true, cancelable: true }));
+    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 5, deltaY: 0, bubbles: true, cancelable: true }));
+    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 2, deltaY: 0, bubbles: true, cancelable: true }));
     await tick();
     expect(pillLabel()).toBe("2 / 3");
 
-    // After the stream stops and cooldown elapses (150ms stream idle + 350ms cooldown)
-    await new Promise((resolve) => setTimeout(resolve, 400));
-    await tick();
-
-    // Next deliberate swipe turns the next page
-    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 15, deltaY: 0, bubbles: true, cancelable: true }));
+    // Consecutive swipe: after 260ms (> 250ms cooldown), user swipes again (re-acceleration deltaX = 22)
+    // even without waiting for complete stream silence
+    await new Promise((resolve) => setTimeout(resolve, 260));
+    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 22, deltaY: 0, bubbles: true, cancelable: true }));
     await tick();
     expect(pillLabel()).toBe("3 / 3");
   });
