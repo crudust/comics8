@@ -43,8 +43,30 @@ class ReaderDomainTest {
         )
 
         assertThat(position.total).isEqualTo(counted)
-        assertThat(position.readOrder).isEqualTo(102)
+        // 205 total episodes: page 1 holds 100 (205..106).
+        // On page 2 (safeCurrentPage = 2), index 1 ("204") is preceded by index 0 ("205"),
+        // so 101 newer episodes precede it -> readOrder is 205 - 101 = 104.
+        assertThat(position.readOrder).isEqualTo(104)
         assertThat(position.nextEpisodeIndex).isEqualTo(0)
+    }
+
+    @Test
+    fun episodePositionDerivesExactReadOrderWithMultiPageRemainder() {
+        // "한밤중 하트튠": 122 total episodes across 2 pages (100 on page 1, 22 on page 2).
+        val counted = EpisodeListingTotal(count = 122, lastPage = 2, pageSize = 100)
+        val page1Episodes = (122 downTo 23).map { it.toString() }
+        val position = ReaderDomain.episodePosition(
+            episodeIds = page1Episodes,
+            currentEpisodeId = "96", // index 26
+            currentPage = 1,
+            lastPage = 2,
+            knownTotal = counted,
+            pageSize = 100,
+        )
+
+        assertThat(position.total).isEqualTo(counted)
+        assertThat(position.readOrder).isEqualTo(96)
+        assertThat(position.nextEpisodeIndex).isEqualTo(25)
     }
 
     @Test

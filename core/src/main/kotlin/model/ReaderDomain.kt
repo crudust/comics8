@@ -192,11 +192,18 @@ object ReaderDomain {
         val total = knownTotal?.takeIf { it.isValid }
 
         val readOrder = if (currentIndex >= 0 && itemCount > 0) {
-            // Unseen pages below the current one may hold up to pageSize items each.
-            val unseenOlder = (safeLastPage - safeCurrentPage).coerceAtLeast(0) * safePageSize
-            val onPageOrder = (itemCount - currentIndex).coerceAtLeast(1)
-            val order = (unseenOlder + onPageOrder).coerceAtLeast(1)
-            if (total != null) order.coerceAtMost(total.count) else order
+            when {
+                safeCurrentPage == safeLastPage -> (itemCount - currentIndex).coerceAtLeast(1)
+                total != null -> {
+                    val newerEpisodes = (safeCurrentPage - 1) * safePageSize + currentIndex
+                    (total.count - newerEpisodes).coerceIn(1, total.count)
+                }
+                else -> {
+                    val unseenOlder = (safeLastPage - safeCurrentPage).coerceAtLeast(0) * safePageSize
+                    val onPageOrder = (itemCount - currentIndex).coerceAtLeast(1)
+                    (unseenOlder + onPageOrder).coerceAtLeast(1)
+                }
+            }
         } else {
             null
         }
