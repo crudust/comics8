@@ -48,6 +48,7 @@
   import { desktopState } from '../state/desktop-state.svelte';
   import type { DesktopStore, ViewMode } from '../state/desktop-state.svelte';
   import PageJumpDialog from '../ui/PageJumpDialog.svelte';
+  import { preloadImages } from './image-preloader';
   import {
     buildDualSpreads,
     buildSinglePageSlices,
@@ -721,6 +722,58 @@
     untrack(() => store.savePage(page));
   });
 
+  // --- image preloading (`DesktopImageCache.preload` parity) ------------------------------------
+
+  /**
+   * Preloads upcoming & previous images in PAGE mode.
+   * Parity with `ReaderPane.kt` lines 631-640 (`listOf(-1, 1, 2, 3)`).
+   */
+  $effect(() => {
+    const mode = store.viewMode;
+    const imgList = images;
+    if (mode !== 'PAGE' || imgList.length === 0) return;
+    const list = slices;
+    const current = sliceIndex;
+    const offsets = [-1, 1, 2, 3];
+    const urls: string[] = [];
+    for (const offset of offsets) {
+      const slice = list[current + offset];
+      if (slice && slice.imageIndex >= 0 && slice.imageIndex < imgList.length) {
+        const url = imgList[slice.imageIndex];
+        if (url) urls.push(url);
+      }
+    }
+    if (urls.length > 0) preloadImages(urls);
+  });
+
+  /**
+   * Preloads upcoming & previous spreads in DUAL mode.
+   * Parity with `ReaderPane.kt` lines 744-756 (`listOf(-1, 1, 2)`).
+   */
+  $effect(() => {
+    const mode = store.viewMode;
+    const imgList = images;
+    if (mode !== 'DUAL' || imgList.length === 0) return;
+    const list = spreads;
+    const current = spreadIndex;
+    const offsets = [-1, 1, 2];
+    const urls: string[] = [];
+    for (const offset of offsets) {
+      const spread = list[current + offset];
+      if (!spread) continue;
+      if (spread.type === 'single') {
+        const url = imgList[spread.index];
+        if (url) urls.push(url);
+      } else {
+        const u1 = imgList[spread.firstIndex];
+        const u2 = imgList[spread.secondIndex];
+        if (u1) urls.push(u1);
+        if (u2) urls.push(u2);
+      }
+    }
+    if (urls.length > 0) preloadImages(urls);
+  });
+
   // --- lifecycle --------------------------------------------------------------------------------
 
   const onFullscreenChange = (): void => {
@@ -760,7 +813,7 @@
         src={images[index]}
         alt={`페이지 ${index + 1}`}
         draggable="false"
-        decoding="async"
+        decoding="auto"
         onload={(event) => onImageLoad(event, index)}
         onerror={() => onImageError(index)}
       />

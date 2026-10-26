@@ -65,6 +65,7 @@ import { historyStore, type HistoryRecord } from "../data/history-store.svelte";
 import { backgroundFetch } from "../background-fetch";
 import { SourceRegistry } from "../sources/registry";
 import type { AnyLoadedSource, SourceSummary } from "../sources/registry";
+import { preloadImages } from "../viewer/image-preloader";
 import {
   DEFAULT_SERVER_URL,
   SyncClient,
@@ -1946,6 +1947,9 @@ export class DesktopStore {
     this.readerLoading = false;
     this.readerError = null;
     this.readerToastMessage = null;
+    if (images.length > 0) {
+      preloadImages(images.slice(0, 4));
+    }
   }
 
   // --- tab / browse -----------------------------------------------------------------------------
@@ -4076,6 +4080,17 @@ export class DesktopStore {
       this.imageAspectRatios = {};
       this.readerLoading = false;
       this.readerError = null;
+
+      // Parity with DesktopViewModel.kt lines 2363-2371: preload initial target window
+      if (this.readerImages.length > 0) {
+        const effectivePage = episode.lastReadPage ?? 0;
+        const targetPage = Math.max(0, Math.min(startPageOnOpen(effectivePage), this.readerImages.length - 1));
+        const initialUrls = this.readerImages.slice(
+          Math.max(0, targetPage - 1),
+          Math.min(this.readerImages.length, targetPage + 4),
+        );
+        preloadImages(initialUrls);
+      }
     } catch (cause) {
       if (token !== this.#readerToken) return;
       this.readerImages = [];
