@@ -35,7 +35,7 @@
    *   `onOpenSeries` rebuilds the `ToonItem` from the summary fields, exactly like the Kotlin card.
    */
 
-  import { AlertCircle, BookOpen, Download, Folder, FolderSync, Trash2, X } from 'lucide-svelte';
+  import { AlertCircle, BookOpen, Download, Folder, FolderSync, Trash2, X } from '@lucide/svelte';
 
   import type { DownloadedToonSummary } from '../data/downloads-store.svelte';
   import { downloadedWorkKey } from '../data/downloads-store.svelte';

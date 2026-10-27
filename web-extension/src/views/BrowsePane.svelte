@@ -30,7 +30,7 @@
    *   `GridCells.Adaptive(minSize = 160.dp)`; card padding 16dp, gaps 12/16dp as in Kotlin.
    */
 
-  import { Star } from 'lucide-svelte';
+  import { Star } from '@lucide/svelte';
 
   import { desktopState } from '../state/desktop-state.svelte';
   import type { DesktopBrowseTab, DesktopStore, DesktopToonItem } from '../state/desktop-state.svelte';

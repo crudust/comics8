@@ -46,7 +46,7 @@
    *      so a throttled background tab still reports the true remaining time (same visible
    *      behaviour: one second less per second, then the expired wording).
    *
-   * Icon mapping (lucide-svelte has no Material icon set): `CloudSync` → `CloudSync`, `Devices` →
+   * Icon mapping (@lucide/svelte has no Material icon set): `CloudSync` → `CloudSync`, `Devices` →
    * `MonitorSmartphone` (the closest "several device shapes" glyph), `Key` → `Key`, `ExpandMore` /
    * `ExpandLess` → `ChevronDown` / `ChevronUp`, `ContentCopy` → `Copy`, `Refresh` → `RefreshCw`, and
    * the `CircularProgressIndicator`s → `LoaderCircle` / a CSS spinner.
@@ -62,7 +62,7 @@
     LoaderCircle,
     MonitorSmartphone,
     RefreshCw,
-  } from 'lucide-svelte';
+  } from '@lucide/svelte';
 
   import { describeError } from '../messaging';
   import { desktopState, type DesktopStore } from '../state/desktop-state.svelte';

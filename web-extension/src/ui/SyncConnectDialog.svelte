@@ -26,7 +26,7 @@
    *   failure land in the same `try`/`catch` the desktop's `isError` / `statusMessage` pair encodes.
    */
 
-  import { CloudSync, LoaderCircle } from 'lucide-svelte';
+  import { CloudSync, LoaderCircle } from '@lucide/svelte';
 
   import { describeError } from '../messaging';
   import { desktopState } from '../state/desktop-state.svelte';

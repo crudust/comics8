@@ -42,7 +42,7 @@
     Star,
     Trash2,
     X,
-  } from 'lucide-svelte';
+  } from '@lucide/svelte';
 
   import {
     desktopState,

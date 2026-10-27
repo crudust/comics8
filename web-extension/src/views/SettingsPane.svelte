@@ -70,7 +70,7 @@
     Timer,
     Upload,
     X,
-  } from 'lucide-svelte';
+  } from '@lucide/svelte';
 
   import SyncPairingDialog from '../ui/SyncPairingDialog.svelte';
   import SyncConnectDialog from '../ui/SyncConnectDialog.svelte';

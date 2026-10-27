@@ -238,12 +238,14 @@ describe("SourceManagerPane row controls", () => {
     expect(rowFor("my-src").querySelector(".icon-button.danger")).not.toBeNull();
     expect(rowFor("other-src").querySelector(".icon-button.danger")).not.toBeNull();
 
-    vi.spyOn(window, "confirm").mockReturnValue(true);
+    // The pane calls the bare `confirm()` global, which Vitest 4 no longer exposes under happy-dom.
+    vi.stubGlobal("confirm", () => true);
     rowFor("my-src").querySelector<HTMLElement>(".icon-button.danger")!.click();
     await tick();
 
     expect(calls.uninstall).toEqual(["my-src"]);
     expect(rowIds()).toEqual(["local", "network-webdav", "other-src"]);
+    vi.unstubAllGlobals();
   });
 
   it("reorders a source inside its own section with the arrow buttons", async () => {

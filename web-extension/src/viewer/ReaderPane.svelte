@@ -43,7 +43,7 @@
     Maximize2,
     Minimize2,
     RefreshCw,
-  } from 'lucide-svelte';
+  } from '@lucide/svelte';
 
   import { desktopState } from '../state/desktop-state.svelte';
   import type { DesktopStore, ViewMode } from '../state/desktop-state.svelte';

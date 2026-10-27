@@ -20,6 +20,9 @@ dependencies {
     api(libs.smbj)
     api(libs.commons.compress)
     api(libs.javif)
+    // jsoup 1.23 annotates its API with JSpecify `@Nullable`, declared as a `provided` dependency.
+    // Kotlin 2.4 rejects inferred types carrying an annotation class absent from the compile classpath.
+    compileOnly(libs.jspecify)
 
     testImplementation(libs.junit)
     testImplementation(libs.truth)

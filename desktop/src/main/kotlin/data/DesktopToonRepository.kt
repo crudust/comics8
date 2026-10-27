@@ -27,6 +27,7 @@ import com.comics8.core.sync.SyncCatalogWire
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -186,13 +187,19 @@ class DesktopToonRepository(
         syncScope.cancel()
     }
 
+    /**
+     * Refreshes episode counts off the caller's thread and returns the launched [Job], so callers that
+     * must observe completion can join it instead of polling the callbacks.
+     *
+     * The callbacks are invoked from several coroutines at once: consumers must be thread-safe.
+     */
     fun syncEpisodeCounts(
         items: List<ToonItem>,
         onThumbnailResolved: ((workId: WorkId, thumbUrl: String) -> Unit)? = null,
         onUpdated: ((workId: WorkId, total: EpisodeListingTotal, progressText: String) -> Unit)? = null,
-    ) {
-        if (items.isEmpty()) return
-        syncScope.launch {
+    ): Job? {
+        if (items.isEmpty()) return null
+        return syncScope.launch {
             val workIds = items.map { it.workId() }
             val historyMap = database.getHistoryByToonIds(workIds).associateBy { it.workId().storageKey() }.toMutableMap()
             val catalogTotals = database.getCatalogTotalsByToonIds(workIds).toMutableMap()

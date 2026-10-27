@@ -33,7 +33,7 @@
    *   `store.refresh()` the desktop indicator triggers.
    */
 
-  import { AlertCircle, Check, Download, MoreVertical, RefreshCw } from 'lucide-svelte';
+  import { AlertCircle, Check, Download, MoreVertical, RefreshCw } from '@lucide/svelte';
 
   import { historyStore } from '../data/history-store.svelte';
   import {

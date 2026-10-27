@@ -30,7 +30,7 @@
     FileCode,
     Folder,
     Settings,
-  } from 'lucide-svelte';
+  } from '@lucide/svelte';
 
   import { desktopState } from '../state/desktop-state.svelte';
   import type { DesktopStore } from '../state/desktop-state.svelte';

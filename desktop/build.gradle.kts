@@ -19,8 +19,11 @@ dependencies {
     runtimeOnly(libs.skiko.windows.x64)
     runtimeOnly(libs.skiko.macos.x64)
     runtimeOnly(libs.skiko.macos.arm64)
-    implementation(compose.material3)
-    implementation(compose.materialIconsExtended)
+    // Explicit coordinates instead of the Compose Multiplatform `compose.material3` /
+    // `compose.materialIconsExtended` accessors: both are deprecated in 1.12 and the icons artifact
+    // is pinned to its final 1.7.3 release, so the versions belong in the catalog, not implicit.
+    implementation(libs.compose.multiplatform.material3)
+    implementation(libs.compose.multiplatform.icons)
 
     implementation(libs.coroutines.swing)
     implementation(libs.sqlite)
@@ -50,7 +53,7 @@ compose.desktop {
                 "jdk.unsupported",
             )
             packageName = "Comics8"
-            packageVersion = "1.2.50"
+            packageVersion = "1.2.51"
             description = "Comics8 Monitor Desktop"
             macOS {
                 bundleID = "com.comics8.desktop"
@@ -184,7 +187,7 @@ val prepareWindowsJre = tasks.register<PrepareWindowsJreTask>("prepareWindowsJre
     expectedSha256.set("d42f84605c8e27c38998b44ac493d1067abbe45be89969c935d71a858393405c")
 }
 
-val compileWindowsResource by tasks.registering(Exec::class) {
+val compileWindowsResource = tasks.register<Exec>("compileWindowsResource") {
     group = "compose desktop"
     description = "Compiles Windows launcher resources using windres"
     val rcFile = file("src/main/c/launcher.rc")
@@ -201,7 +204,7 @@ val compileWindowsResource by tasks.registering(Exec::class) {
     commandLine("x86_64-w64-mingw32-windres", rcFile.absolutePath, "-O", "coff", "-o", resFile.get().asFile.absolutePath)
 }
 
-val compileWindowsLauncher by tasks.registering(Exec::class) {
+val compileWindowsLauncher = tasks.register<Exec>("compileWindowsLauncher") {
     group = "compose desktop"
     description = "Compiles the native Windows Comics8.exe launcher using MinGW"
     dependsOn(compileWindowsResource)

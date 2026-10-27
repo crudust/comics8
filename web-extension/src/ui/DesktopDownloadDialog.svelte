@@ -31,7 +31,7 @@
    *   `historyStore` read set), so "미열람 회차만" means the same chapters on both screens.
    */
 
-  import { Download, LoaderCircle } from 'lucide-svelte';
+  import { Download, LoaderCircle } from '@lucide/svelte';
 
   import { historyStore } from '../data/history-store.svelte';
   import { desktopState } from '../state/desktop-state.svelte';

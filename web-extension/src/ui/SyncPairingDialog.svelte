@@ -25,7 +25,7 @@
    */
 
   import { onMount } from 'svelte';
-  import { Copy, LoaderCircle, MonitorSmartphone, RefreshCw } from 'lucide-svelte';
+  import { Copy, LoaderCircle, MonitorSmartphone, RefreshCw } from '@lucide/svelte';
 
   import { describeError } from '../messaging';
   import { desktopState } from '../state/desktop-state.svelte';

@@ -43,7 +43,7 @@
     Folder,
     Plus,
     Trash2,
-  } from 'lucide-svelte';
+  } from '@lucide/svelte';
 
   import { desktopState } from '../state/desktop-state.svelte';
   import {

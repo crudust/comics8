@@ -17,7 +17,6 @@ import com.comics8.core.source.SourceHttp
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
 import com.google.common.truth.Truth.assertThat
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
@@ -131,7 +130,7 @@ class DesktopToonRepositorySyncTest {
         var updatedTotal: EpisodeListingTotal? = null
         var updatedProgress: String? = null
 
-        repository.syncEpisodeCounts(listOf(item)) { id, total, progress ->
+        val syncJob = repository.syncEpisodeCounts(listOf(item)) { id, total, progress ->
             if (id == workId) {
                 updatedTotal = total
                 updatedProgress = progress
@@ -139,11 +138,7 @@ class DesktopToonRepositorySyncTest {
         }
 
         // 백그라운드 코루틴 실행 대기
-        var attempts = 0
-        while (updatedTotal == null && attempts < 50) {
-            delay(50)
-            attempts++
-        }
+        syncJob?.join()
 
         assertThat(updatedTotal?.count).isEqualTo(15)
         assertThat(updatedProgress).contains("15")
@@ -366,18 +361,14 @@ class DesktopToonRepositorySyncTest {
         var updatedTotal: EpisodeListingTotal? = null
         var updatedProgress: String? = null
 
-        repository.syncEpisodeCounts(listOf(item)) { id, total, progress ->
+        val syncJob = repository.syncEpisodeCounts(listOf(item)) { id, total, progress ->
             if (id == workId) {
                 updatedTotal = total
                 updatedProgress = progress
             }
         }
 
-        var attempts = 0
-        while (updatedTotal == null && attempts < 50) {
-            delay(50)
-            attempts++
-        }
+        syncJob?.join()
 
         assertThat(updatedTotal?.count).isEqualTo(15) // TestSource has 15 episodes
         assertThat(updatedProgress).isEqualTo("15화")
@@ -595,20 +586,19 @@ class DesktopToonRepositorySyncTest {
             )
         }
 
-        var callbackCount = 0
-        repository.syncEpisodeCounts(items) { _, total, progress ->
-            callbackCount++
-            assertThat(total).isEqualTo(15)
-            assertThat(progress).isEqualTo("15화")
+        // `syncEpisodeCounts` invokes the callback from concurrent coroutines, so the counter and the
+        // recorded totals have to be thread-safe.
+        val callbackCount = java.util.concurrent.atomic.AtomicInteger()
+        val reported = java.util.Collections.synchronizedList(mutableListOf<Pair<Int, String>>())
+        val syncJob = repository.syncEpisodeCounts(items) { _, total, progress ->
+            callbackCount.incrementAndGet()
+            reported += (total?.count ?: -1) to progress
         }
 
-        var attempts = 0
-        while (callbackCount < 3 && attempts < 50) {
-            delay(50)
-            attempts++
-        }
+        syncJob?.join()
 
-        assertThat(callbackCount).isEqualTo(3)
+        assertThat(callbackCount.get()).isEqualTo(3)
+        assertThat(reported).containsExactly(15 to "15화", 15 to "15화", 15 to "15화")
         for (item in items) {
             val record = db.getCatalog(item.workId())
             assertThat(record).isNotNull()
@@ -618,14 +608,10 @@ class DesktopToonRepositorySyncTest {
         // The works are still unread (nothing marked read), so they stay refresh candidates: the
         // filter is about unread episodes, not about whether a total is stored.
         val secondCallbackCount = java.util.concurrent.atomic.AtomicInteger()
-        repository.syncEpisodeCounts(items) { _, _, _ ->
+        val secondSyncJob = repository.syncEpisodeCounts(items) { _, _, _ ->
             secondCallbackCount.incrementAndGet()
         }
-        var secondAttempts = 0
-        while (secondCallbackCount.get() < 3 && secondAttempts < 100) {
-            delay(50)
-            secondAttempts++
-        }
+        secondSyncJob?.join()
         assertThat(secondCallbackCount.get()).isEqualTo(3)
     }
 
@@ -681,16 +667,12 @@ class DesktopToonRepositorySyncTest {
 
         var updatedTotal: EpisodeListingTotal? = null
         var updatedProgress: String? = null
-        repoWithSync.syncEpisodeCounts(listOf(item)) { _, total, progress ->
+        val syncJob = repoWithSync.syncEpisodeCounts(listOf(item)) { _, total, progress ->
             updatedTotal = total
             updatedProgress = progress
         }
 
-        var attempts = 0
-        while (updatedTotal == null && attempts < 50) {
-            delay(50)
-            attempts++
-        }
+        syncJob?.join()
 
         // The server row carried no listing shape, so it was not adopted as a total; the source's own
         // listing was counted instead, and that count is what reaches the callback.
@@ -795,15 +777,11 @@ class DesktopToonRepositorySyncTest {
         )
 
         var updatedTotal: EpisodeListingTotal? = null
-        repoWithSync.syncEpisodeCounts(listOf(item)) { _, total, _ ->
+        val syncJob = repoWithSync.syncEpisodeCounts(listOf(item)) { _, total, _ ->
             updatedTotal = total
         }
 
-        var attempts = 0
-        while (updatedTotal == null && attempts < 50) {
-            delay(50)
-            attempts++
-        }
+        syncJob?.join()
 
         // A shapeless server row (50) is not a total, so the local listing is counted instead: 80.
         assertThat(updatedTotal?.count).isEqualTo(80)
