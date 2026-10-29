@@ -163,6 +163,120 @@ class WebDavFileSystemTest {
         }
     }
 
+    @Test
+    fun ownsPerInstanceConnectionPoolAndDispatcher() {
+        val config = NetworkSourceConfig(
+            id = "network-dav-pool-test",
+            protocol = NetworkProtocol.WEBDAV,
+            name = "DAV-Pool",
+            url = "http://127.0.0.1:1/dav/",
+            username = "me",
+            password = "pw",
+        ).validated()
+
+        val first = WebDavFileSystem(config)
+        val second = WebDavFileSystem(config)
+
+        // 소스별로 취소/커넥션을 격리할 수 있도록 풀과 디스패처를 공유하지 않는다.
+        assertThat(first.connectionPool).isNotSameInstanceAs(second.connectionPool)
+        assertThat(first.dispatcher).isNotSameInstanceAs(second.dispatcher)
+        // 개인 NAS 세션 한도를 넘지 않도록 보수적으로 조정된 값.
+        assertThat(first.dispatcher.maxRequests).isEqualTo(16)
+        assertThat(first.dispatcher.maxRequestsPerHost).isEqualTo(8)
+    }
+
+    @Test
+    fun disconnectEvictsIdleConnectionsAndReconnectsTransparently() {
+        val data = "abcdef".toByteArray()
+        val server = bookServer(data)
+        server.start()
+        try {
+            val fs = WebDavFileSystem(configFor(server, "network-dav-disconnect-test"))
+
+            assertThat(fs.list("")).containsExactly(
+                NetworkNode("book.cbz", "book.cbz", false, FileRevision(6L, 0L)),
+            )
+            // 읽고 나면 커넥션이 유휴 상태로 풀에 남아 있다.
+            assertThat(fs.connectionPool.connectionCount()).isEqualTo(1)
+
+            fs.disconnect()
+            // 유휴 커넥션은 즉시 닫혀 NAS 세션이 반납된다.
+            assertThat(fs.connectionPool.connectionCount()).isEqualTo(0)
+            assertThat(fs.dispatcher.runningCallsCount()).isEqualTo(0)
+
+            // disconnect는 영구 종료가 아니므로 다음 접근은 새 연결로 투명하게 재연결된다.
+            assertThat(fs.list("")).containsExactly(
+                NetworkNode("book.cbz", "book.cbz", false, FileRevision(6L, 0L)),
+            )
+            assertThat(fs.connectionPool.connectionCount()).isEqualTo(1)
+
+            fs.openFile("book.cbz").channel.use { channel ->
+                channel.position(1)
+                val target = ByteBuffer.allocate(2)
+                assertThat(channel.read(target)).isEqualTo(2)
+                assertThat(String(target.array())).isEqualTo("bc")
+            }
+
+            // 멱등: 반복 호출해도 예외 없이 유휴 커넥션만 정리한다.
+            fs.disconnect()
+            fs.disconnect()
+            assertThat(fs.connectionPool.connectionCount()).isEqualTo(0)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun closeEvictsIdleConnections() {
+        val server = bookServer("abcdef".toByteArray())
+        server.start()
+        try {
+            val fs = WebDavFileSystem(configFor(server, "network-dav-close-test"))
+
+            fs.list("")
+            assertThat(fs.connectionPool.connectionCount()).isEqualTo(1)
+
+            fs.close()
+            assertThat(fs.connectionPool.connectionCount()).isEqualTo(0)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    private fun configFor(server: MockWebServer, id: String) = NetworkSourceConfig(
+        id = id,
+        protocol = NetworkProtocol.WEBDAV,
+        name = "DAV",
+        url = server.url("/dav/").toString(),
+        username = "me",
+        password = "pw",
+    ).validated()
+
+    /** PROPFIND/HEAD/Range 요청을 모두 처리하는 가짜 WebDAV 서버. */
+    private fun bookServer(data: ByteArray): MockWebServer = MockWebServer().apply {
+        dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = when {
+                request.method == "PROPFIND" -> MockResponse()
+                    .setResponseCode(207)
+                    .setBody(MULTISTATUS)
+                request.method == "HEAD" -> MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Length", data.size)
+                    .setHeader("Last-Modified", "Mon, 31 Aug 2026 00:00:00 GMT")
+                    .setHeader("ETag", "\"book-v1\"")
+                request.getHeader("Range") != null -> {
+                    val range = checkNotNull(request.getHeader("Range"))
+                    val (start, end) = range.removePrefix("bytes=").split('-').map(String::toInt)
+                    MockResponse()
+                        .setResponseCode(206)
+                        .setHeader("Content-Range", "bytes $start-$end/${data.size}")
+                        .setBody(okio.Buffer().write(data, start, end - start + 1))
+                }
+                else -> MockResponse().setResponseCode(404)
+            }
+        }
+    }
+
     companion object {
         private const val MULTISTATUS = """<?xml version="1.0" encoding="utf-8"?>
 <d:multistatus xmlns:d="DAV:">

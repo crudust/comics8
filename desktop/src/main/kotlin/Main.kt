@@ -38,6 +38,7 @@ import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.js.JsPackStore
 import com.comics8.core.source.network.NetworkSourceStore
 import com.comics8.core.source.network.NetworkSourceConfig
+import com.comics8.core.source.network.NetworkSourceRuntime
 import com.comics8.core.source.network.loadSources
 import com.comics8.desktop.data.DesktopDatabase
 import java.io.File
@@ -166,6 +167,7 @@ fun main(args: Array<String>) {
                 downloadManager.close()
                 syncManager.close()
                 database.close()
+                NetworkSourceRuntime.disconnectAll()
                 com.comics8.desktop.ui.util.DesktopImageCache.close()
             }
         }

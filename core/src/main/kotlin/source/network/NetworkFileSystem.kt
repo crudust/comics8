@@ -27,6 +27,13 @@ interface NetworkFileSystem : Closeable {
     fun test() {
         list("")
     }
+
+    /**
+     * 유휴 커넥션만 반납하고 인스턴스는 계속 사용 가능한 상태로 둔다. 다음 접근 시 투명하게 재연결한다.
+     * 영구 종료는 [close].
+     */
+    fun disconnect() {}
+
     override fun close() {}
 }
 

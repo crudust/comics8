@@ -25,6 +25,20 @@ object NetworkSourceRuntime {
         NetworkZipPool.removeForSource(sourceId)
     }
 
+    /**
+     * 소스의 열린 ZIP 세션과 유휴 SMB 커넥션을 회수한다. 백엔드 자체는 등록된 채로 남으므로
+     * 다음 접근에서 투명하게 재연결된다.
+     */
+    fun disconnect(sourceId: String) {
+        NetworkZipPool.removeForSource(sourceId)
+        backends[sourceId]?.let { backend -> runCatching { backend.disconnect() } }
+    }
+
+    fun disconnectAll() {
+        NetworkZipPool.clear()
+        backends.values.forEach { backend -> runCatching { backend.disconnect() } }
+    }
+
     fun currentRevision(sourceId: String, path: String): FileRevision? =
         backends[sourceId]?.let { backend -> runCatching { backend.stat(path)?.revision }.getOrNull() }
 

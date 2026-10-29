@@ -27,6 +27,7 @@ import com.comics8.desktop.ExternalTargetResolver
 import java.text.Normalizer
 import com.comics8.core.source.network.NetworkProtocol
 import com.comics8.core.source.network.NetworkSourceConfig
+import com.comics8.core.source.network.NetworkSourceRuntime
 import com.comics8.core.source.network.NetworkSourceStore
 import com.comics8.core.source.network.createNetworkFileSystem
 import com.comics8.core.source.resolveSourceType
@@ -1522,6 +1523,7 @@ class DesktopViewModel(
         readerJob?.cancel()
         episodeJob?.cancel()
         val current = _state.value
+        current.series?.sourceId?.let { NetworkSourceRuntime.disconnect(it) }
         lastViewedSeries = current.series
         lastViewedEpisodePage = current.episodePage
         val tab = current.tab
@@ -2103,10 +2105,13 @@ class DesktopViewModel(
     }
 
     fun openEpisode(episode: EpisodeItem) {
+        episodeJob?.cancel()
         DesktopImageCache.cancelPendingPreviews()
         DesktopImageCache.clear(ImageCacheRole.READER)
         val current = _state.value
         val series = current.series
+        // 이전 회차 목록/썸네일이 잡고 있던 ZIP 세션과 유휴 SMB 커넥션을 뷰어 진입 전에 반납한다.
+        series?.sourceId?.let { NetworkSourceRuntime.disconnect(it) }
         if (series != null) {
             lastViewedSeries = series
             lastViewedEpisodePage = current.episodePage
@@ -2584,6 +2589,7 @@ class DesktopViewModel(
         if (externalSession != null) {
             externalReaderSession = null
             readerJob?.cancel()
+            _state.value.series?.sourceId?.let { NetworkSourceRuntime.disconnect(it) }
             DesktopImageCache.clear(ImageCacheRole.READER)
             restoreAutoSwitchedViewMode()
             _state.update {
@@ -2604,6 +2610,7 @@ class DesktopViewModel(
         }
         flushPendingPageSave()
         readerJob?.cancel()
+        _state.value.series?.sourceId?.let { NetworkSourceRuntime.disconnect(it) }
         DesktopImageCache.clear(ImageCacheRole.READER)
         val current = _state.value
         lastViewedEpisode = current.currentEpisode

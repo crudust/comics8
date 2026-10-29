@@ -26,12 +26,22 @@ import javax.xml.parsers.DocumentBuilderFactory
 
 class WebDavFileSystem(
     private val config: NetworkSourceConfig,
-    client: OkHttpClient = DEFAULT_CLIENT,
+    client: OkHttpClient = BASE_CLIENT,
 ) : NetworkFileSystem {
+    /**
+     * 소스별 취소/커넥션 격리를 위해 풀과 디스패처는 인스턴스마다 따로 소유한다.
+     * 개인 NAS(Nextcloud, Synology 등)의 동시 세션 한도를 넘지 않도록 보수적으로 잡는다.
+     */
+    internal val connectionPool = ConnectionPool(MAX_IDLE_CONNECTIONS, KEEP_ALIVE_MINUTES, TimeUnit.MINUTES)
+    internal val dispatcher = Dispatcher().apply {
+        maxRequests = MAX_REQUESTS
+        maxRequestsPerHost = MAX_REQUESTS_PER_HOST
+    }
+
     private val authHandler = WebDavAuthHandler(config)
     private val client: OkHttpClient = client.newBuilder()
-        .connectionPool(CONNECTION_POOL)
-        .dispatcher(DISPATCHER)
+        .connectionPool(connectionPool)
+        .dispatcher(dispatcher)
         .addInterceptor(authHandler)
         .authenticator(authHandler)
         .build()
@@ -113,6 +123,17 @@ class WebDavFileSystem(
             if (channel.size() > 0L) channel.read(ByteBuffer.allocate(1))
         }
     }
+
+    /**
+     * 이전 화면에서 남은 백그라운드 Range/PROPFIND 요청을 취소하고 유휴 소켓을 닫아 NAS 세션을 반납한다.
+     * OkHttp 클라이언트 자체는 파괴되지 않으므로 다음 [list], [stat], [openFile] 호출에서 투명하게 재연결한다.
+     */
+    override fun disconnect() {
+        dispatcher.cancelAll()
+        connectionPool.evictAll()
+    }
+
+    override fun close() = disconnect()
 
     private fun readRevision(url: String): FileRevision {
         val request = requestBuilder(url).head().build()
@@ -223,15 +244,13 @@ class WebDavFileSystem(
     }
 
     companion object {
-        private val CONNECTION_POOL = ConnectionPool(32, 5, TimeUnit.MINUTES)
-        private val DISPATCHER = Dispatcher().apply {
-            maxRequests = 64
-            maxRequestsPerHost = 32
-        }
-        private val DEFAULT_CLIENT = OkHttpClient.Builder()
-            .connectionPool(CONNECTION_POOL)
-            .dispatcher(DISPATCHER)
-            .build()
+        private const val MAX_REQUESTS = 16
+        private const val MAX_REQUESTS_PER_HOST = 8
+        private const val MAX_IDLE_CONNECTIONS = 8
+        private const val KEEP_ALIVE_MINUTES = 1L
+
+        /** 기본 타임아웃 템플릿. 여기 딸린 풀/디스패처는 인스턴스가 만든 것으로 교체되어 쓰이지 않는다. */
+        private val BASE_CLIENT: OkHttpClient = OkHttpClient.Builder().build()
 
         private const val PROPFIND_BODY = """<?xml version="1.0" encoding="utf-8" ?>
 <d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:getetag/></d:prop></d:propfind>"""

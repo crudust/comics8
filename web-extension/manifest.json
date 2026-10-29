@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Comics8 Web Reader",
   "description": "Comics8 comic reader: site source plugins, local/WebDAV libraries and reading progress sync.",
-  "version": "0.2.51",
+  "version": "0.2.52",
   "minimum_chrome_version": "116",
   "icons": {
     "16": "icons/icon-16.png",

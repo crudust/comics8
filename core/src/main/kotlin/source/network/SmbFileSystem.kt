@@ -127,46 +127,43 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
         throw IOException("SMB 작업 실패")
     }
 
+    /**
+     * SMB2는 하나의 커넥션 위에서 요청을 멀티플렉싱하므로 커넥션을 여러 개 유지할 이유가 없다.
+     * 풀에는 항상 최대 1개의 멀티플렉싱 커넥션만 보관하고, 없으면 온디맨드로 새로 연결한다.
+     */
     private fun acquireHandles(): Handles {
         synchronized(poolLock) {
             check(!closed) { "SMB 저장소가 닫혔습니다" }
-            val iterator = pool.iterator()
-            while (iterator.hasNext()) {
-                val h = iterator.next()
-                if (!h.isUsable()) {
-                    iterator.remove()
-                    h.close()
-                }
-            }
-            if (pool.isNotEmpty()) {
-                val idle = pool.firstOrNull { it.activeCount() == 0 }
-                if (idle != null) return idle
-                if (pool.size >= MAX_POOL_SIZE) {
-                    return pool.minByOrNull { it.activeCount() } ?: pool.first()
-                }
-            }
+            pruneUnusableLocked()
+            pool.firstOrNull()?.let { return it }
         }
 
-        val created = try {
-            connect()
-        } catch (e: Exception) {
-            synchronized(poolLock) {
-                pool.firstOrNull { it.isUsable() }
-            } ?: throw e
-        }
+        val created = connect()
 
         synchronized(poolLock) {
             if (closed) {
                 created.close()
                 throw IllegalStateException("SMB 저장소가 닫혔습니다")
             }
-            if (pool.size < MAX_POOL_SIZE) {
-                pool.add(created)
-                return created
-            } else {
-                val selected = pool.minByOrNull { it.activeCount() } ?: pool.first()
+            pruneUnusableLocked()
+            pool.firstOrNull()?.let { existing ->
+                // 다른 스레드가 먼저 연결을 만들었다면 그 커넥션을 재사용한다.
                 created.close()
-                return selected
+                return existing
+            }
+            pool.add(created)
+            return created
+        }
+    }
+
+    /** 닫혔거나 사용할 수 없게 된 커넥션은 풀에서 제거하고, 사용 중인 채널이 있으면 반환 시점에 닫는다. */
+    private fun pruneUnusableLocked() {
+        val iterator = pool.iterator()
+        while (iterator.hasNext()) {
+            val handles = iterator.next()
+            if (!handles.isUsable()) {
+                iterator.remove()
+                handles.retire()
             }
         }
     }
@@ -175,6 +172,16 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
         if (pool.remove(handles)) {
             handles.close()
         }
+    }
+
+    /**
+     * 유휴 SMB 커넥션을 닫아 서버 세션을 반납한다. 완전 종료가 아니므로 다음 [list], [stat], [openFile]
+     * 호출에서 새 커넥션을 만들어 투명하게 재연결한다.
+     */
+    override fun disconnect() = synchronized(poolLock) {
+        if (closed) return@synchronized
+        pool.forEach { it.retire() }
+        pool.clear()
     }
 
     private fun isFatalConnectionError(e: Throwable, handles: Handles): Boolean {
@@ -233,23 +240,46 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
         val session: Session,
         val share: DiskShare,
     ) : AutoCloseable {
+        private val lifecycleLock = Any()
         private val activeChannels = AtomicInteger(0)
+        private var retired = false
+        private var closed = false
 
-        fun isUsable(): Boolean = connection.isConnected
+        fun isUsable(): Boolean = synchronized(lifecycleLock) { !retired && connection.isConnected }
 
-        fun activeCount(): Int = activeChannels.get()
-
-        fun retainChannel(): Boolean {
-            if (!isUsable()) return false
+        fun retainChannel(): Boolean = synchronized(lifecycleLock) {
+            if (retired) return false
             activeChannels.incrementAndGet()
-            return true
+            true
         }
 
         fun releaseChannel() {
-            activeChannels.decrementAndGet()
+            val shouldClose = synchronized(lifecycleLock) {
+                val remaining = activeChannels.decrementAndGet()
+                (retired && remaining <= 0 && !closed).also { if (it) closed = true }
+            }
+            if (shouldClose) closeResources()
+        }
+
+        /** 아직 사용 중인 채널이 있으면 즉시 끊지 않고 마지막 채널이 반환될 때 닫는다. */
+        fun retire() {
+            val shouldClose = synchronized(lifecycleLock) {
+                retired = true
+                (activeChannels.get() <= 0 && !closed).also { if (it) closed = true }
+            }
+            if (shouldClose) closeResources()
         }
 
         override fun close() {
+            synchronized(lifecycleLock) {
+                retired = true
+                if (closed) return
+                closed = true
+            }
+            closeResources()
+        }
+
+        private fun closeResources() {
             runCatching { share.close() }
             runCatching { session.close() }
             runCatching { connection.close() }
@@ -323,8 +353,6 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
     }
 
     companion object {
-        private const val MAX_POOL_SIZE = 3
-
         private val SMB_CONFIG: SmbConfig = SmbConfig.builder()
             .withSocketFactory(SmbSocketFactory())
             .withTimeout(15L, TimeUnit.SECONDS)
