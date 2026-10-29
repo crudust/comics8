@@ -2110,8 +2110,6 @@ class DesktopViewModel(
         DesktopImageCache.clear(ImageCacheRole.READER)
         val current = _state.value
         val series = current.series
-        // 이전 회차 목록/썸네일이 잡고 있던 ZIP 세션과 유휴 SMB 커넥션을 뷰어 진입 전에 반납한다.
-        series?.sourceId?.let { NetworkSourceRuntime.disconnect(it) }
         if (series != null) {
             lastViewedSeries = series
             lastViewedEpisodePage = current.episodePage

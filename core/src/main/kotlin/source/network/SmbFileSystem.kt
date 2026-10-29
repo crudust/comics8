@@ -127,9 +127,13 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
         throw IOException("SMB 작업 실패")
     }
 
+    private val connectLock = Any()
+
     /**
      * SMB2는 하나의 커넥션 위에서 요청을 멀티플렉싱하므로 커넥션을 여러 개 유지할 이유가 없다.
      * 풀에는 항상 최대 1개의 멀티플렉싱 커넥션만 보관하고, 없으면 온디맨드로 새로 연결한다.
+     * 여러 스레드가 동시에 커넥션을 요청할 때 중복 connect() 호출로 인한 NAS 인증 폭풍 및 딜레이를
+     * 방지하기 위해 [connectLock]으로 이중 점검(Double-Checked Locking)을 수행한다.
      */
     private fun acquireHandles(): Handles {
         synchronized(poolLock) {
@@ -138,21 +142,23 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
             pool.firstOrNull()?.let { return it }
         }
 
-        val created = connect()
+        synchronized(connectLock) {
+            synchronized(poolLock) {
+                check(!closed) { "SMB 저장소가 닫혔습니다" }
+                pruneUnusableLocked()
+                pool.firstOrNull()?.let { return it }
+            }
 
-        synchronized(poolLock) {
-            if (closed) {
-                created.close()
-                throw IllegalStateException("SMB 저장소가 닫혔습니다")
+            val created = connect()
+
+            synchronized(poolLock) {
+                if (closed) {
+                    created.close()
+                    throw IllegalStateException("SMB 저장소가 닫혔습니다")
+                }
+                pool.add(created)
+                return created
             }
-            pruneUnusableLocked()
-            pool.firstOrNull()?.let { existing ->
-                // 다른 스레드가 먼저 연결을 만들었다면 그 커넥션을 재사용한다.
-                created.close()
-                return existing
-            }
-            pool.add(created)
-            return created
         }
     }
 
@@ -280,10 +286,12 @@ class SmbFileSystem(private val config: NetworkSourceConfig) : NetworkFileSystem
         }
 
         private fun closeResources() {
-            runCatching { share.close() }
-            runCatching { session.close() }
-            runCatching { connection.close() }
-            runCatching { client.close() }
+            java.util.concurrent.ForkJoinPool.commonPool().execute {
+                runCatching { share.close() }
+                runCatching { session.close() }
+                runCatching { connection.close() }
+                runCatching { client.close() }
+            }
         }
     }
 
