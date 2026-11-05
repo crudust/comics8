@@ -155,6 +155,34 @@ object ReaderDomain {
     ): ViewMode =
         if (widthDp >= dualMinWidthDp && widthDp > heightDp) ViewMode.DUAL else singlePagePreference
 
+    private const val AUTO_DUAL_MIN_WIDTH_DP = 800
+
+    /**
+     * Resolves the mode that actually renders the reader. [ViewMode.AUTO] detects a webtoon strip
+     * from the first observed pages, falls back to a dual spread on wide landscape viewports and to
+     * a single page elsewhere. Any explicit mode is returned untouched, so a user's own choice is
+     * never overridden by the detection.
+     */
+    fun resolveEffectiveViewMode(
+        viewMode: ViewMode,
+        widthDp: Int,
+        heightDp: Int,
+        imageAspectRatios: Map<Int, Float> = emptyMap(),
+        dualMinWidthDp: Int = AUTO_DUAL_MIN_WIDTH_DP,
+    ): ViewMode {
+        if (viewMode != ViewMode.AUTO) return viewMode
+        if (hasWebtoonStrip(imageAspectRatios)) return ViewMode.SCROLL
+        return if (widthDp >= dualMinWidthDp && widthDp > heightDp) ViewMode.DUAL else ViewMode.PAGE
+    }
+
+    /** Webtoon detection only inspects the same leading pages the auto-switch watches. */
+    fun hasWebtoonStrip(
+        imageAspectRatios: Map<Int, Float>,
+        threshold: Float = AUTO_SCROLL_HEIGHT_RATIO_THRESHOLD,
+    ): Boolean = imageAspectRatios.entries.any { (index, ratio) ->
+        isAutoScrollCandidate(index) && ratio > 0f && (1f / ratio) >= threshold
+    }
+
     fun imageAspectRatio(width: Int, height: Int): Float? =
         if (width <= 0 || height <= 0) null else width.toFloat() / height.toFloat()
 

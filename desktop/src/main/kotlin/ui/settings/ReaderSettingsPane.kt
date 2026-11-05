@@ -53,7 +53,7 @@ fun ReaderSettingsPane(
             )
             Spacer(Modifier.height(8.dp))
 
-            val viewModes = listOf(ViewMode.SCROLL, ViewMode.PAGE, ViewMode.DUAL)
+            val viewModes = listOf(ViewMode.AUTO, ViewMode.SCROLL, ViewMode.PAGE, ViewMode.DUAL)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 viewModes.forEachIndexed { index, mode ->
                     val isSelected = state.viewMode == mode

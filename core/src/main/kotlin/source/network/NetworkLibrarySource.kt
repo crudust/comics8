@@ -13,16 +13,13 @@ import com.comics8.core.source.SourceCatalog
 import com.comics8.core.source.SourceHttp
 import com.comics8.core.source.SourceKind
 import com.comics8.core.source.local.NaturalSort
-import com.comics8.core.source.local.IndexedLibraryEpisode
-import com.comics8.core.source.local.IndexedLibraryWork
-import com.comics8.core.source.local.LibraryScanIndex
 import com.comics8.core.source.local.ZipImageNames
 import java.util.Base64
 
 class NetworkLibrarySource(
     val config: NetworkSourceConfig,
     private val backend: NetworkFileSystem = createNetworkFileSystem(config),
-    private val index: LibraryScanIndex? = null,
+    private val index: NetworkWorkIndex? = null,
 ) : ComicSource {
     override val id: String = config.id
     override val displayName: String = config.name
@@ -54,21 +51,23 @@ class NetworkLibrarySource(
     override fun useProxy(url: String): Boolean = false
 
     override suspend fun loadListing(catalogId: String, page: Int, http: SourceHttp): ListingPage {
-        val allWorks = scan()
-        val works = when (catalogId.uppercase()) {
-            "LATEST" -> allWorks.sortedByDescending { work ->
-                work.episodes.maxOfOrNull { it.revision.modifiedAtEpochMs } ?: 0L
-            }
-            else -> allWorks
+        val works = scan()
+        val ordered = when (catalogId.uppercase()) {
+            // 최신순은 작품 폴더(또는 압축 파일) 자체의 수정일을 쓴다. 루트 목록만으로 결정되므로
+            // 회차를 추가한 작품은 캐시 상태와 무관하게 항상 맨 앞으로 올라온다.
+            "LATEST" -> works.sortedWith(
+                compareByDescending<NetworkListing> { it.modifiedAtEpochMs }
+                    .then(compareBy(NaturalSort) { it.title }),
+            )
+            else -> works
         }
-        val current = page.coerceIn(1, pageCount(works.size))
+        val current = page.coerceIn(1, pageCount(ordered.size))
         return ListingPage(
-            works.drop((current - 1) * PAGE_SIZE).take(PAGE_SIZE).map(::toItem),
+            ordered.drop((current - 1) * PAGE_SIZE).take(PAGE_SIZE).map(::toItem),
             current,
-            pageCount(works.size),
+            pageCount(ordered.size),
         )
     }
-
 
     override suspend fun search(query: SearchQuery, http: SourceHttp): List<ToonItem> {
         val needle = query.text.trim()
@@ -127,117 +126,77 @@ class NetworkLibrarySource(
     }
 
     private fun workFor(workId: String): NetworkWork? {
-        val parsed = parseWorkId(workId) ?: return scan().firstOrNull { it.id == workId }
-        val work = when (parsed.kind) {
-            WorkKind.SERIES -> {
-                val node = NetworkNode(
-                    path = parsed.path,
-                    name = parsed.path.substringAfterLast('/').ifBlank { config.name },
-                    directory = true,
-                    revision = FileRevision.UNKNOWN,
-                )
-                classifyFolder(node)
-            }
-            WorkKind.DIR -> {
-                val stat = runCatching { backend.stat(parsed.path) }.getOrNull()
-                val name = parsed.path.substringAfterLast('/').ifBlank { config.name }
-                NetworkWork(
-                    id = workId,
-                    title = name,
-                    path = parsed.path,
-                    episodes = listOf(NetworkEpisode(parsed.path, name, zip = false, stat?.revision ?: FileRevision.UNKNOWN)),
-                )
-            }
-            WorkKind.ZIP -> {
-                val stat = runCatching { backend.stat(parsed.path) }.getOrNull()
-                val name = parsed.path.substringAfterLast('/')
-                NetworkWork(
-                    id = workId,
-                    title = stem(name),
-                    path = parsed.path,
-                    episodes = listOf(NetworkEpisode(parsed.path, stem(name), zip = true, stat?.revision ?: FileRevision.UNKNOWN)),
-                )
-            }
+        val parsed = parseWorkId(workId) ?: return null
+        val name = parsed.path.substringAfterLast('/').ifBlank { config.name }
+        return when (parsed.kind) {
+            // 회차 구성이 작품 종류를 결정하므로 열 때도 목록과 같은 규칙(readFolder)으로 읽는다.
+            NetworkWorkKind.SERIES, NetworkWorkKind.DIR -> readFolder(
+                NetworkNode(path = parsed.path, name = name, directory = true, revision = FileRevision.UNKNOWN),
+            )
+            NetworkWorkKind.ZIP -> NetworkWork(
+                kind = NetworkWorkKind.ZIP,
+                title = stem(name),
+                episodes = listOf(NetworkEpisode(parsed.path, stem(name), zip = true, revisionOf(parsed.path))),
+            )
+            NetworkWorkKind.SKIP -> null
         }
-        return work
     }
-
-    private enum class WorkKind { SERIES, DIR, ZIP }
-    private data class ParsedWorkId(val kind: WorkKind, val path: String)
 
     private fun parseWorkId(id: String): ParsedWorkId? {
-        return when {
-            id.startsWith("series:") -> ParsedWorkId(WorkKind.SERIES, id.removePrefix("series:"))
-            id.startsWith("dir:") -> ParsedWorkId(WorkKind.DIR, id.removePrefix("dir:"))
-            id.startsWith("zip:") -> ParsedWorkId(WorkKind.ZIP, id.removePrefix("zip:"))
-            else -> null
-        }
+        val kind = NetworkWorkKind.entries.firstOrNull { it.prefix.isNotEmpty() && id.startsWith("${it.prefix}:") }
+            ?: return null
+        return ParsedWorkId(kind, id.removePrefix("${kind.prefix}:"))
     }
 
-    private fun scan(): List<NetworkWork> {
-        val stamp = runCatching { backend.stat("") }.getOrNull()
-        val statSignature = stamp?.takeIf { it.revision.modifiedAtEpochMs > 0L }?.let { node ->
-            LibraryScanIndex.signature(
-                listOf("${config.protocol}|${config.path}|${node.revision}"),
-            )
-        }
-        if (statSignature != null) {
-            index?.load(statSignature)?.let { cached ->
-                return cached.map(::fromIndexed)
-            }
-        }
+    /**
+     * 그리드에 노출할 작품 목록.
+     *
+     * 루트 목록은 매번 새로 읽는다(수정일이 항상 최신). 폴더를 하나씩 열어야 알 수 있는 "작품 종류와
+     * 썸네일용 첫 회차"만 [NetworkWorkIndex]에 캐시해, 변하지 않은 목록에서는 폴더를 다시 뒤지지 않는다.
+     */
+    private fun scan(): List<NetworkListing> {
         val root = backend.list("").sortedWith(compareBy(NaturalSort) { it.name })
-        val signature = statSignature ?: LibraryScanIndex.signature(root.map { node ->
-            "${node.path}|${node.name}|${node.directory}|${node.revision}"
-        })
-        if (statSignature == null) {
-            index?.load(signature)?.let { cached ->
-                return cached.map(::fromIndexed)
-            }
-        }
-        val works = ArrayList<NetworkWork>()
+        val signature = NetworkWorkIndex.signature(root)
+        val cached = index?.load(signature)
+        val classified = LinkedHashMap<String, NetworkWorkShape>()
+        val works = ArrayList<NetworkListing>()
         for (child in root) {
             if (ZipImageNames.isJunkName(child.name)) continue
-            if (!child.directory && ZipImageNames.isZipName(child.name)) {
-                works += zipWork(child)
-            } else if (child.directory) {
-                classifyFolder(child)?.let(works::add)
+            if (!child.directory) {
+                if (ZipImageNames.isZipName(child.name)) {
+                    works += listing(
+                        child,
+                        NetworkWorkKind.ZIP,
+                        NetworkEpisode(child.path, stem(child.name), zip = true, child.revision),
+                    )
+                }
+                continue
             }
+            val shape = cached?.get(child.path)
+                ?: (readFolder(child)?.toShape() ?: NetworkWorkShape(NetworkWorkKind.SKIP))
+                    .also { classified[child.path] = it }
+            if (shape.kind == NetworkWorkKind.SKIP) continue
+            works += listing(child, shape.kind, shape.episode)
         }
-        index?.save(signature, works.map(::toIndexed))
+        if (cached == null) index?.save(signature, classified)
         return works
     }
 
-    private fun toIndexed(work: NetworkWork): IndexedLibraryWork = IndexedLibraryWork(
-        id = work.id,
-        title = work.title,
-        path = work.path,
-        kind = "NETWORK",
-        episodes = work.episodes.map { episode ->
-            IndexedLibraryEpisode(
-                episode.path,
-                episode.title,
-                episode.zip,
-                episode.revision,
-            )
-        },
-    )
+    private fun listing(node: NetworkNode, kind: NetworkWorkKind, thumb: NetworkEpisode?): NetworkListing =
+        NetworkListing(
+            id = "${kind.prefix}:${node.path}",
+            title = if (kind == NetworkWorkKind.ZIP) stem(node.name) else node.name,
+            path = node.path,
+            // 작품 자체(폴더 또는 압축 파일)의 수정일. 루트 목록에서 바로 읽으므로 항상 최신이다.
+            modifiedAtEpochMs = node.revision.modifiedAtEpochMs,
+            thumb = thumb,
+        )
 
-    private fun fromIndexed(work: IndexedLibraryWork): NetworkWork = NetworkWork(
-        id = work.id,
-        title = work.title,
-        path = work.path,
-        episodes = work.episodes.map { episode ->
-            NetworkEpisode(
-                episode.path,
-                episode.title,
-                episode.zip,
-                episode.revision,
-            )
-        },
-    )
-
-    private fun classifyFolder(dir: NetworkNode): NetworkWork? {
+    /**
+     * 폴더 하나를 작품으로 해석한다. 목록과 열기가 같은 규칙을 공유하도록 회차 구성이 종류를 결정한다.
+     * 폴더 목록은 1회만 읽는다.
+     */
+    private fun readFolder(dir: NetworkNode): NetworkWork? {
         val children = backend.list(dir.path).filterNot { ZipImageNames.isJunkName(it.name) }
         val zips = children.filter { !it.directory && ZipImageNames.isZipName(it.name) }
         val subDirs = children.filter { it.directory }
@@ -245,34 +204,32 @@ class NetworkLibrarySource(
             val episodes = zips.map { NetworkEpisode(it.path, stem(it.name), zip = true, it.revision) } +
                 subDirs.map { NetworkEpisode(it.path, it.name, zip = false, it.revision) }
             return NetworkWork(
-                id = "series:${dir.path}",
+                kind = NetworkWorkKind.SERIES,
                 title = dir.name,
-                path = dir.path,
                 episodes = episodes.sortedWith(compareBy(NaturalSort) { it.title }),
             )
         }
         if (children.any { !it.directory && ZipImageNames.isImageEntry(it.name) }) {
+            // 목록에서는 루트 목록의 수정일을 그대로 쓰고, 열 때는 노드에 수정일이 없으므로 직접 확인한다.
+            val revision = dir.revision.takeIf { it != FileRevision.UNKNOWN } ?: revisionOf(dir.path)
             return NetworkWork(
-                id = "dir:${dir.path}",
+                kind = NetworkWorkKind.DIR,
                 title = dir.name,
-                path = dir.path,
-                episodes = listOf(NetworkEpisode(dir.path, dir.name, zip = false, dir.revision)),
+                episodes = listOf(NetworkEpisode(dir.path, dir.name, zip = false, revision)),
             )
         }
         return null
     }
 
-    private fun zipWork(file: NetworkNode): NetworkWork = NetworkWork(
-        id = "zip:${file.path}",
-        title = stem(file.name),
-        path = file.path,
-        episodes = listOf(NetworkEpisode(file.path, stem(file.name), zip = true, file.revision)),
-    )
+    private fun NetworkWork.toShape(): NetworkWorkShape = NetworkWorkShape(kind, episodes.firstOrNull())
 
-    private fun toItem(work: NetworkWork): ToonItem = ToonItem(
+    private fun revisionOf(path: String): FileRevision =
+        runCatching { backend.stat(path) }.getOrNull()?.revision ?: FileRevision.UNKNOWN
+
+    private fun toItem(work: NetworkListing): ToonItem = ToonItem(
         id = work.id,
         title = work.title,
-        thumbUrl = work.episodes.firstOrNull()?.let { firstImageUrl(it, GRID_THUMB_PX) }.orEmpty(),
+        thumbUrl = work.thumb?.let { firstImageUrl(it, GRID_THUMB_PX) }.orEmpty(),
         href = NetworkImageUri.encode(id, work.path),
         sourceId = id,
     )
@@ -313,19 +270,23 @@ class NetworkLibrarySource(
 
     private fun pageCount(size: Int): Int = maxOf(1, (size + PAGE_SIZE - 1) / PAGE_SIZE)
 
-    private data class NetworkWork(
+    /** 그리드 한 칸. 회차 목록은 담지 않는다. */
+    private data class NetworkListing(
         val id: String,
         val title: String,
         val path: String,
+        val modifiedAtEpochMs: Long,
+        val thumb: NetworkEpisode?,
+    )
+
+    /** 열린 작품과 그 회차 목록. */
+    private data class NetworkWork(
+        val kind: NetworkWorkKind,
+        val title: String,
         val episodes: List<NetworkEpisode>,
     )
 
-    private data class NetworkEpisode(
-        val path: String,
-        val title: String,
-        val zip: Boolean,
-        val revision: FileRevision,
-    )
+    private data class ParsedWorkId(val kind: NetworkWorkKind, val path: String)
 
     private data class NetworkEpisodeRef(val path: String, val zip: Boolean)
 

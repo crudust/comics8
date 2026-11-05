@@ -70,6 +70,7 @@ data class EpisodePage(
 )
 
 enum class ViewMode(val label: String) {
+    AUTO("자동"),
     SCROLL("세로 스크롤"),
     PAGE("단면 페이지"),
     DUAL("양쪽보기"),

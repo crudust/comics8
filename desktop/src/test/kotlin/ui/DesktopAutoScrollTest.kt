@@ -77,102 +77,128 @@ class DesktopAutoScrollTest {
         tempDir.deleteRecursively()
     }
 
+    private fun series(id: String) = ToonItem(
+        id = id,
+        title = "Test Toon $id",
+        thumbUrl = "thumb",
+        href = "href",
+        sourceId = "local",
+    )
+
     @Test
-    fun autoSwitchesToScrollForWebtoonAndRestoresOnNewEpisode() = runBlocking(Dispatchers.Main) {
-        val series = ToonItem(
-            id = "test_toon",
-            title = "Test Toon",
-            thumbUrl = "thumb",
-            href = "href",
-            sourceId = "local",
-        )
+    fun autoModeSwitchesWebtoonToScrollAndRestoresAutoOnNewEpisode() = runBlocking(Dispatchers.Main) {
+        val series = series("auto_toon")
         val ep1 = EpisodeItem(wrId = "ep1", title = "1화", date = "2026-01-01", thumbUrl = null, href = "href1")
         val ep2 = EpisodeItem(wrId = "ep2", title = "2화", date = "2026-01-02", thumbUrl = null, href = "href2")
 
         viewModel.openSeries(series)
-        // User starts with PAGE view mode
-        viewModel.setViewMode(ViewMode.PAGE)
-        assertThat(viewModel.state.value.viewMode).isEqualTo(ViewMode.PAGE)
+        viewModel.updateViewportSize(400, 900)
+        viewModel.setViewMode(ViewMode.AUTO)
 
-        // Open ep1
         viewModel.openEpisode(ep1)
-        assertThat(viewModel.state.value.viewMode).isEqualTo(ViewMode.PAGE)
+        assertThat(viewModel.state.value.viewMode).isEqualTo(ViewMode.AUTO)
+        // A standard comic book page renders single-page while AUTO is undecided.
+        assertThat(viewModel.state.value.effectiveViewMode).isEqualTo(ViewMode.PAGE)
 
-        // First image arrives with 800 x 5000 (ratio 6.25 >= 2.0)
+        // First image arrives with 800 x 5000 (ratio 6.25 >= 2.0) -> webtoon
         viewModel.recordImageAspectRatio(0, 800, 5000)
 
-        // Should automatically switch to SCROLL mode and surface a toast (copy is locale-dependent,
-        // so only the presence of the notification is asserted here).
+        // AUTO switches to SCROLL and surfaces a toast (copy is locale-dependent, so only the
+        // presence of the notification is asserted here).
         assertThat(viewModel.state.value.viewMode).isEqualTo(ViewMode.SCROLL)
         assertThat(viewModel.state.value.readerToastMessage).isNotNull()
 
-        // Now open ep2
+        // The explicit switch belongs to this episode only: the next one starts from AUTO again.
         viewModel.openEpisode(ep2)
-
-        // ViewMode should restore back to PAGE! Toast message should be cleared!
-        assertThat(viewModel.state.value.viewMode).isEqualTo(ViewMode.PAGE)
+        assertThat(viewModel.state.value.viewMode).isEqualTo(ViewMode.AUTO)
         assertThat(viewModel.state.value.readerToastMessage).isNull()
 
-        // If ep2 has a normal manga image (1000 x 1400 -> ratio 1.4 < 2.0)
+        // Normal manga image (1000 x 1400 -> ratio 1.4 < 2.0) keeps the AUTO resolution.
         viewModel.recordImageAspectRatio(0, 1000, 1400)
-        // Remains PAGE mode
-        assertThat(viewModel.state.value.viewMode).isEqualTo(ViewMode.PAGE)
+        assertThat(viewModel.state.value.viewMode).isEqualTo(ViewMode.AUTO)
+        assertThat(viewModel.state.value.effectiveViewMode).isEqualTo(ViewMode.PAGE)
         assertThat(viewModel.state.value.readerToastMessage).isNull()
     }
 
     @Test
-    fun autoSwitchesToScrollWhenSecondPageIsWebtoon() = runBlocking(Dispatchers.Main) {
-        val series = ToonItem(
-            id = "test_toon2",
-            title = "Test Toon 2",
-            thumbUrl = "thumb",
-            href = "href",
-            sourceId = "local",
-        )
+    fun explicitPageModeIsNeverAutoSwitchedForWebtoons() = runBlocking(Dispatchers.Main) {
         val ep1 = EpisodeItem(wrId = "ep1", title = "1화", date = "2026-01-01", thumbUrl = null, href = "href1")
 
-        viewModel.openSeries(series)
+        viewModel.openSeries(series("explicit_page"))
+        viewModel.updateViewportSize(400, 900)
         viewModel.setViewMode(ViewMode.PAGE)
-
         viewModel.openEpisode(ep1)
+
+        viewModel.recordImageAspectRatio(0, 800, 5000)
+
         assertThat(viewModel.state.value.viewMode).isEqualTo(ViewMode.PAGE)
+        assertThat(viewModel.state.value.effectiveViewMode).isEqualTo(ViewMode.PAGE)
+        assertThat(viewModel.state.value.readerToastMessage).isNull()
+    }
+
+    @Test
+    fun explicitDualModeIsNeverAutoSwitchedForWebtoons() = runBlocking(Dispatchers.Main) {
+        val ep1 = EpisodeItem(wrId = "ep1", title = "1화", date = "2026-01-01", thumbUrl = null, href = "href1")
+
+        viewModel.openSeries(series("explicit_dual"))
+        viewModel.updateViewportSize(1280, 800)
+        viewModel.setViewMode(ViewMode.DUAL)
+        viewModel.openEpisode(ep1)
+
+        viewModel.recordImageAspectRatio(0, 800, 5000)
+
+        assertThat(viewModel.state.value.viewMode).isEqualTo(ViewMode.DUAL)
+        assertThat(viewModel.state.value.effectiveViewMode).isEqualTo(ViewMode.DUAL)
+        assertThat(viewModel.state.value.readerToastMessage).isNull()
+    }
+
+    @Test
+    fun autoModeResolvesDualOnWideViewport() = runBlocking(Dispatchers.Main) {
+        viewModel.openSeries(series("auto_wide"))
+        viewModel.updateViewportSize(1280, 800)
+        viewModel.setViewMode(ViewMode.AUTO)
+
+        assertThat(viewModel.state.value.viewMode).isEqualTo(ViewMode.AUTO)
+        assertThat(viewModel.state.value.effectiveViewMode).isEqualTo(ViewMode.DUAL)
+    }
+
+    @Test
+    fun autoModeSwitchesWhenSecondPageIsWebtoon() = runBlocking(Dispatchers.Main) {
+        val ep1 = EpisodeItem(wrId = "ep1", title = "1화", date = "2026-01-01", thumbUrl = null, href = "href1")
+
+        viewModel.openSeries(series("auto_second"))
+        viewModel.updateViewportSize(400, 900)
+        viewModel.setViewMode(ViewMode.AUTO)
+        viewModel.openEpisode(ep1)
 
         // First page is a normal cover/notice image (1000 x 1000, ratio 1.0 < 2.0)
         viewModel.recordImageAspectRatio(0, 1000, 1000)
-        assertThat(viewModel.state.value.viewMode).isEqualTo(ViewMode.PAGE)
+        assertThat(viewModel.state.value.viewMode).isEqualTo(ViewMode.AUTO)
 
         // Second page (index 1) is a tall webtoon strip (800 x 4000, ratio 5.0 >= 2.0)
         viewModel.recordImageAspectRatio(1, 800, 4000)
 
-        // Should switch to SCROLL!
         assertThat(viewModel.state.value.viewMode).isEqualTo(ViewMode.SCROLL)
         assertThat(viewModel.state.value.readerToastMessage).isNotNull()
     }
 
     @Test
     fun doesNotAutoSwitchWhenOnlyThirdPageIsWebtoon() = runBlocking(Dispatchers.Main) {
-        val series = ToonItem(
-            id = "test_toon3",
-            title = "Test Toon 3",
-            thumbUrl = "thumb",
-            href = "href",
-            sourceId = "local",
-        )
         val ep1 = EpisodeItem(wrId = "ep1", title = "1화", date = "2026-01-01", thumbUrl = null, href = "href1")
 
-        viewModel.openSeries(series)
-        viewModel.setViewMode(ViewMode.PAGE)
-
+        viewModel.openSeries(series("auto_third"))
+        viewModel.updateViewportSize(400, 900)
+        viewModel.setViewMode(ViewMode.AUTO)
         viewModel.openEpisode(ep1)
 
         // First and second pages are normal manga
         viewModel.recordImageAspectRatio(0, 1000, 1400)
         viewModel.recordImageAspectRatio(1, 1000, 1400)
-        assertThat(viewModel.state.value.viewMode).isEqualTo(ViewMode.PAGE)
+        assertThat(viewModel.state.value.viewMode).isEqualTo(ViewMode.AUTO)
 
-        // Third page (index 2) is tall, but candidate is only first 2 pages (index 0, 1)
+        // Third page (index 2) is tall, but only the first 2 pages (index 0, 1) are candidates
         viewModel.recordImageAspectRatio(2, 800, 4000)
-        assertThat(viewModel.state.value.viewMode).isEqualTo(ViewMode.PAGE)
+        assertThat(viewModel.state.value.viewMode).isEqualTo(ViewMode.AUTO)
         assertThat(viewModel.state.value.readerToastMessage).isNull()
     }
 }

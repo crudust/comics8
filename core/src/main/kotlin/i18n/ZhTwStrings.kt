@@ -103,6 +103,9 @@ object ZhTwStrings : AppStrings {
     override val actionSortEpisodes: String = "章節排序"
 
     // 5. Reader & Viewer
+    override val viewModeAuto: String = "自動判別"
+    override val viewModeAutoShort: String = "自動"
+    override val viewModeAutoDesc: String = "自動偵測條漫/漫畫格式"
     override val viewModeScroll: String = "條漫模式 (垂直滾動)"
     override val viewModeScrollShort: String = "滾動"
     override val viewModeScrollDesc: String = "垂直連續滾動閱讀"

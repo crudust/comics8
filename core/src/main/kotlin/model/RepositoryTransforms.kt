@@ -209,6 +209,7 @@ object RepositoryTransforms {
         splitMode: String,
     ): ReaderSettingValues = ReaderSettingValues(
         viewMode = when (viewMode.uppercase()) {
+            "AUTO" -> ViewMode.AUTO
             "SCROLL" -> ViewMode.SCROLL
             "DUAL" -> ViewMode.DUAL
             else -> ViewMode.PAGE

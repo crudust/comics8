@@ -22,6 +22,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Close
@@ -363,6 +364,19 @@ fun TopBar(
                     )
                 }
             }
+            if (state.screen == Screen.Reader && state.series != null) {
+                IconButton(onClick = viewModel::toggleFavorite) {
+                    Icon(
+                        imageVector = if (state.seriesFavorited) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                        contentDescription = if (state.seriesFavorited) strings.actionRemoveFavorite else strings.actionAddFavorite,
+                        tint = if (state.seriesFavorited) {
+                            MonochromeTheme.Gold
+                        } else {
+                            MaterialTheme.colorScheme.onBackground
+                        },
+                    )
+                }
+            }
             IconButton(
                 onClick = viewModel::refresh,
                 enabled = state.activeSourceId != null,
@@ -380,7 +394,7 @@ fun TopBar(
                     .fillMaxWidth()
                     .padding(top = 6.dp),
             ) {
-                // View Mode Switcher [ Scroll | Page | Dual ]
+                // View Mode Switcher [ Auto | Scroll | Page | Dual ]
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -389,6 +403,12 @@ fun TopBar(
                         .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
                         .padding(2.dp),
                 ) {
+                    ViewModeChip(
+                        selected = state.viewMode == ViewMode.AUTO,
+                        onClick = { viewModel.setViewMode(ViewMode.AUTO) },
+                        icon = Icons.Default.AutoAwesome,
+                        label = strings.viewModeAutoShort,
+                    )
                     ViewModeChip(
                         selected = state.viewMode == ViewMode.SCROLL,
                         onClick = { viewModel.setViewMode(ViewMode.SCROLL) },
@@ -410,7 +430,7 @@ fun TopBar(
                 }
 
                 // Read Direction Switcher [ 우→좌 | 좌→우 ]
-                if (state.viewMode != ViewMode.SCROLL) {
+                if (state.effectiveViewMode != ViewMode.SCROLL) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -433,7 +453,7 @@ fun TopBar(
                 }
 
                 // Split Mode Switcher [ Fit | Slice ] (Only in Single Page mode)
-                if (state.viewMode == ViewMode.PAGE) {
+                if (state.effectiveViewMode == ViewMode.PAGE) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(2.dp),

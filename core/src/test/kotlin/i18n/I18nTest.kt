@@ -125,6 +125,11 @@ class I18nTest {
         assertThat(PageTapZone.LEFT_NEXT.displayDescription(ja)).isEqualTo("常に左をタップすると次のページ、右をタップすると前のページに移動します。")
 
         // ViewMode
+        assertThat(com.comics8.core.model.ViewMode.AUTO.displayLabel(ko)).isEqualTo("자동 감지")
+        assertThat(com.comics8.core.model.ViewMode.AUTO.displayLabel(en)).isEqualTo("Auto Detect")
+        assertThat(com.comics8.core.model.ViewMode.AUTO.displayShortLabel(ko)).isEqualTo("자동")
+        assertThat(com.comics8.core.model.ViewMode.AUTO.displayShortLabel(en)).isEqualTo("Auto")
+        assertThat(com.comics8.core.model.ViewMode.AUTO.displayDescription(en)).isEqualTo("Auto-detect webtoon/manga format")
         assertThat(com.comics8.core.model.ViewMode.SCROLL.displayLabel(ko)).isEqualTo("세로 스크롤")
         assertThat(com.comics8.core.model.ViewMode.SCROLL.displayLabel(en)).isEqualTo("Webtoon (Scroll)")
         assertThat(com.comics8.core.model.ViewMode.SCROLL.displayLabel(ja)).isEqualTo("縦スクロール (Webtoon)")

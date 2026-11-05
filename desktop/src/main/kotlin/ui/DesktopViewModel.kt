@@ -1997,6 +1997,7 @@ class DesktopViewModel(
             it.copy(
                 screen = Screen.Series,
                 series = toon,
+                seriesFavorited = false,
                 rawEpisodes = emptyList(),
                 episodes = emptyList(),
                 episodeSortOrder = sortOrder,
@@ -2007,6 +2008,7 @@ class DesktopViewModel(
                 readerImages = emptyList(),
             )
         }
+        refreshSeriesFavorited(toon)
         scope.launch {
             try {
                 val readEp = repository.getReadEpisode(item.workId(), item.lastWrId)
@@ -2152,6 +2154,7 @@ class DesktopViewModel(
         }
         loadReaderImages(episode)
         if (series != null) {
+            refreshSeriesFavorited(series)
             scope.launch {
                 val savedSetting = repository.getReaderSetting(series.workId())
                 if (savedSetting != null) {
@@ -2508,6 +2511,8 @@ class DesktopViewModel(
 
     fun setViewMode(mode: ViewMode) {
         preAutoSwitchViewMode = null
+        // Asking for AUTO again re-arms detection for the episode already on screen.
+        if (mode == ViewMode.AUTO) autoSwitchedEpisodeId = null
         _state.update { it.copy(viewMode = mode) }
         if (externalReaderSession != null) return
         val series = _state.value.series ?: return
@@ -2554,7 +2559,8 @@ class DesktopViewModel(
         val currentEp = _state.value.currentEpisode ?: return
         if (autoSwitchedEpisodeId == currentEp.wrId) return
         val currentMode = _state.value.viewMode
-        if (currentMode == ViewMode.SCROLL) return
+        // Only AUTO mode may override the user's choice; an explicit PAGE/DUAL/SCROLL is final.
+        if (currentMode != ViewMode.AUTO) return
 
         if (ReaderDomain.isWebtoonStrip(width, height)) {
             autoSwitchedEpisodeId = currentEp.wrId
@@ -2570,6 +2576,25 @@ class DesktopViewModel(
             readerToastJob = scope.launch {
                 delay(1000)
                 _state.update { it.copy(readerToastMessage = null) }
+            }
+        }
+    }
+
+    fun updateViewportSize(widthDp: Int, heightDp: Int) {
+        _state.update {
+            if (it.viewportWidthDp == widthDp && it.viewportHeightDp == heightDp) {
+                it
+            } else {
+                it.copy(viewportWidthDp = widthDp, viewportHeightDp = heightDp)
+            }
+        }
+    }
+
+    private fun refreshSeriesFavorited(series: ToonItem) {
+        scope.launch {
+            val favorited = repository.isFavorite(series.workId())
+            _state.update { current ->
+                if (current.series?.workId() == series.workId()) current.copy(seriesFavorited = favorited) else current
             }
         }
     }

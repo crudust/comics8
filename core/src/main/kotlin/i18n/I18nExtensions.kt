@@ -89,18 +89,21 @@ fun PageTapZone.displayDescription(strings: AppStrings): String = when (this) {
 }
 
 fun ViewMode.displayLabel(strings: AppStrings): String = when (this) {
+    ViewMode.AUTO -> strings.viewModeAuto
     ViewMode.SCROLL -> strings.viewModeScroll
     ViewMode.PAGE -> strings.viewModeSingleLong
     ViewMode.DUAL -> strings.viewModeDualLong
 }
 
 fun ViewMode.displayDescription(strings: AppStrings): String = when (this) {
+    ViewMode.AUTO -> strings.viewModeAutoDesc
     ViewMode.SCROLL -> strings.viewModeScrollDesc
     ViewMode.PAGE -> strings.viewModeSingleDesc
     ViewMode.DUAL -> strings.viewModeDualDesc
 }
 
 fun ViewMode.displayShortLabel(strings: AppStrings): String = when (this) {
+    ViewMode.AUTO -> strings.viewModeAutoShort
     ViewMode.SCROLL -> strings.viewModeScrollShort
     ViewMode.PAGE -> strings.viewModeSingleShort
     ViewMode.DUAL -> strings.viewModeDualShort

@@ -103,6 +103,9 @@ object ZhCnStrings : AppStrings {
     override val actionSortEpisodes: String = "章节排序"
 
     // 5. Reader & Viewer
+    override val viewModeAuto: String = "自动判别"
+    override val viewModeAutoShort: String = "自动"
+    override val viewModeAutoDesc: String = "自动检测条漫/漫画格式"
     override val viewModeScroll: String = "条漫模式 (竖向滚动)"
     override val viewModeScrollShort: String = "滚动"
     override val viewModeScrollDesc: String = "竖向连续滚动阅读"

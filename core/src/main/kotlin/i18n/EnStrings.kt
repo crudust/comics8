@@ -103,6 +103,9 @@ object EnStrings : AppStrings {
     override val actionSortEpisodes: String = "Sort Episodes"
 
     // 5. Reader & Viewer
+    override val viewModeAuto: String = "Auto Detect"
+    override val viewModeAutoShort: String = "Auto"
+    override val viewModeAutoDesc: String = "Auto-detect webtoon/manga format"
     override val viewModeScroll: String = "Webtoon (Scroll)"
     override val viewModeScrollShort: String = "Scroll"
     override val viewModeScrollDesc: String = "Continuous vertical scrolling"

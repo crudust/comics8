@@ -70,7 +70,9 @@ data class DesktopUiState(
     val readerLoading: Boolean = false,
     val readerError: String? = null,
     val readerToastMessage: String? = null,
-    val viewMode: ViewMode = ViewMode.DUAL,
+    val viewMode: ViewMode = ViewMode.AUTO,
+    val viewportWidthDp: Int = 0,
+    val viewportHeightDp: Int = 0,
     val readDirection: ReadDirection = ReadDirection.RIGHT_TO_LEFT,
     val splitMode: SplitMode = SplitMode.FIT,
     val seriesHistory: ReadHistoryRecord? = null,
@@ -108,6 +110,10 @@ data class DesktopUiState(
     val networkTestSucceeded: Boolean = false,
 ) {
     val isSearch: Boolean get() = searchQuery != null
+
+    /** Mode that actually renders the reader; [ViewMode.AUTO] resolves from viewport and page shapes. */
+    val effectiveViewMode: ViewMode
+        get() = ReaderDomain.resolveEffectiveViewMode(viewMode, viewportWidthDp, viewportHeightDp, imageAspectRatios)
 
     val writesDownloads: Boolean
         get() {

@@ -103,6 +103,9 @@ object JaStrings : AppStrings {
     override val actionSortEpisodes: String = "並び替え"
 
     // 5. Reader & Viewer
+    override val viewModeAuto: String = "自動判別"
+    override val viewModeAutoShort: String = "自動"
+    override val viewModeAutoDesc: String = "ウェブトゥーン/漫画形式を自動判別"
     override val viewModeScroll: String = "縦スクロール (Webtoon)"
     override val viewModeScrollShort: String = "縦スクロール"
     override val viewModeScrollDesc: String = "縦方向に連続スクロールして閲覧"

@@ -1,6 +1,7 @@
 package com.comics8.desktop
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -281,7 +282,12 @@ private fun ComicsDesktopAppContent(
             com.comics8.desktop.ui.components.pickJsFile()?.let(viewModel::importJsFile)
         }
     }
-    Box(modifier = Modifier.fillMaxSize()) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val viewportWidthDp = maxWidth.value.toInt()
+        val viewportHeightDp = maxHeight.value.toInt()
+        LaunchedEffect(viewportWidthDp, viewportHeightDp) {
+            viewModel.updateViewportSize(viewportWidthDp, viewportHeightDp)
+        }
         if (state.screen == Screen.Reader) {
             ReaderPane(
                 state = state,

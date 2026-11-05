@@ -32,6 +32,47 @@ class ReaderDomainTest {
     }
 
     @Test
+    fun resolveEffectiveViewModeKeepsExplicitUserChoice() {
+        val webtoonRatios = mapOf(0 to 0.2f)
+        assertThat(ReaderDomain.resolveEffectiveViewMode(ViewMode.PAGE, 1200, 800, webtoonRatios))
+            .isEqualTo(ViewMode.PAGE)
+        assertThat(ReaderDomain.resolveEffectiveViewMode(ViewMode.DUAL, 400, 900, webtoonRatios))
+            .isEqualTo(ViewMode.DUAL)
+        assertThat(ReaderDomain.resolveEffectiveViewMode(ViewMode.SCROLL, 400, 900, webtoonRatios))
+            .isEqualTo(ViewMode.SCROLL)
+    }
+
+    @Test
+    fun resolveEffectiveViewModeAutoDetectsWebtoonStrips() {
+        // 800x4000 -> ratio 0.2 -> height/width = 5.0 >= 2.0
+        val webtoonRatios = mapOf(0 to 0.2f)
+        assertThat(ReaderDomain.resolveEffectiveViewMode(ViewMode.AUTO, 1200, 800, webtoonRatios))
+            .isEqualTo(ViewMode.SCROLL)
+        assertThat(ReaderDomain.resolveEffectiveViewMode(ViewMode.AUTO, 400, 900, webtoonRatios))
+            .isEqualTo(ViewMode.SCROLL)
+    }
+
+    @Test
+    fun resolveEffectiveViewModeAutoFallsBackToDualOrSinglePage() {
+        // 1000x1400 standard comic -> ratio 0.71, not a webtoon strip
+        val comicRatios = mapOf(0 to 0.71f)
+        assertThat(ReaderDomain.resolveEffectiveViewMode(ViewMode.AUTO, 1200, 800, comicRatios))
+            .isEqualTo(ViewMode.DUAL)
+        assertThat(ReaderDomain.resolveEffectiveViewMode(ViewMode.AUTO, 400, 900, comicRatios))
+            .isEqualTo(ViewMode.PAGE)
+        // Narrow landscape does not qualify for a spread.
+        assertThat(ReaderDomain.resolveEffectiveViewMode(ViewMode.AUTO, 700, 600, comicRatios))
+            .isEqualTo(ViewMode.PAGE)
+    }
+
+    @Test
+    fun resolveEffectiveViewModeIgnoresLateWebtoonPages() {
+        val ratios = mapOf(0 to 0.71f, 1 to 0.71f, 2 to 0.2f)
+        assertThat(ReaderDomain.resolveEffectiveViewMode(ViewMode.AUTO, 400, 900, ratios))
+            .isEqualTo(ViewMode.PAGE)
+    }
+
+    @Test
     fun episodePositionUsesNewestFirstOrderingAcrossPages() {
         val counted = EpisodeListingTotal(count = 205, lastPage = 3, pageSize = 100)
         val position = ReaderDomain.episodePosition(

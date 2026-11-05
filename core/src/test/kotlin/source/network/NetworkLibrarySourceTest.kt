@@ -5,7 +5,6 @@ import com.comics8.core.source.FileRevision
 import com.comics8.core.source.HttpResult
 import com.comics8.core.source.RequestPolicy
 import com.comics8.core.source.SourceHttp
-import com.comics8.core.source.local.LibraryScanIndex
 import com.comics8.core.source.local.PreviewImageResolver
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.runBlocking
@@ -155,27 +154,58 @@ class NetworkLibrarySourceTest {
     }
 
     @Test
-    fun reusesIndexAfterSingleRootStatWithoutListingAgain() = runBlocking {
-        val backend = FakeFs(ByteArray(8), rootModifiedAt = 1234L)
-        val config = NetworkSourceConfig(
-            id = "network-cache-test",
-            protocol = NetworkProtocol.SMB,
-            name = "NAS",
-            host = "nas",
-            share = "comics",
-        )
-        val index = LibraryScanIndex(createTempDirectory("network-index").resolve("index.json").toFile())
+    fun reusesClassificationIndexForUnchangedRootButRereadsRootListing() = runBlocking {
+        val backend = FolderFs(linkedMapOf("Alpha" to 5_000L, "Beta" to 9_000L))
+        val config = testConfig("network-cache-test")
+        val index = NetworkWorkIndex(createTempDirectory("network-index").resolve("index.json").toFile())
         val source = NetworkLibrarySource(config, backend, index)
         try {
             source.loadListing("LIBRARY", 1, ThrowingHttp)
             source.loadListing("LIBRARY", 1, ThrowingHttp)
 
-            assertThat(backend.listCalls).isEqualTo(1)
-            assertThat(backend.statCalls).isEqualTo(2)
+            // 루트 목록은 매번 새로 읽고(수정일 최신 유지), 작품 폴더는 한 번만 뒤진다.
+            assertThat(backend.listCalls).containsExactly("", "Alpha", "Beta", "").inOrder()
         } finally {
             NetworkSourceRuntime.remove(config.id)
         }
     }
+
+    @Test
+    fun latestFollowsWorkFolderModifiedTimeWithoutStaleCache() = runBlocking {
+        val backend = FolderFs(linkedMapOf("Alpha" to 5_000L, "Beta" to 9_000L))
+        val config = testConfig("network-latest-test")
+        val index = NetworkWorkIndex(createTempDirectory("network-index").resolve("index.json").toFile())
+        val source = NetworkLibrarySource(config, backend, index)
+        try {
+            assertThat(latestTitles(source)).containsExactly("Beta", "Alpha").inOrder()
+
+            // 작품 폴더 안에 회차를 추가하면 그 폴더의 수정일만 바뀐다(루트 수정일은 그대로).
+            backend.setFolderModifiedAt("Alpha", 20_000L)
+
+            assertThat(latestTitles(source)).containsExactly("Alpha", "Beta").inOrder()
+        } finally {
+            NetworkSourceRuntime.remove(config.id)
+        }
+    }
+
+    @Test
+    fun latestUsesWorkFolderModifiedTimeInsteadOfNewestChapter() = runBlocking {
+        // Alpha 폴더는 최신이지만 첫 회차 파일은 오래됐고, Beta 는 반대다.
+        val backend = FolderFs(
+            linkedMapOf("Alpha" to 9_000L, "Beta" to 3_000L),
+            chapterModifiedAt = { folder -> if (folder == "Beta") 8_000L else 1_000L },
+        )
+        val config = testConfig("network-latest-folder-time-test")
+        val source = NetworkLibrarySource(config, backend)
+        try {
+            assertThat(latestTitles(source)).containsExactly("Alpha", "Beta").inOrder()
+        } finally {
+            NetworkSourceRuntime.remove(config.id)
+        }
+    }
+
+    private suspend fun latestTitles(source: NetworkLibrarySource): List<String> =
+        source.loadListing("LATEST", 1, ThrowingHttp).items.map { it.title }
 
     @Test
     fun opensCompletedArchiveUsingRevisionFromFileHandleInsteadOfStaleScanSize() = runBlocking {
@@ -243,7 +273,7 @@ class NetworkLibrarySourceTest {
         assertThat(episode.date).isNotNull()
     }
 
-    private class FakeFs(private val zip: ByteArray, private val rootModifiedAt: Long = 0L) : NetworkFileSystem {
+    private class FakeFs(private val zip: ByteArray) : NetworkFileSystem {
         var channelOpens = 0
         var listCalls = 0
         var statCalls = 0
@@ -257,15 +287,7 @@ class NetworkLibrarySourceTest {
         override fun stat(path: String): NetworkNode? {
             statCalls++
             return when (path) {
-                "Book.cbz" -> NetworkNode(
-                    "Book.cbz",
-                    "Book.cbz",
-                    false,
-                    FileRevision(zip.size.toLong(), 0L),
-                )
-                "" -> rootModifiedAt.takeIf { it > 0L }?.let {
-                    NetworkNode("", "comics", true, FileRevision(0L, it))
-                }
+                "Book.cbz" -> NetworkNode("Book.cbz", "Book.cbz", false, FileRevision(zip.size.toLong(), 0L))
                 else -> null
             }
         }
@@ -277,6 +299,41 @@ class NetworkLibrarySourceTest {
                 FileRevision(zip.size.toLong(), 0L),
             )
         }
+    }
+
+    /** 루트 바로 아래에 폴더 작품만 있는 저장소. 폴더/회차 수정일을 테스트에서 직접 바꾼다. */
+    private class FolderFs(
+        folderModifiedAt: Map<String, Long>,
+        private val chapterModifiedAt: (String) -> Long = { 1_000L },
+    ) : NetworkFileSystem {
+        val listCalls = ArrayList<String>()
+        private val folders = LinkedHashMap(folderModifiedAt)
+
+        fun setFolderModifiedAt(name: String, value: Long) {
+            folders[name] = value
+        }
+
+        override fun list(path: String): List<NetworkNode> {
+            listCalls += path
+            return if (path.isEmpty()) {
+                folders.map { (name, modifiedAt) ->
+                    NetworkNode(name, name, directory = true, FileRevision(0L, modifiedAt))
+                }
+            } else {
+                listOf(
+                    NetworkNode(
+                        "$path/01.cbz",
+                        "01.cbz",
+                        directory = false,
+                        FileRevision(10L, chapterModifiedAt(path)),
+                    ),
+                )
+            }
+        }
+
+        override fun stat(path: String): NetworkNode? = null
+        override fun open(path: String): InputStream = ByteArrayInputStream(ByteArray(0))
+        override fun openFile(path: String): OpenedNetworkFile = throw UnsupportedOperationException()
     }
 
     private class MutableFs(initial: ByteArray, revisionTime: Long) : NetworkFileSystem {

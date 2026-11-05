@@ -145,9 +145,9 @@ class NetworkSourceStore(
     fun createSource(config: NetworkSourceConfig): NetworkLibrarySource =
         NetworkLibrarySource(config.validated(), index = indexFor(config.id))
 
-    private fun indexFor(id: String): LibraryScanIndex {
+    private fun indexFor(id: String): NetworkWorkIndex {
         val name = LibraryScanIndex.signature(listOf(id))
-        return LibraryScanIndex(File(indexDir, "$name.json"), maxAgeMs = 24L * 60L * 60L * 1000L)
+        return NetworkWorkIndex(File(indexDir, "$name.json"))
     }
 
     private fun write(configs: List<NetworkSourceConfig>) {

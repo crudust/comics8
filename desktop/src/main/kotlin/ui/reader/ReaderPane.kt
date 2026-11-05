@@ -174,7 +174,7 @@ fun ReaderPane(
                 } else false
             },
     ) {
-        when (state.viewMode) {
+        when (state.effectiveViewMode) {
             ViewMode.SCROLL -> ReaderScrollView(
                 state = state,
                 viewModel = viewModel,
@@ -183,7 +183,7 @@ fun ReaderPane(
                     onRetreatAction = ret
                 },
             )
-            ViewMode.PAGE -> ReaderSingleView(
+            ViewMode.AUTO, ViewMode.PAGE -> ReaderSingleView(
                 state = state,
                 viewModel = viewModel,
                 onRegisterActions = { adv, ret ->

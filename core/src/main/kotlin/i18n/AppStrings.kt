@@ -103,6 +103,9 @@ interface AppStrings {
     val actionSortEpisodes: String
 
     // 5. Reader & Viewer
+    val viewModeAuto: String
+    val viewModeAutoShort: String
+    val viewModeAutoDesc: String
     val viewModeScroll: String
     val viewModeScrollShort: String
     val viewModeScrollDesc: String

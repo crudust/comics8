@@ -103,6 +103,9 @@ object KoStrings : AppStrings {
     override val actionSortEpisodes: String = "회차 정렬"
 
     // 5. Reader & Viewer
+    override val viewModeAuto: String = "자동 감지"
+    override val viewModeAutoShort: String = "자동"
+    override val viewModeAutoDesc: String = "웹툰/만화 형식 자동 감지"
     override val viewModeScroll: String = "세로 스크롤"
     override val viewModeScrollShort: String = "스크롤"
     override val viewModeScrollDesc: String = "세로로 연속 스크롤하며 읽기"
