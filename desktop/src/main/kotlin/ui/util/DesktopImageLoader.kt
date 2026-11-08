@@ -599,6 +599,8 @@ fun DesktopAsyncImage(
     contentScale: ContentScale = ContentScale.Fit,
     alignment: Alignment = Alignment.Center,
     half: ImageHalf = ImageHalf.FULL,
+    /** Vertical slice of the decoded image to draw, used to render one huge strip as slices. */
+    srcFraction: ClosedFloatingPointRange<Float>? = null,
     showPlaceholder: Boolean = true,
     refreshEpoch: Long = 0L,
     onLoaded: ((ImageBitmap) -> Unit)? = null,
@@ -640,7 +642,7 @@ fun DesktopAsyncImage(
     ) {
         val currentBitmap = displayedBitmap
         if (currentBitmap != null) {
-            if (half == ImageHalf.FULL) {
+            if (half == ImageHalf.FULL && srcFraction == null) {
                 Image(
                     bitmap = currentBitmap,
                     contentDescription = contentDescription,
@@ -649,7 +651,13 @@ fun DesktopAsyncImage(
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
-                val cropRect = remember(currentBitmap, half, url) {
+                val cropRect = remember(currentBitmap, half, url, srcFraction) {
+                    if (srcFraction != null) {
+                        val height = currentBitmap.height
+                        val top = (srcFraction.start * height).toInt().coerceIn(0, (height - 1).coerceAtLeast(0))
+                        val bottom = (srcFraction.endInclusive * height).toInt().coerceIn(top + 1, height)
+                        return@remember CropRect(0, top, currentBitmap.width, bottom)
+                    }
                     val cacheKey = url to half
                     if (url.isNotBlank()) {
                         DesktopImageCache.getCropRect(cacheKey)?.let { return@remember it }

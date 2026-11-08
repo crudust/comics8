@@ -12,18 +12,20 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
@@ -70,6 +72,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.comics8.core.image.ImageCacheRole
+import com.comics8.core.model.ReaderTiles
 import com.comics8.core.model.DualSpread
 import com.comics8.core.model.ImageHalf
 import com.comics8.core.model.ReadDirection
@@ -92,6 +95,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+/** Share of the viewport width used by the scroll reader content (matches the old 0.65f). */
+private const val READER_CONTENT_WIDTH_FRACTION = 0.65f
+
+/** Reading position inside one page image, so tiling plan changes never move the reader. */
+private data class ReaderScrollAnchor(val imageIndex: Int, val tileCount: Int)
 
 @Composable
 fun ReaderPane(
@@ -248,149 +256,211 @@ private fun ReaderScrollView(
     onRegisterActions: (onAdvance: () -> Unit, onRetreat: () -> Unit) -> Unit,
 ) {
     val strings = LocalStrings.current
-    val initialIndex = remember(state.currentEpisode?.wrId) {
-        (state.currentEpisode?.lastReadPage ?: 0).coerceIn(0, (state.readerImages.size - 1).coerceAtLeast(0))
-    }
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
-    val scope = rememberCoroutineScope()
-    var controlsVisible by remember { mutableStateOf(false) }
-
-    val onAdvance = {
-        scope.launch {
-            if (state.readerImages.isNotEmpty()) {
-                val next = (listState.firstVisibleItemIndex + 1).coerceAtMost(state.readerImages.size - 1)
-                listState.animateScrollToItem(next)
-            }
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val contentWidthPx = (constraints.maxWidth * READER_CONTENT_WIDTH_FRACTION).toInt()
+        val viewportHeightPx = constraints.maxHeight
+        // Shared plan with the Android reader: one enormous strip is rendered as contiguous slices
+        // instead of a single bitmap.
+        val tiles = remember(state.readerImages.size, state.imageAspectRatios, contentWidthPx, viewportHeightPx) {
+            ReaderTiles.buildScrollItems(
+                imageCount = state.readerImages.size,
+                aspectRatios = state.imageAspectRatios,
+                contentWidthPx = contentWidthPx,
+                viewportHeightPx = viewportHeightPx,
+            )
         }
-        Unit
-    }
-    val onRetreat = {
-        scope.launch {
-            if (state.readerImages.isNotEmpty()) {
-                val prev = (listState.firstVisibleItemIndex - 1).coerceAtLeast(0)
-                listState.animateScrollToItem(prev)
-            }
+        val currentTiles by rememberUpdatedState(tiles)
+        val totalImages = state.readerImages.size
+        val initialIndex = remember(state.currentEpisode?.wrId, tiles.isNotEmpty()) {
+            val targetImage = (state.currentEpisode?.lastReadPage ?: 0).coerceIn(0, (totalImages - 1).coerceAtLeast(0))
+            tiles.indexOfFirst { it.imageIndex >= targetImage }.coerceAtLeast(0)
         }
-        Unit
-    }
+        val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
+        val scope = rememberCoroutineScope()
+        var controlsVisible by remember { mutableStateOf(false) }
 
-    LaunchedEffect(onAdvance, onRetreat) {
-        onRegisterActions(onAdvance, onRetreat)
-    }
+        fun firstItemOfImage(imageIndex: Int): Int =
+            currentTiles.indexOfFirst { it.imageIndex >= imageIndex }.coerceAtLeast(0)
 
-    var restoredWrId by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(state.currentEpisode?.wrId, state.readerImages.isNotEmpty()) {
-        val wrId = state.currentEpisode?.wrId
-        if (wrId != null && wrId != restoredWrId && state.readerImages.isNotEmpty()) {
-            restoredWrId = wrId
-            val target = state.currentEpisode?.lastReadPage ?: 0
-            if (target > 0 && target != listState.firstVisibleItemIndex) {
-                listState.scrollToItem(target.coerceIn(0, state.readerImages.size - 1))
-            }
-        }
-    }
-
-    LaunchedEffect(listState.firstVisibleItemIndex) {
-        if (state.readerImages.isNotEmpty()) {
-            viewModel.savePage(listState.firstVisibleItemIndex)
-        }
-    }
-
-    val totalImages = state.readerImages.size
-    val currentRangeText = remember(listState.firstVisibleItemIndex, totalImages) {
-        if (totalImages > 0) {
-            "${(listState.firstVisibleItemIndex + 1).coerceAtMost(totalImages)} / $totalImages"
-        } else ""
-    }
-
-    LaunchedEffect(listState.isScrollInProgress) {
-        if (listState.isScrollInProgress) {
-            controlsVisible = false
-        }
-    }
-
-    LaunchedEffect(listState, state.readerImages) {
-        snapshotFlow { listState.firstVisibleItemIndex }
-            .distinctUntilChanged()
-            .collect { firstIndex ->
-                if (state.readerImages.isEmpty()) return@collect
-                val minKeep = (firstIndex - 6).coerceAtLeast(0)
-                val maxKeep = (firstIndex + 10).coerceAtMost(state.readerImages.size - 1)
-                for (i in 0 until minKeep) {
-                    val url = state.readerImages.getOrNull(i) ?: continue
-                    viewModel.evictReaderImage(url)
-                }
-                for (i in (maxKeep + 1) until state.readerImages.size) {
-                    val url = state.readerImages.getOrNull(i) ?: continue
-                    viewModel.evictReaderImage(url)
+        val onAdvance = {
+            scope.launch {
+                if (state.readerImages.isNotEmpty()) {
+                    val current = currentTiles.getOrNull(listState.firstVisibleItemIndex)?.imageIndex ?: 0
+                    val next = (current + 1).coerceAtMost((totalImages - 1).coerceAtLeast(0))
+                    listState.animateScrollToItem(firstItemOfImage(next))
                 }
             }
-    }
+            Unit
+        }
+        val onRetreat = {
+            scope.launch {
+                if (state.readerImages.isNotEmpty()) {
+                    val current = currentTiles.getOrNull(listState.firstVisibleItemIndex)?.imageIndex ?: 0
+                    val prev = (current - 1).coerceAtLeast(0)
+                    listState.animateScrollToItem(firstItemOfImage(prev))
+                }
+            }
+            Unit
+        }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        ZoomableBox(
-            modifier = Modifier.fillMaxSize(),
-            resetKey = state.currentEpisode?.wrId,
-            onTap = { _, _ -> controlsVisible = !controlsVisible },
-        ) {
-            LazyColumn(
-                state = listState,
-                horizontalAlignment = Alignment.CenterHorizontally,
+        LaunchedEffect(onAdvance, onRetreat) {
+            onRegisterActions(onAdvance, onRetreat)
+        }
+
+        // Keep the reading position on the same page image and relative depth while the plan grows
+        // from one item per image to one slice per viewport.
+        var scrollAnchor by remember { mutableStateOf<ReaderScrollAnchor?>(null) }
+        LaunchedEffect(listState, currentTiles) {
+            snapshotFlow { listState.firstVisibleItemIndex }
+                .distinctUntilChanged()
+                .collect { itemIndex ->
+                    currentTiles.getOrNull(itemIndex)?.let { tile ->
+                        scrollAnchor = ReaderScrollAnchor(tile.imageIndex, tile.tileCount)
+                    }
+                }
+        }
+        LaunchedEffect(tiles) {
+            val anchored = scrollAnchor ?: return@LaunchedEffect
+            val firstItem = tiles.indexOfFirst { it.imageIndex >= anchored.imageIndex }
+            if (firstItem < 0) return@LaunchedEffect
+            val newTileCount = tiles[firstItem].tileCount
+            if (newTileCount == anchored.tileCount) return@LaunchedEffect
+            val visible = listState.layoutInfo.visibleItemsInfo.firstOrNull()
+            val depth = if (visible != null && visible.size > 0) visible.offset.toFloat() / visible.size else 0f
+            val target = firstItem + (depth * newTileCount).toInt().coerceIn(0, newTileCount - 1)
+            if (target != listState.firstVisibleItemIndex) listState.scrollToItem(target)
+        }
+
+        var restoredWrId by remember { mutableStateOf<String?>(null) }
+        LaunchedEffect(state.currentEpisode?.wrId, tiles.isNotEmpty()) {
+            val wrId = state.currentEpisode?.wrId
+            if (wrId != null && wrId != restoredWrId && tiles.isNotEmpty()) {
+                restoredWrId = wrId
+                val target = state.currentEpisode?.lastReadPage ?: 0
+                if (target > 0) {
+                    val targetItem = currentTiles.indexOfFirst { it.imageIndex >= target }.coerceAtLeast(0)
+                    if (targetItem != listState.firstVisibleItemIndex) listState.scrollToItem(targetItem)
+                }
+            }
+        }
+
+        LaunchedEffect(listState.firstVisibleItemIndex, tiles) {
+            if (tiles.isNotEmpty()) {
+                viewModel.savePage(currentTiles.getOrNull(listState.firstVisibleItemIndex)?.imageIndex ?: 0)
+            }
+        }
+
+        val currentImageIndex = tiles.getOrNull(listState.firstVisibleItemIndex)?.imageIndex ?: 0
+        val currentRangeText = remember(currentImageIndex, totalImages) {
+            if (totalImages > 0) "${(currentImageIndex + 1).coerceAtMost(totalImages)} / $totalImages" else ""
+        }
+
+        LaunchedEffect(listState.isScrollInProgress) {
+            if (listState.isScrollInProgress) {
+                controlsVisible = false
+            }
+        }
+
+        LaunchedEffect(listState, state.readerImages) {
+            snapshotFlow { listState.firstVisibleItemIndex }
+                .distinctUntilChanged()
+                .collect { firstItem ->
+                    if (state.readerImages.isEmpty()) return@collect
+                    val firstImage = currentTiles.getOrNull(firstItem)?.imageIndex ?: return@collect
+                    val minKeep = (firstImage - 6).coerceAtLeast(0)
+                    val maxKeep = (firstImage + 10).coerceAtMost(state.readerImages.size - 1)
+                    for (i in 0 until minKeep) {
+                        val url = state.readerImages.getOrNull(i) ?: continue
+                        viewModel.evictReaderImage(url)
+                    }
+                    for (i in (maxKeep + 1) until state.readerImages.size) {
+                        val url = state.readerImages.getOrNull(i) ?: continue
+                        viewModel.evictReaderImage(url)
+                    }
+                }
+        }
+
+        Box(modifier = Modifier.fillMaxSize()) {
+            ZoomableBox(
                 modifier = Modifier.fillMaxSize(),
+                resetKey = state.currentEpisode?.wrId,
+                onTap = { _, _ -> controlsVisible = !controlsVisible },
             ) {
-                itemsIndexed(state.readerImages, key = { idx, url -> "$idx-$url" }) { index, url ->
-                    DesktopAsyncImage(
-                        cacheRole = ImageCacheRole.READER,
-                        url = url,
-                        contentDescription = strings.labelPageNumber(index + 1),
-                        contentScale = ContentScale.FillWidth,
-                        modifier = Modifier
-                            .fillMaxWidth(0.65f)
-                            .padding(vertical = 2.dp),
-                    )
-                }
-
-                // Next / Prev episode footer
-                item {
-                    Row(
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(32.dp),
-                    ) {
-                        if (state.hasPrevEpisode) {
-                            FilledTonalButton(onClick = viewModel::openPrevEpisode) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
-                                Spacer(Modifier.width(8.dp))
-                                Text(strings.actionPrevEpisode)
-                            }
+                LazyColumn(
+                    state = listState,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(tiles, key = { "${it.imageIndex}:${it.tileIndex}/${it.tileCount}" }) { tile ->
+                        val url = state.readerImages.getOrNull(tile.imageIndex) ?: return@items
+                        val ratio = ReaderTiles.tileAspectRatio(state.imageAspectRatios[tile.imageIndex], tile)
+                        val isSliced = tile.tileCount > 1
+                        val itemModifier = if (ratio != null && ratio > 0f) {
+                            Modifier
+                                .fillMaxWidth(READER_CONTENT_WIDTH_FRACTION)
+                                .aspectRatio(ratio)
+                        } else {
+                            Modifier
+                                .fillMaxWidth(READER_CONTENT_WIDTH_FRACTION)
+                                .padding(vertical = 2.dp)
                         }
-                        Spacer(Modifier.width(16.dp))
-                        if (state.hasNextEpisode) {
-                            Button(onClick = viewModel::openNextEpisode) {
-                                Text(strings.actionNextEpisode)
-                                Spacer(Modifier.width(8.dp))
-                                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null)
+                        DesktopAsyncImage(
+                            cacheRole = ImageCacheRole.READER,
+                            url = url,
+                            contentDescription = strings.labelPageNumber(tile.imageIndex + 1),
+                            contentScale = ContentScale.FillWidth,
+                            srcFraction = if (isSliced) tile.topFraction..tile.bottomFraction else null,
+                            modifier = itemModifier,
+                            onLoaded = { bitmap ->
+                                if (bitmap.width > 0 && bitmap.height > 0) {
+                                    viewModel.recordImageAspectRatio(tile.imageIndex, bitmap.width, bitmap.height)
+                                }
+                            },
+                        )
+                    }
+
+                    // Next / Prev episode footer
+                    item {
+                        Row(
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(32.dp),
+                        ) {
+                            if (state.hasPrevEpisode) {
+                                FilledTonalButton(onClick = viewModel::openPrevEpisode) {
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(strings.actionPrevEpisode)
+                                }
+                            }
+                            Spacer(Modifier.width(16.dp))
+                            if (state.hasNextEpisode) {
+                                Button(onClick = viewModel::openNextEpisode) {
+                                    Text(strings.actionNextEpisode)
+                                    Spacer(Modifier.width(8.dp))
+                                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null)
+                                }
                             }
                         }
                     }
                 }
             }
-        }
 
-        ReaderOverlayControls(
-            state = state,
-            viewModel = viewModel,
-            controlsVisible = controlsVisible,
-            currentRangeText = currentRangeText,
-            currentPage = (listState.firstVisibleItemIndex + 1).coerceIn(1, totalImages.coerceAtLeast(1)),
-            maxPages = totalImages,
-            onPageChange = { targetPage ->
-                val pageIdx = (targetPage - 1).coerceIn(0, (totalImages - 1).coerceAtLeast(0))
-                scope.launch { listState.scrollToItem(pageIdx) }
-            },
-        )
+            ReaderOverlayControls(
+                state = state,
+                viewModel = viewModel,
+                controlsVisible = controlsVisible,
+                currentRangeText = currentRangeText,
+                currentPage = (currentImageIndex + 1).coerceIn(1, totalImages.coerceAtLeast(1)),
+                maxPages = totalImages,
+                onPageChange = { targetPage ->
+                    val pageIdx = (targetPage - 1).coerceIn(0, (totalImages - 1).coerceAtLeast(0))
+                    scope.launch { listState.scrollToItem(firstItemOfImage(pageIdx)) }
+                },
+            )
+        }
     }
 }
 
