@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -22,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.isMetaPressed
@@ -31,11 +33,55 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 import kotlin.math.abs
 
+internal data class ZoomTransformState(
+    val scale: Float,
+    val offset: Offset,
+)
+
+/**
+ * Computes the next scale and clamped pan offset when zooming by [zoomFactor] around
+ * [focalPoint] (in local [ZoomableBox] pixel coordinates, or container center when null).
+ */
+internal fun applyZoomChange(
+    currentScale: Float,
+    currentOffset: Offset,
+    zoomFactor: Float,
+    containerSize: IntSize,
+    focalPoint: Offset? = null,
+    minScale: Float = 1f,
+    maxScale: Float = 5f,
+    snapResetThreshold: Float = 1.02f,
+): ZoomTransformState {
+    if (!zoomFactor.isFinite() || zoomFactor <= 0f) {
+        return ZoomTransformState(currentScale, currentOffset)
+    }
+    val newScale = (currentScale * zoomFactor).coerceIn(minScale, maxScale)
+    if (newScale <= snapResetThreshold) {
+        return ZoomTransformState(minScale, Offset.Zero)
+    }
+    val safeOldScale = currentScale.coerceAtLeast(minScale)
+    val scaleRatio = newScale / safeOldScale
+    val center = Offset(containerSize.width / 2f, containerSize.height / 2f)
+    val relativeFocal = if (focalPoint != null) focalPoint - center else Offset.Zero
+    val unclampedX = currentOffset.x * scaleRatio + relativeFocal.x * (1f - scaleRatio)
+    val unclampedY = currentOffset.y * scaleRatio + relativeFocal.y * (1f - scaleRatio)
+    val maxX = (containerSize.width * (newScale - 1f)) / 2f
+    val maxY = (containerSize.height * (newScale - 1f)) / 2f
+    return ZoomTransformState(
+        scale = newScale,
+        offset = Offset(
+            if (maxX <= 0f) 0f else unclampedX.coerceIn(-maxX, maxX),
+            if (maxY <= 0f) 0f else unclampedY.coerceIn(-maxY, maxY),
+        ),
+    )
+}
+
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun ZoomableBox(
     modifier: Modifier = Modifier,
     resetKey: Any? = null,
+    trackpadPinchEnabled: Boolean = false,
     contentAlignment: Alignment = Alignment.Center,
     onTap: ((Offset, IntSize) -> Unit)? = null,
     onScaleChanged: ((Float) -> Unit)? = null,
@@ -44,8 +90,40 @@ fun ZoomableBox(
     var scale by remember(resetKey) { mutableFloatStateOf(1f) }
     var offset by remember(resetKey) { mutableStateOf(Offset.Zero) }
     var size by remember { mutableStateOf(IntSize.Zero) }
+    var lastPointerPos by remember { mutableStateOf<Offset?>(null) }
     val currentOnTap by rememberUpdatedState(onTap)
     val currentOnScaleChanged by rememberUpdatedState(onScaleChanged)
+    val pinchDispatcher = LocalTrackpadPinchDispatcher.current
+
+    val pinchHandler = rememberUpdatedState<(Double) -> Boolean> { magnificationDelta ->
+        val zoomFactor = (1.0 + magnificationDelta).toFloat().coerceIn(0.5f, 2.0f)
+        val next = applyZoomChange(
+            currentScale = scale,
+            currentOffset = offset,
+            zoomFactor = zoomFactor,
+            containerSize = size,
+            focalPoint = lastPointerPos,
+        )
+        val scaleChanged = next.scale != scale
+        scale = next.scale
+        offset = next.offset
+        if (scaleChanged) {
+            currentOnScaleChanged?.invoke(scale)
+        }
+        true
+    }
+    val stablePinchRegistration = remember {
+        { delta: Double -> pinchHandler.value(delta) }
+    }
+
+    DisposableEffect(pinchDispatcher, trackpadPinchEnabled) {
+        if (pinchDispatcher != null && trackpadPinchEnabled) {
+            pinchDispatcher.register(stablePinchRegistration)
+            onDispose { pinchDispatcher.unregister(stablePinchRegistration) }
+        } else {
+            onDispose {}
+        }
+    }
 
     LaunchedEffect(resetKey) {
         scale = 1f
@@ -61,22 +139,30 @@ fun ZoomableBox(
             .fillMaxSize()
             .clipToBounds()
             .onSizeChanged { size = it }
+            .onPointerEvent(PointerEventType.Enter, PointerEventPass.Initial) { event ->
+                lastPointerPos = event.changes.firstOrNull()?.position
+            }
+            .onPointerEvent(PointerEventType.Move, PointerEventPass.Initial) { event ->
+                lastPointerPos = event.changes.firstOrNull()?.position
+            }
+            .onPointerEvent(PointerEventType.Exit, PointerEventPass.Initial) {
+                lastPointerPos = null
+            }
             .onPointerEvent(PointerEventType.Scroll) { event ->
                 val isZoomModifier = event.keyboardModifiers.isCtrlPressed || event.keyboardModifiers.isMetaPressed
                 if (isZoomModifier) {
                     val scrollDelta = event.changes.sumOf { it.scrollDelta.y.toDouble() }.toFloat()
                     if (scrollDelta != 0f) {
                         val zoomFactor = if (scrollDelta < 0) 1.15f else 0.85f
-                        val newScale = (scale * zoomFactor).coerceIn(1f, 5f)
-                        if (newScale <= 1.02f) {
-                            scale = 1f
-                            offset = Offset.Zero
-                        } else {
-                            scale = newScale
-                            val maxX = (size.width * (newScale - 1f)) / 2f
-                            val maxY = (size.height * (newScale - 1f)) / 2f
-                            offset = Offset(offset.x.coerceIn(-maxX, maxX), offset.y.coerceIn(-maxY, maxY))
-                        }
+                        val next = applyZoomChange(
+                            currentScale = scale,
+                            currentOffset = offset,
+                            zoomFactor = zoomFactor,
+                            containerSize = size,
+                            focalPoint = event.changes.firstOrNull()?.position ?: lastPointerPos,
+                        )
+                        scale = next.scale
+                        offset = next.offset
                         currentOnScaleChanged?.invoke(scale)
                         event.changes.forEach { it.consume() }
                     }
@@ -149,18 +235,15 @@ fun ZoomableBox(
                                 scale = 1f
                                 offset = Offset.Zero
                             } else {
-                                val targetScale = 2.5f
-                                scale = targetScale
-                                val clickDelta = Offset(
-                                    downPos.x - size.width / 2f,
-                                    downPos.y - size.height / 2f,
+                                val next = applyZoomChange(
+                                    currentScale = scale,
+                                    currentOffset = offset,
+                                    zoomFactor = 2.5f / scale.coerceAtLeast(1f),
+                                    containerSize = size,
+                                    focalPoint = downPos,
                                 )
-                                val maxX = (size.width * (targetScale - 1f)) / 2f
-                                val maxY = (size.height * (targetScale - 1f)) / 2f
-                                offset = Offset(
-                                    (-clickDelta.x * (targetScale - 1f)).coerceIn(-maxX, maxX),
-                                    (-clickDelta.y * (targetScale - 1f)).coerceIn(-maxY, maxY),
-                                )
+                                scale = next.scale
+                                offset = next.offset
                             }
                             currentOnScaleChanged?.invoke(scale)
                         } else {

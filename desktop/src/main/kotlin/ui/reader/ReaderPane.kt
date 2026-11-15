@@ -384,6 +384,7 @@ private fun ReaderScrollView(
             ZoomableBox(
                 modifier = Modifier.fillMaxSize(),
                 resetKey = state.currentEpisode?.wrId,
+                trackpadPinchEnabled = state.readerImages.isNotEmpty(),
                 onTap = { _, _ -> controlsVisible = !controlsVisible },
             ) {
                 LazyColumn(
@@ -725,6 +726,7 @@ private fun ReaderSingleView(
         ZoomableBox(
             modifier = Modifier.fillMaxSize(),
             resetKey = page,
+            trackpadPinchEnabled = state.readerImages.isNotEmpty() && page == pagerState.currentPage,
             onTap = handleTap,
             onScaleChanged = onScaleChanged,
         ) { scale ->
@@ -850,6 +852,7 @@ private fun ReaderDualView(
         ZoomableBox(
             modifier = Modifier.fillMaxSize(),
             resetKey = page,
+            trackpadPinchEnabled = state.readerImages.isNotEmpty() && page == pagerState.currentPage,
             onTap = handleTap,
             onScaleChanged = onScaleChanged,
         ) { scale ->

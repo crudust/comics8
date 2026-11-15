@@ -17,10 +17,11 @@ import com.comics8.core.model.ViewMode
 import com.comics8.core.source.WorkId
 import com.comics8.core.source.js.JsPackStore
 import com.comics8.core.source.LocalImageUri
+import com.comics8.core.source.local.ComicArchive
 import com.comics8.core.source.local.LibraryScanner
 import com.comics8.core.source.local.LibraryScanIndex
 import com.comics8.core.source.local.LocalSource
-import com.comics8.core.source.local.ZipArchive
+import com.comics8.core.source.local.RarArchive
 import com.comics8.core.source.local.ZipImageNames
 import com.comics8.core.source.local.ZipImageUri
 import com.comics8.desktop.ExternalTargetResolver
@@ -2233,7 +2234,8 @@ class DesktopViewModel(
                     sourceError = if (!exists) {
                         "파일 또는 폴더를 찾을 수 없습니다:\n${target.path}"
                     } else {
-                        "지원하는 만화 파일(ZIP, CBZ)이나 이미지를 찾을 수 없습니다:\n${target.name}"
+                        val supported = if (RarArchive.isSupported) "ZIP, CBZ, RAR, CBR" else "ZIP, CBZ"
+                        "지원하는 만화 파일($supported)이나 이미지를 찾을 수 없습니다:\n${target.name}"
                     }
                 )
             }
@@ -2289,8 +2291,8 @@ class DesktopViewModel(
         }
         loadReaderImages(episode) {
             withContext(Dispatchers.IO) {
-                ZipArchive(archive).use { zip ->
-                    zip.imageEntries().map { entry -> ZipImageUri.encode(archive, entry) }
+                ComicArchive.open(archive).use { comic ->
+                    comic.imageEntries().map { entry -> ZipImageUri.encode(archive, entry) }
                 }
             }
         }

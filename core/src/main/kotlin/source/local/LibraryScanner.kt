@@ -45,7 +45,7 @@ class LibraryScanner {
         val works = ArrayList<ScannedWork>()
         for (child in children.sortedWith(compareBy(NaturalSort) { it.name })) {
             if (ZipImageNames.isJunkName(child.name)) continue
-            if (isRegularFile(child) && ZipImageNames.isZipName(child.name)) {
+            if (isRegularFile(child) && ZipImageNames.isLocalArchiveName(child.name)) {
                 works += zipWork(child)
                 continue
             }
@@ -66,7 +66,7 @@ class LibraryScanner {
     private fun classifyFolder(dir: File): ScannedWork? {
         val children = listed(dir) ?: return null
         val visible = children.filterNot { ZipImageNames.isJunkName(it.name) }
-        val zips = visible.filter { isRegularFile(it) && ZipImageNames.isZipName(it.name) }
+        val zips = visible.filter { isRegularFile(it) && ZipImageNames.isLocalArchiveName(it.name) }
         val imageFolders = visible.filter { isDirectory(it) && hasDirectImages(it) }
         if (zips.isNotEmpty() || imageFolders.isNotEmpty()) {
             val episodes = ArrayList<ScannedEpisode>(zips.size + imageFolders.size)

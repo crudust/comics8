@@ -50,9 +50,12 @@ import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
 import com.comics8.desktop.ui.Screen
 import com.comics8.desktop.ui.browse.BrowsePane
+import com.comics8.desktop.ui.components.LocalTrackpadPinchDispatcher
+import com.comics8.desktop.ui.components.MacTrackpadPinchBridge
 import com.comics8.desktop.ui.components.PageJumpDialog
 import com.comics8.desktop.ui.components.SyncDialog
 import com.comics8.desktop.ui.components.TopBar
+import com.comics8.desktop.ui.components.TrackpadPinchDispatcher
 import com.comics8.desktop.ui.history.HistoryPane
 import com.comics8.desktop.ui.reader.ReaderPane
 import com.comics8.desktop.ui.series.SeriesPane
@@ -239,12 +242,32 @@ fun main(args: Array<String>) {
                 }
             }
 
-            MaterialTheme(colorScheme = DarkColors) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background,
-                ) {
-                    ComicsDesktopApp(state = state, viewModel = viewModel)
+            val trackpadPinchDispatcher = remember { TrackpadPinchDispatcher() }
+            val isViewerPinchActive = state.screen == Screen.Reader &&
+                !state.showDownloadOptions &&
+                !state.showPageJump &&
+                !state.showSyncDialog &&
+                !state.showUpdateDialog
+
+            DisposableEffect(window, isViewerPinchActive) {
+                if (!isViewerPinchActive) {
+                    onDispose {}
+                } else {
+                    val handle = MacTrackpadPinchBridge.install(window.rootPane) { magnificationDelta ->
+                        trackpadPinchDispatcher.dispatch(magnificationDelta)
+                    }
+                    onDispose { handle.close() }
+                }
+            }
+
+            CompositionLocalProvider(LocalTrackpadPinchDispatcher provides trackpadPinchDispatcher) {
+                MaterialTheme(colorScheme = DarkColors) {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.background,
+                    ) {
+                        ComicsDesktopApp(state = state, viewModel = viewModel)
+                    }
                 }
             }
         }

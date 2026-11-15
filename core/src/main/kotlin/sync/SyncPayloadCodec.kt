@@ -33,11 +33,22 @@ data class SyncCatalogWire(
         com.comics8.core.model.EpisodeListingTotal.fromStored(totalEpisodes, lastPage, pageSize, delta)
 }
 
+data class SourceSampleWorkWire(
+    val id: String,
+    val title: String = "",
+    val href: String = "",
+    val thumbUrl: String = "",
+)
+
 data class SourceResolveWire(
     val clientSourceId: String,
     val originHost: String = "",
     val sampleToonIds: List<String> = emptyList(),
     val sampleTitles: List<String> = emptyList(),
+    val displayName: String = "",
+    val catalogs: List<String> = emptyList(),
+    val episodePageSize: Int = 0,
+    val sampleWorks: List<SourceSampleWorkWire> = emptyList(),
 )
 
 data class SourceResolveResultWire(

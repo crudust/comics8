@@ -154,12 +154,18 @@ async function openReader(
 
 /** Report a natural size for the mounted images, like a real decode would. */
 function loadImages(width = 800, height = 1200): void {
-  for (const img of target.querySelectorAll("img")) {
-    Object.defineProperty(img, "naturalWidth", { value: width, configurable: true });
-    Object.defineProperty(img, "naturalHeight", { value: height, configurable: true });
-    img.dispatchEvent(new Event("load"));
+  const loaded = new Set<HTMLImageElement>();
+  for (let pass = 0; pass < 4; pass += 1) {
+    const imgs = [...target.querySelectorAll("img")].filter((img) => !loaded.has(img));
+    if (imgs.length === 0) break;
+    for (const img of imgs) {
+      loaded.add(img);
+      Object.defineProperty(img, "naturalWidth", { value: width, configurable: true });
+      Object.defineProperty(img, "naturalHeight", { value: height, configurable: true });
+      img.dispatchEvent(new Event("load"));
+    }
+    flushSync();
   }
-  flushSync();
 }
 
 /** Pill text plus the dual-spread range it carries in `aria-label` / `title`. */
@@ -489,6 +495,37 @@ describe("ReaderPane view modes", () => {
     expect(target.querySelector(".spread-row")).toBeNull();
   });
 
+  it("does not jump spreads or lock navigation when wide pages decode in DUAL RTL mode", async () => {
+    const { store } = await openReader({
+      viewMode: "DUAL",
+      direction: "RIGHT_TO_LEFT",
+      images: [
+        "https://img.test/1.jpg",
+        "https://img.test/2.jpg",
+        "https://img.test/3.jpg",
+      ],
+    });
+    mountPane(store);
+    await tick();
+
+    // When the first spread's images decode as wide, RTL must stay on page 1 (not jump to page 2).
+    loadImages(1600, 1000);
+    await tick();
+    expect(pillLabel()).toBe("1 / 3");
+    expect(target.querySelector(".spread-single")).toBeTruthy();
+
+    // Advancing and retreating in RTL works cleanly across split wide pages without bouncing back.
+    clickAt(100); // RTL advance → page 2
+    await tick();
+    loadImages(1600, 1000);
+    await tick();
+    expect(pillLabel()).toBe("2 / 3");
+
+    clickAt(900); // RTL retreat → page 1
+    await tick();
+    expect(pillLabel()).toBe("1 / 3");
+  });
+
   it("slices a wide page in PAGE+SLICE and keeps the active half", async () => {
     const { store } = await openReader({
       viewMode: "PAGE",
@@ -683,23 +720,151 @@ describe("ReaderPane page jump dialog", () => {
     await tick();
     expect(pillLabel()).toBe("2 / 3");
 
-    // Continuous momentum stream: decaying deltas arriving rapidly (every 40ms) extending past the 250ms cooldown.
-    // Total elapsed = 280ms (> 250ms), and deltas are still running (30px > 15px):
+    // Continuous momentum stream: decaying (and slightly wobbling) deltas arriving rapidly past
+    // the 350ms cooldown. Total elapsed = 360ms (> 350ms), and deltas are still running:
     // must NOT trigger a second page turn while still latched!
-    for (const delta of [65, 55, 45, 40, 35, 30]) {
+    for (const delta of [65, 55, 45, 40, 46, 30, 22, 18]) {
       await new Promise((resolve) => setTimeout(resolve, 45));
       stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: delta, deltaY: 0, bubbles: true, cancelable: true }));
     }
+    // Tail rebound / mid-inertia small deltas (5px, -2px) must also not double-trigger
+    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 5, deltaY: 0, bubbles: true, cancelable: true }));
+    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: -2, deltaY: 0, bubbles: true, cancelable: true }));
     await tick();
     expect(pillLabel()).toBe("2 / 3");
 
-    // Once momentum slows below idle threshold (8px) after cooldown, latch releases cleanly
-    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 5, deltaY: 0, bubbles: true, cancelable: true }));
+    // Once momentum slows below idle threshold (3px) after cooldown, latch releases cleanly
+    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 2, deltaY: 0, bubbles: true, cancelable: true }));
     await tick();
     expect(pillLabel()).toBe("2 / 3");
 
     // Second deliberate swipe: user flicks again, turning the next page
     stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 65, deltaY: 0, bubbles: true, cancelable: true }));
+    await tick();
+    expect(pillLabel()).toBe("3 / 3");
+  });
+
+  it("turns pages on gentle mouse wheel notches and line-mode wheel events", async () => {
+    const { store } = await openReader({ viewMode: "PAGE", direction: "LEFT_TO_RIGHT", lastReadPage: 0 });
+    mountPane(store);
+    await tick();
+    expect(pillLabel()).toBe("1 / 3");
+
+    const stageEl = target.querySelector(".reader-stage") as HTMLElement;
+
+    // Gentle wheel ticks accumulating past SCROLL_PAGE_THRESHOLD (8 + 8 >= 15)
+    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 0, deltaY: 8, bubbles: true, cancelable: true }));
+    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 0, deltaY: 8, bubbles: true, cancelable: true }));
+    await tick();
+    expect(pillLabel()).toBe("2 / 3");
+
+    // Wait past cooldown + stream idle, then use DOM_DELTA_LINE (deltaMode = 1, deltaY = 1)
+    await new Promise((resolve) => setTimeout(resolve, 370));
+    stageEl.dispatchEvent(
+      new WheelEvent("wheel", { deltaX: 0, deltaY: 1, deltaMode: 1, bubbles: true, cancelable: true }),
+    );
+    await tick();
+    expect(pillLabel()).toBe("3 / 3");
+  });
+
+  it("supports ZoomableBox double-click zoom, Ctrl+wheel zoom, and zoomed panning without page turns", async () => {
+    const { store } = await openReader({ viewMode: "PAGE", direction: "LEFT_TO_RIGHT", lastReadPage: 0 });
+    mountPane(store);
+    await tick();
+
+    const stageEl = target.querySelector(".reader-stage") as HTMLElement;
+    const pageView = () => target.querySelector(".page-view") as HTMLElement;
+
+    expect(stageEl.getAttribute("data-zoom-scale")).toBe("1");
+    expect(stageEl.classList.contains("zoomed")).toBe(false);
+
+    // Double-click zooms in to 2.5x
+    stageEl.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, clientX: 600, clientY: 400 }));
+    flushSync();
+    expect(stageEl.getAttribute("data-zoom-scale")).toBe("2.5");
+    expect(stageEl.classList.contains("zoomed")).toBe(true);
+    expect(pageView().getAttribute("style")).toContain("scale(2.5)");
+
+    // While zoomed in, wheel pans instead of turning the page
+    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 0, deltaY: 80, bubbles: true, cancelable: true }));
+    await tick();
+    expect(pillLabel()).toBe("1 / 3");
+
+    // Double-click again resets zoom to 1x
+    stageEl.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, clientX: 600, clientY: 400 }));
+    flushSync();
+    expect(stageEl.getAttribute("data-zoom-scale")).toBe("1");
+    expect(stageEl.classList.contains("zoomed")).toBe(false);
+
+    // Ctrl + wheel zooms in
+    const zoomWheel = new WheelEvent("wheel", { deltaY: -50, ctrlKey: true, bubbles: true, cancelable: true });
+    Object.defineProperty(zoomWheel, "ctrlKey", { value: true });
+    stageEl.dispatchEvent(zoomWheel);
+    flushSync();
+    expect(Number(stageEl.getAttribute("data-zoom-scale"))).toBeCloseTo(1.15, 2);
+
+    // Turning the page resets zoom back to 1x
+    clickAt(900);
+    await tick();
+    expect(pillLabel()).toBe("2 / 3");
+    expect(stageEl.getAttribute("data-zoom-scale")).toBe("1");
+  });
+
+  it("scrolls up and down with the mouse wheel in SCROLL mode and auto-switches webtoon strips to SCROLL", async () => {
+    const { store } = await openReader({ viewMode: "SCROLL", direction: "LEFT_TO_RIGHT", lastReadPage: 0 });
+    mountPane(store);
+    await tick();
+
+    const stageEl = target.querySelector(".reader-stage") as HTMLElement;
+    const scrollView = target.querySelector(".scroll-view") as HTMLElement;
+    expect(scrollView).toBeTruthy();
+    expect(pillLabel()).toBe("1 / 3");
+
+    // Wheel down in SCROLL mode moves scrollTop and advances visible page
+    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 0, deltaY: 120, bubbles: true, cancelable: true }));
+    await tick();
+    expect(scrollView.scrollTop).toBe(120);
+    expect(pillLabel()).toBe("2 / 3");
+
+    // Wheel up in SCROLL mode moves scrollTop back up and retreats visible page
+    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 0, deltaY: -80, bubbles: true, cancelable: true }));
+    await tick();
+    expect(scrollView.scrollTop).toBe(40);
+    expect(pillLabel()).toBe("1 / 3");
+  });
+
+  it("turns pages on constant-delta vertical mouse wheel ticks after cooldown and suppresses mid-cooldown bounce", async () => {
+    const { store } = await openReader({ viewMode: "PAGE", direction: "LEFT_TO_RIGHT", lastReadPage: 0 });
+    mountPane(store);
+    await tick();
+    expect(pillLabel()).toBe("1 / 3");
+
+    const stageEl = target.querySelector(".reader-stage") as HTMLElement;
+
+    // 1st wheel tick down (deltaY = 100) -> page 2
+    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 0, deltaY: 100, bubbles: true, cancelable: true }));
+    await tick();
+    expect(pillLabel()).toBe("2 / 3");
+
+    // Immediate opposite-direction bounce within cooldown is suppressed
+    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 0, deltaY: -100, bubbles: true, cancelable: true }));
+    await tick();
+    expect(pillLabel()).toBe("2 / 3");
+
+    // After cooldown + stream idle, opposite-direction wheel tick returns to page 1
+    await new Promise((resolve) => setTimeout(resolve, 370));
+    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 0, deltaY: -100, bubbles: true, cancelable: true }));
+    await tick();
+    expect(pillLabel()).toBe("1 / 3");
+
+    // Constant-magnitude wheel notches down (deltaY = 100 each) separated by cooldown
+    await new Promise((resolve) => setTimeout(resolve, 370));
+    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 0, deltaY: 100, bubbles: true, cancelable: true }));
+    await tick();
+    expect(pillLabel()).toBe("2 / 3");
+
+    await new Promise((resolve) => setTimeout(resolve, 370));
+    stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 0, deltaY: 100, bubbles: true, cancelable: true }));
     await tick();
     expect(pillLabel()).toBe("3 / 3");
   });

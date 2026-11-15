@@ -26,6 +26,7 @@
   html,
   body {
     height: 100%;
+    overscroll-behavior: none;
   }
 
   body {
@@ -43,7 +44,6 @@
   /* The reader surface must never bounce the whole extension page. */
   body.app-body {
     overflow: hidden;
-    overscroll-behavior: none;
   }
 
   :focus-visible {

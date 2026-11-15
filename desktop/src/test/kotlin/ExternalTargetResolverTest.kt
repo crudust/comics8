@@ -1,5 +1,6 @@
 package com.comics8.desktop
 
+import com.comics8.core.source.local.RarArchive
 import com.google.common.truth.Truth.assertThat
 import org.junit.Rule
 import org.junit.Test
@@ -16,6 +17,21 @@ class ExternalTargetResolverTest {
         val target = ExternalTargetResolver.resolve(zip)
         assertThat(target).isInstanceOf(ExternalTargetResolver.Target.Zip::class.java)
         assertThat((target as ExternalTargetResolver.Target.Zip).file).isEqualTo(zip)
+    }
+
+    @Test
+    fun resolvesDirectRarAndCbrWhenSupported() {
+        val rar = tempFolder.newFile("manga.rar")
+        val cbr = tempFolder.newFile("manga.cbr")
+        val rarTarget = ExternalTargetResolver.resolve(rar)
+        val cbrTarget = ExternalTargetResolver.resolve(cbr)
+        if (RarArchive.isSupported) {
+            assertThat((rarTarget as ExternalTargetResolver.Target.Zip).file).isEqualTo(rar)
+            assertThat((cbrTarget as ExternalTargetResolver.Target.Zip).file).isEqualTo(cbr)
+        } else {
+            assertThat(rarTarget).isNull()
+            assertThat(cbrTarget).isNull()
+        }
     }
 
     @Test

@@ -402,6 +402,72 @@ export function formatProgressBadge(
   return lastReadOrder > 0 ? `${lastReadOrder}/${total.count}` : `${total.count}화`;
 }
 
+/**
+ * `EpisodeListingTotal.needsRefresh(lastReadOrder)`.
+ *
+ * Whether a stored count should be refreshed from the tail page on the browse screen:
+ * when the reader has not caught up (`lastReadOrder < count`), or no progress exists yet (`0`).
+ */
+export function needsEpisodeTotalRefresh(
+  total: CatalogTotal,
+  lastReadOrder: number,
+): boolean {
+  return isCountedTotal(total) && lastReadOrder < total.count;
+}
+
+/**
+ * `RepositoryTransforms.historyProgress(existingTotal, existingReadOrder, counted)`.
+ *
+ * Returns the updated `(lastReadOrder, totalEpisodes)` pair when a counted total changes the
+ * history row, or `null` when nothing needs to be written.
+ */
+export function historyProgress(
+  existingTotal: number,
+  existingReadOrder: number,
+  counted: CatalogTotal | EpisodeListingTotal,
+): { lastReadOrder: number; totalEpisodes: number } | null {
+  if (!isCountedTotal(counted)) return null;
+  const clampedOrder =
+    existingReadOrder > counted.count ? counted.count : existingReadOrder;
+  if (existingTotal === counted.count && clampedOrder === existingReadOrder) {
+    return null;
+  }
+  return { lastReadOrder: clampedOrder, totalEpisodes: counted.count };
+}
+
+/**
+ * `RepositoryTransforms.needsEpisodeSync(knownTotal, lastReadOrder, thumbUrl, isFavorite)`.
+ *
+ * Decides whether a browse/search/favorite card needs a background episode metadata fetch:
+ * 1. The work has never been counted (`!isCountedTotal(knownTotal)`), or
+ * 2. The work is a favorite (`isFavorite`), or
+ * 3. The reader has not caught up with the stored count (`needsRefresh(lastReadOrder)`), or
+ * 4. The card is missing a cover thumbnail (`thumbUrl` is blank).
+ */
+export function needsEpisodeSync(
+  knownTotal: CatalogTotal | undefined,
+  lastReadOrder: number,
+  thumbUrl: string | null | undefined,
+  isFavorite = false,
+): boolean {
+  const uncounted = !isCountedTotal(knownTotal);
+  const unreadRemains =
+    isCountedTotal(knownTotal) && needsEpisodeTotalRefresh(knownTotal, lastReadOrder);
+  const missingThumb = (thumbUrl ?? "").trim() === "";
+  return uncounted || isFavorite || unreadRemains || missingThumb;
+}
+
+/** `DesktopToonRepository.hostOfOrigin(origin)`: lowercase host without `www.`. */
+function hostOfOrigin(origin: string | null | undefined): string {
+  const raw = (origin ?? "").trim();
+  if (!raw) return "";
+  try {
+    return new URL(raw).hostname.replace(/^www\./i, "").toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
 // ---------------------------------------------------------------------------------------------
 // listing totals (`core/src/main/kotlin/model/RepositoryTransforms.kt`)
 // ---------------------------------------------------------------------------------------------
@@ -459,6 +525,7 @@ export function totalFromPage(
   const safePageSize = Math.max(1, Math.trunc(pageSize));
   if (clampPage(page.currentPage, lastPage) !== lastPage) return null;
   const items = page.items.length;
+  if (items === 0) return null;
   if (lastPage === 1) {
     const single: EpisodeListingTotal = {
       count: items,
@@ -1069,6 +1136,10 @@ const PAGE_SAVE_DEBOUNCE_MS = 400;
 const MAX_SOURCE_SCRIPT_BYTES = 2 * 1024 * 1024;
 /** `chrome.storage.local` key holding desktop-side preferences (active source, sort, viewer). */
 export const DESKTOP_PREFS_KEY = "comics8.desktop.prefs";
+/** `chrome.storage.local` key holding `SourceBindingManager` local-to-canonical source id bindings. */
+export const SOURCE_BINDINGS_KEY = "comics8.sources.bindings";
+/** Maximum concurrent background episode metadata sweeps (`syncSemaphore = Semaphore(3)`). */
+const EPISODE_SYNC_CONCURRENCY = 3;
 
 type DesktopPrefs = {
   activeSourceId: string | null;
@@ -1627,6 +1698,14 @@ export class DesktopStore {
   /** Authority of the value currently stored in `totalEpisodesByWork[key]`. */
   #episodeTotalRanks: Record<string, EpisodeTotalRank> = {};
 
+  /** `DesktopToonRepository.activeSyncKeys`: prevents duplicate concurrent metadata sweeps per work. */
+  readonly #activeSyncKeys = new Set<string>();
+  /** `DesktopToonRepository.activeResolvingSources`: prevents duplicate `/catalog/source/resolve` calls. */
+  readonly #activeResolvingSources = new Set<string>();
+  /** `SourceBindingManager`: maps `localSourceId -> canonicalSourceId`. */
+  readonly #sourceBindings = new Map<string, string>();
+  #sourceBindingsLoaded = false;
+
   #sortOrders: Record<string, EpisodeSortOrder> = {};
   #readerSettings: Record<string, DesktopReaderSetting> = {};
   #activeSourcePref: string | null = null;
@@ -1654,6 +1733,11 @@ export class DesktopStore {
   #readerToken = 0;
 
   #returnScreen: Screen = "Browse";
+  #lastViewedSeries: DesktopToonItem | null = null;
+  #lastViewedEpisodePage = 1;
+  #lastViewedEpisode: DesktopEpisodeItem | null = null;
+  #preAutoSwitchViewMode: ViewMode | null = null;
+  #autoSwitchedEpisodeId: string | null = null;
 
   #pageSaveTimer: ReturnType<typeof setTimeout> | null = null;
   #pendingPageSave:
@@ -1713,13 +1797,18 @@ export class DesktopStore {
       favoritesStore.init().catch(() => undefined),
       historyStore.init().catch(() => undefined),
       this.#registry.init().catch(() => undefined),
+      this.#syncClient.init?.().catch(() => undefined),
+      this.#loadSourceBindings().catch(() => undefined),
     ]);
+    if (typeof this.#syncClient.getStatus === "function") {
+      this.refreshSyncState(this.#syncClient.getStatus());
+    }
     // Persisted trace of `DesktopViewModel`'s `catalogTotals`: a count taken in a previous session is
     // reused by `fetchEpisodeMetadata` without sweeping every page again. The rows are counted
     // totals, so they are recorded at counted rank: a page's estimated shape must never replace one.
     this.catalogTotals = mapCatalogTotals(catalogStore.getAll());
-    for (const key of Object.keys(this.catalogTotals)) {
-      this.#episodeTotalRanks[key] = EPISODE_TOTAL_RANK.counted;
+    for (const [key, total] of Object.entries(this.catalogTotals)) {
+      this.#recordEpisodeTotal(key, total.count, EPISODE_TOTAL_RANK.counted);
     }
     for (const h of historyStore.getHistory()) {
       if (h.lastReadOrder) {
@@ -2254,7 +2343,10 @@ export class DesktopStore {
     if (this.screen !== "Series" && this.screen !== "Reader") {
       this.#returnScreen = this.screen;
     }
+    this.#lastViewedSeries = series;
+    this.#lastViewedEpisodePage = 1;
 
+    this.#loadToken += 1;
     this.screen = "Series";
     this.series = series;
     this.seriesHistory = null;
@@ -2288,16 +2380,24 @@ export class DesktopStore {
     await episodesPromise;
   }
 
-  /** `DesktopViewModel.closeSeries`: back to the grid (or history, when opened from there). */
+  /** `DesktopViewModel.closeSeries`: back to the grid (or history / downloads, when opened from there). */
   async closeSeries(): Promise<void> {
     this.#loadToken += 1;
     this.#episodeToken += 1;
     this.#readerToken += 1;
+    if (this.series) {
+      this.#lastViewedSeries = this.series;
+      this.#lastViewedEpisodePage = this.episodePage;
+    }
+    this.#restoreAutoSwitchedViewMode();
     const tab = this.activeTab;
     const searching = this.searchQuery !== null;
     const returnScreen = this.#returnScreen;
+    const targetScreen: Screen =
+      returnScreen === "History" || returnScreen === "Downloads" ? returnScreen : "Browse";
+    this.#returnScreen = "Browse";
 
-    this.screen = returnScreen === "History" ? "History" : "Browse";
+    this.screen = targetScreen;
     this.series = null;
     this.seriesHistory = null;
     this.rawEpisodes = [];
@@ -2313,8 +2413,12 @@ export class DesktopStore {
     this.highlightedEpisodeId = null;
     this.showPageJump = false;
 
-    if (this.screen === "History") {
+    if (targetScreen === "History") {
       await this.loadHistory();
+      return;
+    }
+    if (targetScreen === "Downloads") {
+      await this.loadDownloads();
       return;
     }
     if (tab && !searching) {
@@ -2324,6 +2428,109 @@ export class DesktopStore {
       } else if (tab.kind === "favorite") {
         await this.#loadPage(1, { replace: true });
       }
+    }
+  }
+
+  /**
+   * `DesktopViewModel.goBack()`: steps back through open dialogs and screens (`Reader -> Series -> Browse/History/Downloads`).
+   * Returns `true` when an action was consumed.
+   */
+  goBack(): boolean {
+    if (this.showPageJump) {
+      this.togglePageJump(false);
+      return true;
+    }
+    if (this.showSyncDialog) {
+      this.closeSyncDialog();
+      return true;
+    }
+    if (this.showDownloadOptions) {
+      this.closeDownloadOptions();
+      return true;
+    }
+    if (this.sourceError !== null) {
+      this.sourceError = null;
+      return true;
+    }
+    switch (this.screen) {
+      case "Reader":
+        this.closeReader();
+        return true;
+      case "Series":
+        void this.closeSeries();
+        return true;
+      case "History":
+        this.closeHistory();
+        return true;
+      case "Downloads":
+        this.closeDownloads();
+        return true;
+      case "Settings":
+        this.closeSettings();
+        return true;
+      case "SourceManager":
+        this.closeSourceManager();
+        return true;
+      case "Browse":
+        if (this.isSearch) {
+          void this.clearSearch();
+          return true;
+        }
+        return false;
+    }
+  }
+
+  /**
+   * `DesktopViewModel.goForward()`: steps forward (`Browse/History/Downloads -> Series -> Reader -> nextEpisode`).
+   * Returns `true` when an action was consumed.
+   */
+  goForward(): boolean {
+    switch (this.screen) {
+      case "Browse":
+      case "History":
+      case "Downloads": {
+        const target = this.#lastViewedSeries ?? this.items[0] ?? null;
+        if (!target) return false;
+        const savedPage =
+          this.#lastViewedSeries &&
+          this.#lastViewedSeries.id === target.id &&
+          this.#sourceIdFor(this.#lastViewedSeries) === this.#sourceIdFor(target)
+            ? this.#lastViewedEpisodePage
+            : 1;
+        void this.openSeries(target).then(() => {
+          if (savedPage > 1) {
+            void this.goToEpisodePage(savedPage);
+          }
+        });
+        return true;
+      }
+      case "Series": {
+        const episodes = this.#navigationEpisodes;
+        const lastEp = this.#lastViewedEpisode;
+        const matchedLast = lastEp
+          ? (episodes.find((ep) => ep.wrId === lastEp.wrId) ?? null)
+          : null;
+        const historyWrId = this.seriesHistory?.lastWrId;
+        const matchedHistory = historyWrId
+          ? (episodes.find((ep) => ep.wrId === historyWrId) ?? null)
+          : null;
+        const fallback =
+          this.episodeSortOrder === "OLDEST"
+            ? (episodes[0] ?? null)
+            : (episodes[episodes.length - 1] ?? episodes[0] ?? null);
+        const target = matchedLast ?? matchedHistory ?? fallback;
+        if (!target) return false;
+        void this.openEpisode(target);
+        return true;
+      }
+      case "Reader": {
+        if (!this.hasNextEpisode) return false;
+        void this.nextEpisode();
+        return true;
+      }
+      case "Settings":
+      case "SourceManager":
+        return false;
     }
   }
 
@@ -2375,6 +2582,13 @@ export class DesktopStore {
     const series = this.series;
     const sourceId = series ? this.#sourceIdFor(series) : (this.activeSourceId ?? null);
 
+    if (series) {
+      this.#lastViewedSeries = series;
+      this.#lastViewedEpisodePage = this.episodePage;
+    }
+    this.#lastViewedEpisode = episode;
+    this.#restoreAutoSwitchedViewMode();
+
     const startPage = startPageOnOpen(episode.lastReadPage ?? 0);
     const now = Date.now();
     const openEpisode: DesktopEpisodeItem = {
@@ -2422,6 +2636,10 @@ export class DesktopStore {
   closeReader(): void {
     void this.#flushPageSave();
     this.triggerDebouncedPush();
+    if (this.currentEpisode) {
+      this.#lastViewedEpisode = this.currentEpisode;
+    }
+    this.#restoreAutoSwitchedViewMode();
     this.#readerToken += 1;
     this.#toastTimer = clearTimeoutOf(this.#toastTimer);
     this.screen = "Series";
@@ -2470,7 +2688,23 @@ export class DesktopStore {
   async goToEpisodePage(page: number): Promise<void> {
     const series = this.series;
     if (!series) return;
-    await this.#loadEpisodes(series, clampPage(page, this.episodeLastPage));
+    const clamped = clampPage(page, this.episodeLastPage);
+    this.#lastViewedEpisodePage = clamped;
+    await this.#loadEpisodes(series, clamped);
+  }
+
+  /** `DesktopViewModel.nextEpisodePage`: `if (state.episodePage < state.episodeLastPage) goToEpisodePage(state.episodePage + 1)`. */
+  async nextEpisodePage(): Promise<void> {
+    if (this.episodePage < this.episodeLastPage) {
+      await this.goToEpisodePage(this.episodePage + 1);
+    }
+  }
+
+  /** `DesktopViewModel.prevEpisodePage`: `if (state.episodePage > 1) goToEpisodePage(state.episodePage - 1)`. */
+  async prevEpisodePage(): Promise<void> {
+    if (this.episodePage > 1) {
+      await this.goToEpisodePage(this.episodePage - 1);
+    }
   }
 
   /**
@@ -2574,6 +2808,7 @@ export class DesktopStore {
 
   /** `comics8.desktop.ui.settings` viewer controls: `setViewMode`. */
   setViewMode(mode: ViewMode): void {
+    this.#preAutoSwitchViewMode = null;
     this.viewMode = mode;
     this.#persistReaderSetting();
   }
@@ -2596,14 +2831,61 @@ export class DesktopStore {
    * The reader calls this from every `<img onload>`; the ratio is what turns a paged mode into
    * smart wide-spread / slice layout (`buildDualSpreads`, `buildSinglePageSlices`). `ReaderDomain
    * .imageAspectRatio` returns `null` for a broken bitmap, which is dropped rather than stored.
+   * For indices 0 and 1 (`ReaderDomain.isAutoScrollCandidate`), tall webtoon strips (`height / width >= 2.0`)
+   * auto-switch to `SCROLL` mode if the user has not explicitly saved a viewMode for the series.
    */
   recordImageAspectRatio(index: number, width: number, height: number): void {
     if (!Number.isFinite(index) || index < 0) return;
     if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return;
     const key = Math.trunc(index);
     const ratio = width / height;
-    if (this.imageAspectRatios[key] === ratio) return;
-    this.imageAspectRatios = { ...this.imageAspectRatios, [key]: ratio };
+    if (this.imageAspectRatios[key] !== ratio) {
+      this.imageAspectRatios = { ...this.imageAspectRatios, [key]: ratio };
+    }
+    if (key === 0 || key === 1) {
+      this.#checkAndAutoSwitchToScroll(width, height);
+    }
+  }
+
+  /** `DesktopViewModel.checkAndAutoSwitchToScroll(width, height)` (`ReaderDomain.isWebtoonStrip`). */
+  #checkAndAutoSwitchToScroll(width: number, height: number): void {
+    if (height / width < 2.0) return;
+    const currentEp = this.currentEpisode;
+    const series = this.series;
+    if (!currentEp || !series) return;
+
+    const sourceId = this.#sourceIdFor(series);
+    const saved = this.#readerSettings[workKey(sourceId, series.id)];
+    if (saved !== undefined) return;
+
+    if (this.#autoSwitchedEpisodeId === currentEp.wrId) return;
+
+    if (this.viewMode === "SCROLL") {
+      this.#autoSwitchedEpisodeId = currentEp.wrId;
+      return;
+    }
+
+    if (this.#preAutoSwitchViewMode === null) {
+      this.#preAutoSwitchViewMode = this.viewMode;
+    }
+    this.#autoSwitchedEpisodeId = currentEp.wrId;
+    this.viewMode = "SCROLL";
+    this.showToast("자동으로 스크롤 모드로 전환되었습니다", 1000);
+  }
+
+  /** `DesktopViewModel.restoreAutoSwitchedViewMode()`. */
+  #restoreAutoSwitchedViewMode(): void {
+    const prev = this.#preAutoSwitchViewMode;
+    this.#preAutoSwitchViewMode = null;
+    this.#autoSwitchedEpisodeId = null;
+    if (prev !== null) {
+      const series = this.series;
+      if (series) {
+        const sourceId = this.#sourceIdFor(series);
+        if (this.#readerSettings[workKey(sourceId, series.id)] !== undefined) return;
+      }
+      this.viewMode = prev;
+    }
   }
 
   /**
@@ -2630,6 +2912,17 @@ export class DesktopStore {
   /** `DesktopViewModel.toggleFullscreen`. */
   toggleFullscreen(): void {
     this.isFullscreen = !this.isFullscreen;
+    if (typeof document !== "undefined") {
+      try {
+        if (this.isFullscreen) {
+          void document.documentElement.requestFullscreen?.()?.catch(() => undefined);
+        } else if (document.fullscreenElement) {
+          void document.exitFullscreen?.()?.catch(() => undefined);
+        }
+      } catch {
+        // Extension surfaces or headless test environments may not support the Fullscreen API.
+      }
+    }
   }
 
   /**
@@ -2694,16 +2987,7 @@ export class DesktopStore {
     const key = workKey(record.sourceId, record.toonId);
     const mode = this.progressDisplayMode(record.sourceId);
     const order = record.lastReadOrder ?? this.#lastReadOrder[key] ?? 0;
-    const total =
-      this.catalogTotals[key] ??
-      (record.totalEpisodes
-        ? {
-            count: record.totalEpisodes,
-            lastPage: 1,
-            pageSize: record.totalEpisodes,
-            delta: 0,
-          }
-        : undefined);
+    const total = this.catalogTotals[key];
     return (
       formatProgressBadge(mode, order, total, this.readCounts[key] ?? 0) ?? ""
     );
@@ -3030,44 +3314,42 @@ export class DesktopStore {
           historyStore.applyRemoteHistory(remotePull.history, remotePull.readEpisodes),
         ]);
         if (remotePull.catalog && remotePull.catalog.length > 0) {
-          await catalogStore.saveAllCatalog(
-            remotePull.catalog.map((c) => ({
-              sourceId: c.sourceId,
+          // Parity with `DesktopSyncManager.kt`: totals only come from counting a listing, so a wire
+          // row is adopted only when it carries the listing shape (`catalogTotalFromRow`).
+          const shapedCatalog: Array<{
+            sourceId: string;
+            toonId: string;
+            total: EpisodeListingTotal;
+          }> = [];
+          for (const c of remotePull.catalog) {
+            const total = catalogTotalFromRow(c);
+            if (!total) continue;
+            const localSid = this.#getLocalSourceId(c.sourceId);
+            shapedCatalog.push({
+              sourceId: localSid,
               toonId: c.toonId,
-              count: c.totalEpisodes,
-              total: {
-                count: c.totalEpisodes,
-                lastPage: c.lastPage ?? 1,
-                pageSize: c.pageSize ?? c.totalEpisodes,
-                delta: c.delta ?? 0,
-              },
-            })),
-          );
+              total,
+            });
+          }
+          if (shapedCatalog.length > 0) {
+            await catalogStore.saveAllCatalog(shapedCatalog);
+          }
         }
         const historyRows = historyStore.getHistory();
-        const catalogUpdates = [];
         for (const h of historyRows) {
           const k = workKey(h.sourceId, h.toonId);
           if (h.lastReadOrder) {
             this.#lastReadOrder[k] = Math.max(this.#lastReadOrder[k] ?? 0, h.lastReadOrder);
           }
-          if (h.totalEpisodes && !this.catalogTotals[k]) {
-            catalogUpdates.push({
-              sourceId: h.sourceId,
-              toonId: h.toonId,
-              count: h.totalEpisodes,
-            });
-          }
-        }
-        if (catalogUpdates.length > 0) {
-          await catalogStore.saveAllCatalog(catalogUpdates);
         }
         this.catalogTotals = mapCatalogTotals(catalogStore.getAll());
+        for (const [key, total] of Object.entries(this.catalogTotals)) {
+          this.#recordEpisodeTotal(key, total.count, EPISODE_TOTAL_RANK.counted);
+        }
         if (this.items.length > 0) {
-          this.items = this.#decorateItems(
-            this.items,
-            this.activeTab?.sourceId ?? this.activeSourceId ?? LOCAL_SOURCE,
-          );
+          const activeSid = this.activeTab?.sourceId ?? this.activeSourceId ?? LOCAL_SOURCE;
+          this.items = this.#decorateItems(this.items, activeSid);
+          void this.syncEpisodeMetadata(this.items);
         }
         if (this.screen === "History") {
           await this.loadHistory();
@@ -3527,16 +3809,7 @@ export class DesktopStore {
       const key = workKey(sourceId, item.id);
       const history = historyStore.getProgress(sourceId, item.id);
       const readOrder = history?.lastReadOrder ?? this.#lastReadOrder[key] ?? 0;
-      const total =
-        totals[key] ??
-        (history?.totalEpisodes
-          ? {
-              count: history.totalEpisodes,
-              lastPage: 1,
-              pageSize: history.totalEpisodes,
-              delta: 0,
-            }
-          : undefined);
+      const total = totals[key];
       return {
         ...item,
         sourceId,
@@ -3572,72 +3845,284 @@ export class DesktopStore {
   }
 
   /**
-   * `DesktopToonRepository.syncEpisodeCounts` (step 1): server-first batch query of the counted
-   * totals this device never counted itself.
+   * `DesktopToonRepository.syncEpisodeCounts`: 4-step hybrid episode count & thumbnail sync.
    *
-   * A browse card can only print a badge once the work's total is known, and counting a listing
-   * costs one request *per page*. Another client (Android/Desktop) has usually already counted it
-   * and reported it to `POST /catalog/report`, so the missing rows are asked for in one batch and
-   * written straight into {@link catalogTotals} + {@link catalogStore}. The grid is then re-decorated
-   * so `readProgress` ("64화" before anything is read, "52/64" afterwards) appears immediately.
-   *
-   * Callers fire this without awaiting ({@link #loadPage}, {@link search}); a failed lookup answers
-   * `[]` and leaves the badges blank, exactly like the Kotlin `catch (_: Exception) {}`.
+   * - Step 0: Resolve canonical source identity (`POST /catalog/source/resolve`) so different
+   *   devices with differently named JS plugins still share the same crowdsource catalog.
+   * - Step 1: Server-first batch query (`POST /catalog/batch`) for works missing a counted total
+   *   locally. Updates `catalogTotals`, `catalogStore`, `historyStore` and re-decorates immediately.
+   * - Step 2: Incremental web scraping fallback (concurrency 3) for cards where
+   *   {@link needsEpisodeSync} holds (uncounted after Step 1, favorite, unread episodes remain so the
+   *   tail page may have grown, or missing thumbnail). Stops early on browse listings once an
+   *   up-to-date work (`!isIncreased && isListing && !item.isNew`) is encountered.
+   * - Step 3: Crowdsource report (`POST /catalog/report`) of newly discovered/updated counts back to
+   *   the server using canonical source IDs.
    */
-  async syncEpisodeMetadata(items: readonly ToonItem[]): Promise<void> {
+  async syncEpisodeMetadata(
+    items: readonly ToonItem[],
+    options: { isListing?: boolean } = {},
+  ): Promise<void> {
     if (items.length === 0) return;
+    const isListing =
+      options.isListing ??
+      (this.screen === "Browse" &&
+        this.searchQuery === null &&
+        this.activeTab?.kind !== "favorite");
+
     const sourceOf = new Map<string, string>();
-    for (const item of items) sourceOf.set(item.id, this.#sourceIdFor(item));
-
-    // `missingFromLocal`: only works whose counted row is absent locally. A row already in
-    // `catalogTotals` (this session, or a previous one through `catalogStore`) is not re-asked for.
-    const missing = items.filter((item) => {
-      const sourceId = this.#sourceIdFor(item);
-      return !isCountedTotal(this.catalogTotals[workKey(sourceId, item.id)]);
-    });
-    if (missing.length === 0) return;
-
-    // Library files never leave the device (`import_snapshot_for_user` rejects `local`), so there is
-    // nothing server-side to ask about.
-    const queries = missing.filter((item) => this.#sourceIdFor(item) !== LOCAL_SOURCE);
-    if (queries.length === 0) return;
+    for (const item of items) {
+      sourceOf.set(item.id, this.#sourceIdFor(item));
+    }
 
     const token = this.#loadToken;
-    let rows: SyncCatalogRow[] = [];
-    try {
-      rows = await this.#syncClient.fetchCatalogBatch(
-        queries.map((item) => ({ sourceId: this.#sourceIdFor(item), toonId: item.id })),
-      );
-    } catch {
-      // A badge is a nicety; a failed batch must never surface as an error state.
-      rows = [];
-    }
-    if (rows.length === 0) return;
 
-    let changed = false;
-    for (const row of rows) {
-      const total = catalogTotalFromRow(row);
-      if (!total) continue;
-      // The server may answer under its canonical source id; the cards are keyed by ours
-      // (`bindingManager.getLocalSourceId(wire.sourceId)` on the desktop).
-      const sourceId = sourceOf.get(row.toonId) ?? row.sourceId;
-      if (!sourceId) continue;
-      const key = workKey(sourceId, row.toonId);
-      const previous = this.catalogTotals[key];
-      this.catalogTotals = { ...this.catalogTotals, [key]: toCatalogTotal(total) };
-      this.#recordEpisodeTotal(key, total.count, EPISODE_TOTAL_RANK.counted);
-      await catalogStore.saveCatalog(sourceId, row.toonId, total).catch(() => undefined);
-      if (previous?.count !== total.count) changed = true;
+    // --- Step 0: Resolve source identity if not bound yet ---
+    const sampleSourceId = this.#sourceIdFor(items[0]!);
+    if (
+      sampleSourceId !== LOCAL_SOURCE &&
+      !this.#hasSourceBinding(sampleSourceId) &&
+      !this.#activeResolvingSources.has(sampleSourceId) &&
+      typeof this.#syncClient.resolveSource === "function"
+    ) {
+      this.#activeResolvingSources.add(sampleSourceId);
+      try {
+        const loaded = this.#sources.get(sampleSourceId);
+        const originHost = hostOfOrigin(loaded?.meta?.origin);
+        const sampleIds = items.slice(0, 50).map((it) => it.id);
+        const sampleTitles = items.slice(0, 50).map((it) => it.title);
+        const sampleWorks = items.slice(0, 30).map((it) => ({
+          id: it.id,
+          title: it.title,
+          href: it.href ?? "",
+          thumbUrl: it.thumbUrl ?? "",
+        }));
+        const res = await this.#syncClient.resolveSource({
+          clientSourceId: sampleSourceId,
+          originHost,
+          sampleToonIds: sampleIds,
+          sampleTitles,
+          displayName: loaded?.meta?.displayName ?? "",
+          catalogs: loaded?.meta?.catalogs?.map((c) => `${c.id}:${c.title}`) ?? [],
+          episodePageSize: loaded?.meta?.episodePageSize ?? 0,
+          sampleWorks,
+        });
+        if (res?.canonicalSourceId) {
+          await this.#bindSource(sampleSourceId, res.canonicalSourceId);
+        }
+      } catch {
+        // Best-effort source binding
+      } finally {
+        this.#activeResolvingSources.delete(sampleSourceId);
+      }
     }
-    if (!changed) return;
-    // The listing may have been replaced while the batch was in flight; re-decorating a stale grid
-    // would stamp another source's cards.
+
+    // --- Step 1: Server-first batch query for works missing a local counted total ---
+    const missing = items.filter((item) => {
+      const sourceId = this.#sourceIdFor(item);
+      return (
+        sourceId !== LOCAL_SOURCE &&
+        !isCountedTotal(this.catalogTotals[workKey(sourceId, item.id)])
+      );
+    });
+
+    if (missing.length > 0 && typeof this.#syncClient.fetchCatalogBatch === "function") {
+      let rows: SyncCatalogRow[] = [];
+      try {
+        rows = await this.#syncClient.fetchCatalogBatch(
+          missing.map((item) => {
+            const localSid = this.#sourceIdFor(item);
+            return {
+              sourceId: this.#getCanonicalSourceId(localSid),
+              toonId: item.id,
+            };
+          }),
+        );
+      } catch {
+        rows = [];
+      }
+
+      if (rows.length > 0) {
+        let changed = false;
+        const nextTotals = { ...this.catalogTotals };
+        const batchSave: Array<{
+          sourceId: string;
+          toonId: string;
+          total: EpisodeListingTotal;
+        }> = [];
+
+        for (const row of rows) {
+          const total = catalogTotalFromRow(row);
+          if (!total) continue;
+          const localSid = sourceOf.get(row.toonId) ?? this.#getLocalSourceId(row.sourceId);
+          if (!localSid) continue;
+          const key = workKey(localSid, row.toonId);
+          const previous = nextTotals[key];
+          nextTotals[key] = toCatalogTotal(total);
+          this.#recordEpisodeTotal(key, total.count, EPISODE_TOTAL_RANK.counted);
+          batchSave.push({ sourceId: localSid, toonId: row.toonId, total });
+          void this.#syncHistoryTotal(localSid, row.toonId, total);
+          if (
+            !previous ||
+            previous.count !== total.count ||
+            previous.lastPage !== total.lastPage ||
+            previous.pageSize !== total.pageSize ||
+            previous.delta !== total.delta
+          ) {
+            changed = true;
+          }
+        }
+
+        this.catalogTotals = nextTotals;
+        if (batchSave.length > 0) {
+          await catalogStore.saveAllCatalog(batchSave).catch(() => undefined);
+        }
+        if (changed) {
+          this.#refreshDecoratedListings(token);
+        }
+      }
+    }
+
+    // --- Step 2: Incremental web scraping fallback for remaining/stale items ---
+    const targets = items.filter((item) => {
+      const sourceId = this.#sourceIdFor(item);
+      if (sourceId === LOCAL_SOURCE) return false;
+      const key = workKey(sourceId, item.id);
+      if (this.#activeSyncKeys.has(key)) return false;
+      const knownTotal = this.catalogTotals[key];
+      const history = historyStore.getProgress(sourceId, item.id);
+      const lastReadOrder = history?.lastReadOrder ?? this.#lastReadOrder[key] ?? 0;
+      const isFav = Boolean((item as DesktopToonItem).isFavorite) || favoritesStore.isFavorite(sourceId, item.id);
+      return needsEpisodeSync(knownTotal, lastReadOrder, item.thumbUrl, isFav);
+    });
+
+    if (targets.length === 0) return;
+
+    // Yield one macrotask before launching background scraping workers (mirrors `Dispatchers.IO`
+    // off-main-thread execution on Desktop/Android so synchronous callers after `init()` or
+    // `setActiveSource()` are not contended by immediate page sweeps).
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
     if (token !== this.#loadToken) return;
-    // `onUpdated` on the desktop rewrites the one row it learned about; the web grid re-decorates in
-    // place so every card sharing that work (search hit, favorite tab) picks the badge up at once.
-    this.items = this.items.flatMap((item) =>
-      this.#decorateItems([item], this.#sourceIdFor(item)),
-    );
+
+    for (const item of targets) {
+      this.#activeSyncKeys.add(workKey(this.#sourceIdFor(item), item.id));
+    }
+
+    const discoveredUpdates: SyncCatalogRow[] = [];
+    let encounteredUpToDate = false;
+    let cursor = 0;
+
+    try {
+      const worker = async (): Promise<void> => {
+        while (cursor < targets.length) {
+          const index = cursor++;
+          const target = targets[index];
+          if (!target) continue;
+          if (token !== this.#loadToken) break;
+
+          const sourceId = this.#sourceIdFor(target);
+          const key = workKey(sourceId, target.id);
+          const currentTotal = this.catalogTotals[key];
+          const history = historyStore.getProgress(sourceId, target.id);
+          const currentReadOrder = history?.lastReadOrder ?? this.#lastReadOrder[key] ?? 0;
+          const isFav =
+            Boolean((target as DesktopToonItem).isFavorite) ||
+            favoritesStore.isFavorite(sourceId, target.id);
+          const stillNeeded = needsEpisodeSync(
+            currentTotal,
+            currentReadOrder,
+            target.thumbUrl,
+            isFav,
+          );
+          if (encounteredUpToDate && !stillNeeded) continue;
+
+          try {
+            const prev = this.catalogTotals[key];
+            const prevOrder =
+              historyStore.getProgress(sourceId, target.id)?.lastReadOrder ??
+              this.#lastReadOrder[key] ??
+              0;
+            const prevHasNew =
+              prev !== undefined && prevOrder > 0 && prev.count > prevOrder;
+
+            const metadata = await this.fetchEpisodeMetadata(
+              { ...target, sourceId },
+              null,
+              { reportToServer: false },
+            );
+
+            if (metadata.thumbUrl && (target.thumbUrl ?? "").trim() === "") {
+              this.#applySeriesThumbnail({ ...target, sourceId }, sourceId, metadata.thumbUrl);
+            }
+
+            const counted = metadata.total;
+            if (counted && isValidEpisodeListingTotal(counted)) {
+              const isIncreased = !prev || counted.count > prev.count;
+              const isChanged =
+                !prev ||
+                prev.count !== counted.count ||
+                prev.lastPage !== counted.lastPage ||
+                prev.pageSize !== counted.pageSize ||
+                prev.delta !== counted.delta;
+
+              if (isChanged && sourceId !== LOCAL_SOURCE) {
+                discoveredUpdates.push({
+                  sourceId,
+                  toonId: target.id,
+                  totalEpisodes: counted.count,
+                  updatedAt: Date.now(),
+                  lastPage: counted.lastPage,
+                  pageSize: counted.pageSize,
+                  delta: counted.delta,
+                });
+              }
+
+              if (!isIncreased && isListing && !target.isNew && !prevHasNew) {
+                encounteredUpToDate = true;
+              }
+
+              if (isChanged) {
+                this.#refreshDecoratedListings(token);
+              }
+            }
+          } catch {
+            // Individual series scraping failure is ignored (`DesktopToonRepository.kt:369`).
+          }
+        }
+      };
+
+      const workerCount = Math.min(EPISODE_SYNC_CONCURRENCY, targets.length);
+      await Promise.all(Array.from({ length: workerCount }, () => worker()));
+    } finally {
+      for (const item of targets) {
+        this.#activeSyncKeys.delete(workKey(this.#sourceIdFor(item), item.id));
+      }
+    }
+
+    // --- Step 3: Crowdsource report newly counted totals back to server ---
+    if (
+      discoveredUpdates.length > 0 &&
+      typeof this.#syncClient.reportCatalog === "function"
+    ) {
+      const canonicalUpdates = discoveredUpdates.map((u) => ({
+        ...u,
+        sourceId: this.#getCanonicalSourceId(u.sourceId),
+      }));
+      await this.#syncClient.reportCatalog(canonicalUpdates).catch(() => undefined);
+    }
+  }
+
+  /** Re-decorates the active grid (`this.items`) and any cached tab listings with latest totals. */
+  #refreshDecoratedListings(token: number): void {
+    for (const [tabId, cached] of this.#catalogCache.entries()) {
+      const tabSid = tabId.split(":")[0] || this.activeSourceId || LOCAL_SOURCE;
+      this.#catalogCache.set(tabId, this.#decorateItems(cached, tabSid));
+    }
+    if (token !== this.#loadToken) return;
+    if (this.items.length > 0) {
+      this.items = this.items.flatMap((item) =>
+        this.#decorateItems([item], this.#sourceIdFor(item)),
+      );
+    }
   }
 
   /**
@@ -3813,6 +4298,7 @@ export class DesktopStore {
   async fetchEpisodeMetadata(
     item: DesktopToonItem,
     knownPage?: KnownEpisodePage | null,
+    options?: { reportToServer?: boolean },
   ): Promise<EpisodeMetadata> {
     const sourceId = this.#sourceIdFor(item);
     const source = await this.#requireSource(sourceId);
@@ -3829,7 +4315,9 @@ export class DesktopStore {
     if (knownPage && knownPage.lastPage <= 1 && knownPage.currentPage <= 1) {
       const singleTotal = totalFromPage(knownPage, pageSize, null);
       const thumb = needThumb ? firstThumb(knownPage.items) : null;
-      if (singleTotal) await this.#saveEpisodeTotal(key, singleTotal, EPISODE_TOTAL_RANK.counted);
+      if (singleTotal) {
+        await this.#saveEpisodeTotal(key, singleTotal, EPISODE_TOTAL_RANK.counted, options);
+      }
       return { total: singleTotal, thumbUrl: thumb };
     }
 
@@ -3864,7 +4352,7 @@ export class DesktopStore {
       const lastPage = Math.max(1, Math.trunc(knownPage?.lastPage ?? 1));
       if (lastPage === 1) {
         const row: EpisodeListingTotal = { count: reported, lastPage: 1, pageSize, delta: 0 };
-        await this.#saveEpisodeTotal(key, row, EPISODE_TOTAL_RANK.reported);
+        await this.#saveEpisodeTotal(key, row, EPISODE_TOTAL_RANK.reported, options);
         return { total: row, thumbUrl: needThumb ? firstThumb(knownPage?.items ?? []) : null };
       }
       // The stored correction is derived from the live tail page, so a later tail read reproduces
@@ -3879,7 +4367,7 @@ export class DesktopStore {
           }
         : null;
       if (row && isValidEpisodeListingTotal(row)) {
-        await this.#saveEpisodeTotal(key, row, EPISODE_TOTAL_RANK.reported);
+        await this.#saveEpisodeTotal(key, row, EPISODE_TOTAL_RANK.reported, options);
         return { total: row, thumbUrl: thumbFrom(lastPage) ?? thumbFrom(1) };
       }
       // The tail page could not be read, so the count cannot be shaped: keep the reported number for
@@ -3905,7 +4393,7 @@ export class DesktopStore {
           if (needThumb && tailPage !== 1) {
             await loadPage(1).catch(() => null);
           }
-          await this.#saveEpisodeTotal(key, reused, EPISODE_TOTAL_RANK.counted);
+          await this.#saveEpisodeTotal(key, reused, EPISODE_TOTAL_RANK.counted, options);
           return {
             total: reused,
             thumbUrl: thumbFrom(tailPage) ?? thumbFrom(1),
@@ -3923,7 +4411,7 @@ export class DesktopStore {
     if (counted) {
       // The row is stored either way (it is the counted shape), but a reported number stays the
       // one {@link totalEpisodesOf} answers with, because its rank is higher.
-      await this.#saveEpisodeTotal(key, counted, EPISODE_TOTAL_RANK.counted);
+      await this.#saveEpisodeTotal(key, counted, EPISODE_TOTAL_RANK.counted, options);
       if (needThumb && !loaded.has(1)) await loadPage(1).catch(() => null);
     }
     return { total: counted, thumbUrl: thumbFrom(1) };
@@ -3975,6 +4463,17 @@ export class DesktopStore {
         ? { ...row, thumbUrl }
         : row,
     );
+    for (const [tabId, cached] of this.#catalogCache.entries()) {
+      const tabSid = tabId.split(":")[0] || this.activeSourceId || LOCAL_SOURCE;
+      this.#catalogCache.set(
+        tabId,
+        cached.map((row) =>
+          workKey(row.sourceId ?? tabSid, row.id) === key && (row.thumbUrl ?? "").trim() === ""
+            ? { ...row, thumbUrl }
+            : row,
+        ),
+      );
+    }
   }
 
   /**
@@ -3983,18 +4482,31 @@ export class DesktopStore {
    * `DesktopViewModel.updateHistoryAndProgress` → `repository.saveCatalogTotal` writes the row to
    * SQLite and the count to `catalogTotals`; here the row goes to {@link catalogStore}
    * (`chrome.storage.local`) and `totalEpisodesByWork` keeps the number the header prints.
+   * When `reportToServer !== false` and the total changed, it also crowdsources the update to
+   * `POST /catalog/report`, matching `DesktopToonRepository.saveCatalogTotal`.
    */
   async #saveEpisodeTotal(
     key: string,
     total: EpisodeListingTotal,
     rank: EpisodeTotalRank,
+    options?: { reportToServer?: boolean },
   ): Promise<void> {
     if (!isValidEpisodeListingTotal(total)) return;
     const [sourceId, ...rest] = key.split(":");
     const toonId = rest.join(":");
     if (!sourceId || !toonId) return;
+    const prev = this.catalogTotals[key];
+    const changed =
+      !prev ||
+      prev.count !== total.count ||
+      prev.lastPage !== total.lastPage ||
+      prev.pageSize !== total.pageSize ||
+      prev.delta !== total.delta;
+
     this.catalogTotals = { ...this.catalogTotals, [key]: toCatalogTotal(total) };
     this.#recordEpisodeTotal(key, total.count, rank);
+    void this.#syncHistoryTotal(sourceId, toonId, total);
+
     // No stamp: `CatalogStore` owns `updatedAt`, and it skips the write entirely when the row is
     // unchanged, so a tail-page refresh that reproduces the same count is not a new observation.
     await catalogStore
@@ -4005,6 +4517,125 @@ export class DesktopStore {
         delta: total.delta,
       })
       .catch(() => undefined);
+
+    if (
+      changed &&
+      options?.reportToServer !== false &&
+      sourceId !== LOCAL_SOURCE &&
+      typeof this.#syncClient.reportCatalog === "function"
+    ) {
+      void this.#syncClient
+        .reportCatalog([
+          {
+            sourceId: this.#getCanonicalSourceId(sourceId),
+            toonId,
+            totalEpisodes: total.count,
+            updatedAt: Date.now(),
+            lastPage: total.lastPage,
+            pageSize: total.pageSize,
+            delta: total.delta,
+          },
+        ])
+        .catch(() => undefined);
+    }
+  }
+
+  /**
+   * `DesktopToonRepository.syncHistoryTotal`: keeps `historyStore` progress in sync when a work's
+   * counted episode total changes (clamping `lastReadOrder` if needed).
+   */
+  async #syncHistoryTotal(
+    sourceId: string,
+    toonId: string,
+    counted: EpisodeListingTotal | CatalogTotal,
+  ): Promise<void> {
+    const existing = historyStore.getProgress(sourceId, toonId);
+    if (!existing) return;
+    const updated = historyProgress(
+      existing.totalEpisodes ?? 0,
+      existing.lastReadOrder ?? 0,
+      counted,
+    );
+    if (!updated) return;
+    const key = workKey(sourceId, toonId);
+    this.#lastReadOrder[key] = updated.lastReadOrder;
+    await historyStore
+      .recordProgress(
+        sourceId,
+        toonId,
+        existing.title,
+        existing.thumbUrl,
+        {
+          wrId: existing.lastWrId,
+          title: existing.lastEpisodeTitle,
+          href: "",
+          date: "",
+        },
+        existing.pageIndex,
+        existing.totalPages,
+        updated.lastReadOrder,
+        updated.totalEpisodes,
+      )
+      .catch(() => undefined);
+  }
+
+  // --- internals: SourceBindingManager (`core/src/main/kotlin/source/SourceBindingManager.kt`) ---
+
+  #hasSourceBinding(localSourceId: string): boolean {
+    return this.#sourceBindings.has(localSourceId);
+  }
+
+  #getCanonicalSourceId(localSourceId: string): string {
+    return this.#sourceBindings.get(localSourceId) ?? localSourceId;
+  }
+
+  #getLocalSourceId(canonicalSourceId: string): string {
+    for (const [localId, canonicalId] of this.#sourceBindings.entries()) {
+      if (canonicalId === canonicalSourceId) return localId;
+    }
+    return canonicalSourceId;
+  }
+
+  async #bindSource(localSourceId: string, canonicalSourceId: string): Promise<void> {
+    if (!localSourceId || !canonicalSourceId) return;
+    this.#sourceBindings.set(localSourceId, canonicalSourceId);
+    await this.#persistSourceBindings();
+  }
+
+  async #loadSourceBindings(): Promise<void> {
+    if (this.#sourceBindingsLoaded) return;
+    this.#sourceBindingsLoaded = true;
+    if (!this.#persistPreferences) return;
+    const area = chromeStorageArea();
+    if (!area) return;
+    try {
+      const stored = await area.get(SOURCE_BINDINGS_KEY);
+      const raw = stored?.[SOURCE_BINDINGS_KEY];
+      if (typeof raw === "object" && raw !== null) {
+        for (const [localId, canonicalId] of Object.entries(raw as Record<string, unknown>)) {
+          if (typeof canonicalId === "string" && localId.trim() !== "" && canonicalId.trim() !== "") {
+            this.#sourceBindings.set(localId.trim(), canonicalId.trim());
+          }
+        }
+      }
+    } catch {
+      // Ignore storage errors
+    }
+  }
+
+  async #persistSourceBindings(): Promise<void> {
+    if (!this.#persistPreferences) return;
+    const area = chromeStorageArea();
+    if (!area) return;
+    try {
+      const obj: Record<string, string> = {};
+      for (const [localId, canonicalId] of this.#sourceBindings.entries()) {
+        obj[localId] = canonicalId;
+      }
+      await area.set({ [SOURCE_BINDINGS_KEY]: obj });
+    } catch {
+      // Ignore storage errors
+    }
   }
 
   /**
@@ -4085,11 +4716,18 @@ export class DesktopStore {
       if (this.readerImages.length > 0) {
         const effectivePage = episode.lastReadPage ?? 0;
         const targetPage = Math.max(0, Math.min(startPageOnOpen(effectivePage), this.readerImages.length - 1));
-        const initialUrls = this.readerImages.slice(
-          Math.max(0, targetPage - 1),
-          Math.min(this.readerImages.length, targetPage + 4),
-        );
-        preloadImages(initialUrls);
+        const start = Math.max(0, targetPage - 1);
+        const end = Math.min(this.readerImages.length, targetPage + 4);
+        const loadedImages = this.readerImages;
+        const initialUrls = loadedImages.slice(start, end);
+        preloadImages(initialUrls, (url, width, height) => {
+          if (token !== this.#readerToken || this.readerImages !== loadedImages) return;
+          for (let index = start; index < end; index += 1) {
+            if (loadedImages[index] === url) {
+              this.recordImageAspectRatio(index, width, height);
+            }
+          }
+        });
       }
     } catch (cause) {
       if (token !== this.#readerToken) return;

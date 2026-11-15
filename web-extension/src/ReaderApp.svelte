@@ -58,13 +58,124 @@
     else void desktopState.goToPage(page);
   }
 
+  function isEditableTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) return false;
+    if (target.isContentEditable) return true;
+    if (target.closest('[contenteditable="true"]')) return true;
+    return /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName);
+  }
+
+  const onFullscreenChange = (): void => {
+    if (typeof document === 'undefined') return;
+    const active = document.fullscreenElement !== null;
+    if (desktopState.isFullscreen !== active) desktopState.isFullscreen = active;
+  };
+
+  const navDepth = $derived(
+    desktopState.screen === 'Reader'
+      ? 2
+      : desktopState.screen === 'Settings' && desktopState.selectedSettingsCategory !== null
+        ? 2
+        : desktopState.screen !== 'Browse' || desktopState.isSearch
+          ? 1
+          : 0,
+  );
+
+  let historyPushedDepth = 0;
+  let handlingPopState = false;
+
+  $effect(() => {
+    const depth = navDepth;
+    if (typeof window === 'undefined' || typeof window.history?.pushState !== 'function') return;
+    if (handlingPopState) {
+      historyPushedDepth = depth;
+      handlingPopState = false;
+      return;
+    }
+    while (historyPushedDepth < depth) {
+      historyPushedDepth += 1;
+      try {
+        window.history.pushState({ comics8Nav: historyPushedDepth }, '');
+      } catch {
+        break;
+      }
+    }
+    if (depth < historyPushedDepth) {
+      historyPushedDepth = depth;
+    }
+  });
+
+  function handleWindowPopState(): void {
+    handlingPopState = true;
+    desktopState.goBack();
+  }
+
+  function handleWindowMouseup(event: MouseEvent): void {
+    if (event.defaultPrevented) return;
+    if (event.button === 3) {
+      if (desktopState.goBack()) event.preventDefault();
+    } else if (event.button === 4) {
+      if (desktopState.goForward()) event.preventDefault();
+    }
+  }
+
+  function handleWindowKeydown(event: KeyboardEvent): void {
+    if (event.defaultPrevented) return;
+    // ReaderPane owns its own keyboard handler against its `store` prop when no shell modal is open.
+    if (
+      desktopState.screen === 'Reader' &&
+      !desktopState.showPageJump &&
+      !desktopState.showSyncDialog &&
+      !desktopState.showDownloadOptions
+    ) {
+      return;
+    }
+    if (isEditableTarget(event.target)) return;
+
+    const key = event.key;
+    const code = event.code;
+    const isCmd = event.metaKey || event.ctrlKey;
+    const isAlt = event.altKey;
+    const hasModifier = isCmd || isAlt;
+
+    const isBack =
+      hasModifier &&
+      (code === 'ArrowLeft' || key === 'ArrowLeft' || code === 'BracketLeft' || key === '[');
+    const isForward =
+      hasModifier &&
+      (code === 'ArrowRight' || key === 'ArrowRight' || code === 'BracketRight' || key === ']');
+
+    if (isBack) {
+      if (desktopState.goBack()) event.preventDefault();
+      return;
+    }
+    if (isForward) {
+      if (desktopState.goForward()) event.preventDefault();
+      return;
+    }
+    if (key === 'Escape') {
+      if (desktopState.goBack()) event.preventDefault();
+      return;
+    }
+    if (!hasModifier && (code === 'KeyF' || key === 'f' || key === 'F')) {
+      event.preventDefault();
+      desktopState.toggleFullscreen();
+    }
+  }
+
   onMount(async () => {
+    if (typeof document !== 'undefined') {
+      document.addEventListener('fullscreenchange', onFullscreenChange);
+    }
     await desktopState.init().catch((err) => {
       console.error('Failed to init desktopState:', err);
     });
   });
 
   onDestroy(() => {
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('fullscreenchange', onFullscreenChange);
+    }
     activeZipProvider?.close();
   });
 
@@ -115,7 +226,14 @@
   }
 </script>
 
-<svelte:window ondragover={handleDragOver} ondragleave={handleDragLeave} ondrop={handleDrop} />
+<svelte:window
+  ondragover={handleDragOver}
+  ondragleave={handleDragLeave}
+  ondrop={handleDrop}
+  onkeydown={handleWindowKeydown}
+  onmouseup={handleWindowMouseup}
+  onpopstate={handleWindowPopState}
+/>
 
 <!-- Hidden input for file selection (the drop target below is the visible entry point). -->
 <input
@@ -126,7 +244,7 @@
   onchange={handleFileInputChange}
 />
 
-<main class="shell">
+<main class="shell" class:fullscreen={desktopState.isFullscreen}>
   {#if desktopState.screen === 'Reader'}
     <ReaderPane store={desktopState} />
   {:else if desktopState.screen === 'SourceManager'}

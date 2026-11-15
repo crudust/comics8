@@ -122,6 +122,35 @@ describe("TopBar — Browse row", () => {
     expect(store.searchInput).toBe("");
     unmount(app);
   });
+
+  it("renders the fullscreen toggle button on Browse and Series views and toggles isFullscreen", async () => {
+    const store = makeStore("Browse");
+    const app = mount(TopBar, { target, props: { store } });
+    await tick();
+
+    const fsBtn = () => target.querySelector<HTMLButtonElement>(".fullscreen-toggle")!;
+    expect(fsBtn()).not.toBeNull();
+    expect(fsBtn().getAttribute("aria-label")).toBe("전체 화면");
+    expect(store.isFullscreen).toBe(false);
+
+    fsBtn().click();
+    flushSync();
+    expect(store.isFullscreen).toBe(true);
+    expect(fsBtn().getAttribute("aria-label")).toBe("전체 화면 종료");
+
+    // Moving to Series keeps the fullscreen toggle button available so user can exit without Esc
+    store.screen = "Series";
+    store.series = { id: "42", title: "테스트 작품", thumbUrl: "", href: "" };
+    flushSync();
+    expect(fsBtn()).not.toBeNull();
+    expect(fsBtn().getAttribute("aria-label")).toBe("전체 화면 종료");
+
+    fsBtn().click();
+    flushSync();
+    expect(store.isFullscreen).toBe(false);
+    expect(fsBtn().getAttribute("aria-label")).toBe("전체 화면");
+    unmount(app);
+  });
 });
 
 describe("TopBar — History row", () => {

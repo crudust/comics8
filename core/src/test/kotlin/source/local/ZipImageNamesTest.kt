@@ -33,4 +33,14 @@ class ZipImageNamesTest {
         assertThat(ZipImageNames.isZipName("foo.rar")).isFalse()
         assertThat(ZipImageNames.isZipName(".secret.zip")).isFalse()
     }
+
+    @Test
+    fun rarNamesAcceptRarAndCbr() {
+        assertThat(ZipImageNames.isRarName("foo.CBR")).isTrue()
+        assertThat(ZipImageNames.isRarName("foo.rar")).isTrue()
+        assertThat(ZipImageNames.isRarName("foo.zip")).isFalse()
+        assertThat(ZipImageNames.isRarName(".secret.rar")).isFalse()
+        assertThat(ZipImageNames.isLocalArchiveName("foo.rar")).isEqualTo(RarArchive.isSupported)
+        assertThat(ZipImageNames.isLocalArchiveName("foo.zip")).isTrue()
+    }
 }

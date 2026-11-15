@@ -16,7 +16,7 @@
  * styles, so the class contract (`read` / `highlighted`) is the stable thing to check.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushSync, mount, unmount } from "svelte";
 
 import SeriesPane from "../src/views/SeriesPane.svelte";
@@ -465,5 +465,37 @@ describe("SeriesPane loading and error states", () => {
     expect(calls.episodes.length).toBeGreaterThanOrEqual(2);
     expect(store.episodeError).toBeNull();
     expect(target.querySelectorAll(".episode-card")).toHaveLength(3);
+  });
+
+  it("exits Series back to Browse on Escape, Alt+Left, Cmd+[, and horizontal retreat swipe on page 1", async () => {
+    const calls: Calls = { episodes: [], images: 0, parents: [] };
+    const source = fakeSource({ pageCount: 2 }, calls);
+
+    const store = createDesktopStore({ registry: fakeRegistry(source), persistPreferences: false });
+    await store.init();
+    await store.openSeries({ ...item, sourceId: "test-src" });
+    mountPane(store);
+    await tick();
+
+    expect(store.screen).toBe("Series");
+    expect(store.episodePage).toBe(1);
+
+    const pane = () => target.querySelector(".pane") as HTMLElement;
+
+    // Horizontal advance swipe on page 1 -> goes to episode page 2
+    pane().dispatchEvent(new WheelEvent("wheel", { deltaX: 60, deltaY: 0, bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(store.episodePage).toBe(2));
+
+    // Horizontal retreat swipe on page 2 after cooldown -> returns to episode page 1
+    await new Promise((resolve) => setTimeout(resolve, 370));
+    pane().dispatchEvent(new WheelEvent("wheel", { deltaX: -60, deltaY: 0, bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(store.episodePage).toBe(1));
+    expect(store.screen).toBe("Series");
+
+    // Horizontal retreat swipe on page 1 after cooldown -> closes Series back to Browse (`SeriesPane.kt` lines 92-97)
+    await new Promise((resolve) => setTimeout(resolve, 370));
+    pane().dispatchEvent(new WheelEvent("wheel", { deltaX: -60, deltaY: 0, bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(store.screen).toBe("Browse"));
+    expect(store.series).toBeNull();
   });
 });

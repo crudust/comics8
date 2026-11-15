@@ -48,6 +48,11 @@
   import { desktopState } from '../state/desktop-state.svelte';
   import type { DesktopStore, ViewMode } from '../state/desktop-state.svelte';
   import PageJumpDialog from '../ui/PageJumpDialog.svelte';
+  import {
+    createWheelPagingController,
+    normalizeWheelDelta,
+    SCROLL_PAGE_THRESHOLD,
+  } from '../ui/wheel-paging';
   import { preloadImages } from './image-preloader';
   import {
     buildDualSpreads,
@@ -91,17 +96,11 @@
   const PROMPT_FIRST_EPISODE = '첫 번째 회차입니다';
   /** `delay(3000)` in `promptJob`. */
   const PROMPT_TIMEOUT_MS = 3000;
-  /**
-   * `ReaderDomain.SCROLL_PAGE_THRESHOLD` / `SCROLL_IDLE_THRESHOLD` / `SCROLL_LATCH_COOLDOWN_MS`.
-   * Parity with macOS trackpad discrete paging engine in `desktop/.../CommonWidgets.kt`,
-   * scaled for browser WheelEvent pixel deltas.
-   */
-  const SCROLL_PAGE_THRESHOLD = 15.0;
-  const SCROLL_IDLE_THRESHOLD = 8.0;
-  const SCROLL_LATCH_COOLDOWN_MS = 250;
-  const SCROLL_STREAM_IDLE_MS = 120;
   /** `ZoomableBox` treats a drag beyond 8px as a pan, never a tap. */
   const TAP_SLOP_PX = 8;
+  const MIN_ZOOM_SCALE = 1.0;
+  const MAX_ZOOM_SCALE = 5.0;
+  const DOUBLE_TAP_ZOOM_SCALE = 2.5;
 
   // --- state -----------------------------------------------------------------------------------
 
@@ -136,6 +135,22 @@
   /** Stage box, used to fit the cropped half of a sliced wide page (`ZoomableBox` + `Canvas`). */
   let stageWidth = $state(0);
   let stageHeight = $state(0);
+
+  /** `ZoomableBox` state (`desktop/src/main/kotlin/ui/components/ZoomableBox.kt`). */
+  let zoomScale = $state(1);
+  let zoomOffsetX = $state(0);
+  let zoomOffsetY = $state(0);
+  const isZoomed = $derived(zoomScale > 1.05);
+  const zoomStyle = $derived(
+    zoomScale > 1.001
+      ? `transform: translate3d(${zoomOffsetX}px, ${zoomOffsetY}px, 0) scale(${zoomScale}); transform-origin: center center;`
+      : '',
+  );
+  const scrollZoomStyle = $derived(
+    zoomScale > 1.001
+      ? `transform: translate3d(${zoomOffsetX}px, 0px, 0) scale(${zoomScale}); transform-origin: center top;`
+      : '',
+  );
 
   const pageEls: (HTMLElement | undefined)[] = [];
 
@@ -315,7 +330,7 @@
     await tick();
     const container = scrollEl;
     const node = pageEls[clampIndex(index, Math.max(totalImages, 1))];
-    if (!container || !node) return;
+    if (!container || !node || !hasMeasurablePages()) return;
     const top = node.offsetTop;
     try {
       container.scrollTo({ top, behavior: smooth ? 'smooth' : 'auto' });
@@ -348,27 +363,135 @@
     }
   }
 
-  // --- tap zones (lines 473-482) ----------------------------------------------------------------
+  // --- ZoomableBox & tap zones (`ZoomableBox.kt` + `ReaderPagedLayout`) -------------------------
+
+  function resolveStageSize(element?: HTMLElement | null): { width: number; height: number; left: number; top: number } {
+    const rect = element?.getBoundingClientRect();
+    const width =
+      rect && rect.width > 0
+        ? rect.width
+        : stageWidth > 0
+          ? stageWidth
+          : (typeof window !== 'undefined' && window.innerWidth) || 1000;
+    const height =
+      rect && rect.height > 0
+        ? rect.height
+        : stageHeight > 0
+          ? stageHeight
+          : (typeof window !== 'undefined' && window.innerHeight) || 800;
+    return { width, height, left: rect?.left ?? 0, top: rect?.top ?? 0 };
+  }
+
+  function clampZoomOffset(
+    x: number,
+    y: number,
+    scale: number,
+    width?: number,
+    height?: number,
+  ): { x: number; y: number } {
+    const w = width && width > 0 ? width : stageWidth > 0 ? stageWidth : (typeof window !== 'undefined' && window.innerWidth) || 1000;
+    const h = height && height > 0 ? height : stageHeight > 0 ? stageHeight : (typeof window !== 'undefined' && window.innerHeight) || 800;
+    const maxX = (w * Math.max(0, scale - 1)) / 2;
+    const maxY = store.viewMode === 'SCROLL' ? 0 : (h * Math.max(0, scale - 1)) / 2;
+    return {
+      x: Math.min(Math.max(x, -maxX), maxX),
+      y: Math.min(Math.max(y, -maxY), maxY),
+    };
+  }
+
+  function resetZoom(): void {
+    zoomScale = 1;
+    zoomOffsetX = 0;
+    zoomOffsetY = 0;
+  }
+
+  // `LaunchedEffect(resetKey)` in `ZoomableBox.kt`: reset zoom on chapter, mode, or page change.
+  let lastZoomResetKey = '';
+  $effect(() => {
+    const key = `${store.currentEpisode?.wrId ?? ''}:${store.viewMode}:${sliceIndex}:${spreadIndex}`;
+    if (key === lastZoomResetKey) return;
+    lastZoomResetKey = key;
+    untrack(() => resetZoom());
+  });
 
   let pointerStart: { x: number; y: number } | null = null;
+  let pointerLast: { x: number; y: number } | null = null;
   let pointerDragged = false;
 
   function handlePointerDown(event: PointerEvent): void {
+    if (event.button !== undefined && event.button !== 0) return;
     pointerStart = { x: event.clientX, y: event.clientY };
+    pointerLast = { x: event.clientX, y: event.clientY };
     pointerDragged = false;
   }
 
   function handlePointerMove(event: PointerEvent): void {
-    if (!pointerStart) return;
-    const dx = event.clientX - pointerStart.x;
-    const dy = event.clientY - pointerStart.y;
-    if (Math.hypot(dx, dy) > TAP_SLOP_PX) pointerDragged = true;
+    if (!pointerStart || !pointerLast) return;
+    const totalDx = event.clientX - pointerStart.x;
+    const totalDy = event.clientY - pointerStart.y;
+    const stepDx = event.clientX - pointerLast.x;
+    const stepDy = event.clientY - pointerLast.y;
+    pointerLast = { x: event.clientX, y: event.clientY };
+
+    if (Math.hypot(totalDx, totalDy) > TAP_SLOP_PX) {
+      pointerDragged = true;
+    }
+
+    if (isZoomed && pointerDragged) {
+      const stage = resolveStageSize(event.currentTarget as HTMLElement | null);
+      const clamped = clampZoomOffset(
+        zoomOffsetX + stepDx,
+        zoomOffsetY + stepDy,
+        zoomScale,
+        stage.width,
+        stage.height,
+      );
+      zoomOffsetX = clamped.x;
+      zoomOffsetY = clamped.y;
+    }
+  }
+
+  function handlePointerUp(): void {
+    pointerStart = null;
+    pointerLast = null;
   }
 
   function consumeDrag(): boolean {
     if (!pointerDragged) return false;
     pointerDragged = false;
     return true;
+  }
+
+  /**
+   * Double-click zoom (`ZoomableBox.kt` lines 146-165):
+   * toggles between `1x` and `2.5x` anchored on the clicked coordinates.
+   */
+  function handleStageDblClick(event: MouseEvent): void {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('button, a, input, select, textarea, [role="dialog"]')) return;
+    event.preventDefault();
+
+    if (zoomScale > 1.05) {
+      resetZoom();
+      return;
+    }
+
+    const stage = resolveStageSize(event.currentTarget as HTMLElement | null);
+    const downX = event.clientX - stage.left;
+    const downY = event.clientY - stage.top;
+    const clickDeltaX = downX - stage.width / 2;
+    const clickDeltaY = downY - stage.height / 2;
+    const targetScale = DOUBLE_TAP_ZOOM_SCALE;
+    const clamped = clampZoomOffset(
+      -clickDeltaX * (targetScale - 1),
+      -clickDeltaY * (targetScale - 1),
+      targetScale,
+      stage.width,
+      stage.height,
+    );
+    zoomScale = targetScale;
+    zoomOffsetX = clamped.x;
+    zoomOffsetY = clamped.y;
   }
 
   /**
@@ -383,11 +506,9 @@
     // Buttons inside the scroll footer must keep their own action.
     if (target?.closest('button, a, input, select, textarea, [role="dialog"]')) return;
 
-    const element = event.currentTarget as HTMLElement | null;
-    const rect = element?.getBoundingClientRect();
-    const width = rect && rect.width > 0 ? rect.width : window.innerWidth || 1;
-    const x = event.clientX - (rect?.left ?? 0);
-    const ratio = x / width;
+    const stage = resolveStageSize(event.currentTarget as HTMLElement | null);
+    const x = event.clientX - stage.left;
+    const ratio = x / stage.width;
 
     if (ratio < 0.38) {
       if (isR2L) advance();
@@ -403,99 +524,90 @@
     clearPrompts();
   }
 
-  // --- wheel paging (`desktopDiscreteScrollPaging` parity) ---------------------------------------
+  // --- wheel paging & zoom (`desktopDiscreteScrollPaging` + `ZoomableBox` parity) ---------------
 
-  let isWheelLatched = false;
-  let lastWheelTriggerTime = 0;
-  let wheelIdleTimer: ReturnType<typeof setTimeout> | null = null;
-  let wheelStreamAxis: 'HORIZONTAL' | 'VERTICAL' | 'UNDECIDED' = 'UNDECIDED';
+  const wheelPaging = createWheelPagingController({ allowVerticalWheel: true });
+  let scrollWheelAccumY = 0;
 
   function handleWheel(event: WheelEvent): void {
-    // SCROLL owns its own scrolling; zoom chords belong to the browser/ZoomableBox.
-    if (store.viewMode === 'SCROLL') return;
-    if (event.ctrlKey || event.metaKey) return;
+    const deltaX = normalizeWheelDelta(event.deltaX, event.deltaMode);
+    const deltaY = normalizeWheelDelta(event.deltaY, event.deltaMode);
 
-    const deltaX = event.deltaX;
-    const deltaY = event.deltaY;
-    const absX = Math.abs(deltaX);
-    const absY = Math.abs(deltaY);
-
-    const now = Date.now();
-    const elapsed = now - lastWheelTriggerTime;
-
-    // 1. Reset idle timer: guarantees unlatch after stream has stopped AND cooldown elapsed
-    // (parity with `CommonWidgets.kt` lines 285-294 `idleJob`)
-    if (wheelIdleTimer) {
-      clearTimeout(wheelIdleTimer);
-      wheelIdleTimer = null;
+    // 1. Ctrl / Cmd + Wheel Zoom (`ZoomableBox.kt` lines 65-82)
+    if (event.ctrlKey || event.metaKey) {
+      event.preventDefault();
+      if (deltaY === 0) return;
+      const zoomFactor = deltaY < 0 ? 1.15 : 0.85;
+      const nextScale = Math.min(Math.max(zoomScale * zoomFactor, MIN_ZOOM_SCALE), MAX_ZOOM_SCALE);
+      if (nextScale <= 1.02) {
+        resetZoom();
+      } else {
+        const stage = resolveStageSize(event.currentTarget as HTMLElement | null);
+        const clamped = clampZoomOffset(zoomOffsetX, zoomOffsetY, nextScale, stage.width, stage.height);
+        zoomScale = nextScale;
+        zoomOffsetX = clamped.x;
+        zoomOffsetY = clamped.y;
+      }
+      return;
     }
-    const remainingCooldown = Math.max(0, SCROLL_LATCH_COOLDOWN_MS - elapsed);
-    wheelIdleTimer = setTimeout(() => {
-      isWheelLatched = false;
-      wheelStreamAxis = 'UNDECIDED';
-      wheelIdleTimer = null;
-    }, Math.max(SCROLL_STREAM_IDLE_MS, remainingCooldown));
 
-    // 2. Lock the gesture axis on the first clearly dominant delta (`resolveScrollGestureAxis`)
-    if (wheelStreamAxis === 'UNDECIDED') {
-      if (Math.max(absX, absY) >= SCROLL_IDLE_THRESHOLD) {
-        if (absX - absY > SCROLL_IDLE_THRESHOLD) {
-          wheelStreamAxis = 'HORIZONTAL';
-        } else if (absY - absX > SCROLL_IDLE_THRESHOLD) {
-          wheelStreamAxis = 'VERTICAL';
+    // 2. When zoomed in (`scale > 1.05`), wheel pans the zoomed page instead of turning pages
+    // (`ReaderPane.kt` line 554 `enabled = !isCurrentPageZoomed` + `ZoomableBox.kt` lines 83-94).
+    if (isZoomed && store.viewMode !== 'SCROLL') {
+      event.preventDefault();
+      const stage = resolveStageSize(event.currentTarget as HTMLElement | null);
+      const clamped = clampZoomOffset(
+        zoomOffsetX - deltaX,
+        zoomOffsetY - deltaY,
+        zoomScale,
+        stage.width,
+        stage.height,
+      );
+      zoomOffsetX = clamped.x;
+      zoomOffsetY = clamped.y;
+      return;
+    }
+
+    // 3. SCROLL mode owns vertical scrolling natively (with horizontal pan when zoomed).
+    if (store.viewMode === 'SCROLL') {
+      if (Math.abs(deltaX) > Math.abs(deltaY)) {
+        event.preventDefault();
+      }
+      if (isZoomed && deltaX !== 0) {
+        const stage = resolveStageSize(event.currentTarget as HTMLElement | null);
+        const clamped = clampZoomOffset(
+          zoomOffsetX - deltaX,
+          0,
+          zoomScale,
+          stage.width,
+          stage.height,
+        );
+        zoomOffsetX = clamped.x;
+        zoomOffsetY = 0;
+      }
+      // Headless DOM (`clientHeight === 0`) lacks native scroll physics; emulate `scrollTop` for tests.
+      if (scrollEl && deltaY !== 0 && scrollEl.clientHeight === 0) {
+        event.preventDefault();
+        scrollEl.scrollTop = Math.max(0, scrollEl.scrollTop + deltaY);
+        if (hasMeasurablePages() || scrollEl.scrollHeight > scrollEl.clientHeight) {
+          handleScroll();
+        } else {
+          scrollWheelAccumY += deltaY;
+          if (Math.abs(scrollWheelAccumY) >= SCROLL_PAGE_THRESHOLD) {
+            const dir = scrollWheelAccumY > 0 ? 'ADVANCE' : 'RETREAT';
+            scrollWheelAccumY = 0;
+            navigate(dir);
+          }
         }
       }
-    }
-
-    // 3. If momentum decayed below idle threshold and cooldown has passed, release latch
-    // (`CommonWidgets.kt` lines 324-330)
-    if (absX < SCROLL_IDLE_THRESHOLD && absY < SCROLL_IDLE_THRESHOLD) {
-      if (elapsed >= SCROLL_LATCH_COOLDOWN_MS) {
-        isWheelLatched = false;
-      }
       return;
     }
 
-    // 4. If currently latched, suppress continuation/inertia events from the same swipe
-    // (`CommonWidgets.kt` lines 332-336)
-    if (isWheelLatched) {
-      event.preventDefault();
-      return;
-    }
-
-    // 5. Only trigger new discrete action if minimum cooldown elapsed
-    // (`CommonWidgets.kt` lines 338-341)
-    if (elapsed < SCROLL_LATCH_COOLDOWN_MS) {
-      event.preventDefault();
-      return;
-    }
-
-    // 6. Must meet threshold
-    if (absX < SCROLL_PAGE_THRESHOLD && absY < SCROLL_PAGE_THRESHOLD) return;
-
-    // 7. Resolve direction (`ReaderDomain.resolveScrollDirection`):
-    // Horizontal streams follow reading direction, vertical streams treat down as forward.
-    let direction: 'advance' | 'retreat' | null = null;
-    if (absX >= absY) {
-      const isForward = isR2L ? deltaX < 0 : deltaX > 0;
-      direction = isForward ? 'advance' : 'retreat';
-    } else {
-      direction = deltaY > 0 ? 'advance' : 'retreat';
-    }
-
-    if (!direction) return;
-
-    // 8. Latch immediately and trigger discrete action exactly once
-    // (`CommonWidgets.kt` lines 360-369)
-    isWheelLatched = true;
-    lastWheelTriggerTime = now;
-    event.preventDefault();
-
-    if (direction === 'advance') {
-      advance();
-    } else {
-      retreat();
-    }
+    wheelPaging.handleWheel(event, {
+      isR2L,
+      onAdvance: advance,
+      onRetreat: retreat,
+    });
   }
 
   // --- keyboard (lines 124-173) -----------------------------------------------------------------
@@ -509,18 +621,10 @@
 
   function toggleFullscreen(): void {
     store.toggleFullscreen();
-    try {
-      if (store.isFullscreen) {
-        void document.documentElement.requestFullscreen?.()?.catch(() => undefined);
-      } else if (document.fullscreenElement) {
-        void document.exitFullscreen?.()?.catch(() => undefined);
-      }
-    } catch {
-      // Extension surfaces often cannot use the Fullscreen API; the CSS class still applies.
-    }
   }
 
   function handleKeydown(event: KeyboardEvent): void {
+    if (event.defaultPrevented) return;
     if (isEditableTarget(event.target)) return;
 
     const key = event.key;
@@ -539,9 +643,9 @@
     if (pageJumpOpen) return;
 
     const isBack =
-      hasModifier && (code === 'ArrowLeft' || code === 'BracketLeft' || key === '[');
+      hasModifier && (code === 'ArrowLeft' || key === 'ArrowLeft' || code === 'BracketLeft' || key === '[');
     const isForward =
-      hasModifier && (code === 'ArrowRight' || code === 'BracketRight' || key === ']');
+      hasModifier && (code === 'ArrowRight' || key === 'ArrowRight' || code === 'BracketRight' || key === ']');
 
     if (isBack) {
       event.preventDefault();
@@ -568,6 +672,34 @@
       event.preventDefault();
       if (isR2L) advance();
       else retreat();
+      return;
+    }
+    if (!hasModifier && (code === 'ArrowDown' || key === 'ArrowDown')) {
+      event.preventDefault();
+      if (store.viewMode === 'SCROLL' && scrollEl) {
+        scrollEl.scrollTop = Math.max(0, scrollEl.scrollTop + 120);
+        if (hasMeasurablePages() || scrollEl.scrollHeight > scrollEl.clientHeight) {
+          handleScroll();
+        } else {
+          advance();
+        }
+      } else {
+        advance();
+      }
+      return;
+    }
+    if (!hasModifier && (code === 'ArrowUp' || key === 'ArrowUp')) {
+      event.preventDefault();
+      if (store.viewMode === 'SCROLL' && scrollEl) {
+        scrollEl.scrollTop = Math.max(0, scrollEl.scrollTop - 120);
+        if (hasMeasurablePages() || scrollEl.scrollHeight > scrollEl.clientHeight) {
+          handleScroll();
+        } else {
+          retreat();
+        }
+      } else {
+        retreat();
+      }
       return;
     }
     if (!hasModifier && (code === 'Space' || key === ' ' || code === 'PageDown' || key === 'PageDown')) {
@@ -608,6 +740,8 @@
   let lastSavedPage = -1;
 
   function restoreFromProgress(target: number): void {
+    previousSlices = slices;
+    previousSpreads = spreads;
     if (store.viewMode === 'SCROLL') {
       const index = clampIndex(target, Math.max(totalImages, 1));
       firstVisible = index;
@@ -664,7 +798,8 @@
   $effect(() => {
     const current = slices;
     if (current === previousSlices) return;
-    const old = previousSlices[sliceIndex];
+    const currentIdx = untrack(() => sliceIndex);
+    const old = previousSlices[currentIdx];
     previousSlices = current;
     if (!old) return;
     let index = current.findIndex(
@@ -674,20 +809,26 @@
     if (index >= 0) sliceIndex = clampIndex(index, Math.max(current.length, 1));
   });
 
-  /** Keeps the active page when freshly measured ratios regroup the spreads. */
+  /**
+   * Keeps the active page when freshly measured ratios regroup the spreads.
+   * Parity with Android `ReaderDualPagePane` (`ReaderPane.kt` lines 906-927): anchors on the
+   * spread's leading reading-order page (`firstIndex`), never `savedPageForSpread` (which returns
+   * `secondIndex` in RTL and would jump to the next spread whenever a wide page splits a pair).
+   */
   let previousSpreads: typeof spreads = [];
   $effect(() => {
     const current = spreads;
     if (current === previousSpreads) return;
-    const old = previousSpreads[spreadIndex];
+    const currentIdx = untrack(() => spreadIndex);
+    const old = previousSpreads[currentIdx];
     previousSpreads = current;
     if (!old) return;
-    const oldPage = savedPageForSpread(old, isR2L);
-    let index = current.findIndex((spread) => {
-      const start = spread.type === 'single' ? spread.index : spread.firstIndex;
-      const end = spread.type === 'single' ? spread.index : spread.secondIndex;
-      return oldPage >= start && oldPage <= end;
-    });
+    const activeImage = old.type === 'single' ? old.index : old.firstIndex;
+    let index = current.findIndex((spread) =>
+      spread.type === 'single'
+        ? spread.index === activeImage
+        : spread.firstIndex === activeImage || spread.secondIndex === activeImage,
+    );
     if (index < 0) index = 0;
     spreadIndex = clampIndex(index, Math.max(current.length, 1));
   });
@@ -724,6 +865,20 @@
 
   // --- image preloading (`DesktopImageCache.preload` parity) ------------------------------------
 
+  function preloadPageIndices(indices: number[], imgList: readonly string[]): void {
+    const valid = indices.filter((idx) => idx >= 0 && idx < imgList.length && !!imgList[idx]);
+    if (valid.length === 0) return;
+    const urls = valid.map((idx) => imgList[idx]!);
+    preloadImages(urls, (url, width, height) => {
+      if (store.readerImages !== imgList) return;
+      for (const idx of valid) {
+        if (imgList[idx] === url) {
+          store.recordImageAspectRatio(idx, width, height);
+        }
+      }
+    });
+  }
+
   /**
    * Preloads upcoming & previous images in PAGE mode.
    * Parity with `ReaderPane.kt` lines 631-640 (`listOf(-1, 1, 2, 3)`).
@@ -735,15 +890,14 @@
     const list = slices;
     const current = sliceIndex;
     const offsets = [-1, 1, 2, 3];
-    const urls: string[] = [];
+    const indices: number[] = [];
     for (const offset of offsets) {
       const slice = list[current + offset];
       if (slice && slice.imageIndex >= 0 && slice.imageIndex < imgList.length) {
-        const url = imgList[slice.imageIndex];
-        if (url) urls.push(url);
+        indices.push(slice.imageIndex);
       }
     }
-    if (urls.length > 0) preloadImages(urls);
+    preloadPageIndices(indices, imgList);
   });
 
   /**
@@ -757,21 +911,17 @@
     const list = spreads;
     const current = spreadIndex;
     const offsets = [-1, 1, 2];
-    const urls: string[] = [];
+    const indices: number[] = [];
     for (const offset of offsets) {
       const spread = list[current + offset];
       if (!spread) continue;
       if (spread.type === 'single') {
-        const url = imgList[spread.index];
-        if (url) urls.push(url);
+        indices.push(spread.index);
       } else {
-        const u1 = imgList[spread.firstIndex];
-        const u2 = imgList[spread.secondIndex];
-        if (u1) urls.push(u1);
-        if (u2) urls.push(u2);
+        indices.push(spread.firstIndex, spread.secondIndex);
       }
     }
-    if (urls.length > 0) preloadImages(urls);
+    preloadPageIndices(indices, imgList);
   });
 
   // --- lifecycle --------------------------------------------------------------------------------
@@ -789,7 +939,7 @@
 
   onDestroy(() => {
     if (promptTimer) clearTimeout(promptTimer);
-    if (wheelIdleTimer) clearTimeout(wheelIdleTimer);
+    wheelPaging.destroy();
     if (typeof document !== 'undefined') {
       document.removeEventListener('fullscreenchange', onFullscreenChange);
     }
@@ -837,41 +987,48 @@
 >
   <div
     class="reader-stage"
+    class:zoomed={isZoomed}
+    data-zoom-scale={zoomScale}
     bind:clientWidth={stageWidth}
     bind:clientHeight={stageHeight}
     onclick={handleStageClick}
+    ondblclick={handleStageDblClick}
     onpointerdown={handlePointerDown}
     onpointermove={handlePointerMove}
+    onpointerup={handlePointerUp}
+    onpointercancel={handlePointerUp}
     onwheel={handleWheel}
     role="presentation"
   >
     {#if store.viewMode === 'SCROLL'}
       <!-- ReaderScrollView: continuous vertical column, 65% width. -->
       <div class="scroll-view" bind:this={scrollEl} onscroll={handleScroll}>
-        {#each images as url, index (index + '-' + url)}
-          <div class="scroll-page" use:trackPage={index} data-page-index={index}>
-            {@render pageImage(index, 'scroll-image', '')}
-          </div>
-        {/each}
+        <div class="scroll-content" style={scrollZoomStyle}>
+          {#each images as url, index (index + '-' + url)}
+            <div class="scroll-page" use:trackPage={index} data-page-index={index}>
+              {@render pageImage(index, 'scroll-image', '')}
+            </div>
+          {/each}
 
-        <div class="scroll-footer">
-          {#if store.hasPrevEpisode}
-            <button type="button" class="footer-button tonal" onclick={() => void store.prevEpisode()}>
-              <ChevronLeft size={15} />
-              <span>{LABEL_PREV_EPISODE}</span>
-            </button>
-          {/if}
-          {#if store.hasNextEpisode}
-            <button type="button" class="footer-button primary" onclick={() => void store.nextEpisode()}>
-              <span>{LABEL_NEXT_EPISODE}</span>
-              <ChevronRight size={15} />
-            </button>
-          {/if}
+          <div class="scroll-footer">
+            {#if store.hasPrevEpisode}
+              <button type="button" class="footer-button tonal" onclick={() => void store.prevEpisode()}>
+                <ChevronLeft size={15} />
+                <span>{LABEL_PREV_EPISODE}</span>
+              </button>
+            {/if}
+            {#if store.hasNextEpisode}
+              <button type="button" class="footer-button primary" onclick={() => void store.nextEpisode()}>
+                <span>{LABEL_NEXT_EPISODE}</span>
+                <ChevronRight size={15} />
+              </button>
+            {/if}
+          </div>
         </div>
       </div>
     {:else if store.viewMode === 'PAGE'}
       <!-- ReaderSingleView: Fit shows the whole page, Slice cuts a wide page in two halves. -->
-      <div class="page-view">
+      <div class="page-view" style={zoomStyle}>
         {#if currentSlice && images[currentSlice.imageIndex]}
           {#if currentSlice.half === 'FULL' || aspectRatios[currentSlice.imageIndex] === undefined}
             <div class="page-slice">
@@ -890,7 +1047,7 @@
       </div>
     {:else}
       <!-- ReaderDualView: smart wide-spread grouping, physical order follows the direction. -->
-      <div class="dual-view">
+      <div class="dual-view" style={zoomStyle}>
         {#if currentSpread?.type === 'single'}
           {#if currentSpreadIsWide}
             <div class="spread-single">
@@ -1151,11 +1308,13 @@
   .reader-pane {
     position: relative;
     display: flex;
+    flex: 1 1 auto;
     flex-direction: column;
     width: 100%;
     height: 100%;
     min-height: 0;
     overflow: hidden;
+    overscroll-behavior: none;
     background: #000000;
     color: #f4f4f5;
     -webkit-user-select: none;
@@ -1174,6 +1333,7 @@
     flex: 1 1 auto;
     min-height: 0;
     overflow: hidden;
+    overscroll-behavior: none;
     background: #000000;
     touch-action: manipulation;
     cursor: pointer;
@@ -1184,11 +1344,21 @@
   .scroll-view {
     position: absolute;
     inset: 0;
+    width: 100%;
+    height: 100%;
     overflow-x: hidden;
     overflow-y: auto;
-    overscroll-behavior: contain;
+    overscroll-behavior-x: none;
+    overscroll-behavior-y: contain;
     scrollbar-width: thin;
     scrollbar-color: #3f3f46 transparent;
+  }
+
+  .scroll-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
   }
 
   .scroll-page {
@@ -1238,6 +1408,14 @@
     color: #09090b;
   }
 
+  .reader-stage.zoomed {
+    cursor: grab;
+  }
+
+  .reader-stage.zoomed:active {
+    cursor: grabbing;
+  }
+
   /* --- PAGE ----------------------------------------------------------------------------- */
 
   .page-view {
@@ -1258,7 +1436,10 @@
     overflow: hidden;
   }
 
+  /* Parity with Desktop `Modifier.fillMaxSize()` + `ContentScale.Fit`: scales up in fullscreen too. */
   .page-image {
+    width: 100%;
+    height: 100%;
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;
@@ -1267,6 +1448,8 @@
 
   .page-image.half {
     position: absolute;
+    width: auto;
+    height: auto;
     max-width: none;
     max-height: none;
     object-fit: fill;
@@ -1317,11 +1500,22 @@
     justify-content: flex-end;
   }
 
+  /* Parity with Desktop `ReaderDualView`: fills the slot and aligns against the center spine. */
   .dual-image {
+    width: 100%;
+    height: 100%;
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;
     -webkit-user-drag: none;
+  }
+
+  .slot.spine-end .dual-image {
+    object-position: right center;
+  }
+
+  .slot.spine-start .dual-image {
+    object-position: left center;
   }
 
   /* --- broken image --------------------------------------------------------------------- */

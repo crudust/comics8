@@ -119,4 +119,42 @@ describe("ReaderApp — shell page jump (Main.kt 320-336)", () => {
     flushSync();
     expect(target.querySelector("[data-testid='page-jump-dialog']")).not.toBeNull();
   });
+
+  it("steps back from Reader to Series and from Series to Browse on Escape, shortcuts, mouse back, and popstate", async () => {
+    await mountShell();
+    desktopState.currentEpisode = { wrId: "e1", title: "1화", href: "", isRead: true, lastReadPage: 0 };
+    desktopState.readerImages = ["https://img.test/1.jpg"];
+    desktopState.screen = "Reader";
+    flushSync();
+    await tick();
+
+    // 1. Escape in Reader -> returns to Series
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true }));
+    flushSync();
+    await tick();
+    expect(desktopState.screen).toBe("Series");
+
+    // 2. Escape in Series -> returns to Browse
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true }));
+    flushSync();
+    await tick();
+    expect(desktopState.screen).toBe("Browse");
+
+    // 3. Alt+Left / Cmd+[ / Mouse Back button (button = 3) / popstate in Series -> returns to Browse
+    for (const trigger of [
+      () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", code: "ArrowLeft", altKey: true, bubbles: true, cancelable: true })),
+      () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "[", code: "BracketLeft", metaKey: true, bubbles: true, cancelable: true })),
+      () => window.dispatchEvent(new MouseEvent("mouseup", { button: 3, bubbles: true, cancelable: true })),
+      () => window.dispatchEvent(new PopStateEvent("popstate")),
+    ]) {
+      desktopState.screen = "Series";
+      desktopState.series = { id: "42", title: "테스트 작품", thumbUrl: "", href: "" };
+      flushSync();
+      await tick();
+      trigger();
+      flushSync();
+      await tick();
+      expect(desktopState.screen).toBe("Browse");
+    }
+  });
 });

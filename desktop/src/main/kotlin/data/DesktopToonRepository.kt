@@ -215,16 +215,29 @@ class DesktopToonRepository(
             val sampleItem = items.firstOrNull()
             if (sampleItem != null && syncManager != null && !bindingManager.hasBinding(sampleItem.sourceId) && activeResolvingSources.add(sampleItem.sourceId)) {
                 try {
-                    val originHost = try { sources.getOrNull(sampleItem.sourceId)?.origin.orEmpty() } catch (_: Exception) { "" }
+                    val srcObj = try { sources.getOrNull(sampleItem.sourceId) } catch (_: Exception) { null }
+                    val originHost = srcObj?.origin.orEmpty()
                     val host = SourceRegistry.hostOf(originHost).orEmpty()
                     val sampleIds = items.map { it.id }.take(50)
                     val sampleTitles = items.map { it.title }.take(50)
+                    val sampleWorks = items.take(30).map {
+                        com.comics8.core.sync.SourceSampleWorkWire(
+                            id = it.id,
+                            title = it.title,
+                            href = it.href,
+                            thumbUrl = it.thumbUrl,
+                        )
+                    }
                     val res = syncManager.resolveSource(
                         SourceResolveWire(
                             clientSourceId = sampleItem.sourceId,
                             originHost = host,
                             sampleToonIds = sampleIds,
                             sampleTitles = sampleTitles,
+                            displayName = srcObj?.displayName.orEmpty(),
+                            catalogs = srcObj?.catalogs?.map { "${it.id}:${it.label}" }.orEmpty(),
+                            episodePageSize = srcObj?.episodePageSize ?: 0,
+                            sampleWorks = sampleWorks,
                         )
                     )
                     if (res != null) {

@@ -46,7 +46,7 @@ import com.comics8.core.source.local.ThumbEncoder
 import com.comics8.core.source.local.CoverThumbCache
 import com.comics8.core.source.local.LocalPreviewUri
 import com.comics8.core.source.local.ThumbKey
-import com.comics8.core.source.local.ZipArchive
+import com.comics8.core.source.local.ComicArchive
 import com.comics8.core.source.local.ZipImageUri
 import com.comics8.core.source.network.NetworkImageUri
 import com.comics8.core.source.network.NetworkSourceRuntime
@@ -340,7 +340,7 @@ object DesktopImageCache {
             }
         } else if (zipRef != null) {
             try {
-                ZipArchive(zipRef.zip).use { archive ->
+                ComicArchive.open(zipRef.zip).use { archive ->
                     archive.open(zipRef.entry).use { it.readBytes() }
                 }
             } catch (_: Exception) {

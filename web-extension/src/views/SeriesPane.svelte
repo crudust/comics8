@@ -33,6 +33,7 @@
    *   `store.refresh()` the desktop indicator triggers.
    */
 
+  import { onDestroy } from 'svelte';
   import { AlertCircle, Check, Download, MoreVertical, RefreshCw } from '@lucide/svelte';
 
   import { historyStore } from '../data/history-store.svelte';
@@ -42,6 +43,7 @@
     workKey,
   } from '../state/desktop-state.svelte';
   import type { DesktopStore } from '../state/desktop-state.svelte';
+  import { createWheelPagingController } from '../ui/wheel-paging';
   import type { DesktopEpisodeItem, DesktopToonItem } from '../state/desktop-state.svelte';
   import type { ArtistChoice } from '../sources/types';
 
@@ -223,7 +225,89 @@
       .catch(() => null);
     if (parent) await store.openSeries(parent);
   }
+
+  // ---------------------------------------------------------------------------------------------
+  // horizontal swipe paging & back navigation (`SeriesPane.kt` lines 85-101)
+  // ---------------------------------------------------------------------------------------------
+
+  const wheelPaging = createWheelPagingController({ allowVerticalWheel: false });
+
+  function handleWheel(event: WheelEvent): void {
+    if (event.ctrlKey || event.metaKey) return;
+    wheelPaging.handleWheel(event, {
+      enabled: canPage,
+      onAdvance: () => {
+        if (typeof store.nextEpisodePage === 'function') {
+          void store.nextEpisodePage();
+        } else if (store.episodePage < store.episodeLastPage) {
+          void store.goToEpisodePage(store.episodePage + 1);
+        }
+      },
+      onRetreat: () => {
+        if (store.episodePage > 1) {
+          if (typeof store.prevEpisodePage === 'function') {
+            void store.prevEpisodePage();
+          } else {
+            void store.goToEpisodePage(store.episodePage - 1);
+          }
+        } else {
+          void store.closeSeries();
+        }
+      },
+    });
+  }
+
+  function isEditableTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) return false;
+    if (target.isContentEditable) return true;
+    if (target.closest('[contenteditable="true"]')) return true;
+    return /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName);
+  }
+
+  function handleWindowKeydown(event: KeyboardEvent): void {
+    if (event.defaultPrevented) return;
+    if (isEditableTarget(event.target)) return;
+
+    if (event.key === 'Escape' && artistPick !== null) {
+      event.preventDefault();
+      artistPick = null;
+      return;
+    }
+
+    if (store.showPageJump || store.showSyncDialog || store.showDownloadOptions) return;
+
+    const key = event.key;
+    const code = event.code;
+    const hasModifier = event.metaKey || event.ctrlKey || event.altKey;
+    const isBack =
+      hasModifier &&
+      (code === 'ArrowLeft' || key === 'ArrowLeft' || code === 'BracketLeft' || key === '[');
+    const isForward =
+      hasModifier &&
+      (code === 'ArrowRight' || key === 'ArrowRight' || code === 'BracketRight' || key === ']');
+
+    if (isBack || key === 'Escape') {
+      event.preventDefault();
+      if (typeof store.goBack === 'function') {
+        store.goBack();
+      } else {
+        void store.closeSeries();
+      }
+      return;
+    }
+    if (isForward) {
+      if (typeof store.goForward === 'function' && store.goForward()) {
+        event.preventDefault();
+      }
+    }
+  }
+
+  onDestroy(() => {
+    wheelPaging.destroy();
+  });
 </script>
+
+<svelte:window onkeydown={handleWindowKeydown} />
 
 {#if !series}
   <!-- `ErrorPane(strings.errorNoSeriesInfo, strings.navBackToList)` -->
@@ -237,7 +321,7 @@
     </div>
   </section>
 {:else}
-  <section class="pane">
+  <section class="pane" onwheel={handleWheel}>
     <header class="header">
       <div class="header-text">
         <h1 class="title" title={series.title}>{series.title}</h1>
@@ -459,6 +543,7 @@
     flex-direction: column;
     min-height: 0;
     height: 100%;
+    overscroll-behavior-x: none;
     background: #000000;
     color: #f4f4f5;
   }

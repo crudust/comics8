@@ -61,7 +61,7 @@ internal object ExternalTargetResolver {
         }
 
         if (normalized.isAnyRegularFile()) {
-            if (ZipImageNames.isZipName(normalized.name)) {
+            if (ZipImageNames.isLocalArchiveName(normalized.name)) {
                 return Target.Zip(normalized)
             }
             if (ZipImageNames.isImageEntry(normalized.name)) {
@@ -76,7 +76,7 @@ internal object ExternalTargetResolver {
         if (normalized.isAnyDirectory()) {
             // 1. Direct inner file with the same name (macOS SMB mount: /Volumes/foo.zip/foo.zip)
             val directInner = File(normalized, normalized.name)
-            if (directInner.isAnyRegularFile() && ZipImageNames.isZipName(directInner.name)) {
+            if (directInner.isAnyRegularFile() && ZipImageNames.isLocalArchiveName(directInner.name)) {
                 return Target.Zip(directInner)
             }
 
@@ -85,7 +85,7 @@ internal object ExternalTargetResolver {
 
             // 2. Matching child archive by normalized name
             val innerSameName = children.firstOrNull { child ->
-                child.isAnyRegularFile() && ZipImageNames.isZipName(child.name) &&
+                child.isAnyRegularFile() && ZipImageNames.isLocalArchiveName(child.name) &&
                     Normalizer.normalize(child.name, Normalizer.Form.NFC).equals(nfcTargetName, ignoreCase = true)
             }
             if (innerSameName != null) {
@@ -93,7 +93,7 @@ internal object ExternalTargetResolver {
             }
 
             // 3. Any child archives in folder
-            val zips = children.filter { it.isAnyRegularFile() && ZipImageNames.isZipName(it.name) }
+            val zips = children.filter { it.isAnyRegularFile() && ZipImageNames.isLocalArchiveName(it.name) }
             if (zips.size == 1) {
                 return Target.Zip(zips.first())
             } else if (zips.isNotEmpty()) {

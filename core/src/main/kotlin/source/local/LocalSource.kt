@@ -86,9 +86,9 @@ class LocalSource(
 
     override suspend fun resolveImages(episode: EpisodeItem, item: ToonItem, http: SourceHttp): List<String> {
         val path = File(episode.wrId)
-        if (path.isFile && ZipImageNames.isZipName(path.name)) {
-            return ZipArchive(path).use { zip ->
-                zip.imageEntries().map { ZipImageUri.encode(path, it) }
+        if (path.isFile && ZipImageNames.isLocalArchiveName(path.name)) {
+            return ComicArchive.open(path).use { archive ->
+                archive.imageEntries().map { ZipImageUri.encode(path, it) }
             }
         }
         if (path.isDirectory) {

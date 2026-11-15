@@ -7,15 +7,15 @@ import java.io.InputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 
-class ZipArchive(file: File) : Closeable {
+class ZipArchive(file: File) : ComicArchive {
     private val zip = ZipFile(file)
     private val images: List<String> by lazy { listImageEntries() }
 
-    fun imageEntries(): List<String> = images
+    override fun imageEntries(): List<String> = images
 
-    fun firstImageEntry(): String? = images.firstOrNull()
+    override fun firstImageEntry(): String? = images.firstOrNull()
 
-    fun open(entryName: String): InputStream {
+    override fun open(entryName: String): InputStream {
         val normalized = normalizeZipEntry(entryName)
         val entry = findEntry(normalized, entryName)
             ?: throw IllegalArgumentException("missing zip entry: $entryName")

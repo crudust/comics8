@@ -37,7 +37,7 @@ import { catalogStore, type EpisodeListingTotal } from "../src/data/catalog-stor
 import { favoritesStore } from "../src/data/favorites-store.svelte";
 import { historyStore } from "../src/data/history-store.svelte";
 import type { SourceRegistry } from "../src/sources/registry";
-import type { SyncClient } from "../src/sync/sync-client";
+import type { SyncCatalogRow, SyncClient } from "../src/sync/sync-client";
 import type { EpisodeItem, ToonItem } from "../src/sources/types";
 
 const episodes = (titles: string[]): EpisodeItem[] =>
@@ -2024,4 +2024,325 @@ describe("DesktopStore.syncEpisodeMetadata (server-first catalog batch)", () => 
       globalThis.fetch = originalFetch;
     }
   });
+
+  it("scrapes uncounted works in Step 2 when /catalog/batch misses and reports to /catalog/report (Step 3)", async () => {
+    const reportedBatches: SyncCatalogRow[][] = [];
+    const resolvedWires: unknown[] = [];
+    const cards: ToonItem[] = [card("w1"), card("w2")];
+    const episodesByToon: Record<string, EpisodeItem[]> = {
+      w1: Array.from({ length: 15 }, (_, i) => ({
+        wrId: `e${15 - i}`,
+        title: `${15 - i}화`,
+        href: "",
+      })),
+      w2: Array.from({ length: 8 }, (_, i) => ({
+        wrId: `e${8 - i}`,
+        title: `${8 - i}화`,
+        href: "",
+      })),
+    };
+    const source = {
+      id: "custom-src",
+      displayName: "Custom Source",
+      meta: { origin: "https://www.src.test/list", episodePageSize: 100, searchPlaceholder: "검색" },
+      catalogs: [{ id: "LATEST", label: "최신", paginated: true }],
+      async loadListing(_catalogId: string, page: number) {
+        return { items: cards, pageInfo: { currentPage: page, lastPage: 1 } };
+      },
+      async loadEpisodes(toon: ToonItem, page: number) {
+        return {
+          items: episodesByToon[toon.id] ?? [],
+          pageInfo: { currentPage: page, lastPage: 1 },
+        };
+      },
+      async resolveImages() {
+        return [];
+      },
+      async search() {
+        return [];
+      },
+    };
+    const store = createDesktopStore({
+      registry: {
+        init: async () => {},
+        list: () => [
+          {
+            id: "custom-src",
+            displayName: "Custom Source",
+            origin: "https://www.src.test/list",
+            catalogs: [],
+            builtin: true,
+          },
+        ],
+        get: async () => source,
+      } as unknown as SourceRegistry,
+      syncClient: {
+        init: async () => ({
+          syncKey: "C8-TEST-KEY",
+          serverUrl: "https://sync.test",
+          lastSyncedAt: 0,
+          lastResult: "idle" as const,
+          lastError: null,
+          isPro: false,
+          autoSyncEnabled: true,
+        }),
+        getStatus: () => ({
+          syncKey: "C8-TEST-KEY",
+          serverUrl: "https://sync.test",
+          lastSyncedAt: 0,
+          lastResult: "idle" as const,
+          lastError: null,
+          isPro: false,
+          autoSyncEnabled: true,
+        }),
+        resolveSource: async (wire: unknown) => {
+          resolvedWires.push(wire);
+          return {
+            canonicalSourceId: "canonical-src",
+            status: "matched",
+            confidence: 1,
+          };
+        },
+        fetchCatalogBatch: async () => [],
+        reportCatalog: async (updates: readonly SyncCatalogRow[]) => {
+          reportedBatches.push([...updates]);
+        },
+      } as unknown as SyncClient,
+      persistPreferences: false,
+    });
+
+    await store.init();
+    // Wait for Step 2 macrotask + scraping workers to finish
+    await new Promise((r) => setTimeout(r, 30));
+    await settle();
+
+    expect(resolvedWires).toHaveLength(1);
+    expect(resolvedWires[0]).toMatchObject({
+      clientSourceId: "custom-src",
+      originHost: "src.test",
+      sampleToonIds: ["w1", "w2"],
+    });
+    expect(store.items.find((row) => row.id === "w1")?.readProgress).toBe("15화");
+    expect(store.items.find((row) => row.id === "w2")?.readProgress).toBe("8화");
+    expect(reportedBatches).toHaveLength(1);
+    expect(reportedBatches[0]?.map((u) => ({ sourceId: u.sourceId, toonId: u.toonId, totalEpisodes: u.totalEpisodes }))).toEqual([
+      { sourceId: "canonical-src", toonId: "w1", totalEpisodes: 15 },
+      { sourceId: "canonical-src", toonId: "w2", totalEpisodes: 8 },
+    ]);
+  });
+
+  it("refreshes already-counted works from the tail page on the initial listing when new episodes arrive", async () => {
+    // Previously counted as 10 episodes (1 page, pageSize 100), user has read 5/10 (`lastReadOrder < count`).
+    await catalogStore.saveCatalog("src", "a", {
+      count: 10,
+      lastPage: 1,
+      pageSize: 100,
+      delta: 0,
+    });
+    await historyStore.recordProgress(
+      "src",
+      "a",
+      "작품 a",
+      "https://src.test/a.jpg",
+      { wrId: "e5", title: "5화", href: "", date: "" },
+      0,
+      10,
+      5,
+      10,
+    );
+
+    // Now the remote source has 12 episodes on page 1!
+    const liveEpisodes: EpisodeItem[] = Array.from({ length: 12 }, (_, i) => ({
+      wrId: `e${12 - i}`,
+      title: `${12 - i}화`,
+      href: "",
+    }));
+    const source = {
+      id: "src",
+      displayName: "Test Source",
+      meta: { origin: "https://src.test", episodePageSize: 100, searchPlaceholder: "검색" },
+      catalogs: [{ id: "LATEST", label: "최신", paginated: true }],
+      async loadListing(_catalogId: string, page: number) {
+        return { items: [card("a")], pageInfo: { currentPage: page, lastPage: 1 } };
+      },
+      async loadEpisodes(_toon: ToonItem, page: number) {
+        return { items: liveEpisodes, pageInfo: { currentPage: page, lastPage: 1 } };
+      },
+      async resolveImages() {
+        return [];
+      },
+      async search() {
+        return [];
+      },
+    };
+
+    const store = createDesktopStore({
+      registry: {
+        init: async () => {},
+        list: () => [
+          { id: "src", displayName: "Test Source", origin: "https://src.test", catalogs: [], builtin: true },
+        ],
+        get: async () => source,
+      } as unknown as SourceRegistry,
+      syncClient: {
+        fetchCatalogBatch: async () => [],
+        reportCatalog: async () => {},
+      } as unknown as SyncClient,
+      persistPreferences: false,
+    });
+
+    await store.init();
+    // Immediately after stored totals merge, it shows 5/10:
+    expect(store.items[0]?.readProgress).toBe("5/10");
+
+    // After Step 2 tail-page check finishes in background, it updates to 5/12!
+    await new Promise((r) => setTimeout(r, 30));
+    await settle();
+    expect(store.items[0]?.readProgress).toBe("5/12");
+    expect(catalogStore.getCatalog("src", "a")?.count).toBe(12);
+    expect(historyStore.getProgress("src", "a")?.totalEpisodes).toBe(12);
+  });
+
+  it("does not fabricate catalogStore rows from unshaped history.totalEpisodes during syncNow", async () => {
+    const store = createDesktopStore({
+      syncClient: {
+        init: async () => ({
+          syncKey: "C8-SYNC-KEY",
+          serverUrl: "https://sync.test",
+          lastSyncedAt: 0,
+          lastResult: "idle" as const,
+          lastError: null,
+          isPro: false,
+          autoSyncEnabled: true,
+        }),
+        getStatus: () => ({
+          syncKey: "C8-SYNC-KEY",
+          serverUrl: "https://sync.test",
+          lastSyncedAt: 100,
+          lastResult: "success" as const,
+          lastError: null,
+          isPro: false,
+          autoSyncEnabled: true,
+        }),
+        pull: async () => ({
+          version: 2,
+          exportedAt: 100,
+          isPro: false,
+          favorites: [],
+          history: [
+            {
+              toonId: "uncounted-work",
+              sourceId: "src",
+              title: "Uncounted",
+              thumbUrl: "",
+              lastEpisodeId: "1",
+              lastEpisodeTitle: "1화",
+              lastReadAt: 100,
+              lastReadOrder: 3,
+              totalEpisodes: 50,
+            },
+          ],
+          readEpisodes: [],
+          readerSettings: [],
+          tombstones: [],
+          catalog: [],
+        }),
+        push: async () => ({
+          status: "success",
+          savedAt: 100,
+          userId: "u1",
+          sizeBytes: 10,
+          favorites: 0,
+          history: 1,
+          readEpisodes: 0,
+          isPro: false,
+        }),
+      } as unknown as SyncClient,
+      persistPreferences: false,
+    });
+
+    await store.syncNow();
+    // `history.totalEpisodes` is an echo, not a shaped listing count, so it must NOT pollute catalogStore.
+    expect(catalogStore.getCatalog("src", "uncounted-work")).toBeNull();
+    expect(store.catalogTotals["src:uncounted-work"]).toBeUndefined();
+  });
+
+  it("supports goBack/goForward across Browse, Series, Reader, and Downloads, and auto-switches webtoon strips to SCROLL", async () => {
+    const item: ToonItem = { id: "w1", title: "웹툰 작품", thumbUrl: "", href: "" };
+    const episodes = [
+      { wrId: "e2", title: "2화", href: "" },
+      { wrId: "e1", title: "1화", href: "" },
+    ];
+    const source = {
+      id: "src",
+      displayName: "Test Source",
+      meta: { origin: "https://src.test", episodePageSize: 100, searchPlaceholder: "검색" },
+      catalogs: [{ id: "LATEST", label: "최신", paginated: false }],
+      async loadListing() {
+        return { items: [item], pageInfo: { currentPage: 1, lastPage: 1 } };
+      },
+      async loadEpisodes(_toon: ToonItem, page: number) {
+        return { items: episodes, pageInfo: { currentPage: page, lastPage: 2 } };
+      },
+      async resolveImages() {
+        return ["https://src.test/1.jpg", "https://src.test/2.jpg"];
+      },
+      async search() {
+        return [item];
+      },
+    };
+    const store = createDesktopStore({
+      registry: {
+        init: async () => {},
+        list: () => [{ id: "src", displayName: "Test Source", origin: "", catalogs: [], builtin: true }],
+        get: async () => source,
+      } as unknown as SourceRegistry,
+      persistPreferences: false,
+    });
+    await store.init();
+    expect(store.screen).toBe("Browse");
+
+    // 1. Open Series, step episode pages with nextEpisodePage / prevEpisodePage
+    await store.openSeries(item);
+    expect(store.screen).toBe("Series");
+    expect(store.episodePage).toBe(1);
+    await store.nextEpisodePage();
+    expect(store.episodePage).toBe(2);
+    await store.prevEpisodePage();
+    expect(store.episodePage).toBe(1);
+
+    // 2. Open Episode -> default viewMode is DUAL, webtoon strip (height / width >= 2.0) auto-switches to SCROLL
+    await store.openEpisode(episodes[1]!);
+    expect(store.screen).toBe("Reader");
+    expect(store.viewMode).toBe("DUAL");
+    store.recordImageAspectRatio(0, 800, 2400);
+    expect(store.viewMode).toBe("SCROLL");
+    expect(store.readerToastMessage).toContain("스크롤 모드");
+
+    // 3. goBack from Reader -> returns to Series and restores pre-auto-switch viewMode
+    expect(store.goBack()).toBe(true);
+    expect(store.screen).toBe("Series");
+    expect(store.viewMode).toBe("DUAL");
+
+    // 4. goBack from Series -> returns to Browse
+    expect(store.goBack()).toBe(true);
+    await Promise.resolve();
+    expect(store.screen).toBe("Browse");
+
+    // 5. goForward from Browse -> re-opens lastViewedSeries
+    expect(store.goForward()).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(store.screen).toBe("Series");
+    expect(store.series?.id).toBe("w1");
+
+    // 6. Opening Series from Downloads returns to Downloads on closeSeries / goBack
+    store.openDownloads();
+    expect(store.screen).toBe("Downloads");
+    await store.openSeries(item);
+    expect(store.screen).toBe("Series");
+    expect(store.goBack()).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(store.screen).toBe("Downloads");
+  });
 });
+

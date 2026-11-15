@@ -35,6 +35,8 @@
     Download,
     FileText,
     History,
+    Maximize2,
+    Minimize2,
     MoveVertical,
     Play,
     RefreshCw,
@@ -437,6 +439,24 @@
         onclick={() => void store.refresh()}
       >
         <RefreshCw size={20} aria-hidden="true" />
+      </button>
+    {/if}
+
+    {#if screen === 'Browse' || screen === 'Series' || screen === 'Reader' || screen === 'Downloads' || store.isFullscreen}
+      <button
+        type="button"
+        class="icon-button fullscreen-toggle"
+        class:active={store.isFullscreen}
+        title={store.isFullscreen ? '전체 화면 종료 (F)' : '전체 화면 (F)'}
+        aria-label={store.isFullscreen ? '전체 화면 종료' : '전체 화면'}
+        aria-pressed={store.isFullscreen}
+        onclick={() => store.toggleFullscreen()}
+      >
+        {#if store.isFullscreen}
+          <Minimize2 size={18} aria-hidden="true" />
+        {:else}
+          <Maximize2 size={18} aria-hidden="true" />
+        {/if}
       </button>
     {/if}
   </div>

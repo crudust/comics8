@@ -706,3 +706,75 @@ describe("SyncError", () => {
     expect(error.code).toBe("RateLimited");
   });
 });
+
+describe("reportCatalog & resolveSource", () => {
+  it("posts shaped catalog updates to /catalog/report and drops unshaped rows", async () => {
+    const { client, recorded } = makeClient(() => ({
+      body: JSON.stringify({ status: "ok" }),
+    }));
+    await client.reportCatalog([
+      {
+        sourceId: "src",
+        toonId: "a",
+        totalEpisodes: 64,
+        lastPage: 2,
+        pageSize: 50,
+        delta: 0,
+        updatedAt: 1000,
+      },
+      // Missing lastPage/pageSize -> dropped
+      {
+        sourceId: "src",
+        toonId: "b",
+        totalEpisodes: 10,
+      },
+    ]);
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]!.url).toBe(`${normalizeApiRoot(DEFAULT_SERVER_URL)}/catalog/report`);
+    expect(JSON.parse(recorded[0]!.body ?? "{}")).toEqual({
+      updates: [
+        {
+          sourceId: "src",
+          toonId: "a",
+          totalEpisodes: 64,
+          updatedAt: 1000,
+          lastPage: 2,
+          pageSize: 50,
+          delta: 0,
+        },
+      ],
+    });
+  });
+
+  it("resolves canonical source id via /catalog/source/resolve", async () => {
+    const { client, recorded } = makeClient(() => ({
+      body: JSON.stringify({
+        canonical_source_id: "canonical-src",
+        status: "matched",
+        confidence: 0.98,
+        reason: "host_and_samples",
+      }),
+    }));
+    const result = await client.resolveSource({
+      clientSourceId: "local-plugin-1",
+      originHost: "src.test",
+      sampleToonIds: ["101", "102"],
+      sampleTitles: ["Work A", "Work B"],
+    });
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]!.url).toBe(`${normalizeApiRoot(DEFAULT_SERVER_URL)}/catalog/source/resolve`);
+    expect(JSON.parse(recorded[0]!.body ?? "{}")).toEqual({
+      client_source_id: "local-plugin-1",
+      origin_host: "src.test",
+      sample_toon_ids: ["101", "102"],
+      sample_titles: ["Work A", "Work B"],
+    });
+    expect(result).toEqual({
+      canonicalSourceId: "canonical-src",
+      status: "matched",
+      confidence: 0.98,
+      reason: "host_and_samples",
+    });
+  });
+});
+

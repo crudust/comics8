@@ -30,6 +30,7 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.truth)
+    testImplementation(libs.guava)
 }
 
 compose.desktop {
@@ -42,6 +43,9 @@ compose.desktop {
             "-XX:MinHeapFreeRatio=20",
             "-XX:MaxHeapFreeRatio=40",
         )
+        if (System.getProperty("os.name").orEmpty().lowercase().contains("mac")) {
+            jvmArgs += "--add-exports=java.desktop/com.apple.eawt.event=ALL-UNNAMED"
+        }
         nativeDistributions {
             modules(
                 "java.sql",
@@ -53,7 +57,7 @@ compose.desktop {
                 "jdk.unsupported",
             )
             packageName = "Comics8"
-            packageVersion = "1.2.55"
+            packageVersion = "1.2.56"
             description = "Comics8 Monitor Desktop"
             macOS {
                 bundleID = "com.comics8.desktop"
@@ -61,6 +65,8 @@ compose.desktop {
                 iconFile.set(project.file("src/main/resources/icon.icns"))
                 fileAssociation("application/zip", "zip", "ZIP comic archive")
                 fileAssociation("application/vnd.comicbook+zip", "cbz", "Comic Book ZIP archive")
+                fileAssociation("application/vnd.rar", "rar", "RAR comic archive")
+                fileAssociation("application/vnd.comicbook-rar", "cbr", "Comic Book RAR archive")
             }
             windows {
                 menuGroup = "Comics8"
@@ -239,6 +245,12 @@ tasks.withType<org.gradle.jvm.tasks.Jar>().configureEach {
     exclude("META-INF/*.DSA")
     exclude("META-INF/*.RSA")
     exclude("META-INF/SIG-*")
+}
+
+if (System.getProperty("os.name").orEmpty().lowercase().contains("mac")) {
+    tasks.withType<Test>().configureEach {
+        jvmArgs("--add-exports=java.desktop/com.apple.eawt.event=ALL-UNNAMED")
+    }
 }
 
 val packageWindowsPortable = tasks.register<Zip>("packageWindowsZip") {

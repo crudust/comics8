@@ -133,13 +133,17 @@ export class CatalogStore {
 
   /**
    * Persists multiple counted totals (e.g. from sync pull or batch metadata).
+   *
+   * Mirrors `DesktopDatabase.saveAllCatalog`: only rows carrying a valid listing shape
+   * (`EpisodeListingTotal.isValid`) are accepted, and a row is updated whenever its count or shape
+   * (`lastPage`, `pageSize`, `delta`) changed.
    */
   async saveAllCatalog(
     items: Array<{
       sourceId?: string;
       toonId: string;
       count?: number;
-      total?: EpisodeListingTotal | { count: number; lastPage?: number; pageSize?: number; delta?: number };
+      total?: EpisodeListingTotal | { count: number; lastPage: number; pageSize: number; delta: number; updatedAt?: number };
     }>,
   ): Promise<number> {
     await this.init();
@@ -149,22 +153,20 @@ export class CatalogStore {
     for (const item of items) {
       if (!item || !item.toonId) continue;
       const sourceId = String(item.sourceId || "local").trim();
-      const key = catalogKey(sourceId, item.toonId);
-      const count =
-        typeof item.total?.count === "number"
-          ? item.total.count
-          : typeof item.count === "number"
-            ? item.count
-            : 0;
-      if (count <= 0) continue;
+      const id = String(item.toonId).trim();
+      if (!id || !item.total) continue;
+      const record = normaliseTotal(sourceId, item.total);
+      if (!record) continue;
+      const key = catalogKey(sourceId, id);
       const previous = next[key];
-      if (!previous || previous.count !== count) {
-        next[key] = {
-          count,
-          lastPage: item.total && "lastPage" in item.total && typeof item.total.lastPage === "number" ? item.total.lastPage : 1,
-          pageSize: item.total && "pageSize" in item.total && typeof item.total.pageSize === "number" ? item.total.pageSize : count,
-          delta: item.total && "delta" in item.total && typeof item.total.delta === "number" ? item.total.delta : 0,
-        };
+      if (
+        !previous ||
+        previous.count !== record.count ||
+        previous.lastPage !== record.lastPage ||
+        previous.pageSize !== record.pageSize ||
+        previous.delta !== record.delta
+      ) {
+        next[key] = record;
         changed++;
       }
     }

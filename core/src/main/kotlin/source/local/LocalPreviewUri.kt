@@ -49,10 +49,10 @@ object LocalPreviewUri {
 
     fun open(ref: Ref): InputStream = when (ref.kind) {
         Kind.ZIP -> {
-            val archive = ZipArchive(File(ref.path))
+            val archive = ComicArchive.open(File(ref.path))
             val entry = archive.firstImageEntry() ?: run {
                 archive.close()
-                error("ZIP에 이미지가 없습니다")
+                error("아카이브에 이미지가 없습니다")
             }
             val input = archive.open(entry)
             object : java.io.FilterInputStream(input) {

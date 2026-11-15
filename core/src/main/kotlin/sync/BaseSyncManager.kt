@@ -572,6 +572,27 @@ open class BaseSyncManager(
                 put("origin_host", wire.originHost)
                 put("sample_toon_ids", org.json.JSONArray(wire.sampleToonIds.take(50)))
                 put("sample_titles", org.json.JSONArray(wire.sampleTitles.take(50)))
+                if (wire.displayName.isNotBlank()) {
+                    put("display_name", wire.displayName)
+                }
+                if (wire.catalogs.isNotEmpty()) {
+                    put("catalogs", org.json.JSONArray(wire.catalogs.take(20)))
+                }
+                if (wire.episodePageSize > 0) {
+                    put("episode_page_size", wire.episodePageSize)
+                }
+                if (wire.sampleWorks.isNotEmpty()) {
+                    put("sample_works", org.json.JSONArray().apply {
+                        wire.sampleWorks.take(30).forEach { w ->
+                            put(JSONObject().apply {
+                                put("id", w.id)
+                                put("title", w.title)
+                                put("href", w.href)
+                                put("thumb_url", w.thumbUrl)
+                            })
+                        }
+                    })
+                }
             }
             val reqBody = payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
             val req = Request.Builder()

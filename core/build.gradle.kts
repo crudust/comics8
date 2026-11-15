@@ -26,5 +26,6 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.truth)
+    testImplementation(libs.guava)
     testImplementation(libs.mockwebserver)
 }

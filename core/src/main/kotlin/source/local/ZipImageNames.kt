@@ -3,6 +3,7 @@ package com.comics8.core.source.local
 object ZipImageNames {
     val IMAGE_EXTS: Set<String> = setOf("jpg", "jpeg", "png", "webp", "avif", "gif")
     val ZIP_EXTS: Set<String> = setOf("zip", "cbz")
+    val RAR_EXTS: Set<String> = setOf("rar", "cbr")
 
     fun isJunkEntry(name: String): Boolean {
         val n = name.replace('\\', '/')
@@ -23,6 +24,15 @@ object ZipImageNames {
         val ext = name.substringAfterLast('.', "").lowercase()
         return ext in ZIP_EXTS
     }
+
+    fun isRarName(name: String): Boolean {
+        if (isJunkEntry(name) || name.endsWith("/")) return false
+        val ext = name.substringAfterLast('.', "").lowercase()
+        return ext in RAR_EXTS
+    }
+
+    fun isLocalArchiveName(name: String): Boolean =
+        isZipName(name) || (RarArchive.isSupported && isRarName(name))
 
     fun isJunkName(name: String): Boolean {
         if (name.isEmpty() || name == "." || name == "..") return true

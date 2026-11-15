@@ -111,6 +111,33 @@ export type SyncCatalogRow = {
   delta?: number;
 };
 
+export type SourceSampleWorkWire = {
+  id: string;
+  title?: string;
+  href?: string;
+  thumbUrl?: string;
+};
+
+/** `com.comics8.core.sync.SourceResolveWire`. */
+export type SourceResolveWire = {
+  clientSourceId: string;
+  originHost: string;
+  sampleToonIds: readonly string[];
+  sampleTitles: readonly string[];
+  displayName?: string;
+  catalogs?: readonly string[];
+  episodePageSize?: number;
+  sampleWorks?: readonly SourceSampleWorkWire[];
+};
+
+/** `com.comics8.core.sync.SourceResolveResultWire`. */
+export type SourceResolveResultWire = {
+  canonicalSourceId: string;
+  status: string;
+  confidence: number;
+  reason?: string | null;
+};
+
 /** The four buckets the task's `/sync` payload owns. */
 export type SyncUpdates = {
   favorites: SyncFavorite[];
@@ -602,6 +629,138 @@ export class SyncClient {
       // Unknown server, offline, malformed JSON: the caller keeps its local totals and retries on
       // the next listing load.
       return [];
+    }
+  }
+
+  /**
+   * `POST /catalog/report` — crowdsources counted episode totals (up to {@link MAX_CATALOG_BATCH_ITEMS}).
+   *
+   * This is `BaseSyncManager.reportCatalog`: only rows carrying a verified listing shape are sent,
+   * and failures are silently ignored so background reporting never disturbs UI state.
+   */
+  async reportCatalog(entries: readonly SyncCatalogRow[]): Promise<void> {
+    const valid = entries
+      .slice(0, MAX_CATALOG_BATCH_ITEMS)
+      .filter(
+        (entry) =>
+          entry &&
+          typeof entry.sourceId === "string" &&
+          entry.sourceId.trim() !== "" &&
+          typeof entry.toonId === "string" &&
+          entry.toonId.trim() !== "" &&
+          typeof entry.totalEpisodes === "number" &&
+          entry.totalEpisodes > 0 &&
+          typeof entry.lastPage === "number" &&
+          entry.lastPage >= 1 &&
+          typeof entry.pageSize === "number" &&
+          entry.pageSize >= 1,
+      )
+      .map((entry) => ({
+        sourceId: entry.sourceId,
+        toonId: entry.toonId,
+        totalEpisodes: Math.trunc(entry.totalEpisodes),
+        updatedAt:
+          typeof entry.updatedAt === "number" && Number.isFinite(entry.updatedAt)
+            ? Math.trunc(entry.updatedAt)
+            : Date.now(),
+        lastPage: Math.trunc(entry.lastPage!),
+        pageSize: Math.trunc(entry.pageSize!),
+        delta: Math.trunc(entry.delta ?? 0) || 0,
+      }));
+    if (valid.length === 0) return;
+
+    const url = `${normalizeApiRoot(this.status.serverUrl)}/catalog/report`;
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+      "Content-Type": "application/json; charset=utf-8",
+    };
+    if (this.status.syncKey) {
+      headers["Authorization"] = `Bearer ${this.status.syncKey}`;
+      headers["X-Sync-Key"] = this.status.syncKey;
+    }
+
+    try {
+      await this.fetchImpl({
+        url,
+        method: "POST",
+        headers,
+        body: JSON.stringify({ updates: valid }),
+        timeoutMs: this.timeoutMs,
+      });
+    } catch {
+      // Crowdsource reporting is best-effort (`BaseSyncManager.reportCatalog`).
+    }
+  }
+
+  /**
+   * `POST /catalog/source/resolve` — resolves a local plugin source id to the server's canonical id.
+   *
+   * This is `BaseSyncManager.resolveSource`, enabling cross-device episode count sharing even when
+   * two users installed a JS plugin with different local source ids.
+   */
+  async resolveSource(wire: SourceResolveWire): Promise<SourceResolveResultWire | null> {
+    if (!wire.clientSourceId) return null;
+
+    const url = `${normalizeApiRoot(this.status.serverUrl)}/catalog/source/resolve`;
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+      "Content-Type": "application/json; charset=utf-8",
+    };
+    if (this.status.syncKey) {
+      headers["Authorization"] = `Bearer ${this.status.syncKey}`;
+      headers["X-Sync-Key"] = this.status.syncKey;
+    }
+
+    try {
+      const payload: Record<string, unknown> = {
+        client_source_id: wire.clientSourceId,
+        origin_host: wire.originHost,
+        sample_toon_ids: wire.sampleToonIds.slice(0, 50),
+        sample_titles: wire.sampleTitles.slice(0, 50),
+      };
+      if (wire.displayName && wire.displayName.trim() !== "") {
+        payload.display_name = wire.displayName.trim();
+      }
+      if (wire.catalogs && wire.catalogs.length > 0) {
+        payload.catalogs = wire.catalogs.slice(0, 20);
+      }
+      if (typeof wire.episodePageSize === "number" && wire.episodePageSize > 0) {
+        payload.episode_page_size = wire.episodePageSize;
+      }
+      if (wire.sampleWorks && wire.sampleWorks.length > 0) {
+        payload.sample_works = wire.sampleWorks.slice(0, 30).map((w) => ({
+          id: w.id,
+          title: w.title ?? "",
+          href: w.href ?? "",
+          thumb_url: w.thumbUrl ?? "",
+        }));
+      }
+      const response = await this.fetchImpl({
+        url,
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+        timeoutMs: this.timeoutMs,
+      });
+      if (response.error || !response.ok || !response.body) return null;
+      const body = JSON.parse(response.body) as {
+        canonical_source_id?: unknown;
+        status?: unknown;
+        confidence?: unknown;
+        reason?: unknown;
+      };
+      const canonicalSourceId =
+        typeof body.canonical_source_id === "string" && body.canonical_source_id.trim() !== ""
+          ? body.canonical_source_id.trim()
+          : wire.clientSourceId;
+      return {
+        canonicalSourceId,
+        status: typeof body.status === "string" ? body.status : "unknown",
+        confidence: typeof body.confidence === "number" ? body.confidence : 0,
+        reason: typeof body.reason === "string" ? body.reason : null,
+      };
+    } catch {
+      return null;
     }
   }
 
