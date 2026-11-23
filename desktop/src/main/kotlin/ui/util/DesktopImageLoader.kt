@@ -36,6 +36,7 @@ import com.comics8.core.model.ImageHalf
 import com.comics8.core.model.computeContentCropRect
 import com.comics8.core.image.ImageCacheRole
 import com.comics8.core.image.ImageMemoryPolicy
+import com.comics8.core.network.ComicImageInterceptor
 import com.comics8.core.network.ImageFallbacks
 import com.comics8.core.network.ImageReferer
 import com.comics8.core.source.LocalImageUri
@@ -375,9 +376,12 @@ object DesktopImageCache {
                 null
             }
         } else {
-            fetchRemoteBytes(url, cachedFile)
+            fetchRemoteBytes(url, cachedFile, manualRetry = forceRetry)
         }
     }
+
+    private fun fallbacksFor(url: String): List<String> =
+        if (::registry.isInitialized) ImageFallbacks.forUrl(url, registry) else emptyList()
 
     private fun fetchNetworkBytes(url: String, cachedFile: File): ByteArray? {
         return try {
@@ -390,30 +394,39 @@ object DesktopImageCache {
         }
     }
 
-    private fun fetchRemoteBytes(url: String, cachedFile: File): ByteArray? {
+    private fun fetchRemoteBytes(url: String, cachedFile: File, manualRetry: Boolean = false): ByteArray? {
         if (LocalImageUri.toFile(url) != null) return null
         if (ZipImageUri.parse(url) != null) return null
         if (NetworkImageUri.parse(url) != null) return null
 
-        try {
+        val result = fetchSingleRemoteBytes(url, manualRetry = manualRetry)
+        if (result != null && result.isNotEmpty()) {
+            try {
+                writeAtomically(cachedFile, result)
+                evictDiskIfNeeded(cachedFile)
+            } catch (_: Exception) {
+            }
+            return result
+        }
+        return null
+    }
+
+    private fun fetchSingleRemoteBytes(url: String, manualRetry: Boolean = false): ByteArray? {
+        return try {
             val request = Request.Builder()
                 .url(url)
+                .apply {
+                    if (manualRetry) {
+                        header(ComicImageInterceptor.HEADER_RETRY_MODE, ComicImageInterceptor.RETRY_MODE_MANUAL)
+                    }
+                }
                 .get()
                 .build()
-            val result = httpClient.newCall(request).execute().use { resp ->
+            httpClient.newCall(request).execute().use { resp ->
                 if (resp.isSuccessful) resp.body?.bytes() else null
             }
-            if (result != null && result.isNotEmpty()) {
-                try {
-                    writeAtomically(cachedFile, result)
-                    evictDiskIfNeeded(cachedFile)
-                } catch (_: Exception) {
-                }
-                return result
-            }
-            return null
         } catch (_: Exception) {
-            return null
+            null
         }
     }
 
@@ -458,25 +471,48 @@ object DesktopImageCache {
                     pipelineSlots.withPermit {
                         if (!isActive) return@async null
                         val bytes = readImageBytes(url, forceRetry = forceRetry)
-                        if (bytes != null && bytes.isNotEmpty()) {
-                            val bitmap = decodeForDisplay(bytes, role)
-                            if (bitmap != null) {
-                                synchronized(inFlightLock) {
-                                    if (roleGenerations[role.ordinal] == generation && isActive) {
-                                        synchronized(memoryLock) {
-                                            memoryCaches.getValue(role).put(url, bitmap)
-                                        }
-                                    }
-                                }
-                                bitmap
-                            } else {
-                                val hash = hashUrl(url)
-                                File(diskCacheDir, "$hash.img").delete()
-                                null
-                            }
+                        var bitmap = if (bytes != null && bytes.isNotEmpty()) {
+                            decodeForDisplay(bytes, role)
                         } else {
                             null
                         }
+                        if (bitmap == null && bytes != null && bytes.isNotEmpty()) {
+                            val hash = hashUrl(url)
+                            File(diskCacheDir, "$hash.img").delete()
+                            if (url.startsWith("http://", ignoreCase = true) ||
+                                url.startsWith("https://", ignoreCase = true)
+                            ) {
+                                val limit = if (forceRetry) {
+                                    ComicImageInterceptor.MAX_MANUAL_FALLBACKS
+                                } else {
+                                    ComicImageInterceptor.MAX_FALLBACKS_DEFAULT
+                                }
+                                for (candidate in fallbacksFor(url).take(limit)) {
+                                    if (!isActive) return@async null
+                                    val candidateBytes = fetchSingleRemoteBytes(candidate, manualRetry = false)
+                                    if (candidateBytes != null && candidateBytes.isNotEmpty()) {
+                                        val decoded = decodeForDisplay(candidateBytes, role)
+                                        if (decoded != null) {
+                                            val cachedFile = File(diskCacheDir, "$hash.img")
+                                            writeAtomically(cachedFile, candidateBytes)
+                                            evictDiskIfNeeded(cachedFile)
+                                            bitmap = decoded
+                                            break
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (bitmap != null) {
+                            synchronized(inFlightLock) {
+                                if (roleGenerations[role.ordinal] == generation && isActive) {
+                                    synchronized(memoryLock) {
+                                        memoryCaches.getValue(role).put(url, bitmap)
+                                    }
+                                }
+                            }
+                        }
+                        bitmap
                     }
                 } catch (_: Exception) {
                     null
@@ -604,13 +640,15 @@ fun DesktopAsyncImage(
     showPlaceholder: Boolean = true,
     refreshEpoch: Long = 0L,
     onLoaded: ((ImageBitmap) -> Unit)? = null,
+    onRefreshEpisode: (() -> Unit)? = null,
 ) {
     // Check synchronous memory cache first
     val cachedBitmap = remember(cacheRole, url) { DesktopImageCache.get(cacheRole, url) }
     var displayedBitmap by remember(cacheRole, url) { mutableStateOf(cachedBitmap) }
     var loading by remember(cacheRole, url) { mutableStateOf(url.isNotBlank() && cachedBitmap == null) }
+    var localRetry by remember(cacheRole, url) { mutableStateOf(0) }
 
-    val retryKey = if (displayedBitmap == null) refreshEpoch else 0L
+    val retryKey = if (displayedBitmap == null) refreshEpoch + localRetry else 0L
 
     LaunchedEffect(cacheRole, url, retryKey) {
         if (url.isBlank()) {
@@ -618,14 +656,14 @@ fun DesktopAsyncImage(
             loading = false
             return@LaunchedEffect
         }
-        val memoryHit = DesktopImageCache.get(cacheRole, url)
+        val force = retryKey > 0L
+        val memoryHit = if (force) null else DesktopImageCache.get(cacheRole, url)
         if (memoryHit != null) {
             displayedBitmap = memoryHit
             loading = false
             onLoaded?.invoke(memoryHit)
         } else {
             loading = true
-            val force = retryKey > 0L
             val loaded = DesktopImageCache.loadImage(cacheRole, url, forceRetry = force)
             displayedBitmap = loaded
             loading = false
@@ -739,18 +777,6 @@ fun DesktopAsyncImage(
             }
         } else if (url.isNotBlank() && !loading) {
             val strings = LocalStrings.current
-            var localRetry by remember(url) { mutableStateOf(0) }
-            LaunchedEffect(localRetry) {
-                if (localRetry > 0) {
-                    loading = true
-                    val loaded = DesktopImageCache.loadImage(cacheRole, url, forceRetry = true)
-                    displayedBitmap = loaded
-                    loading = false
-                    if (loaded != null) {
-                        onLoaded?.invoke(loaded)
-                    }
-                }
-            }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -782,6 +808,18 @@ fun DesktopAsyncImage(
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.SemiBold,
                     )
+                    if (localRetry >= 1 && onRefreshEpisode != null) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = strings.actionRefresh,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.secondary,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier
+                                .clickable { onRefreshEpisode() }
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                        )
+                    }
                 }
             }
         } else {

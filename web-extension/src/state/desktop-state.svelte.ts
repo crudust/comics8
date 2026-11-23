@@ -1731,6 +1731,8 @@ export class DesktopStore {
   #loadToken = 0;
   #episodeToken = 0;
   #readerToken = 0;
+  #imageFallbacksCache = new Map<string, string[]>();
+  #registeredRefererHosts = new Set<string>();
 
   #returnScreen: Screen = "Browse";
   #lastViewedSeries: DesktopToonItem | null = null;
@@ -2599,6 +2601,7 @@ export class DesktopStore {
     };
 
     this.#toastTimer = clearTimeoutOf(this.#toastTimer);
+    this.#imageFallbacksCache.clear();
     this.screen = "Reader";
     this.currentEpisode = openEpisode;
     this.readerImages = [];
@@ -2630,6 +2633,72 @@ export class DesktopStore {
       await this.#writeProgress(series, sourceId, openEpisode, startPage);
       this.triggerDebouncedPush();
     }
+  }
+
+  async imageFallbacks(url: string): Promise<string[]> {
+    if (!url) return [];
+    const sourceId = this.series ? this.#sourceIdFor(this.series) : this.activeSourceId;
+    if (!sourceId) return [];
+    const cacheKey = `${sourceId}:${url}`;
+    const cached = this.#imageFallbacksCache.get(cacheKey);
+    if (cached) return cached;
+
+    try {
+      const source = await this.#requireSource(sourceId);
+      const fn = (source as { imageFallbacks?: (u: string) => Promise<string[]> | string[] } | null)
+        ?.imageFallbacks;
+      if (typeof fn !== "function") {
+        this.#imageFallbacksCache.set(cacheKey, []);
+        return [];
+      }
+      const raw = await fn.call(source, url);
+      const list = Array.isArray(raw)
+        ? raw.filter((entry): entry is string => typeof entry === "string" && entry.trim() !== "")
+        : [];
+      if (this.#imageFallbacksCache.size >= 512) {
+        this.#imageFallbacksCache.clear();
+      }
+      this.#imageFallbacksCache.set(cacheKey, list);
+      return list;
+    } catch {
+      return [];
+    }
+  }
+
+  async ensureFallbackReferer(url: string): Promise<void> {
+    if (typeof chrome === "undefined" || typeof chrome.runtime?.sendMessage !== "function") return;
+    let host = "";
+    try {
+      host = new URL(url).hostname.toLowerCase();
+    } catch {
+      return;
+    }
+    if (!host || this.#registeredRefererHosts.has(host)) return;
+
+    const sourceId = this.series ? this.#sourceIdFor(this.series) : this.activeSourceId;
+    const meta = sourceId ? this.#sources.get(sourceId)?.meta : undefined;
+    const referer = meta?.referer || meta?.origin || "";
+    if (!referer) return;
+
+    try {
+      await chrome.runtime.sendMessage({
+        action: "SET_REFERER_RULE",
+        url,
+        referer,
+      });
+      this.#registeredRefererHosts.add(host);
+    } catch {
+      // Best-effort rule registration; viewer still attempts the fallback image load.
+    }
+  }
+
+  async refreshReaderImages(): Promise<void> {
+    const episode = this.currentEpisode;
+    if (!episode) return;
+    this.#readerToken += 1;
+    this.#imageFallbacksCache.clear();
+    this.readerError = null;
+    await this.#loadReaderImages(episode, this.series);
   }
 
   /** `DesktopViewModel.closeReader`: flush the pending page, return to the episode list. */

@@ -1006,8 +1006,21 @@ class DesktopViewModel(
         }
     }
 
+    fun refreshReaderImages() {
+        DesktopImageCache.clearFailures()
+        DesktopImageCache.clear(ImageCacheRole.READER)
+        _state.update { it.copy(refreshEpoch = it.refreshEpoch + 1) }
+        if (externalReaderSession != null) return
+        val episode = _state.value.currentEpisode ?: return
+        loadReaderImages(episode)
+    }
+
     fun refresh() {
         checkForUpdate()
+        if (_state.value.screen == Screen.Reader) {
+            refreshReaderImages()
+            return
+        }
         DesktopImageCache.clearFailures()
         _state.update { it.copy(refreshEpoch = it.refreshEpoch + 1) }
         if (_state.value.activeSourceId == null) return

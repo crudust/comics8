@@ -417,6 +417,7 @@ private fun ReaderScrollView(
                                     viewModel.recordImageAspectRatio(tile.imageIndex, bitmap.width, bitmap.height)
                                 }
                             },
+                            onRefreshEpisode = viewModel::refreshReaderImages,
                         )
                     }
 
@@ -745,6 +746,7 @@ private fun ReaderSingleView(
                             viewModel.recordImageAspectRatio(currentSlice.imageIndex, w, h)
                         }
                     },
+                    onRefreshEpisode = viewModel::refreshReaderImages,
                 )
             }
         }
@@ -879,6 +881,7 @@ private fun ReaderDualView(
                                     onLoaded = { bmp ->
                                         viewModel.recordImageAspectRatio(spread.index, bmp.width, bmp.height)
                                     },
+                                    onRefreshEpisode = viewModel::refreshReaderImages,
                                 )
                             }
                         }
@@ -910,6 +913,7 @@ private fun ReaderDualView(
                                             onLoaded = { bmp ->
                                                 viewModel.recordImageAspectRatio(spread.index, bmp.width, bmp.height)
                                             },
+                                            onRefreshEpisode = viewModel::refreshReaderImages,
                                         )
                                     }
                                 }
@@ -932,6 +936,7 @@ private fun ReaderDualView(
                                             onLoaded = { bmp ->
                                                 viewModel.recordImageAspectRatio(spread.index, bmp.width, bmp.height)
                                             },
+                                            onRefreshEpisode = viewModel::refreshReaderImages,
                                         )
                                     }
                                 }
@@ -969,6 +974,7 @@ private fun ReaderDualView(
                                     onLoaded = { bmp ->
                                         viewModel.recordImageAspectRatio(leftIndex, bmp.width, bmp.height)
                                     },
+                                    onRefreshEpisode = viewModel::refreshReaderImages,
                                 )
                             }
                         }
@@ -991,6 +997,7 @@ private fun ReaderDualView(
                                     onLoaded = { bmp ->
                                         viewModel.recordImageAspectRatio(rightIndex, bmp.width, bmp.height)
                                     },
+                                    onRefreshEpisode = viewModel::refreshReaderImages,
                                 )
                             }
                         }

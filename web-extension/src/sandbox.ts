@@ -149,7 +149,12 @@ window.addEventListener("message", async (event) => {
   if (data.action === "CALL_METHOD") {
     try {
       const source = getOrLoadSource(data.script);
-      const method = data.method as "loadListing" | "loadEpisodes" | "resolveImages" | "search";
+      const method = data.method as
+        | "loadListing"
+        | "loadEpisodes"
+        | "resolveImages"
+        | "search"
+        | "imageFallbacks";
       const args = Array.isArray(data.args) ? data.args : [];
 
       let result: unknown;
@@ -161,6 +166,8 @@ window.addEventListener("message", async (event) => {
         result = await source.resolveImages(args[0], args[1]);
       } else if (method === "search") {
         result = await source.search(args[0]);
+      } else if (method === "imageFallbacks") {
+        result = await source.imageFallbacks(args[0]);
       } else {
         throw new Error(`Unsupported method: ${method}`);
       }

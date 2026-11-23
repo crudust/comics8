@@ -153,7 +153,7 @@ export async function sandboxGetMeta(
 
 export async function sandboxCallMethod<T = unknown>(
   script: string,
-  method: "loadListing" | "loadEpisodes" | "resolveImages" | "search",
+  method: "loadListing" | "loadEpisodes" | "resolveImages" | "search" | "imageFallbacks",
   args: unknown[],
 ): Promise<T> {
   await ensureSandbox();
@@ -213,6 +213,10 @@ export class SandboxLoadedSource {
 
   search(query: any, page = 1): Promise<ListingResult> {
     return sandboxCallMethod<ListingResult>(this.script, "search", [query, page]);
+  }
+
+  imageFallbacks(url: string): Promise<string[]> {
+    return sandboxCallMethod<string[]>(this.script, "imageFallbacks", [url]);
   }
 }
 

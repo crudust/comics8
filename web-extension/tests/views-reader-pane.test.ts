@@ -47,7 +47,11 @@ type Calls = {
 };
 
 function fakeSource(
-  options: { images?: string[]; fail?: () => boolean } = {},
+  options: {
+    images?: string[];
+    fail?: () => boolean;
+    imageFallbacks?: (url: string) => string[] | Promise<string[]>;
+  } = {},
   calls: Calls,
 ) {
   return {
@@ -65,6 +69,9 @@ function fakeSource(
       calls.images += 1;
       if (options.fail?.()) throw new Error("이미지 서버가 응답하지 않습니다.");
       return options.images ?? ["https://img.test/1.jpg", "https://img.test/2.jpg", "https://img.test/3.jpg"];
+    },
+    async imageFallbacks(url: string) {
+      return options.imageFallbacks ? options.imageFallbacks(url) : [];
     },
   };
 }
@@ -109,6 +116,7 @@ async function openReader(
   options: {
     images?: string[];
     fail?: () => boolean;
+    imageFallbacks?: (url: string) => string[] | Promise<string[]>;
     wrId?: string;
     entries?: Calls;
     viewMode?: "SCROLL" | "PAGE" | "DUAL";
@@ -118,7 +126,10 @@ async function openReader(
   } = {},
 ): Promise<{ store: DesktopStore; calls: Calls; source: ReturnType<typeof fakeSource> }> {
   const calls: Calls = options.entries ?? { images: 0, next: 0, prev: 0, close: 0 };
-  const source = fakeSource({ images: options.images, fail: options.fail }, calls);
+  const source = fakeSource(
+    { images: options.images, fail: options.fail, imageFallbacks: options.imageFallbacks },
+    calls,
+  );
   const store = createDesktopStore({
     registry: fakeRegistry(source),
     persistPreferences: false,
@@ -867,5 +878,106 @@ describe("ReaderPane page jump dialog", () => {
     stageEl.dispatchEvent(new WheelEvent("wheel", { deltaX: 0, deltaY: 100, bubbles: true, cancelable: true }));
     await tick();
     expect(pillLabel()).toBe("3 / 3");
+  });
+
+  it("automatically switches img src through imageFallbacks on error before showing failed state", async () => {
+    const { store } = await openReader({
+      viewMode: "PAGE",
+      direction: "LEFT_TO_RIGHT",
+      lastReadPage: 0,
+      images: ["https://host-a.test/1.jpg"],
+      imageFallbacks: (url) => [
+        url.replace("host-a.test", "host-b.test"),
+        url.replace("host-a.test", "host-c.test"),
+      ],
+    });
+    mountPane(store);
+    await tick();
+
+    let img = target.querySelector("img.page-image") as HTMLImageElement;
+    expect(img).toBeTruthy();
+    expect(img.getAttribute("src")).toBe("https://host-a.test/1.jpg");
+
+    // 1st error -> falls back to host-b without showing .image-failed
+    img.dispatchEvent(new Event("error"));
+    await tick();
+    expect(target.querySelector(".image-failed")).toBeNull();
+    img = target.querySelector("img.page-image") as HTMLImageElement;
+    expect(img.getAttribute("src")).toBe("https://host-b.test/1.jpg");
+
+    // 2nd error -> falls back to host-c
+    img.dispatchEvent(new Event("error"));
+    await tick();
+    expect(target.querySelector(".image-failed")).toBeNull();
+    img = target.querySelector("img.page-image") as HTMLImageElement;
+    expect(img.getAttribute("src")).toBe("https://host-c.test/1.jpg");
+
+    // 3rd error (no more fallbacks) -> shows .image-failed
+    img.dispatchEvent(new Event("error"));
+    await tick();
+    expect(target.querySelector(".image-failed")).toBeTruthy();
+  });
+
+  it("caps automatic fallbacks at 3, advances to 4th on manual retry, and offers episode refresh", async () => {
+    let resolveCount = 0;
+    const { store, calls } = await openReader({
+      viewMode: "PAGE",
+      direction: "LEFT_TO_RIGHT",
+      lastReadPage: 0,
+      images: ["https://host-0.test/1.jpg"],
+      imageFallbacks: () => [
+        "https://host-1.test/1.jpg",
+        "https://host-2.test/1.jpg",
+        "https://host-3.test/1.jpg",
+        "https://host-4.test/1.jpg",
+      ],
+    });
+    const source = await store.registry.get("test-src");
+    const origResolve = source!.resolveImages.bind(source);
+    source!.resolveImages = async (ep, it) => {
+      resolveCount += 1;
+      return origResolve(ep, it);
+    };
+
+    mountPane(store);
+    await tick();
+    expect(calls.images).toBe(1);
+
+    // Trigger 4 errors (original + 3 auto fallbacks)
+    for (const expectedSrc of [
+      "https://host-0.test/1.jpg",
+      "https://host-1.test/1.jpg",
+      "https://host-2.test/1.jpg",
+      "https://host-3.test/1.jpg",
+    ]) {
+      const img = target.querySelector("img.page-image") as HTMLImageElement;
+      expect(img.getAttribute("src")).toBe(expectedSrc);
+      img.dispatchEvent(new Event("error"));
+      await tick();
+    }
+
+    // Auto limit exhausted -> .image-failed shown, refresh button NOT shown before manual retry
+    const failedBtn = target.querySelector("button.image-failed") as HTMLButtonElement;
+    expect(failedBtn).toBeTruthy();
+    expect(target.querySelector("button.image-refresh")).toBeNull();
+
+    // Click Retry -> advances to 4th fallback candidate
+    failedBtn.click();
+    await tick();
+    const retriedImg = target.querySelector("img.page-image") as HTMLImageElement;
+    expect(retriedImg).toBeTruthy();
+    expect(retriedImg.getAttribute("src")).toBe("https://host-4.test/1.jpg");
+
+    // 4th fallback fails -> error state reappears, now with secondary "주소 새로고침" button
+    retriedImg.dispatchEvent(new Event("error"));
+    await tick();
+    const refreshBtn = target.querySelector("button.image-refresh") as HTMLButtonElement;
+    expect(refreshBtn).toBeTruthy();
+
+    // Clicking "주소 새로고침" re-invokes resolveImages via refreshReaderImages()
+    refreshBtn.click();
+    await tick();
+    expect(resolveCount).toBe(1);
+    expect(calls.images).toBe(2);
   });
 });

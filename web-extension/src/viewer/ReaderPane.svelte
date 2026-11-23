@@ -54,6 +54,7 @@
     SCROLL_PAGE_THRESHOLD,
   } from '../ui/wheel-paging';
   import { preloadImages } from './image-preloader';
+  import { ImageFallbackController } from './image-fallback';
   import {
     buildDualSpreads,
     buildSinglePageSlices,
@@ -80,6 +81,7 @@
   const LABEL_EPISODE_LIST = '목록';
   const LABEL_PAGE_JUMP = '페이지 이동';
   const LABEL_RETRY = '다시 시도';
+  const LABEL_REFRESH_URLS = '주소 새로고침';
   const LOADING_TEXT = '불러오는 중...';
   const ERROR_NO_IMAGES = '이미지를 불러올 수 없습니다.';
   /**
@@ -168,8 +170,12 @@
       },
     };
   }
+  const fallbackController = new ImageFallbackController();
   let failedPages = $state<Record<number, boolean>>({});
   let imageEpochs = $state<Record<number, number>>({});
+  let activeUrls = $state<Record<number, string>>({});
+  let manualRetries = $state<Record<number, number>>({});
+  let fallbackEpoch = 0;
 
   const currentSlice: SinglePageSlice | null = $derived(slices[sliceIndex] ?? null);
   const currentSpread = $derived(spreads[spreadIndex] ?? null);
@@ -717,6 +723,10 @@
 
   function onImageLoad(event: Event, index: number): void {
     const img = event.currentTarget as HTMLImageElement;
+    const originalUrl = images[index];
+    if (originalUrl) {
+      fallbackController.recordSuccess(originalUrl, activeUrls[index] ?? originalUrl);
+    }
     const ratio = imageAspectRatio(img.naturalWidth, img.naturalHeight);
     if (ratio === null) return;
     store.recordImageAspectRatio(index, img.naturalWidth, img.naturalHeight);
@@ -724,11 +734,47 @@
   }
 
   function onImageError(index: number): void {
+    void handleImageError(index);
+  }
+
+  async function handleImageError(index: number): Promise<void> {
+    const epoch = fallbackEpoch;
+    const originalUrl = images[index];
+    if (!originalUrl) {
+      failedPages = { ...failedPages, [index]: true };
+      return;
+    }
+    const failedUrl = activeUrls[index] ?? originalUrl;
+    const fallbacks = await store.imageFallbacks(originalUrl);
+    if (epoch !== fallbackEpoch || images[index] !== originalUrl) return;
+
+    const next = fallbackController.nextUrl(index, originalUrl, failedUrl, fallbacks, 'auto');
+    if (next) {
+      await store.ensureFallbackReferer(next);
+      if (epoch !== fallbackEpoch || images[index] !== originalUrl) return;
+      activeUrls = { ...activeUrls, [index]: next };
+      imageEpochs = { ...imageEpochs, [index]: (imageEpochs[index] ?? 0) + 1 };
+      return;
+    }
     failedPages = { ...failedPages, [index]: true };
   }
 
-  function retryImage(index: number): void {
+  async function retryImage(index: number): Promise<void> {
+    const epoch = fallbackEpoch;
+    const originalUrl = images[index];
+    manualRetries = { ...manualRetries, [index]: (manualRetries[index] ?? 0) + 1 };
     failedPages = { ...failedPages, [index]: false };
+    if (originalUrl) {
+      const currentUrl = activeUrls[index] ?? originalUrl;
+      const fallbacks = await store.imageFallbacks(originalUrl);
+      if (epoch !== fallbackEpoch || images[index] !== originalUrl) return;
+      const next = fallbackController.nextUrl(index, originalUrl, currentUrl, fallbacks, 'manual');
+      if (next) {
+        await store.ensureFallbackReferer(next);
+        if (epoch !== fallbackEpoch || images[index] !== originalUrl) return;
+        activeUrls = { ...activeUrls, [index]: next };
+      }
+    }
     imageEpochs = { ...imageEpochs, [index]: (imageEpochs[index] ?? 0) + 1 };
   }
 
@@ -782,6 +828,20 @@
     imageEpochs = {};
     const target = store.currentEpisode?.lastReadPage ?? 0;
     untrack(() => restoreFromProgress(target));
+  });
+
+  // Reset fallback tracking whenever the episode image list changes (new chapter or URL refresh).
+  let lastImagesRef: readonly string[] | null = null;
+  $effect(() => {
+    const currentImages = images;
+    if (currentImages === lastImagesRef) return;
+    lastImagesRef = currentImages;
+    fallbackEpoch += 1;
+    fallbackController.resetEpisode();
+    activeUrls = {};
+    manualRetries = {};
+    failedPages = {};
+    imageEpochs = {};
   });
 
   // Reset the restore guard when the chapter closes so re-opening it restores again.
@@ -956,11 +1016,11 @@
 
 {#snippet pageImage(index: number, className: string, style: string)}
   {#if images[index] && !failedPages[index]}
-    {#key imageEpochs[index] ?? 0}
+    {#key `${imageEpochs[index] ?? 0}:${activeUrls[index] ?? images[index]}`}
       <img
         class={className}
         {style}
-        src={images[index]}
+        src={activeUrls[index] ?? images[index]}
         alt={`페이지 ${index + 1}`}
         draggable="false"
         decoding="auto"
@@ -969,10 +1029,31 @@
       />
     {/key}
   {:else if failedPages[index]}
-    <button type="button" class="image-failed" onclick={() => retryImage(index)}>
-      <span>{ERROR_NO_IMAGES}</span>
-      <span class="image-failed-hint">{LABEL_RETRY}</span>
-    </button>
+    <div class="image-failed-wrap">
+      <button
+        type="button"
+        class="image-failed"
+        onclick={(event) => {
+          event.stopPropagation();
+          void retryImage(index);
+        }}
+      >
+        <span>{ERROR_NO_IMAGES}</span>
+        <span class="image-failed-hint">{LABEL_RETRY}</span>
+      </button>
+      {#if (manualRetries[index] ?? 0) >= 1}
+        <button
+          type="button"
+          class="image-refresh"
+          onclick={(event) => {
+            event.stopPropagation();
+            void store.refreshReaderImages();
+          }}
+        >
+          {LABEL_REFRESH_URLS}
+        </button>
+      {/if}
+    </div>
   {/if}
 {/snippet}
 
@@ -1541,6 +1622,32 @@
   .image-failed:hover {
     border-color: #52525b;
     color: #d4d4d8;
+  }
+
+  .image-failed-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 220px;
+    padding: 16px;
+  }
+
+  .image-refresh {
+    padding: 6px 12px;
+    border: 1px solid #3f3f46;
+    border-radius: 6px;
+    background: #18181b;
+    color: #d4d4d8;
+    font: 600 11.5px/1.2 var(--font-sans, system-ui, sans-serif);
+    cursor: pointer;
+  }
+
+  .image-refresh:hover {
+    border-color: #52525b;
+    background: #27272a;
   }
 
   .image-failed-hint {

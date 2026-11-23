@@ -277,6 +277,314 @@ class ComicImageInterceptorTest {
     }
 
     @Test
+    fun forbidden403TriggersCrossHostFallback() {
+        val crossHostSource = StubComicSource(
+            id = "cross403",
+            origin = "https://127.0.0.1",
+            ownedHost = hostSuffixes("127.0.0.1", "localhost"),
+            fallbacks = { url ->
+                listOf(url.replace("127.0.0.1", "localhost"))
+            },
+        )
+        val reg = SourceRegistry(listOf(crossHostSource))
+        server.enqueue(MockResponse().setResponseCode(403).setBody("forbidden"))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("ok-from-localhost"))
+
+        val client = OkHttpClient.Builder()
+            .addInterceptor(ComicImageInterceptor(reg))
+            .build()
+
+        val url = "http://127.0.0.1:${server.port}/page1.webp"
+        client.newCall(Request.Builder().url(url).build()).execute().use { resp ->
+            assertThat(resp.isSuccessful).isTrue()
+            assertThat(resp.body?.string()).isEqualTo("ok-from-localhost")
+        }
+
+        assertThat(server.requestCount).isEqualTo(2)
+        assertThat(server.takeRequest().getHeader("Host")).startsWith("127.0.0.1")
+        assertThat(server.takeRequest().getHeader("Host")).startsWith("localhost")
+    }
+
+    @Test
+    fun htmlErrorPageWith200TriggersFallback() {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "text/html; charset=utf-8")
+                .setBody("<html><body>Blocked</body></html>"),
+        )
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "image/avif")
+                .setBody("real-image-bytes"),
+        )
+
+        val client = OkHttpClient.Builder()
+            .addInterceptor(ComicImageInterceptor(registry))
+            .build()
+
+        val url = server.url("/missing.webp").toString()
+        client.newCall(Request.Builder().url(url).build()).execute().use { resp ->
+            assertThat(resp.isSuccessful).isTrue()
+            assertThat(resp.body?.string()).isEqualTo("real-image-bytes")
+        }
+
+        assertThat(server.requestCount).isEqualTo(2)
+        assertThat(server.takeRequest().path).isEqualTo("/missing.webp")
+        assertThat(server.takeRequest().path).isEqualTo("/fallback.avif")
+    }
+
+    @Test
+    fun manualRetryTriggersFallbackOnTimeoutAndSameHost403AndStripsHeader() {
+        val multiSource = StubComicSource(
+            id = "manual",
+            origin = "https://127.0.0.1",
+            ownedHost = hostSuffixes("127.0.0.1"),
+            fallbacks = { url ->
+                listOf(
+                    url.replace("/p1.webp", "/fb1.webp"),
+                    url.replace("/p1.webp", "/fb2.webp"),
+                    url.replace("/p1.webp", "/fb3.webp"),
+                    url.replace("/p1.webp", "/fb4.webp"),
+                )
+            },
+        )
+        val reg = SourceRegistry(listOf(multiSource))
+        val recordedPaths = mutableListOf<String>()
+        val recordedRetryHeaders = mutableListOf<String?>()
+
+        val client = OkHttpClient.Builder()
+            .addInterceptor(ComicImageInterceptor(reg, maxFallbacks = 2))
+            .addInterceptor { chain ->
+                val req = chain.request()
+                val path = req.url.encodedPath
+                recordedPaths += path
+                recordedRetryHeaders += req.header(ComicImageInterceptor.HEADER_RETRY_MODE)
+                when (path) {
+                    "/p1.webp" -> throw SocketTimeoutException("Read timed out")
+                    "/fb1.webp" -> Response.Builder()
+                        .request(req)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(403)
+                        .message("Forbidden")
+                        .body("forbidden".toResponseBody("text/plain".toMediaType()))
+                        .build()
+                    "/fb2.webp" -> Response.Builder()
+                        .request(req)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(404)
+                        .message("Not Found")
+                        .body("missing".toResponseBody("text/plain".toMediaType()))
+                        .build()
+                    else -> Response.Builder()
+                        .request(req)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .body("manual-recovered".toResponseBody("image/webp".toMediaType()))
+                        .build()
+                }
+            }
+            .build()
+
+        val request = Request.Builder()
+            .url("http://127.0.0.1:${server.port}/p1.webp")
+            .header(ComicImageInterceptor.HEADER_RETRY_MODE, ComicImageInterceptor.RETRY_MODE_MANUAL)
+            .build()
+
+        client.newCall(request).execute().use { resp ->
+            assertThat(resp.isSuccessful).isTrue()
+            assertThat(resp.body?.string()).isEqualTo("manual-recovered")
+        }
+
+        assertThat(recordedPaths).containsExactly("/p1.webp", "/fb1.webp", "/fb2.webp", "/fb3.webp").inOrder()
+        assertThat(recordedRetryHeaders.all { it == null }).isTrue()
+    }
+
+    @Test
+    fun stickyHostSkipsDeadOriginAfterHardFailureAndSelfHealsWhenPreferredFails() {
+        val mirrorSource = StubComicSource(
+            id = "sticky",
+            origin = "https://host-a.example",
+            ownedHost = hostSuffixes("host-a.example", "host-b.example"),
+            fallbacks = { url -> listOf(url.replace("host-a.example", "host-b.example")) },
+        )
+        val reg = SourceRegistry(listOf(mirrorSource))
+        val requestedHosts = mutableListOf<String>()
+        var failB = false
+        var now = 1_000L
+
+        val client = OkHttpClient.Builder()
+            .addInterceptor(ComicImageInterceptor(reg, clock = { now }))
+            .addInterceptor { chain ->
+                val req = chain.request()
+                val host = req.url.host
+                requestedHosts += host
+                val fail = (host == "host-a.example" && !failB) || (host == "host-b.example" && failB)
+                Response.Builder()
+                    .request(req)
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(if (fail) 502 else 200)
+                    .message(if (fail) "Bad Gateway" else "OK")
+                    .body("img".toResponseBody("image/webp".toMediaType()))
+                    .build()
+            }
+            .build()
+
+        // 1st request: host-a fails 502 -> recovers on host-b -> promotes host-b
+        client.newCall(Request.Builder().url("https://host-a.example/1.webp").build()).execute().use {
+            assertThat(it.isSuccessful).isTrue()
+        }
+        assertThat(requestedHosts).containsExactly("host-a.example", "host-b.example").inOrder()
+
+        // 2nd request: skips host-a and goes straight to host-b
+        requestedHosts.clear()
+        client.newCall(Request.Builder().url("https://host-a.example/2.webp").build()).execute().use {
+            assertThat(it.isSuccessful).isTrue()
+        }
+        assertThat(requestedHosts).containsExactly("host-b.example")
+
+        // 3rd request: host-b goes down -> self-heals back to host-a
+        failB = true
+        requestedHosts.clear()
+        client.newCall(Request.Builder().url("https://host-a.example/3.webp").build()).execute().use {
+            assertThat(it.isSuccessful).isTrue()
+        }
+        assertThat(requestedHosts).containsExactly("host-b.example", "host-a.example").inOrder()
+    }
+
+    @Test
+    fun stickyHostOn404RequiresTwoRecoveriesBeforePromoting() {
+        val mirrorSource = StubComicSource(
+            id = "sticky404",
+            origin = "https://host-a.example",
+            ownedHost = hostSuffixes("host-a.example", "host-b.example"),
+            fallbacks = { url -> listOf(url.replace("host-a.example", "host-b.example")) },
+        )
+        val reg = SourceRegistry(listOf(mirrorSource))
+        val requestedHosts = mutableListOf<String>()
+
+        val client = OkHttpClient.Builder()
+            .addInterceptor(ComicImageInterceptor(reg))
+            .addInterceptor { chain ->
+                val req = chain.request()
+                val host = req.url.host
+                requestedHosts += host
+                Response.Builder()
+                    .request(req)
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(if (host == "host-a.example") 404 else 200)
+                    .message("status")
+                    .body("img".toResponseBody("image/webp".toMediaType()))
+                    .build()
+            }
+            .build()
+
+        // 1st 404 recovery: must NOT promote host-b yet
+        client.newCall(Request.Builder().url("https://host-a.example/1.webp").build()).execute().use {
+            assertThat(it.isSuccessful).isTrue()
+        }
+        assertThat(requestedHosts).containsExactly("host-a.example", "host-b.example").inOrder()
+
+        // 2nd request still tries host-a first, then recovers on host-b and promotes host-b
+        requestedHosts.clear()
+        client.newCall(Request.Builder().url("https://host-a.example/2.webp").build()).execute().use {
+            assertThat(it.isSuccessful).isTrue()
+        }
+        assertThat(requestedHosts).containsExactly("host-a.example", "host-b.example").inOrder()
+
+        // 3rd request skips host-a and goes straight to host-b
+        requestedHosts.clear()
+        client.newCall(Request.Builder().url("https://host-a.example/3.webp").build()).execute().use {
+            assertThat(it.isSuccessful).isTrue()
+        }
+        assertThat(requestedHosts).containsExactly("host-b.example")
+    }
+
+    @Test
+    fun degradedFallbackHostIsDemotedBehindHealthyHost() {
+        val mirrorSource = StubComicSource(
+            id = "demote",
+            origin = "https://host-a.example",
+            ownedHost = hostSuffixes("host-a.example", "host-b.example", "host-c.example"),
+            fallbacks = { url ->
+                listOf(
+                    url.replace("host-a.example", "host-b.example"),
+                    url.replace("host-a.example", "host-c.example"),
+                )
+            },
+        )
+        val reg = SourceRegistry(listOf(mirrorSource))
+        val requestedHosts = mutableListOf<String>()
+
+        val client = OkHttpClient.Builder()
+            .addInterceptor(ComicImageInterceptor(reg))
+            .addInterceptor { chain ->
+                val req = chain.request()
+                val host = req.url.host
+                requestedHosts += host
+                val code = if (host == "host-c.example") 200 else 500
+                Response.Builder()
+                    .request(req)
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(code)
+                    .message("status")
+                    .body("img".toResponseBody("image/webp".toMediaType()))
+                    .build()
+            }
+            .build()
+
+        // 1st request: host-a fails 500 -> host-b fails 500 (demoted) -> host-c succeeds (promoted)
+        client.newCall(Request.Builder().url("https://host-a.example/1.webp").build()).execute().use {
+            assertThat(it.isSuccessful).isTrue()
+        }
+        assertThat(requestedHosts).containsExactly("host-a.example", "host-b.example", "host-c.example").inOrder()
+
+        // Now ask from a different origin host-d where host-b and host-c are fallbacks:
+        // host-c should be tried before demoted host-b.
+        val source2 = StubComicSource(
+            id = "demote2",
+            origin = "https://host-d.example",
+            ownedHost = hostSuffixes("host-d.example"),
+            fallbacks = { url ->
+                listOf(
+                    url.replace("host-d.example", "host-b.example"),
+                    url.replace("host-d.example", "host-c.example"),
+                )
+            },
+        )
+        val reg2 = SourceRegistry(listOf(mirrorSource, source2))
+        val interceptor = ComicImageInterceptor(reg2)
+        val client2 = OkHttpClient.Builder()
+            .addInterceptor(interceptor)
+            .addInterceptor { chain ->
+                val req = chain.request()
+                val host = req.url.host
+                requestedHosts += host
+                val code = if (host == "host-c.example") 200 else 500
+                Response.Builder()
+                    .request(req)
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(code)
+                    .message("status")
+                    .body("img".toResponseBody("image/webp".toMediaType()))
+                    .build()
+            }
+            .build()
+
+        // Prime degradation on host-b via host-a
+        requestedHosts.clear()
+        client2.newCall(Request.Builder().url("https://host-a.example/1.webp").build()).execute().use {}
+        // Now request host-d; host-c should come before demoted host-b
+        requestedHosts.clear()
+        client2.newCall(Request.Builder().url("https://host-d.example/1.webp").build()).execute().use {
+            assertThat(it.isSuccessful).isTrue()
+        }
+        assertThat(requestedHosts).containsExactly("host-d.example", "host-c.example").inOrder()
+    }
+
+    @Test
     fun newImageHttpClientConfiguredCorrectly() {
         val testDir = File(System.getProperty("java.io.tmpdir"), "test-c8-cache-" + System.currentTimeMillis())
         val base = ToonClient.defaultClient(cacheDirectory = testDir)
