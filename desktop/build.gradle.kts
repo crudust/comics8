@@ -14,6 +14,7 @@ plugins {
 
 dependencies {
     implementation(project(":core"))
+    implementation(project(":shared-ui"))
 
     implementation(compose.desktop.currentOs)
     runtimeOnly(libs.skiko.windows.x64)
@@ -57,7 +58,7 @@ compose.desktop {
                 "jdk.unsupported",
             )
             packageName = "Comics8"
-            packageVersion = "1.2.57"
+            packageVersion = "1.2.58"
             description = "Comics8 Monitor Desktop"
             macOS {
                 bundleID = "com.comics8.desktop"

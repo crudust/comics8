@@ -84,12 +84,12 @@ import com.comics8.core.model.buildDualSpreads
 import com.comics8.core.model.buildSinglePageSlices
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
-import com.comics8.desktop.ui.components.ErrorPane
-import com.comics8.desktop.ui.components.LoadingPane
-import com.comics8.desktop.ui.components.TopBar
+import com.comics8.shared.ui.components.ErrorPane
+import com.comics8.shared.ui.components.LoadingPane
+import com.comics8.shared.ui.components.TopBar
 import com.comics8.desktop.ui.components.ZoomableBox
 import com.comics8.desktop.ui.components.desktopDiscreteScrollPaging
-import com.comics8.desktop.ui.theme.LocalStrings
+import com.comics8.shared.ui.theme.LocalStrings
 import com.comics8.desktop.ui.util.DesktopAsyncImage
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -215,7 +215,7 @@ fun ReaderPane(
 
         if (state.readerError != null && state.readerImages.isEmpty()) {
             ErrorPane(
-                message = state.readerError,
+                message = state.readerError.orEmpty(),
                 actionLabel = strings.actionRetry,
                 onRetry = { state.currentEpisode?.let { viewModel.openEpisode(it) } },
             )
@@ -1088,7 +1088,7 @@ private fun BoxScope.ReaderOverlayControls(
     ) {
         TopBar(
             state = state,
-            viewModel = viewModel,
+            controller = viewModel.controller,
             inOverlay = true,
         )
     }

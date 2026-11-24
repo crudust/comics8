@@ -1,667 +1,144 @@
 package com.comics8.desktop.ui
 
+import com.comics8.core.app.PlatformHost
+import com.comics8.core.app.SharedAppController
+import com.comics8.core.i18n.AppStrings
 import com.comics8.core.image.ImageCacheRole
+import com.comics8.core.model.AppUpdateState
 import com.comics8.core.model.ArtistRef
-import com.comics8.core.model.BrowseTab
 import com.comics8.core.model.EpisodeItem
-import com.comics8.core.model.EpisodeListingTotal
-import com.comics8.core.model.EpisodeSortOrder
-import com.comics8.core.model.ProgressDisplayMode
-import com.comics8.core.model.ReadDirection
-import com.comics8.core.model.ReaderDomain
-import com.comics8.core.model.RepositoryTransforms
-import com.comics8.core.model.sortedWithOrder
-import com.comics8.core.model.SplitMode
 import com.comics8.core.model.ToonItem
 import com.comics8.core.model.ViewMode
-import com.comics8.core.source.WorkId
-import com.comics8.core.source.js.JsPackStore
 import com.comics8.core.source.LocalImageUri
+import com.comics8.core.source.SourceSettings
+import com.comics8.core.source.js.JsPackStore
 import com.comics8.core.source.local.ComicArchive
 import com.comics8.core.source.local.LibraryScanner
-import com.comics8.core.source.local.LibraryScanIndex
-import com.comics8.core.source.local.LocalSource
 import com.comics8.core.source.local.RarArchive
-import com.comics8.core.source.local.ZipImageNames
 import com.comics8.core.source.local.ZipImageUri
-import com.comics8.desktop.ExternalTargetResolver
-import java.text.Normalizer
-import com.comics8.core.source.network.NetworkProtocol
 import com.comics8.core.source.network.NetworkSourceConfig
-import com.comics8.core.source.network.NetworkSourceRuntime
 import com.comics8.core.source.network.NetworkSourceStore
-import com.comics8.core.source.network.createNetworkFileSystem
-import com.comics8.core.source.resolveSourceType
+import com.comics8.core.storage.KeyValuePrefs
 import com.comics8.core.sync.AppUpdateChecker
-import com.comics8.core.sync.SyncConstants
-import com.comics8.core.sync.SyncActionCoordinator
 import com.comics8.desktop.DesktopVersion
-import com.comics8.desktop.ui.settings.SettingsCategory
+import com.comics8.desktop.ExternalTargetResolver
 import com.comics8.desktop.data.DesktopSourcePrefs
 import com.comics8.desktop.data.DesktopToonRepository
 import com.comics8.desktop.data.DesktopUpdateManager
-import com.comics8.desktop.data.ReadHistoryRecord
 import com.comics8.desktop.ui.util.DesktopFolderPicker
 import com.comics8.desktop.ui.util.DesktopImageCache
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.nio.file.Files
-
-import com.comics8.core.i18n.AppLanguage
-import com.comics8.core.i18n.I18n
 import java.util.prefs.Preferences
-
-private data class ExternalReaderSession(
-    val returnScreen: Screen,
-    val viewMode: ViewMode,
-    val readDirection: ReadDirection,
-    val splitMode: SplitMode,
-)
 
 class DesktopViewModel(
     val repository: DesktopToonRepository,
-    private val jsPackStore: JsPackStore,
-    private val networkSourceStore: NetworkSourceStore,
+    jsPackStore: JsPackStore,
+    networkSourceStore: NetworkSourceStore,
     private val pickLibraryFolder: () -> File? = { DesktopFolderPicker.pickDirectory() },
 ) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val prefs: Preferences = Preferences.userRoot().node("com.comics8.desktop")
-    private val syncActions by lazy {
-        SyncActionCoordinator(scope, { repository.syncManager }, ::applySyncRefresh)
-    }
 
-    val appLanguage: AppLanguage
-        get() = try {
-            val code = prefs.get("app_language", AppLanguage.AUTO.code)
-            AppLanguage.fromCode(code)
-        } catch (_: Exception) {
-            AppLanguage.AUTO
+    private val platform = object : PlatformHost {
+        override val prefs: KeyValuePrefs = JavaPreferencesKeyValuePrefs(this@DesktopViewModel.prefs)
+        override val sourceSettings: SourceSettings = DesktopSourcePrefs
+        override val localLibraryIndexFile: File =
+            File(System.getProperty("user.home"), ".comics8/cache/library-index/local.json")
+
+        override fun materializeLocalRoots(): List<File> =
+            DesktopSourcePrefs.libraryRoots().map { File(it) }
+
+        override fun clearImageMemory(role: ImageCacheRole) {
+            DesktopImageCache.clear(role)
         }
 
-    fun setAppLanguage(language: AppLanguage) {
-        prefs.put("app_language", language.code)
-        _state.update { it.copy(appLanguage = language) }
-    }
+        override fun cancelPendingImagePreviews() {
+            DesktopImageCache.cancelPendingPreviews()
+        }
 
-    fun setEpisodeSortOrder(order: EpisodeSortOrder) {
-        val targetSourceId = _state.value.series?.sourceId ?: DesktopSourcePrefs.activeSourceId() ?: WorkId.LOCAL_SOURCE
-        setSourceEpisodeSortOrder(targetSourceId, order)
-    }
+        override fun clearImageFailures() {
+            DesktopImageCache.clearFailures()
+        }
 
-    fun getSourceEpisodeSortOrder(sourceId: String): EpisodeSortOrder =
-        DesktopSourcePrefs.episodeSortOrder(sourceId)
-
-    fun setSourceEpisodeSortOrder(sourceId: String, order: EpisodeSortOrder) {
-        DesktopSourcePrefs.setEpisodeSortOrder(sourceId, order)
-        _state.update { current ->
-            val isCurrentSeriesSource = current.series?.sourceId == sourceId
-            val isCurrentActiveSource = current.series == null && (DesktopSourcePrefs.activeSourceId() ?: WorkId.LOCAL_SOURCE) == sourceId
-            if (isCurrentSeriesSource || isCurrentActiveSource) {
-                current.copy(
-                    episodeSortOrder = order,
-                    episodes = if (isCurrentSeriesSource) (current.rawEpisodes.ifEmpty { current.episodes }).sortedWithOrder(order) else current.episodes,
-                )
-            } else {
-                current
+        override fun preloadReaderImages(urls: List<String>) {
+            scope.launch(Dispatchers.IO) {
+                DesktopImageCache.preload(ImageCacheRole.READER, urls)
             }
         }
-    }
 
-    private val _state = MutableStateFlow(
-        DesktopUiState(
-            appLanguage = try {
-                val code = prefs.get("app_language", AppLanguage.AUTO.code)
-                AppLanguage.fromCode(code)
-            } catch (_: Exception) {
-                AppLanguage.AUTO
-            },
-            episodeSortOrder = DesktopSourcePrefs.episodeSortOrder(DesktopSourcePrefs.activeSourceId() ?: WorkId.LOCAL_SOURCE),
-        ),
-    )
-    val state: StateFlow<DesktopUiState> = _state.asStateFlow()
-
-    private var loadJob: Job? = null
-    private var episodeJob: Job? = null
-    private var readerJob: Job? = null
-    private var downloadCatalogJob: Job? = null
-    private var suggestJob: Job? = null
-    private var pageSaveJob: Job? = null
-    private var pendingPageSave: Triple<WorkId, String, Int>? = null
-    private var externalReaderSession: ExternalReaderSession? = null
-    private var autoSwitchedEpisodeId: String? = null
-    private var preAutoSwitchViewMode: ViewMode? = null
-    private var readerToastJob: Job? = null
-
-    private val catalogCache = mutableMapOf<BrowseTab, List<ToonItem>>()
-    private val catalogPages = mutableMapOf<BrowseTab, Pair<Int, Int>>()
-
-    // 계층적 내비게이션 상태 (그리드 <-> 회차리스트 <-> 뷰어)
-    private var lastViewedSeries: ToonItem? = null
-    private var lastViewedEpisodePage: Int = 1
-    private var lastViewedEpisode: EpisodeItem? = null
-    private var previousScreenBeforeSeries: Screen = Screen.Browse
-
-    override fun close() {
-        pageSaveJob?.cancel()
-        val pending = pendingPageSave
-        pendingPageSave = null
-        if (pending != null) {
-            runBlocking(Dispatchers.IO) {
-                repository.saveEpisodePage(pending.first, pending.second, pending.third)
-            }
-        }
-        scope.cancel()
-    }
-
-    fun goBack(): Boolean {
-        val current = _state.value
-        if (current.artistPick != null) {
-            dismissArtistPick()
-            return true
-        }
-        if (current.showPageJump) {
-            togglePageJump(false)
-            return true
-        }
-        if (current.showSyncDialog) {
-            closeSyncDialog()
-            return true
-        }
-        if (current.showUpdateDialog) {
-            closeUpdateDialog()
-            return true
-        }
-        if (current.showDownloadOptions) {
-            closeDownloadOptions()
-            return true
-        }
-        if (current.showAddSourceSheet) {
-            dismissAddSourceSheet()
-            return true
-        }
-        if (current.networkDraft != null) {
-            closeNetworkSourceDialog()
-            return true
-        }
-        if (current.showRemoveSourceSheet) {
-            closeRemoveSourceSheet()
-            return true
-        }
-        if (current.sourceError != null) {
-            dismissSourceError()
-            return true
+        override fun evictReaderImage(url: String) {
+            DesktopImageCache.evict(ImageCacheRole.READER, url)
         }
 
-        return when (current.screen) {
-            Screen.Reader -> {
-                // 3단계(뷰어) -> 2단계(회차리스트)로 즉시 복귀
-                if (externalReaderSession == null) {
-                    lastViewedEpisode = current.currentEpisode
-                }
-                closeReader()
-                true
-            }
-            Screen.Series -> {
-                // 2단계(회차리스트) -> 1단계(그리드/히스토리/다운로드)로 즉시 복귀
-                lastViewedSeries = current.series
-                lastViewedEpisodePage = current.episodePage
-                val prev = previousScreenBeforeSeries
-                if (prev == Screen.History) {
-                    openHistory()
-                } else if (prev == Screen.Downloads) {
-                    openDownloads()
-                } else {
-                    closeSeries()
-                }
-                true
-            }
-            Screen.History -> {
-                closeHistory()
-                true
-            }
-            Screen.Downloads -> {
-                closeDownloads()
-                true
-            }
-            Screen.Settings -> {
-                closeSettings()
-                true
-            }
-            Screen.SourceManager -> {
-                closeSourceManager()
-                true
-            }
-            Screen.Browse -> {
-                if (current.isSearch) {
-                    current.tab?.let { selectTab(it) }
-                    true
-                } else {
-                    false
-                }
-            }
-        }
-    }
+        override fun pickLibraryFolder(): File? = this@DesktopViewModel.pickLibraryFolder()
 
-    fun goForward(): Boolean {
-        val current = _state.value
-        return when (current.screen) {
-            Screen.Browse, Screen.History, Screen.Downloads -> {
-                // 1단계(그리드) -> 2단계(회차리스트)로 이동
-                val targetSeries = lastViewedSeries ?: current.items.firstOrNull()
-                if (targetSeries != null) {
-                    openSeries(targetSeries)
-                    if (lastViewedEpisodePage > 1) {
-                        goToEpisodePage(lastViewedEpisodePage)
-                    }
-                    true
-                } else false
-            }
-            Screen.Series -> {
-                // 2단계(회차리스트) -> 3단계(뷰어)로 이동
-                val targetEp = lastViewedEpisode
-                    ?: current.seriesHistory?.let { h -> current.episodes.firstOrNull { it.wrId == h.lastWrId } }
-                    ?: (current.rawEpisodes.ifEmpty { current.episodes }).lastOrNull() // 1화
-                    ?: current.episodes.firstOrNull()
-                if (targetEp != null) {
-                    openEpisode(targetEp)
-                    true
-                } else false
-            }
-            Screen.Reader -> {
-                // 3단계(뷰어) -> 다음 회차가 있으면 다음 회차로 이동
-                if (current.hasNextEpisode) {
-                    openNextEpisode()
-                    true
-                } else false
-            }
-            else -> false
+        override fun onSourceWriteAccessChanged() {
+            repository.setSourceWriteAccess(DesktopSourcePrefs::isEnabled)
         }
-    }
 
-    init {
-        repository.applyPreferences { id ->
-            DesktopSourcePrefs.language(id)?.ifBlank { null }
-        }
-        repository.setSourceWriteAccess(DesktopSourcePrefs::isEnabled)
-        ensureLocalSourceLoaded()
-        val initialNet = com.comics8.core.network.NetworkSettingsStorage.load { k, def -> prefs.get(k, def) }
-        _state.update { it.copy(networkSettings = initialNet) }
-        repository.client.applyNetworkSettings(initialNet, SyncConstants.DEFAULT_SERVER_URL)
+        override val appVersionName: String = DesktopVersion.VERSION_NAME
+        override val appVersionCode: Int = DesktopVersion.VERSION_CODE
 
-        applyActiveSource(DesktopSourcePrefs.activeSourceId() ?: WorkId.LOCAL_SOURCE, loadListing = false)
-        if (_state.value.activeSourceId != null) {
-            loadPage(1)
-        }
-        checkForUpdate()
-        repository.syncManager?.let { sm ->
-            scope.launch {
-                sm.syncState.collect { s ->
-                    _state.update { it.copy(syncState = s) }
-                    repository.client.applyNetworkSettings(_state.value.networkSettings, s.serverUrl)
-                }
-            }
-            scope.launch {
-                val res = sm.syncPull()
-                if (res.success && (res.favoritesCount > 0 || res.historyCount > 0 || res.episodesCount > 0)) {
-                    applySyncRefresh()
-                }
-            }
-        }
-        repository.downloadManager?.let { dm ->
-            scope.launch {
-                dm.progress.collect { p ->
-                    val prev = _state.value.downloadProgress
-                    _state.update { it.copy(downloadProgress = p) }
-                    val prevWrId = prev.currentTask?.episode?.wrId
-                    val nextWrId = p.currentTask?.episode?.wrId
-                    if ((prev.isRunning && !p.isRunning) || (prevWrId != null && prevWrId != nextWrId)) {
-                        refreshDownloadedWrIds()
-                        if (_state.value.screen == Screen.Downloads) {
-                            loadDownloads()
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    fun onImportedPacksReady() {
-        repository.applyPreferences { id ->
-            DesktopSourcePrefs.language(id)?.ifBlank { null }
-        }
-        _state.update { it.copy(packsReady = true) }
-        val currentActive = _state.value.activeSourceId
-        val prefActive = DesktopSourcePrefs.activeSourceId()
-        if (currentActive != prefActive) {
-            applyActiveSource(prefActive, loadListing = false)
-        }
-        if (_state.value.activeSourceId != null && _state.value.items.isEmpty() && loadJob?.isActive != true) {
-            loadPage(1)
-        }
-    }
-
-    private fun applyActiveSource(sourceId: String?, loadListing: Boolean) {
-        val source = sourceId?.let { repository.activeSource(it) }
-        if (source == null) {
-            readerJob?.cancel()
-            episodeJob?.cancel()
-            lastViewedSeries = null
-            lastViewedEpisode = null
-        }
-        val tabs = source?.let { BrowseTab.forSource(it) }.orEmpty()
-        val nextTab = BrowseTab.afterSourceChange(_state.value.tab, tabs)
-        _state.update {
-            it.copy(
-                activeSourceId = source?.id,
-                installedSources = repository.installedSources(),
-                browseTabs = tabs,
-                tab = nextTab,
-                items = if (source == null) emptyList() else it.items,
-                loading = source != null && loadListing,
-                error = if (source == null) null else it.error,
-                searchSuggestions = emptyList(),
-                sourceRegistry = repository.sourceRegistry(),
-                libraryRoots = DesktopSourcePrefs.libraryRoots(),
-                screen = if (source == null) Screen.Browse else it.screen,
-                series = if (source == null) null else it.series,
-                episodeSortOrder = if (source != null) DesktopSourcePrefs.episodeSortOrder(source.id) else it.episodeSortOrder,
-            )
-        }
-        if (source == null || nextTab == null) return
-        if (loadListing) {
-            selectTab(nextTab, force = true)
-        }
-    }
-
-    fun checkForUpdate(manual: Boolean = false, onFeedback: ((String) -> Unit)? = null) {
-        if (_state.value.updateState.isChecking) return
-        scope.launch {
-            _state.update { it.copy(updateState = it.updateState.copy(isChecking = true)) }
-            val currentVersionName = DesktopVersion.VERSION_NAME
-            val currentVersionCode = DesktopVersion.VERSION_CODE
-            val strings = I18n.strings(_state.value.appLanguage)
-            val serverUrl = _state.value.syncState.serverUrl.ifBlank { SyncConstants.DEFAULT_SERVER_URL }
-            val updateState = withContext(Dispatchers.IO) {
+        override suspend fun checkForAppUpdate(serverUrl: String, strings: AppStrings): AppUpdateState =
+            withContext(Dispatchers.IO) {
                 AppUpdateChecker.checkDesktopUpdate(
-                    currentVersionName = currentVersionName,
-                    currentVersionCode = currentVersionCode,
+                    currentVersionName = appVersionName,
+                    currentVersionCode = appVersionCode,
                     serverUrl = serverUrl,
                     strings = strings,
                 )
             }
-            val newServerUrl = updateState.newServerUrl
-            if (newServerUrl != null) {
-                repository.syncManager?.updateServerUrlIfChanged(newServerUrl)
-            }
-            _state.update {
-                it.copy(
-                    updateState = updateState.copy(isChecking = false),
-                    showUpdateDialog = if (manual && updateState.hasUpdate) true else it.showUpdateDialog,
-                )
-            }
-            if (manual) {
-                if (updateState.error != null) {
-                    onFeedback?.invoke(updateState.error ?: strings.msgUpdateCheckFailed)
-                } else if (!updateState.hasUpdate) {
-                    onFeedback?.invoke(strings.msgLatestVersionInUse(currentVersionName))
-                }
-            }
-        }
+
+        override suspend fun downloadAndInstallUpdate(
+            downloadUrl: String,
+            onProgress: (Float) -> Unit,
+        ): Result<Unit> = DesktopUpdateManager.downloadAndApplyUpdate(downloadUrl, onProgress)
+
+        override val autoSwitchWebtoonInReader: Boolean = true
+        override val markSeenOnFavoriteTab: Boolean = false
+        override val initialLoadWithForce: Boolean = false
+        override val collapseSearchClearsActiveSearch: Boolean = false
+        override val refreshReaderUsesAsRefresh: Boolean = false
     }
 
-    fun openUpdateDialog() {
-        _state.update { it.copy(showUpdateDialog = true) }
+    val controller: SharedAppController = SharedAppController(
+        scope = scope,
+        repository = repository,
+        jsPackStore = jsPackStore,
+        networkSourceStore = networkSourceStore,
+        platform = platform,
+    )
+
+    val state: StateFlow<DesktopUiState> = controller.state
+
+    override fun close() {
+        controller.close()
+        scope.cancel()
     }
 
-    fun closeUpdateDialog() {
-        _state.update { it.copy(showUpdateDialog = false) }
-    }
+    fun goBack(): Boolean = controller.goBack()
+    fun goForward(): Boolean = controller.goForward()
+    fun onImportedPacksReady() = controller.onImportedPacksReady()
 
-    fun startUpdate() {
-        val updateUrl = _state.value.updateState.downloadUrl
-        if (updateUrl.isBlank()) return
-        scope.launch {
-            _state.update {
-                it.copy(
-                    updateState = it.updateState.copy(
-                        isDownloading = true,
-                        downloadProgress = 0f,
-                        error = null,
-                    )
-                )
-            }
-            val result = DesktopUpdateManager.downloadAndApplyUpdate(
-                downloadUrl = updateUrl,
-                onProgress = { progress ->
-                    _state.update { it.copy(updateState = it.updateState.copy(downloadProgress = progress)) }
-                }
-            )
-            result.fold(
-                onSuccess = {
-                    _state.update { it.copy(updateState = it.updateState.copy(isDownloading = false)) }
-                },
-                onFailure = { err ->
-                    val strings = I18n.strings(_state.value.appLanguage)
-                    val detail = err.localizedMessage ?: err.message
-                    val errorMsg = if (detail.isNullOrBlank()) strings.msgUpdateDownloadFailed else "${strings.msgUpdateDownloadFailed}: $detail"
-                    _state.update {
-                        it.copy(
-                            updateState = it.updateState.copy(
-                                isDownloading = false,
-                                error = errorMsg,
-                            )
-                        )
-                    }
-                }
-            )
-        }
-    }
+    fun closeUpdateDialog() = controller.dismissUpdateDialog()
+    fun startUpdate() = controller.startUpdate()
 
-    fun selectTab(tab: BrowseTab) = selectTab(tab, force = false)
-
-    private fun selectTab(tab: BrowseTab, force: Boolean) {
-        if (
-            !force &&
-            tab == _state.value.tab &&
-            _state.value.screen == Screen.Browse &&
-            !_state.value.isSearch
-        ) return
-        loadJob?.cancel()
-        episodeJob?.cancel()
-        readerJob?.cancel()
-        val cached = catalogCache[tab]
-        val (cachedPage, cachedLastPage) = catalogPages[tab] ?: Pair(1, 1)
-        _state.update {
-            it.copy(
-                tab = tab,
-                page = cachedPage,
-                lastPage = cachedLastPage,
-                items = cached ?: emptyList(),
-                loading = cached == null,
-                error = null,
-                screen = Screen.Browse,
-                searchQuery = null,
-                searchInput = "",
-                series = null,
-                rawEpisodes = emptyList(),
-                episodes = emptyList(),
-                currentEpisode = null,
-                readerImages = emptyList(),
-                readerError = null,
-                scrollToTopTrigger = it.scrollToTopTrigger + 1,
-            )
-        }
-        if (cached == null) {
-            loadPage(cachedPage)
-        } else {
-            scope.launch {
-                val fresh = repository.refreshProgress(cached)
-                catalogCache[tab] = fresh
-                if (_state.value.tab == tab && _state.value.screen == Screen.Browse && !_state.value.isSearch) {
-                    _state.update { it.copy(items = fresh) }
-                }
-                triggerEpisodeCountSync(fresh)
-            }
-        }
-    }
-
-    fun setActiveSource(sourceId: String) {
-        if (sourceId !in DesktopSourcePrefs.installedIds()) return
-        DesktopSourcePrefs.setActiveSourceId(sourceId)
-        repository.setSourceWriteAccess(DesktopSourcePrefs::isEnabled)
-        applyActiveSource(sourceId, loadListing = true)
-        if (_state.value.screen == Screen.History) {
-            loadHistory()
-        }
-        if (_state.value.screen == Screen.Downloads) {
-            loadDownloads()
-        }
-    }
-
-    fun setSourceEnabled(sourceId: String, enabled: Boolean) {
-        val id = sourceId.trim()
-        if (id.isEmpty()) return
-        if (!enabled) {
-            uninstallSource(id)
-            return
-        }
-        if (id == WorkId.LOCAL_SOURCE) {
-            ensureLocalSourceLoaded()
-        }
-        DesktopSourcePrefs.setEnabled(id, true)
-        repository.setSourceWriteAccess(DesktopSourcePrefs::isEnabled)
-        _state.update {
-            it.copy(
-                installedSources = repository.installedSources(),
-                libraryRoots = DesktopSourcePrefs.libraryRoots(),
-            )
-        }
-    }
-
-    fun openAddSourceSheet() {
-        _state.update {
-            it.copy(
-                showAddSourceSheet = true,
-                showRemoveSourceSheet = false,
-            )
-        }
-    }
-
-    fun dismissAddSourceSheet() {
-        _state.update { it.copy(showAddSourceSheet = false) }
-    }
-
-    fun closeAddSourceSheet() = dismissAddSourceSheet()
-
-    fun openNetworkSourceDialog(protocol: NetworkProtocol) {
-        val defaultName = if (protocol == NetworkProtocol.SMB) "SMB 저장소" else "WebDAV 저장소"
-        _state.update {
-            it.copy(
-                networkDraft = NetworkSourceConfig(protocol = protocol, name = defaultName),
-                networkTesting = false,
-                networkTestMessage = null,
-                networkTestSucceeded = false,
-                showAddSourceSheet = false,
-            )
-        }
-    }
-
-    fun updateNetworkDraft(draft: NetworkSourceConfig) {
-        _state.update {
-            it.copy(networkDraft = draft, networkTestMessage = null, networkTestSucceeded = false)
-        }
-    }
-
-    fun closeNetworkSourceDialog() {
-        _state.update {
-            it.copy(
-                networkDraft = null,
-                networkTesting = false,
-                networkTestMessage = null,
-                networkTestSucceeded = false,
-            )
-        }
-    }
-
-    fun testNetworkConnection() {
-        val draft = _state.value.networkDraft ?: return
-        scope.launch {
-            _state.update { it.copy(networkTesting = true, networkTestMessage = null, networkTestSucceeded = false) }
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    val valid = draft.validated()
-                    createNetworkFileSystem(valid).use { it.test() }
-                    valid
-                }
-            }
-            _state.update {
-                if (it.networkDraft?.id != draft.id) it else it.copy(
-                    networkTesting = false,
-                    networkTestMessage = result.fold(
-                        onSuccess = { "연결에 성공했습니다" },
-                        onFailure = { error -> error.message?.ifBlank { null } ?: "연결에 실패했습니다" },
-                    ),
-                    networkTestSucceeded = result.isSuccess,
-                    networkDraft = result.getOrNull() ?: it.networkDraft,
-                )
-            }
-        }
-    }
-
-    fun registerNetworkConnection() {
-        val current = _state.value
-        val draft = current.networkDraft ?: return
-        if (!current.networkTestSucceeded) return
-        scope.launch {
-            try {
-                val source = withContext(Dispatchers.IO) {
-                    val valid = draft.validated()
-                    networkSourceStore.save(valid)
-                    networkSourceStore.createSource(valid)
-                }
-                val registry = repository.sourceRegistry()
-                registry.remove(source.id)
-                check(registry.add(source)) { "연결을 등록할 수 없습니다" }
-                DesktopSourcePrefs.setInstalledIds(DesktopSourcePrefs.installedIds() + source.id)
-                repository.setSourceWriteAccess(DesktopSourcePrefs::isEnabled)
-                clearCatalogCache(source.id)
-                closeNetworkSourceDialog()
-                setActiveSource(source.id)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                _state.update {
-                    it.copy(networkTesting = false, networkTestMessage = e.message ?: "등록에 실패했습니다")
-                }
-            }
-        }
-    }
-
-    fun openRemoveSourceSheet() {
-        if (_state.value.installedSources.none { it.id != WorkId.LOCAL_SOURCE }) return
-        _state.update { it.copy(showRemoveSourceSheet = true, showAddSourceSheet = false) }
-    }
-
-    fun closeRemoveSourceSheet() {
-        _state.update { it.copy(showRemoveSourceSheet = false) }
-    }
-
-    fun dismissSourceError() {
-        _state.update { it.copy(sourceError = null) }
-    }
+    fun closeAddSourceSheet() = controller.closeAddSourceSheet()
+    fun updateNetworkDraft(draft: NetworkSourceConfig) = controller.updateNetworkDraft(draft)
+    fun closeNetworkSourceDialog() = controller.closeNetworkSourceDialog()
+    fun testNetworkConnection() = controller.testNetworkConnection()
+    fun registerNetworkConnection() = controller.registerNetworkConnection()
+    fun closeRemoveSourceSheet() = controller.closeRemoveSourceSheet()
+    fun dismissSourceError() = controller.dismissSourceError()
 
     fun importJsFile(file: File) {
         scope.launch {
@@ -676,1558 +153,44 @@ class DesktopViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _state.update {
-                    it.copy(sourceError = e.message?.ifBlank { null } ?: "파일을 읽을 수 없습니다")
-                }
+                controller.setSourceError(e.message?.ifBlank { null } ?: "파일을 읽을 수 없습니다")
             }
         }
     }
 
-    fun importJsScript(script: String, fileName: String = "source.js") {
-        scope.launch {
-            try {
-                val source = withContext(Dispatchers.IO) {
-                    jsPackStore.ingest(script, fileName)
-                }
-                val registry = repository.sourceRegistry()
-                registry.remove(source.id)
-                check(registry.add(source)) { "failed to register ${'$'}{source.id}" }
-                DesktopSourcePrefs.setInstalledIds(DesktopSourcePrefs.installedIds() + source.id)
-                repository.setSourceWriteAccess(DesktopSourcePrefs::isEnabled)
-                clearCatalogCache(source.id)
-                closeAddSourceSheet()
-                setActiveSource(source.id)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                _state.update {
-                    it.copy(sourceError = e.message?.ifBlank { null } ?: "가져오기에 실패했습니다")
-                }
-            }
-        }
-    }
-
-    fun uninstallSource(sourceId: String) {
-        val id = sourceId.trim()
-        if (id.isEmpty() || id == WorkId.LOCAL_SOURCE) return
-        jsPackStore.delete(id)
-        networkSourceStore.delete(id)
-        repository.sourceRegistry().remove(id)
-        DesktopSourcePrefs.setEnabled(id, false)
-        repository.setSourceWriteAccess(DesktopSourcePrefs::isEnabled)
-        clearCatalogCache(id)
-        closeRemoveSourceSheet()
-        if (_state.value.activeSourceId == id) {
-            applyActiveSource(WorkId.LOCAL_SOURCE, loadListing = true)
-        } else {
-            _state.update {
-                it.copy(
-                    installedSources = repository.installedSources(),
-                    sourceRegistry = repository.sourceRegistry(),
-                    libraryRoots = DesktopSourcePrefs.libraryRoots(),
-                )
-            }
-        }
-    }
-
-    fun removeActiveSource() {
-        val id = _state.value.activeSourceId ?: return
-        if (id == WorkId.LOCAL_SOURCE) return
-        uninstallSource(id)
-    }
-
-    fun getNetworkSourceConfig(sourceId: String): com.comics8.core.source.network.NetworkSourceConfig? {
-        val direct = (repository.sourceRegistry().getOrNull(sourceId) as? com.comics8.core.source.network.NetworkLibrarySource)?.config
-        if (direct != null) return direct
-        return networkSourceStore.all().firstOrNull { it.id == sourceId }
-    }
-
-    fun updateNetworkSourceConfig(
-        config: com.comics8.core.source.network.NetworkSourceConfig,
-        onResult: (Boolean, String?) -> Unit,
-    ) {
-        scope.launch {
-            try {
-                val valid = withContext(Dispatchers.IO) {
-                    val v = config.validated()
-                    com.comics8.core.source.network.NetworkSourceRuntime.remove(v.id)
-                    networkSourceStore.save(v)
-                    v
-                }
-                val newSource = networkSourceStore.createSource(valid)
-                val registry = repository.sourceRegistry()
-                registry.remove(valid.id)
-                registry.add(newSource)
-                clearCatalogCache(valid.id)
-                _state.update {
-                    it.copy(
-                        installedSources = repository.installedSources(),
-                        sourceRegistry = repository.sourceRegistry(),
-                    )
-                }
-                onResult(true, null)
-            } catch (e: Exception) {
-                onResult(false, e.message ?: "네트워크 설정 저장에 실패했습니다")
-            }
-        }
-    }
-
-    fun getJsSourceScript(sourceId: String): String? {
-        if (sourceId == WorkId.LOCAL_SOURCE || sourceId.startsWith("network-")) return null
-        val file = runCatching { jsPackStore.fileFor(sourceId) }.getOrNull() ?: return null
-        return if (file.isFile) {
-            runCatching { file.readText(Charsets.UTF_8) }.getOrNull()
-        } else null
-    }
-
-    fun updateJsSourceScript(
-        sourceId: String,
-        newScript: String,
-        onResult: (Boolean, String?) -> Unit,
-    ) {
-        scope.launch {
-            try {
-                val source = withContext(Dispatchers.IO) {
-                    val bytes = newScript.toByteArray(Charsets.UTF_8)
-                    com.comics8.core.source.js.JsPackStore.checkSize(bytes.size)
-                    val s = com.comics8.core.source.js.JsComicSource.fromScript(newScript, "$sourceId.js")
-                    jsPackStore.copy(sourceId, s.hostApiLevel, bytes)
-                    s
-                }
-                val registry = repository.sourceRegistry()
-                registry.remove(sourceId)
-                registry.add(source)
-                clearCatalogCache(sourceId)
-                _state.update {
-                    it.copy(
-                        installedSources = repository.installedSources(),
-                        sourceRegistry = repository.sourceRegistry(),
-                    )
-                }
-                onResult(true, null)
-            } catch (e: Exception) {
-                onResult(false, e.message ?: "JS 스크립트 저장에 실패했습니다")
-            }
-        }
-    }
-
-    fun requestRemoveSource(source: com.comics8.core.source.ComicSource) {
-        uninstallSource(source.id)
-    }
-
-    fun openAddSmb() {
-        openNetworkSourceDialog(com.comics8.core.source.network.NetworkProtocol.SMB)
-    }
-
-    fun openAddWebDav() {
-        openNetworkSourceDialog(com.comics8.core.source.network.NetworkProtocol.WEBDAV)
-    }
-
-    fun importJs() {
-        openAddSourceSheet()
-    }
-
-    fun addLibraryRoot() {
-        if (_state.value.activeSourceId != WorkId.LOCAL_SOURCE) return
-        val dir = pickLibraryFolder() ?: return
-        val path = try {
-            dir.canonicalPath
-        } catch (_: Exception) {
-            dir.absolutePath
-        }
-        if (!File(path).isDirectory) return
-        val current = DesktopSourcePrefs.libraryRoots()
-        if (path !in current) {
-            DesktopSourcePrefs.setLibraryRoots(current + path)
-        }
-        _state.update { it.copy(libraryRoots = DesktopSourcePrefs.libraryRoots()) }
-        catalogCache.clear()
-        catalogPages.clear()
-        refresh()
-    }
-
-    fun removeLibraryRoot(path: String) {
-        if (_state.value.activeSourceId != WorkId.LOCAL_SOURCE) return
-        DesktopSourcePrefs.setLibraryRoots(DesktopSourcePrefs.libraryRoots().filterNot { it == path })
-        _state.update { it.copy(libraryRoots = DesktopSourcePrefs.libraryRoots()) }
-        catalogCache.clear()
-        catalogPages.clear()
-        refresh()
-    }
-
-    private fun ensureLocalSourceLoaded() {
-        val registry = repository.sourceRegistry()
-        if (registry.contains(WorkId.LOCAL_SOURCE)) return
-        registry.add(
-            LocalSource(
-                roots = { DesktopSourcePrefs.libraryRoots().map { File(it) } },
-                index = LibraryScanIndex(
-                    File(System.getProperty("user.home"), ".comics8/cache/library-index/local.json"),
-                ),
-            ),
-        )
-    }
-
-    fun onListingOpen(item: ToonItem) {
-        if (item.artistChoices.size >= 2) {
-            _state.update { it.copy(artistPick = ArtistPickRequest(item)) }
-        } else {
-            openSeries(item)
-        }
-    }
-
-    fun openArtistPicker(item: ToonItem, entryEpisodeId: String? = item.entryEpisodeId) {
-        if (item.artistChoices.size < 2) return
-        _state.update { it.copy(artistPick = ArtistPickRequest(item, entryEpisodeId)) }
-    }
-
-    fun dismissArtistPick() {
-        _state.update { it.copy(artistPick = null) }
-    }
-
-    fun pickArtist(artist: ArtistRef) {
-        val request = _state.value.artistPick ?: return
-        dismissArtistPick()
-        val parent = repository.sourceOrNull(request.item.sourceId)
-            ?.resolveParent(request.item, artist, request.entryEpisodeId)
-        if (parent != null) {
-            openSeries(parent)
-        }
-    }
-
-    private fun updateThumbnailIfBlank(workId: WorkId, thumbUrl: String) {
-        if (thumbUrl.isBlank()) return
-        _state.update { curr ->
-            val updatedItems = curr.items.map { row ->
-                if (row.workId() == workId && row.thumbUrl.isBlank()) {
-                    row.copy(thumbUrl = thumbUrl)
-                } else row
-            }
-            if (!curr.isSearch) {
-                curr.tab?.let { tab ->
-                    catalogCache[tab]?.let { cached ->
-                        catalogCache[tab] = cached.map { row ->
-                            if (row.workId() == workId && row.thumbUrl.isBlank()) {
-                                row.copy(thumbUrl = thumbUrl)
-                            } else row
-                        }
-                    }
-                }
-            }
-            val updatedSeries = if (curr.series?.workId() == workId && curr.series.thumbUrl.isBlank()) {
-                curr.series.copy(thumbUrl = thumbUrl)
-            } else curr.series
-            curr.copy(items = updatedItems, series = updatedSeries)
-        }
-    }
-
-    private fun triggerEpisodeCountSync(items: List<ToonItem>) {
-        repository.syncEpisodeCounts(
-            items,
-            onThumbnailResolved = ::updateThumbnailIfBlank,
-            onUpdated = { workId, total, progressText ->
-                _state.update { curr ->
-                    val updatedItems = curr.items.map { row ->
-                        if (row.workId() == workId) row.copy(readProgress = progressText) else row
-                    }
-                    if (!curr.isSearch) {
-                        curr.tab?.let { tab ->
-                            catalogCache[tab]?.let { cached ->
-                                catalogCache[tab] = cached.map { row ->
-                                    if (row.workId() == workId) row.copy(readProgress = progressText) else row
-                                }
-                            }
-                        }
-                    }
-                    curr.copy(
-                        items = updatedItems,
-                        catalogTotals = curr.catalogTotals + (workId.storageKey() to total),
-                        seriesHistory = if (curr.series?.workId() == workId) {
-                            curr.seriesHistory?.let { currHist ->
-                                val merged = RepositoryTransforms.historyProgress(currHist.lastReadOrder, total)
-                                currHist.copy(
-                                    totalEpisodes = total.count,
-                                    lastReadOrder = merged.lastReadOrder,
-                                    hasNew = merged.hasNew,
-                                )
-                            }
-                        } else curr.seriesHistory,
-                    )
-                }
-            },
-        )
-    }
-
-    fun loadPage(page: Int, replace: Boolean = false) {
-        val tab = _state.value.tab ?: return
-        val targetPage = page.coerceAtLeast(1)
-        if (!replace && loadJob?.isActive == true && _state.value.page == targetPage && _state.value.loading) {
-            return
-        }
-        loadJob?.cancel()
-
-        loadJob = scope.launch {
-            _state.update {
-                it.copy(
-                    loading = if (replace) it.items.isEmpty() else true,
-                    refreshing = replace && it.items.isNotEmpty(),
-                    error = null,
-                )
-            }
-            try {
-                val result = repository.loadListing(tab, targetPage)
-                catalogCache[tab] = result.items
-                catalogPages[tab] = Pair(result.currentPage, result.lastPage)
-                _state.update {
-                    it.copy(
-                        page = result.currentPage,
-                        lastPage = result.lastPage,
-                        items = result.items,
-                        loading = false,
-                        refreshing = false,
-                        error = null,
-                        scrollToTopTrigger = it.scrollToTopTrigger + 1,
-                    )
-                }
-                if (result.items.isNotEmpty() && tab !is BrowseTab.Favorite) {
-                    repository.markSeen(result.items)
-                }
-                triggerEpisodeCountSync(result.items)
-            } catch (e: Exception) {
-                if (e is CancellationException) return@launch
-                _state.update {
-                    it.copy(
-                        loading = false,
-                        refreshing = false,
-                        error = e.localizedMessage ?: "목록을 불러오지 못했습니다.",
-                    )
-                }
-            }
-        }
-    }
-
-    fun refreshReaderImages() {
-        DesktopImageCache.clearFailures()
-        DesktopImageCache.clear(ImageCacheRole.READER)
-        _state.update { it.copy(refreshEpoch = it.refreshEpoch + 1) }
-        if (externalReaderSession != null) return
-        val episode = _state.value.currentEpisode ?: return
-        loadReaderImages(episode)
-    }
-
-    fun refresh() {
-        checkForUpdate()
-        if (_state.value.screen == Screen.Reader) {
-            refreshReaderImages()
-            return
-        }
-        DesktopImageCache.clearFailures()
-        _state.update { it.copy(refreshEpoch = it.refreshEpoch + 1) }
-        if (_state.value.activeSourceId == null) return
-        if (_state.value.screen == Screen.Browse) {
-            syncOnBrowseRefresh()
-        }
-        if (_state.value.screen == Screen.Series) {
-            val series = _state.value.series
-            if (series != null) {
-                loadEpisodes(series, _state.value.episodePage)
-            }
-            return
-        }
-        if (_state.value.isSearch) {
-            val query = _state.value.searchQuery.orEmpty()
-            if (query.isNotEmpty()) search(query)
-        } else {
-            catalogCache.remove(_state.value.tab)
-            loadPage(_state.value.page, replace = true)
-        }
-    }
-
-    private fun syncOnBrowseRefresh() {
-        val sm = repository.syncManager ?: return
-        scope.launch {
-            val res = sm.syncIfIdle() ?: return@launch
-            if (res.success && (res.favoritesCount > 0 || res.historyCount > 0 || res.episodesCount > 0)) {
-                val now = _state.value
-                if (now.screen == Screen.Browse && !now.isSearch) {
-                    loadPage(now.page, replace = true)
-                }
-            }
-        }
-    }
-
-    fun search(query: String) {
-        val sourceId = _state.value.activeSourceId ?: return
-        val q = query.trim()
-        if (q.isEmpty()) return
-        loadJob?.cancel()
-        _state.update {
-            it.copy(
-                searchQuery = q,
-                searchInput = q,
-                searchSuggestions = emptyList(),
-                items = emptyList(),
-                page = 1,
-                lastPage = 1,
-                loading = true,
-                error = null,
-                screen = Screen.Browse,
-            )
-        }
-        loadJob = scope.launch {
-            try {
-                val results = repository.search(q, sourceId)
-                repository.markSeen(results)
-                _state.update {
-                    it.copy(
-                        items = results,
-                        loading = false,
-                        error = null,
-                        scrollToTopTrigger = it.scrollToTopTrigger + 1,
-                    )
-                }
-                triggerEpisodeCountSync(results)
-            } catch (e: Exception) {
-                if (e is CancellationException) return@launch
-                _state.update {
-                    it.copy(
-                        loading = false,
-                        error = humanError("검색에 실패했습니다.", e),
-                    )
-                }
-            }
-        }
-    }
-
-    fun updateSearchInput(input: String) {
-        _state.update { it.copy(searchInput = input) }
-        requestSuggestions(input)
-    }
-
-    fun applySearchSuggestion(suggestion: com.comics8.core.source.SearchSuggestion) {
-        updateSearchInput(suggestion.applyTo(_state.value.searchInput))
-    }
-
-    private fun requestSuggestions(value: String) {
-        suggestJob?.cancel()
-        val sourceId = _state.value.activeSourceId
-        if (value.isBlank() || sourceId == null) {
-            _state.update { it.copy(searchSuggestions = emptyList()) }
-            return
-        }
-        suggestJob = scope.launch {
-            kotlinx.coroutines.delay(200)
-            try {
-                val items = repository.suggest(value, sourceId)
-                _state.update { current ->
-                    if (current.searchInput == value) current.copy(searchSuggestions = items) else current
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                _state.update { it.copy(searchSuggestions = emptyList()) }
-            }
-        }
-    }
-
-    fun toggleSearchBar() {
-        _state.update {
-            val nextExpanded = !it.searchExpanded
-            it.copy(
-                searchExpanded = nextExpanded,
-                searchInput = if (!nextExpanded) "" else it.searchInput,
-                searchSuggestions = if (!nextExpanded) emptyList() else it.searchSuggestions,
-            )
-        }
-    }
-
-    fun openSeries(item: ToonItem) {
-        val currentScreen = _state.value.screen
-        if (currentScreen != Screen.Series && currentScreen != Screen.Reader) {
-            previousScreenBeforeSeries = currentScreen
-        }
-        lastViewedSeries = item
-        DesktopImageCache.cancelPendingPreviews()
-        DesktopImageCache.clear(ImageCacheRole.EPISODE)
-        episodeJob?.cancel()
-        val sortOrder = DesktopSourcePrefs.episodeSortOrder(item.sourceId)
-        _state.update {
-            it.copy(
-                screen = Screen.Series,
-                series = item,
-                seriesHistory = null,
-                rawEpisodes = emptyList(),
-                episodes = emptyList(),
-                episodeSortOrder = sortOrder,
-                episodePage = 1,
-                episodeLastPage = 1,
-                episodeError = null,
-                seriesFavorited = false,
-                highlightedEpisodeId = item.entryEpisodeId,
-                downloadedWrIds = emptySet(),
-            )
-        }
-        loadEpisodes(item, 1)
-        scope.launch {
-            val favorited = repository.isFavorite(item.workId())
-            val history = repository.getHistory(item.workId())
-            val readCount = countIfNeeded(item.workId())
-            val catalogTotal = repository.getCatalogTotal(item.workId())
-            val itemKey = item.workId().storageKey()
-            _state.update { current ->
-                val nextTotals = if (catalogTotal != null && current.catalogTotals[itemKey] == null) {
-                    current.catalogTotals + (itemKey to catalogTotal)
-                } else {
-                    current.catalogTotals
-                }
-                if (current.series?.workId() == item.workId()) {
-                    current.copy(
-                        seriesFavorited = favorited,
-                        seriesHistory = history,
-                        readCounts = current.readCounts.withCount(item.workId(), readCount),
-                        catalogTotals = nextTotals,
-                    )
-                } else {
-                    current.copy(catalogTotals = nextTotals)
-                }
-            }
-        }
-    }
-
-    fun loadEpisodes(item: ToonItem, page: Int) {
-        episodeJob?.cancel()
-        episodeJob = scope.launch {
-            val local = if (page <= 1) {
-                repository.loadLocalEpisodes(item)
-            } else {
-                com.comics8.core.model.EpisodePage(emptyList(), page, 1)
-            }
-            val hasLocal = local.items.isNotEmpty()
-            val sortOrder = DesktopSourcePrefs.episodeSortOrder(item.sourceId)
-            _state.update {
-                it.copy(
-                    episodeSortOrder = sortOrder,
-                    episodeLoading = !hasLocal,
-                    episodeError = null,
-                    rawEpisodes = if (hasLocal) local.items else it.rawEpisodes,
-                    episodes = if (hasLocal) local.items.sortedWithOrder(sortOrder) else it.episodes,
-                    episodePage = if (hasLocal) 1 else it.episodePage,
-                    episodeLastPage = if (hasLocal) 1 else it.episodeLastPage,
-                )
-            }
-            if (hasLocal) {
-                refreshDownloadedWrIds()
-            }
-            try {
-                val result = repository.loadEpisodes(item, page)
-                _state.update {
-                    it.copy(
-                        rawEpisodes = result.items,
-                        episodes = result.items.sortedWithOrder(sortOrder),
-                        episodePage = result.currentPage,
-                        episodeLastPage = result.lastPage,
-                        episodeLoading = false,
-                        episodeError = null,
-                        scrollToTopTrigger = it.scrollToTopTrigger + 1,
-                    )
-                }
-                refreshDownloadedWrIds()
-                if (result.items.isNotEmpty()) {
-                    val firstThumb = result.items.firstOrNull()?.thumbUrl
-                    if (!firstThumb.isNullOrBlank() && item.thumbUrl.isBlank()) {
-                        updateThumbnailIfBlank(item.workId(), firstThumb)
-                    }
-                    // One page cannot produce a count: reuse the learned correction or count again.
-                    // The page just loaded is handed over so the tail page is not fetched twice.
-                    val metadata = repository.fetchEpisodeMetadata(item, knownPage = result)
-                    metadata.total?.let { t ->
-                        _state.update { it.copy(catalogTotals = it.catalogTotals + (item.workId().storageKey() to t)) }
-                    }
-                    updateHistoryAndProgress(item, metadata.total)
-                }
-            } catch (e: Exception) {
-                if (e is CancellationException) return@launch
-                val keepLocal = hasLocal || _state.value.episodes.isNotEmpty()
-                _state.update {
-                    it.copy(
-                        episodeLoading = false,
-                        episodeError = if (keepLocal) {
-                            null
-                        } else {
-                            e.localizedMessage ?: "회차 목록을 불러오지 못했습니다."
-                        },
-                    )
-                }
-            }
-        }
-    }
-
-    /**
-     * Persists the counted total and keeps the history row's copy plus hasNew in sync. When the
-     * listing has not been counted ([counted] null) nothing is written: an uncounted work simply has
-     * no badge instead of a guessed one.
-     */
-    private suspend fun updateHistoryAndProgress(item: ToonItem, counted: EpisodeListingTotal?) {
-        val total = counted?.takeIf { it.isValid } ?: return
-        repository.saveCatalogTotal(item.workId(), total)
-        val rawEpisodes = _state.value.rawEpisodes.ifEmpty { _state.value.episodes }
-        val latestRead = rawEpisodes.firstOrNull { it.isRead }
-        val seriesKey = item.workId().storageKey()
-        val derivedPosition = if (latestRead != null) {
-            ReaderDomain.episodePosition(
-                episodeIds = rawEpisodes.map(EpisodeItem::wrId),
-                currentEpisodeId = latestRead.wrId,
-                currentPage = _state.value.episodePage,
-                lastPage = _state.value.episodeLastPage,
-                knownTotal = _state.value.catalogTotals[seriesKey] ?: total,
-                pageSize = repository.sourceOrNull(item.sourceId)?.episodePageSize ?: 100,
-            )
-        } else null
-        val derivedOrder = derivedPosition?.readOrder
-
-        val existing = repository.getHistory(item.workId())
-        if (existing == null) {
-            if (latestRead != null && derivedOrder != null) {
-                val nextEp = derivedPosition.nextEpisodeIndex?.let { rawEpisodes.getOrNull(it) }
-                val progress = RepositoryTransforms.historyProgress(derivedOrder, total)
-                val created = ReadHistoryRecord(
-                    sourceId = item.sourceId,
-                    toonId = item.id,
-                    toonTitle = item.title,
-                    toonThumbUrl = item.thumbUrl.orEmpty(),
-                    toonHref = item.href,
-                    lastWrId = latestRead.wrId,
-                    lastEpisodeTitle = latestRead.title,
-                    lastEpisodeHref = latestRead.href,
-                    lastReadOrder = progress.lastReadOrder,
-                    totalEpisodes = total.count,
-                    lastReadAt = latestRead.readAt ?: System.currentTimeMillis(),
-                    nextWrId = nextEp?.wrId,
-                    nextEpisodeTitle = nextEp?.title,
-                    nextEpisodeHref = nextEp?.href,
-                    hasNew = progress.hasNew,
-                )
-                repository.saveHistory(created)
-                val (progressText, readCount) = listingProgress(
-                    item.sourceId,
-                    created.lastReadOrder,
-                    total,
-                    item.workId(),
-                )
-                _state.update { curr ->
-                    val updatedItems = curr.items.map { row ->
-                        if (row.workId() == item.workId()) row.copy(readProgress = progressText) else row
-                    }
-                    curr.copy(
-                        items = updatedItems,
-                        seriesHistory = if (curr.series?.workId() == item.workId()) created else curr.seriesHistory,
-                        readCounts = curr.readCounts.withCount(item.workId(), readCount),
-                    )
-                }
-            } else {
-                val (progressText, _) = listingProgress(
-                    item.sourceId,
-                    0,
-                    total,
-                    item.workId(),
-                )
-                if (progressText.isNotBlank()) {
-                    _state.update { curr ->
-                        val updatedItems = curr.items.map { row ->
-                            if (row.workId() == item.workId()) row.copy(readProgress = progressText) else row
-                        }
-                        curr.copy(items = updatedItems)
-                    }
-                }
-            }
-            return
-        }
-
-        val mergedProgress = RepositoryTransforms.historyProgress(existing.lastReadOrder, total)
-        val candidateOrder = mergedProgress.lastReadOrder
-        val shouldElevate = derivedOrder != null && derivedOrder > candidateOrder
-        val safeOrder = if (shouldElevate) derivedOrder!! else candidateOrder
-        val hasNew = if (shouldElevate) total.needsRefresh(safeOrder) else mergedProgress.hasNew
-
-        val updatedWrId = if (shouldElevate && latestRead != null) latestRead.wrId else existing.lastWrId
-        val updatedTitle = if (shouldElevate && latestRead != null) latestRead.title else existing.lastEpisodeTitle
-        val updatedHref = if (shouldElevate && latestRead != null) latestRead.href else existing.lastEpisodeHref
-        val updatedReadAt = if (shouldElevate && latestRead != null) {
-            maxOf(existing.lastReadAt, latestRead.readAt ?: 0L)
-        } else existing.lastReadAt
-        val updatedNextWrId = if (shouldElevate && derivedPosition?.nextEpisodeIndex != null) {
-            rawEpisodes.getOrNull(derivedPosition.nextEpisodeIndex!!)?.wrId ?: existing.nextWrId
-        } else existing.nextWrId
-        val updatedNextTitle = if (shouldElevate && derivedPosition?.nextEpisodeIndex != null) {
-            rawEpisodes.getOrNull(derivedPosition.nextEpisodeIndex!!)?.title ?: existing.nextEpisodeTitle
-        } else existing.nextEpisodeTitle
-        val updatedNextHref = if (shouldElevate && derivedPosition?.nextEpisodeIndex != null) {
-            rawEpisodes.getOrNull(derivedPosition.nextEpisodeIndex!!)?.href ?: existing.nextEpisodeHref
-        } else existing.nextEpisodeHref
-
-        if (existing.totalEpisodes != total.count ||
-            existing.lastReadOrder != safeOrder ||
-            existing.hasNew != hasNew ||
-            existing.lastWrId != updatedWrId ||
-            existing.lastReadAt != updatedReadAt
-        ) {
-            val updated = existing.copy(
-                totalEpisodes = total.count,
-                lastReadOrder = safeOrder,
-                hasNew = hasNew,
-                lastWrId = updatedWrId,
-                lastEpisodeTitle = updatedTitle,
-                lastEpisodeHref = updatedHref,
-                lastReadAt = updatedReadAt,
-                nextWrId = updatedNextWrId,
-                nextEpisodeTitle = updatedNextTitle,
-                nextEpisodeHref = updatedNextHref,
-            )
-            repository.saveHistory(updated)
-            val (progressText, readCount) = listingProgress(
-                item.sourceId,
-                updated.lastReadOrder,
-                total,
-                item.workId(),
-            )
-            _state.update { curr ->
-                val updatedItems = curr.items.map { row ->
-                    if (row.workId() == item.workId()) row.copy(readProgress = progressText) else row
-                }
-                curr.copy(
-                    items = updatedItems,
-                    seriesHistory = if (curr.series?.workId() == item.workId()) updated else curr.seriesHistory,
-                    readCounts = curr.readCounts.withCount(item.workId(), readCount),
-                )
-            }
-        }
-    }
-
-    fun goToEpisodePage(page: Int) {
-        val series = _state.value.series ?: return
-        val clamped = ReaderDomain.clampPage(page, _state.value.episodeLastPage)
-        loadEpisodes(series, clamped)
-    }
-
-    fun goToPage(page: Int) {
-        if (_state.value.tab?.paginated != true) return
-        val clamped = ReaderDomain.clampPage(page, _state.value.lastPage)
-        _state.update {
-            it.copy(
-                items = emptyList(),
-                loading = true,
-                error = null,
-                page = clamped,
-                showPageJump = false,
-                scrollToTopTrigger = it.scrollToTopTrigger + 1,
-            )
-        }
-        loadPage(clamped, replace = true)
-    }
-
-    fun nextPage() {
-        val current = _state.value
-        if (current.page < current.lastPage) goToPage(current.page + 1)
-    }
-
-    fun prevPage() {
-        val current = _state.value
-        if (current.page > 1) goToPage(current.page - 1)
-    }
-
-    fun nextEpisodePage() {
-        val current = _state.value
-        if (current.episodePage < current.episodeLastPage) goToEpisodePage(current.episodePage + 1)
-    }
-
-    fun prevEpisodePage() {
-        val current = _state.value
-        if (current.episodePage > 1) goToEpisodePage(current.episodePage - 1)
-    }
-
-    fun togglePageJump(show: Boolean) {
-        _state.update { it.copy(showPageJump = show) }
-    }
-
-    fun toggleFavorite() {
-        val series = _state.value.series ?: return
-        toggleFavorite(series)
-    }
-
-    fun toggleFavorite(item: ToonItem) {
-        scope.launch {
-            val favorited = repository.toggleFavorite(item) ?: return@launch
-            _state.update { current ->
-                val updated = current.items.map { row ->
-                    if (row.workId() == item.workId()) row.copy(isFavorite = favorited) else row
-                }
-                val visible = if (
-                    !favorited &&
-                    current.tab is BrowseTab.Favorite &&
-                    current.screen == Screen.Browse &&
-                    !current.isSearch
-                ) {
-                    updated.filter { it.workId() != item.workId() }
-                } else {
-                    updated
-                }
-                if (current.tab !is BrowseTab.Favorite) {
-                    catalogCache.remove(BrowseTab.Favorite(item.sourceId.ifBlank { WorkId.DEFAULT_SOURCE }))
-                }
-                if (!current.isSearch) {
-                    current.tab?.let { catalogCache[it] = visible }
-                }
-                current.copy(
-                    seriesFavorited = if (current.series?.workId() == item.workId()) favorited else current.seriesFavorited,
-                    items = visible,
-                )
-            }
-        }
-    }
-
-    fun resumeSeries() {
-        val current = _state.value
-        val series = current.series ?: return
-        val hist = current.seriesHistory ?: run {
-            openFirstEpisode()
-            return
-        }
-        continueHistoryEpisode(hist)
-    }
-
-    fun openFirstEpisode() {
-        val current = _state.value
-        val series = current.series ?: return
-        val lastPage = current.episodeLastPage
-        val raw = current.rawEpisodes.ifEmpty { current.episodes }
-        val seriesKey = series.workId().storageKey()
-        if (lastPage <= 1) {
-            val firstEp = raw.lastOrNull()
-            if (firstEp != null) {
-                openEpisode(firstEp)
-                return
-            }
-        }
-        scope.launch {
-            try {
-                // Resolve the total through the single-page + verified-shape path, then load the
-                // page we actually need. No total arithmetic belongs in the view model.
-                val metadata = repository.fetchEpisodeMetadata(series)
-                repository.saveCatalogTotal(series.workId(), metadata.total)
-
-                val result = repository.loadEpisodes(series, lastPage.coerceAtLeast(1))
-                _state.update {
-                    it.copy(
-                        rawEpisodes = result.items,
-                        episodes = result.items.sortedWithOrder(it.episodeSortOrder),
-                        episodePage = result.currentPage,
-                        episodeLastPage = result.lastPage,
-                        catalogTotals = metadata.total?.let { t -> it.catalogTotals + (seriesKey to t) } ?: it.catalogTotals,
-                    )
-                }
-                result.items.lastOrNull()?.let(::openEpisode)
-            } catch (_: Exception) {
-            }
-        }
-    }
-
-    fun closeSeries() {
-        DesktopImageCache.cancelPendingPreviews()
-        DesktopImageCache.clear(ImageCacheRole.EPISODE)
-        readerJob?.cancel()
-        episodeJob?.cancel()
-        val current = _state.value
-        current.series?.sourceId?.let { NetworkSourceRuntime.disconnect(it) }
-        lastViewedSeries = current.series
-        lastViewedEpisodePage = current.episodePage
-        val tab = current.tab
-        val searching = current.isSearch
-        _state.update {
-            it.copy(
-                screen = Screen.Browse,
-                series = null,
-                seriesHistory = null,
-                rawEpisodes = emptyList(),
-                episodes = emptyList(),
-                episodeError = null,
-                showPageJump = false,
-                seriesFavorited = false,
-                currentEpisode = null,
-                readerImages = emptyList(),
-                readerError = null,
-                highlightedEpisodeId = null,
-            )
-        }
-        if (tab != null && !searching) {
-            val cached = catalogCache[tab]
-            if (cached != null) {
-                scope.launch {
-                    val fresh = repository.refreshProgress(cached)
-                    catalogCache[tab] = fresh
-                    if (_state.value.tab == tab && _state.value.screen == Screen.Browse && !_state.value.isSearch) {
-                        _state.update { it.copy(items = fresh) }
-                    }
-                }
-            } else if (tab is BrowseTab.Favorite) {
-                loadPage(1, replace = true)
-            }
-        }
-    }
-
-    fun openHistory() {
-        if (_state.value.screen == Screen.Series) {
-            DesktopImageCache.clear(ImageCacheRole.EPISODE)
-        }
-        loadHistory()
-        _state.update { it.copy(screen = Screen.History) }
-    }
-
-    fun closeHistory() {
-        _state.update { it.copy(screen = Screen.Browse) }
-    }
-
-    fun loadHistory() {
-        val sourceId = _state.value.activeSourceId
-        if (sourceId == null) {
-            _state.update { it.copy(historyLoading = false, historyItems = emptyList()) }
-            return
-        }
-        scope.launch {
-            _state.update { it.copy(historyLoading = it.historyItems.isEmpty()) }
-            val items = repository.getHistory(sourceId)
-            val workIds = items.map { item -> item.workId() }
-            val counts = countIfNeeded(workIds, sourceId)
-            val totals = repository.getCatalogTotals(workIds)
-            _state.update {
-                it.copy(
-                    historyItems = items,
-                    historyLoading = false,
-                    readCounts = it.readCounts + counts,
-                    catalogTotals = it.catalogTotals + totals,
-                    scrollToTopTrigger = it.scrollToTopTrigger + 1,
-                )
-            }
-        }
-    }
-
-    fun openDownloadOptions() {
-        if (!_state.value.writesDownloads) return
-        val series = _state.value.series ?: return
-        downloadCatalogJob?.cancel()
-        _state.update {
-            it.copy(
-                showDownloadOptions = true,
-                downloadCatalog = emptyList(),
-                downloadCatalogLoading = true,
-            )
-        }
-        downloadCatalogJob = scope.launch {
-            try {
-                val all = repository.loadAllEpisodes(series)
-                _state.update {
-                    it.copy(
-                        downloadCatalog = all,
-                        downloadCatalogLoading = false,
-                    )
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                _state.update { current ->
-                    current.copy(
-                        downloadCatalog = current.rawEpisodes.ifEmpty { current.episodes },
-                        downloadCatalogLoading = false,
-                    )
-                }
-            }
-        }
-    }
-
-    fun closeDownloadOptions() {
-        downloadCatalogJob?.cancel()
-        _state.update {
-            it.copy(
-                showDownloadOptions = false,
-                downloadCatalog = emptyList(),
-                downloadCatalogLoading = false,
-            )
-        }
-    }
-
-    fun startDownloadEpisodes(episodesToDownload: List<EpisodeItem>) {
-        if (!_state.value.writesDownloads) return
-        val series = _state.value.series ?: return
-        closeDownloadOptions()
-        repository.downloadManager?.enqueueEpisodes(series, episodesToDownload)
-    }
-
-    fun startDownloadEpisode(episode: EpisodeItem) {
-        if (!_state.value.writesDownloads) return
-        val series = _state.value.series ?: return
-        repository.downloadManager?.enqueueEpisodes(series, listOf(episode))
-    }
-
-    private fun refreshDownloadedWrIds() {
-        val series = _state.value.series ?: return
-        scope.launch {
-            val ids = repository.downloadManager
-                ?.getDownloadedEpisodes(series.workId())
-                .orEmpty()
-                .map { it.wrId }
-                .toSet()
-            _state.update { current ->
-                if (current.series?.workId() == series.workId()) {
-                    current.copy(downloadedWrIds = ids)
-                } else {
-                    current
-                }
-            }
-        }
-    }
-
-    fun cancelDownloads() {
-        repository.downloadManager?.cancelAll()
-    }
-
-    fun openDownloads() {
-        if (!_state.value.writesDownloads) return
-        if (_state.value.screen == Screen.Series) {
-            DesktopImageCache.clear(ImageCacheRole.EPISODE)
-        }
-        readerJob?.cancel()
-        episodeJob?.cancel()
-        _state.update {
-            it.copy(
-                screen = Screen.Downloads,
-                downloadLoading = true,
-            )
-        }
-        loadDownloads()
-    }
-
-    fun closeDownloads() {
-        _state.update { it.copy(screen = Screen.Browse) }
-    }
-
-    fun openSettings() {
-        readerJob?.cancel()
-        episodeJob?.cancel()
-        _state.update { it.copy(screen = Screen.Settings, selectedSettingsCategory = null) }
-    }
-
-    fun selectSettingsCategory(category: SettingsCategory?) {
-        _state.update { it.copy(selectedSettingsCategory = category) }
-    }
-
-    fun closeSettings() {
-        if (_state.value.selectedSettingsCategory != null) {
-            _state.update { it.copy(selectedSettingsCategory = null) }
-        } else {
-            _state.update { it.copy(screen = Screen.Browse) }
-        }
-    }
-
-    fun openSourceManager() {
-        readerJob?.cancel()
-        episodeJob?.cancel()
-        _state.update { it.copy(screen = Screen.SourceManager) }
-    }
-
-    fun closeSourceManager() {
-        _state.update { it.copy(screen = Screen.Browse) }
-    }
-
-    fun reorderStorageSources(fromIndex: Int, toIndex: Int) {
-        val current = _state.value.installedSources
-        val networkStorage = current.filter { it.resolveSourceType().isStorage && it.id != WorkId.LOCAL_SOURCE }
-        if (fromIndex !in networkStorage.indices || toIndex !in networkStorage.indices) return
-        val mutable = networkStorage.toMutableList()
-        val moved = mutable.removeAt(fromIndex)
-        mutable.add(toIndex, moved)
-
-        val online = current.filterNot { it.resolveSourceType().isStorage }
-        val newIds = linkedSetOf<String>().apply {
-            add(WorkId.LOCAL_SOURCE)
-            mutable.forEach { add(it.id) }
-            online.forEach { add(it.id) }
-        }
-        DesktopSourcePrefs.setInstalledIds(newIds)
-        _state.update { it.copy(installedSources = repository.installedSources()) }
-    }
-
-    fun reorderOnlineSources(fromIndex: Int, toIndex: Int) {
-        val current = _state.value.installedSources
-        val online = current.filterNot { it.resolveSourceType().isStorage }
-        if (fromIndex !in online.indices || toIndex !in online.indices) return
-        val mutable = online.toMutableList()
-        val moved = mutable.removeAt(fromIndex)
-        mutable.add(toIndex, moved)
-
-        val storage = current.filter { it.resolveSourceType().isStorage && it.id != WorkId.LOCAL_SOURCE }
-        val newIds = linkedSetOf<String>().apply {
-            add(WorkId.LOCAL_SOURCE)
-            storage.forEach { add(it.id) }
-            mutable.forEach { add(it.id) }
-        }
-        DesktopSourcePrefs.setInstalledIds(newIds)
-        _state.update { it.copy(installedSources = repository.installedSources()) }
-    }
-
-    fun setSourceProgressDisplayMode(sourceId: String, mode: com.comics8.core.model.ProgressDisplayMode) {
-        DesktopSourcePrefs.setProgressDisplayMode(sourceId, mode)
-        val current = _state.value
-        scope.launch {
-            val updated = repository.refreshProgress(current.items)
-            current.tab?.let { tab ->
-                catalogCache[tab] = updated
-            }
-            val historyCounts = if (current.historyItems.isNotEmpty()) {
-                countIfNeeded(current.historyItems.map { it.workId() }, sourceId)
-            } else emptyMap()
-            val targetSeries = current.series?.takeIf { it.sourceId == sourceId }
-            val seriesCount = if (targetSeries != null) countIfNeeded(targetSeries.workId()) else null
-            _state.update { state ->
-                val nextCounts = if (targetSeries != null && seriesCount != null) {
-                    (state.readCounts + historyCounts).withCount(targetSeries.workId(), seriesCount)
-                } else {
-                    state.readCounts + historyCounts
-                }
-                state.copy(items = updated, readCounts = nextCounts)
-            }
-        }
-    }
-
-    fun loadDownloads() {
-        val sourceId = _state.value.activeSourceId
-        if (sourceId == null) {
-            _state.update { it.copy(downloadLoading = false, downloadSummaries = emptyList()) }
-            return
-        }
-        scope.launch {
-            _state.update { it.copy(downloadLoading = it.downloadSummaries.isEmpty()) }
-            val items = repository.downloadManager
-                ?.getDownloadedToonSummaries(sourceId)
-                .orEmpty()
-            _state.update {
-                it.copy(
-                    downloadSummaries = items,
-                    downloadLoading = false,
-                    scrollToTopTrigger = it.scrollToTopTrigger + 1,
-                )
-            }
-        }
-    }
-
-    fun deleteToonDownloads(workId: WorkId) {
-        scope.launch {
-            repository.downloadManager?.deleteToonDownloads(workId)
-            loadDownloads()
-        }
-    }
-
-    fun deleteHistory(workId: WorkId) {
-        scope.launch {
-            repository.deleteHistory(workId)
-            _state.update { current ->
-                val updatedItems = current.items.map {
-                    if (it.workId() == workId) it.copy(readProgress = null) else it
-                }
-                current.copy(
-                    historyItems = current.historyItems.filter { it.workId() != workId },
-                    items = updatedItems,
-                    seriesHistory = if (current.series?.workId() == workId) null else current.seriesHistory,
-                    readCounts = current.readCounts - workId.storageKey(),
-                )
-            }
-        }
-    }
-
-    fun clearAllHistory() {
-        val sourceId = _state.value.activeSourceId ?: return
-        scope.launch {
-            repository.clearHistory(sourceId)
-            _state.update { current ->
-                val updatedItems = current.items.map { it.copy(readProgress = null) }
-                current.copy(
-                    historyItems = emptyList(),
-                    items = updatedItems,
-                    seriesHistory = null,
-                    readCounts = emptyMap(),
-                )
-            }
-        }
-    }
-
-    fun openSyncDialog() {
-        _state.update { it.copy(showSyncDialog = true) }
-    }
-
-    fun closeSyncDialog() {
-        _state.update { it.copy(showSyncDialog = false) }
-    }
-
-    private suspend fun applySyncRefresh() {
-        catalogCache.clear()
-        catalogPages.clear()
-        if (_state.value.activeSourceId != null) {
-            loadPage(_state.value.page, replace = true)
-        }
-        val sourceId = _state.value.activeSourceId ?: return
-        val updatedHistory = repository.getHistory(sourceId)
-        val counts = countIfNeeded(updatedHistory.map { item -> item.workId() }, sourceId)
-        val seriesItem = _state.value.series
-        val seriesFav = seriesItem?.let { repository.isFavorite(it.workId()) } ?: _state.value.seriesFavorited
-        _state.update {
-            it.copy(
-                historyItems = updatedHistory,
-                readCounts = it.readCounts + counts,
-                seriesFavorited = seriesFav,
-            )
-        }
-        if (_state.value.screen == Screen.History) {
-            loadHistory()
-        }
-    }
-
-    fun syncNow() {
-        syncActions.syncNow()
-    }
-
-    fun restoreWithMasterKey(key: String, onResult: (com.comics8.core.model.SyncResult) -> Unit) {
-        syncActions.restore(key, onResult)
-    }
-
-    fun updateSyncKey(key: String) {
-        repository.syncManager?.updateSyncKey(key)
-    }
-
-    fun generateNewSyncKey() {
-        repository.syncManager?.generateNewKey()
-    }
-
-    fun updateSyncServerUrl(url: String) {
-        repository.syncManager?.updateServerUrl(url)
-    }
-
-    fun toggleAutoSync(enabled: Boolean) {
-        repository.syncManager?.setAutoSyncEnabled(enabled)
-    }
-
-    fun setProxyType(type: com.comics8.core.model.ProxyType) {
-        val next = _state.value.networkSettings.copy(proxyType = type)
-        com.comics8.core.network.NetworkSettingsStorage.save(next) { k, v -> if (v != null) prefs.put(k, v) else prefs.remove(k) }
-        _state.update { it.copy(networkSettings = next, proxyTestResult = null, proxyTestSuccess = null) }
-        val serverUrl = repository.syncManager?.syncState?.value?.serverUrl ?: SyncConstants.DEFAULT_SERVER_URL
-        repository.client.applyNetworkSettings(next, serverUrl)
-    }
-
-    fun setCustomProxy(config: com.comics8.core.model.CustomProxyConfig) {
-        val next = _state.value.networkSettings.copy(customProxy = config)
-        com.comics8.core.network.NetworkSettingsStorage.save(next) { k, v -> if (v != null) prefs.put(k, v) else prefs.remove(k) }
-        _state.update { it.copy(networkSettings = next, proxyTestResult = null, proxyTestSuccess = null) }
-        val serverUrl = repository.syncManager?.syncState?.value?.serverUrl ?: SyncConstants.DEFAULT_SERVER_URL
-        repository.client.applyNetworkSettings(next, serverUrl)
-    }
-
-    fun testProxyConnection(strings: com.comics8.core.i18n.AppStrings) {
-        val current = _state.value.networkSettings
-        _state.update { it.copy(proxyTesting = true, proxyTestResult = strings.statusTestingProxy, proxyTestSuccess = null) }
-        scope.launch {
-            val result = repository.client.testProxyConnection(current.proxyType, current.customProxy)
-            result.onSuccess { latency ->
-                _state.update { it.copy(proxyTesting = false, proxyTestResult = strings.statusProxySuccess(latency), proxyTestSuccess = true) }
-            }.onFailure { err ->
-                _state.update { it.copy(proxyTesting = false, proxyTestResult = strings.statusProxyFailed(err.message ?: "Error"), proxyTestSuccess = false) }
-            }
-        }
-    }
-
-    fun toggleServerProxy(enabled: Boolean) {
-        repository.syncManager?.setUseServerProxy(enabled)
-    }
-
-    fun requestPairingCode(onResult: (com.comics8.core.model.PairRequestResult) -> Unit) {
-        syncActions.requestPairingCode(onResult)
-    }
-
-    fun confirmPairingCode(code: String, onResult: (com.comics8.core.model.PairConfirmResult) -> Unit) {
-        syncActions.confirmPairingCode(code, onResult)
-    }
-
-    fun exportBackup(file: java.io.File, onResult: (Boolean, String) -> Unit) {
-        scope.launch {
-            try {
-                val json = repository.exportBackupJson()
-                withContext(Dispatchers.IO) {
-                    file.writeText(json, Charsets.UTF_8)
-                }
-                val stats = repository.getBackupStats()
-                onResult(true, "백업 파일이 저장되었습니다. (즐겨찾기 ${stats.favoriteCount}개, 기록 ${stats.historyCount}개)")
-            } catch (e: Exception) {
-                onResult(false, "백업 저장 실패: ${e.localizedMessage ?: "알 수 없는 오류"}")
-            }
-        }
-    }
-
-    fun importBackup(file: java.io.File, onResult: (Boolean, String) -> Unit) {
-        scope.launch {
-            try {
-                val json = withContext(Dispatchers.IO) {
-                    file.readText(Charsets.UTF_8)
-                }
-                val result = repository.importBackupJson(json)
-                if (result.success) {
-                    if (_state.value.activeSourceId != null) {
-                        loadPage(page = _state.value.page, replace = true)
-                    }
-                    val sourceId = _state.value.activeSourceId
-                    if (sourceId != null) {
-                        val updatedHistory = repository.getHistory(sourceId)
-                        _state.update { it.copy(historyItems = updatedHistory) }
-                    }
-                    onResult(true, "복원 완료: 즐겨찾기 ${result.favoriteCount}개, 기록 ${result.historyCount}개")
-                } else {
-                    onResult(false, result.message)
-                }
-            } catch (e: Exception) {
-                onResult(false, "복원 실패: ${e.localizedMessage ?: "파일 읽기 오류"}")
-            }
-        }
-    }
-
-    fun openSeriesFromHistory(item: ReadHistoryRecord) {
-        openSeries(item.toToonItem())
-    }
-
-    fun continueHistoryEpisode(item: ReadHistoryRecord) {
-        val toon = item.toToonItem()
-        if (_state.value.screen == Screen.History) {
-            previousScreenBeforeSeries = Screen.History
-        }
-        episodeJob?.cancel()
-        readerJob?.cancel()
-        val sortOrder = DesktopSourcePrefs.episodeSortOrder(toon.sourceId)
-        _state.update {
-            it.copy(
-                screen = Screen.Series,
-                series = toon,
-                seriesFavorited = false,
-                rawEpisodes = emptyList(),
-                episodes = emptyList(),
-                episodeSortOrder = sortOrder,
-                episodeLoading = true,
-                highlightedEpisodeId = item.lastWrId,
-                readerLoading = true,
-                readerError = null,
-                readerImages = emptyList(),
-            )
-        }
-        refreshSeriesFavorited(toon)
-        scope.launch {
-            try {
-                val readEp = repository.getReadEpisode(item.workId(), item.lastWrId)
-                val isCompleted = readEp == null || com.comics8.core.model.ReaderProgress.isCompleted(readEp.lastPage)
-                val targetOrder = if (isCompleted) item.lastReadOrder + 1 else item.lastReadOrder
-                val predictedPage = ReaderDomain.predictedEpisodePage(item.totalEpisodes, targetOrder)
-
-                var epPage = repository.loadEpisodes(toon, predictedPage)
-                var lastIdx = epPage.items.indexOfFirst { it.wrId == item.lastWrId }
-                var actualPage = predictedPage
-
-                if (lastIdx < 0 && predictedPage != 1) {
-                    epPage = repository.loadEpisodes(toon, 1)
-                    lastIdx = epPage.items.indexOfFirst { it.wrId == item.lastWrId }
-                    actualPage = 1
-                }
-
-                _state.update {
-                    it.copy(
-                        rawEpisodes = epPage.items,
-                        episodes = epPage.items.sortedWithOrder(it.episodeSortOrder),
-                        episodePage = actualPage,
-                        episodeLastPage = epPage.lastPage,
-                        episodeLoading = false,
-                    )
-                }
-
-                if (!isCompleted) {
-                    val targetEp = (if (lastIdx >= 0) epPage.items[lastIdx] else null)
-                        ?: EpisodeItem(
-                            wrId = item.lastWrId,
-                            title = item.lastEpisodeTitle,
-                            date = null,
-                            thumbUrl = null,
-                            href = item.lastEpisodeHref,
-                            lastReadPage = readEp?.lastPage ?: 0,
-                        )
-                    val resumePage = com.comics8.core.model.ReaderProgress.startPageOnOpen(readEp?.lastPage ?: 0)
-                    openEpisode(targetEp.copy(lastReadPage = resumePage))
-                } else {
-                    val nextEp = when {
-                        lastIdx > 0 -> epPage.items[lastIdx - 1]
-                        lastIdx == 0 && actualPage > 1 -> {
-                            try {
-                                val prevEpPage = repository.loadEpisodes(toon, actualPage - 1)
-                                _state.update {
-                                    it.copy(
-                                        rawEpisodes = prevEpPage.items,
-                                        episodes = prevEpPage.items.sortedWithOrder(it.episodeSortOrder),
-                                        episodePage = actualPage - 1,
-                                        episodeLastPage = prevEpPage.lastPage,
-                                    )
-                                }
-                                prevEpPage.items.lastOrNull() ?: epPage.items[0]
-                            } catch (_: Exception) {
-                                epPage.items[0]
-                            }
-                        }
-                        lastIdx == 0 -> epPage.items[0]
-                        else -> {
-                            if (!item.nextWrId.isNullOrBlank()) {
-                                epPage.items.firstOrNull { it.wrId == item.nextWrId } ?: epPage.items.firstOrNull()
-                            } else {
-                                epPage.items.firstOrNull()
-                            }
-                        }
-                    }
-
-                    if (nextEp != null) {
-                        openEpisode(nextEp.copy(lastReadPage = 0))
-                    } else {
-                        val fallback = EpisodeItem(
-                            wrId = item.lastWrId,
-                            title = item.lastEpisodeTitle,
-                            date = null,
-                            thumbUrl = null,
-                            href = item.lastEpisodeHref,
-                            lastReadPage = 0,
-                        )
-                        openEpisode(fallback)
-                    }
-                }
-            } catch (_: Exception) {
-                _state.update { it.copy(episodeLoading = false) }
-                val fallback = EpisodeItem(
-                    wrId = item.lastWrId,
-                    title = item.lastEpisodeTitle,
-                    date = null,
-                    thumbUrl = null,
-                    href = item.lastEpisodeHref,
-                    lastReadPage = 0,
-                )
-                openEpisode(fallback)
-            }
-        }
-    }
-
-    fun openEpisode(episode: EpisodeItem) {
-        episodeJob?.cancel()
-        DesktopImageCache.cancelPendingPreviews()
-        DesktopImageCache.clear(ImageCacheRole.READER)
-        val current = _state.value
-        val series = current.series
-        if (series != null) {
-            lastViewedSeries = series
-            lastViewedEpisodePage = current.episodePage
-        }
-        lastViewedEpisode = episode
-        val nowMs = System.currentTimeMillis()
-        val rawEpisodes = current.rawEpisodes.ifEmpty { current.episodes }
-        val seriesKey = series?.workId()?.storageKey().orEmpty()
-        val position = ReaderDomain.episodePosition(
-            episodeIds = rawEpisodes.map(EpisodeItem::wrId),
-            currentEpisodeId = episode.wrId,
-            currentPage = current.episodePage,
-            lastPage = current.episodeLastPage,
-            knownTotal = current.catalogTotals[seriesKey],
-            pageSize = series?.let { repository.sourceOrNull(it.sourceId)?.episodePageSize } ?: 100,
-        )
-        val nextEp = position.nextEpisodeIndex?.let(rawEpisodes::get)
-        val restoredMode = restoreAutoSwitchedViewMode()
-
-        val startPage = com.comics8.core.model.ReaderProgress.startPageOnOpen(episode.lastReadPage)
-        _state.update { curr ->
-            val updatedRaw = curr.rawEpisodes.map {
-                if (it.wrId == episode.wrId) it.copy(isRead = true, readAt = nowMs) else it
-            }
-            val updatedEpisodes = curr.episodes.map {
-                if (it.wrId == episode.wrId) it.copy(isRead = true, readAt = nowMs) else it
-            }
-            curr.copy(
-                screen = Screen.Reader,
-                currentEpisode = episode.copy(isRead = true, readAt = nowMs, lastReadPage = startPage),
-                rawEpisodes = updatedRaw,
-                episodes = updatedEpisodes,
-                readerImages = emptyList(),
-                imageAspectRatios = emptyMap(),
-                readerLoading = true,
-                readerError = null,
-                readerToastMessage = null,
-                viewMode = restoredMode,
-            )
-        }
-        loadReaderImages(episode)
-        if (series != null) {
-            refreshSeriesFavorited(series)
-            scope.launch {
-                val savedSetting = repository.getReaderSetting(series.workId())
-                if (savedSetting != null) {
-                    _state.update {
-                        it.copy(
-                            viewMode = savedSetting.viewMode,
-                            readDirection = savedSetting.readDirection,
-                            splitMode = savedSetting.splitMode,
-                        )
-                    }
-                }
-                repository.markEpisodeRead(series.workId(), episode.wrId, episode.lastReadPage)
-                val existingHistory = repository.getHistory(series.workId())
-
-                val counted = _state.value.catalogTotals[seriesKey]
-                val progress = RepositoryTransforms.historyProgress(
-                    position.readOrder ?: existingHistory?.lastReadOrder ?: 1,
-                    counted,
-                )
-                val finalOrder = progress.lastReadOrder
-                val finalTotal = counted?.count ?: 0
-
-                val (progressText, readCount) = listingProgress(
-                    series.sourceId,
-                    finalOrder,
-                    counted,
-                    series.workId(),
-                )
-                val savedHistory = ReadHistoryRecord(
-                    sourceId = series.sourceId,
-                    toonId = series.id,
-                    toonTitle = series.title,
-                    toonThumbUrl = series.thumbUrl,
-                    toonHref = series.href,
-                    lastWrId = episode.wrId,
-                    lastEpisodeTitle = episode.title,
-                    lastEpisodeHref = episode.href,
-                    lastReadOrder = finalOrder,
-                    totalEpisodes = finalTotal,
-                    lastReadAt = nowMs,
-                    nextWrId = nextEp?.wrId ?: existingHistory?.nextWrId,
-                    nextEpisodeTitle = nextEp?.title ?: existingHistory?.nextEpisodeTitle,
-                    nextEpisodeHref = nextEp?.href ?: existingHistory?.nextEpisodeHref,
-                    hasNew = progress.hasNew,
-                )
-                repository.saveHistory(savedHistory)
-                _state.update { curr ->
-                    val updatedItems = curr.items.map { item ->
-                        if (item.workId() == series.workId()) item.copy(readProgress = progressText) else item
-                    }
-                    curr.copy(
-                        items = updatedItems,
-                        seriesHistory = if (curr.series?.workId() == series.workId()) savedHistory else curr.seriesHistory,
-                        readCounts = curr.readCounts.withCount(series.workId(), readCount),
-                    )
-                }
-            }
-        }
-    }
+    fun importJsScript(script: String, fileName: String = "source.js") = controller.importJsScript(script, fileName)
+    fun uninstallSource(sourceId: String) = controller.uninstallSource(sourceId)
+
+    fun addLibraryRoot() = controller.addLibraryRootFromPicker()
+    fun removeLibraryRoot(path: String) = controller.removeLibraryRoot(path)
+
+    fun dismissArtistPick() = controller.dismissArtistPick()
+    fun pickArtist(artist: ArtistRef) = controller.pickArtist(artist)
+
+    fun refreshReaderImages() = controller.refreshReaderImages()
+    fun refresh() = controller.refresh(force = false)
+
+    fun openSeries(item: ToonItem) = controller.openSeries(item)
+    fun goToEpisodePage(page: Int) = controller.goToEpisodePage(page)
+    fun goToPage(page: Int) = controller.goToPage(page)
+    fun nextPage() = controller.nextPage()
+    fun prevPage() = controller.prevPage()
+    fun nextEpisodePage() = controller.nextEpisodePage()
+    fun prevEpisodePage() = controller.prevEpisodePage()
+    fun togglePageJump(show: Boolean) = controller.togglePageJump(show)
+    fun closeSeries() = controller.closeSeries()
+
+    fun closeDownloadOptions() = controller.closeDownloadOptions()
+    fun startDownloadEpisodes(episodesToDownload: List<EpisodeItem>) =
+        controller.startDownloadEpisodes(episodesToDownload)
+
+    fun exportBackup(file: File, onResult: (Boolean, String) -> Unit) =
+        controller.exportBackupWithWriter({ json -> file.writeText(json, Charsets.UTF_8) }, onResult)
+
+    fun importBackup(file: File, onResult: (Boolean, String) -> Unit) =
+        controller.importBackupWithReader({ file.readText(Charsets.UTF_8) }, onResult)
+
+    fun openEpisode(episode: EpisodeItem) = controller.openEpisode(episode)
 
     fun openExternalArchive(file: File) {
         val target = try {
@@ -2242,16 +205,14 @@ class DesktopViewModel(
             } catch (_: Exception) {
                 false
             }
-            _state.update {
-                it.copy(
-                    sourceError = if (!exists) {
-                        "파일 또는 폴더를 찾을 수 없습니다:\n${target.path}"
-                    } else {
-                        val supported = if (RarArchive.isSupported) "ZIP, CBZ, RAR, CBR" else "ZIP, CBZ"
-                        "지원하는 만화 파일($supported)이나 이미지를 찾을 수 없습니다:\n${target.name}"
-                    }
-                )
-            }
+            controller.setSourceError(
+                if (!exists) {
+                    "파일 또는 폴더를 찾을 수 없습니다:\n${target.path}"
+                } else {
+                    val supported = if (RarArchive.isSupported) "ZIP, CBZ, RAR, CBR" else "ZIP, CBZ"
+                    "지원하는 만화 파일($supported)이나 이미지를 찾을 수 없습니다:\n${target.name}"
+                },
+            )
             return
         }
 
@@ -2261,28 +222,7 @@ class DesktopViewModel(
         }
     }
 
-    private fun prepareExternalReaderSession() {
-        val current = _state.value
-        if (externalReaderSession == null) {
-            if (current.screen == Screen.Reader) {
-                flushPendingPageSave()
-                repository.syncManager?.triggerDebouncedPush()
-            }
-            externalReaderSession = ExternalReaderSession(
-                returnScreen = if (current.screen == Screen.Reader) Screen.Series else current.screen,
-                viewMode = current.viewMode,
-                readDirection = current.readDirection,
-                splitMode = current.splitMode,
-            )
-        } else if (current.screen == Screen.Reader) {
-            flushPendingPageSave()
-        }
-        DesktopImageCache.cancelPendingPreviews()
-        DesktopImageCache.clear(ImageCacheRole.READER)
-    }
-
     private fun openExternalZip(archive: File) {
-        prepareExternalReaderSession()
         val title = archive.name.substringBeforeLast('.', archive.name)
         val episode = EpisodeItem(
             wrId = archive.path,
@@ -2291,18 +231,7 @@ class DesktopViewModel(
             thumbUrl = null,
             href = archive.toURI().toString(),
         )
-        _state.update {
-            it.copy(
-                screen = Screen.Reader,
-                currentEpisode = episode,
-                readerImages = emptyList(),
-                imageAspectRatios = emptyMap(),
-                readerLoading = true,
-                readerError = null,
-                sourceError = null,
-            )
-        }
-        loadReaderImages(episode) {
+        controller.openExternalReaderSession(episode) {
             withContext(Dispatchers.IO) {
                 ComicArchive.open(archive).use { comic ->
                     comic.imageEntries().map { entry -> ZipImageUri.encode(archive, entry) }
@@ -2312,7 +241,6 @@ class DesktopViewModel(
     }
 
     private fun openExternalFolder(dir: File, initialFile: File? = null) {
-        prepareExternalReaderSession()
         val title = dir.name
         val episode = EpisodeItem(
             wrId = dir.path,
@@ -2321,18 +249,7 @@ class DesktopViewModel(
             thumbUrl = null,
             href = LocalImageUri.fromFile(dir),
         )
-        _state.update {
-            it.copy(
-                screen = Screen.Reader,
-                currentEpisode = episode,
-                readerImages = emptyList(),
-                imageAspectRatios = emptyMap(),
-                readerLoading = true,
-                readerError = null,
-                sourceError = null,
-            )
-        }
-        loadReaderImages(episode) {
+        controller.openExternalReaderSession(episode) {
             withContext(Dispatchers.IO) {
                 val imageFiles = LibraryScanner().listFolderImages(dir)
                 val images = imageFiles.map { LocalImageUri.fromFile(it) }
@@ -2340,7 +257,7 @@ class DesktopViewModel(
                     val initialName = initialFile.name
                     val idx = imageFiles.indexOfFirst { it.name.equals(initialName, ignoreCase = true) }
                     if (idx > 0) {
-                        _state.update { curr ->
+                        controller.updateState { curr ->
                             curr.copy(currentEpisode = curr.currentEpisode?.copy(lastReadPage = idx))
                         }
                     }
@@ -2350,391 +267,52 @@ class DesktopViewModel(
         }
     }
 
-    private fun loadReaderImages(episode: EpisodeItem) {
-        val workId = _state.value.series?.workId()
-        loadReaderImages(episode) { repository.loadImages(episode, workId) }
+    fun openNextEpisode() = controller.openNextEpisode()
+    fun openPrevEpisode() = controller.openPrevEpisode()
+    fun savePage(page: Int, seenThroughPage: Int = page) = controller.savePage(page, seenThroughPage)
+    fun setViewMode(mode: ViewMode) = controller.setViewMode(mode)
+    fun recordImageAspectRatio(index: Int, width: Int, height: Int) =
+        controller.recordImageAspectRatio(index, width, height)
+    fun updateViewportSize(widthDp: Int, heightDp: Int) = controller.updateViewportSize(widthDp, heightDp)
+    fun closeReader() = controller.closeReader()
+    fun evictReaderImage(url: String) = controller.evictReaderImage(url)
+    fun toggleFullscreen() = controller.toggleFullscreen()
+}
+
+private class JavaPreferencesKeyValuePrefs(
+    private val prefs: Preferences,
+) : KeyValuePrefs {
+    override fun contains(key: String): Boolean = try {
+        key in prefs.keys()
+    } catch (_: Exception) {
+        false
     }
 
-    private fun loadReaderImages(episode: EpisodeItem, resolveImages: suspend () -> List<String>) {
-        readerJob?.cancel()
-        readerJob = scope.launch {
-            try {
-                val images = resolveImages()
-                if (images.isEmpty()) {
-                    _state.update {
-                        it.copy(
-                            readerImages = emptyList(),
-                            imageAspectRatios = emptyMap(),
-                            readerLoading = false,
-                            readerError = "이미지가 없습니다.",
-                        )
-                    }
-                    return@launch
-                }
+    override fun getString(key: String, defaultValue: String?): String? =
+        prefs.get(key, defaultValue)
 
-                _state.update {
-                    it.copy(
-                        readerImages = images,
-                        imageAspectRatios = emptyMap(),
-                        readerLoading = false,
-                        readerError = null,
-                    )
-                }
-
-                val effectivePage = _state.value.currentEpisode?.lastReadPage ?: episode.lastReadPage
-                val targetPage = ReaderDomain.initialImagePage(effectivePage, images.size) ?: 0
-                val preloadUrls = images.subList(
-                    (targetPage - 1).coerceAtLeast(0),
-                    (targetPage + 3).coerceAtMost(images.size),
-                )
-                scope.launch(Dispatchers.IO) {
-                    DesktopImageCache.preload(ImageCacheRole.READER, preloadUrls)
-                }
-            } catch (e: Exception) {
-                if (e is CancellationException) return@launch
-                _state.update {
-                    it.copy(
-                        readerLoading = false,
-                        readerError = e.localizedMessage ?: "이미지를 불러오지 못했습니다.",
-                    )
-                }
-            }
-        }
+    override fun putString(key: String, value: String?) {
+        if (value == null) prefs.remove(key) else prefs.put(key, value)
     }
 
-    fun openNextEpisode() {
-        val current = _state.value
-        val series = current.series
-        val currentEp = current.currentEpisode
-        if (series != null && currentEp != null && externalReaderSession == null) {
-            val totalImages = current.readerImages.size
-            val lastPage = if (totalImages > 0) totalImages - 1 else currentEp.lastReadPage
-            val completedPage = com.comics8.core.model.ReaderProgress.encodePage(lastPage, completed = true)
-            scope.launch {
-                repository.saveEpisodePage(series.workId(), currentEp.wrId, completedPage)
-            }
-        }
-        val epList = current.episodes.ifEmpty { current.rawEpisodes }
-        when (val navigation = ReaderDomain.nextEpisode(
-            currentIndex = current.currentEpisodeIndex,
-            itemCount = epList.size,
-            currentPage = current.episodePage,
-            sortOrder = current.episodeSortOrder,
-        )) {
-            is ReaderDomain.EpisodeNavigation.InCurrentPage -> openEpisode(epList[navigation.index])
-            is ReaderDomain.EpisodeNavigation.LoadPage -> if (series != null) {
-                scope.launch {
-                    navigateToEpisodePage(series, navigation.page, navigation.edge)
-                }
-            }
-            ReaderDomain.EpisodeNavigation.None -> Unit
-        }
+    override fun getBoolean(key: String, defaultValue: Boolean): Boolean =
+        prefs.getBoolean(key, defaultValue)
+
+    override fun putBoolean(key: String, value: Boolean) {
+        prefs.putBoolean(key, value)
     }
 
-    fun openPrevEpisode() {
-        val current = _state.value
-        val series = current.series
-        val epList = current.episodes.ifEmpty { current.rawEpisodes }
-        when (val navigation = ReaderDomain.prevEpisode(
-            currentIndex = current.currentEpisodeIndex,
-            itemCount = epList.size,
-            currentPage = current.episodePage,
-            lastPage = current.episodeLastPage,
-            sortOrder = current.episodeSortOrder,
-        )) {
-            is ReaderDomain.EpisodeNavigation.InCurrentPage -> openEpisode(epList[navigation.index])
-            is ReaderDomain.EpisodeNavigation.LoadPage -> if (series != null) {
-                scope.launch {
-                    navigateToEpisodePage(series, navigation.page, navigation.edge)
-                }
-            }
-            ReaderDomain.EpisodeNavigation.None -> Unit
-        }
+    override fun getInt(key: String, defaultValue: Int): Int =
+        prefs.getInt(key, defaultValue)
+
+    override fun putInt(key: String, value: Int) {
+        prefs.putInt(key, value)
     }
 
-    private suspend fun navigateToEpisodePage(
-        series: ToonItem,
-        page: Int,
-        edge: ReaderDomain.PageEdge,
-    ) {
-        try {
-            val result = repository.loadEpisodes(series, page)
-            _state.update {
-                it.copy(
-                    rawEpisodes = result.items,
-                    episodes = result.items.sortedWithOrder(it.episodeSortOrder),
-                    episodePage = result.currentPage,
-                    episodeLastPage = result.lastPage,
-                )
-            }
-            val target = when (edge) {
-                ReaderDomain.PageEdge.FIRST -> result.items.firstOrNull()
-                ReaderDomain.PageEdge.LAST -> result.items.lastOrNull()
-            }
-            target?.let { openEpisode(it) }
-        } catch (_: Exception) {
-        }
-    }
+    override fun getLong(key: String, defaultValue: Long): Long =
+        prefs.getLong(key, defaultValue)
 
-    fun savePage(page: Int, seenThroughPage: Int = page) {
-        val current = _state.value
-        if (externalReaderSession != null) {
-            _state.update { state ->
-                state.copy(currentEpisode = state.currentEpisode?.copy(lastReadPage = page))
-            }
-            return
-        }
-        val series = current.series ?: return
-        val episode = current.currentEpisode ?: return
-        val totalImages = current.readerImages.size
-        val targetPage = com.comics8.core.model.ReaderProgress.persistPage(
-            page = page,
-            totalImages = totalImages,
-            seenThroughPage = seenThroughPage,
-        )
-        if (episode.lastReadPage == page && pendingPageSave?.third == targetPage) return
-
-        _state.update { state ->
-            state.copy(
-                currentEpisode = state.currentEpisode?.copy(lastReadPage = page),
-            )
-        }
-        val workId = series.workId()
-        val wrId = episode.wrId
-        pendingPageSave = Triple(workId, wrId, targetPage)
-        pageSaveJob?.cancel()
-        pageSaveJob = scope.launch {
-            kotlinx.coroutines.delay(400)
-            repository.saveEpisodePage(workId, wrId, targetPage)
-            if (pendingPageSave == Triple(workId, wrId, targetPage)) {
-                pendingPageSave = null
-            }
-        }
-    }
-
-    private fun flushPendingPageSave() {
-        pageSaveJob?.cancel()
-        pageSaveJob = null
-        val pending = pendingPageSave
-        pendingPageSave = null
-        if (pending != null) {
-            scope.launch {
-                repository.saveEpisodePage(pending.first, pending.second, pending.third)
-            }
-        }
-    }
-
-    fun setViewMode(mode: ViewMode) {
-        preAutoSwitchViewMode = null
-        // Asking for AUTO again re-arms detection for the episode already on screen.
-        if (mode == ViewMode.AUTO) autoSwitchedEpisodeId = null
-        _state.update { it.copy(viewMode = mode) }
-        if (externalReaderSession != null) return
-        val series = _state.value.series ?: return
-        val direction = _state.value.readDirection
-        val split = _state.value.splitMode
-        scope.launch {
-            repository.saveReaderSetting(series.workId(), mode, direction, split)
-        }
-    }
-
-    fun setReadDirection(direction: ReadDirection) {
-        _state.update { it.copy(readDirection = direction) }
-        if (externalReaderSession != null) return
-        val series = _state.value.series ?: return
-        val mode = _state.value.viewMode
-        val split = _state.value.splitMode
-        scope.launch {
-            repository.saveReaderSetting(series.workId(), mode, direction, split)
-        }
-    }
-
-    fun setSplitMode(mode: SplitMode) {
-        _state.update { it.copy(splitMode = mode) }
-        if (externalReaderSession != null) return
-        val series = _state.value.series ?: return
-        val modeVal = _state.value.viewMode
-        val direction = _state.value.readDirection
-        scope.launch {
-            repository.saveReaderSetting(series.workId(), modeVal, direction, mode)
-        }
-    }
-
-    fun recordImageAspectRatio(index: Int, width: Int, height: Int) {
-        val ratio = ReaderDomain.imageAspectRatio(width, height) ?: return
-        _state.update {
-            it.copy(imageAspectRatios = it.imageAspectRatios + (index to ratio))
-        }
-        if (ReaderDomain.isAutoScrollCandidate(index)) {
-            checkAndAutoSwitchToScroll(width, height)
-        }
-    }
-
-    private fun checkAndAutoSwitchToScroll(width: Int, height: Int) {
-        val currentEp = _state.value.currentEpisode ?: return
-        if (autoSwitchedEpisodeId == currentEp.wrId) return
-        val currentMode = _state.value.viewMode
-        // Only AUTO mode may override the user's choice; an explicit PAGE/DUAL/SCROLL is final.
-        if (currentMode != ViewMode.AUTO) return
-
-        if (ReaderDomain.isWebtoonStrip(width, height)) {
-            autoSwitchedEpisodeId = currentEp.wrId
-            preAutoSwitchViewMode = currentMode
-            val toast = I18n.strings(_state.value.appLanguage).toastAutoSwitchedToScroll
-            _state.update {
-                it.copy(
-                    viewMode = ViewMode.SCROLL,
-                    readerToastMessage = toast,
-                )
-            }
-            readerToastJob?.cancel()
-            readerToastJob = scope.launch {
-                delay(1000)
-                _state.update { it.copy(readerToastMessage = null) }
-            }
-        }
-    }
-
-    fun updateViewportSize(widthDp: Int, heightDp: Int) {
-        _state.update {
-            if (it.viewportWidthDp == widthDp && it.viewportHeightDp == heightDp) {
-                it
-            } else {
-                it.copy(viewportWidthDp = widthDp, viewportHeightDp = heightDp)
-            }
-        }
-    }
-
-    private fun refreshSeriesFavorited(series: ToonItem) {
-        scope.launch {
-            val favorited = repository.isFavorite(series.workId())
-            _state.update { current ->
-                if (current.series?.workId() == series.workId()) current.copy(seriesFavorited = favorited) else current
-            }
-        }
-    }
-
-    private fun restoreAutoSwitchedViewMode(): ViewMode {
-        val mode = preAutoSwitchViewMode ?: _state.value.viewMode
-        preAutoSwitchViewMode = null
-        autoSwitchedEpisodeId = null
-        readerToastJob?.cancel()
-        return mode
-    }
-
-    fun closeReader() {
-        val externalSession = externalReaderSession
-        if (externalSession != null) {
-            externalReaderSession = null
-            readerJob?.cancel()
-            _state.value.series?.sourceId?.let { NetworkSourceRuntime.disconnect(it) }
-            DesktopImageCache.clear(ImageCacheRole.READER)
-            restoreAutoSwitchedViewMode()
-            _state.update {
-                it.copy(
-                    screen = externalSession.returnScreen,
-                    currentEpisode = null,
-                    readerImages = emptyList(),
-                    imageAspectRatios = emptyMap(),
-                    readerLoading = false,
-                    readerError = null,
-                    readerToastMessage = null,
-                    viewMode = externalSession.viewMode,
-                    readDirection = externalSession.readDirection,
-                    splitMode = externalSession.splitMode,
-                )
-            }
-            return
-        }
-        flushPendingPageSave()
-        readerJob?.cancel()
-        _state.value.series?.sourceId?.let { NetworkSourceRuntime.disconnect(it) }
-        DesktopImageCache.clear(ImageCacheRole.READER)
-        val current = _state.value
-        lastViewedEpisode = current.currentEpisode
-        val restoredMode = restoreAutoSwitchedViewMode()
-        _state.update {
-            it.copy(
-                screen = Screen.Series,
-                currentEpisode = null,
-                readerImages = emptyList(),
-                imageAspectRatios = emptyMap(),
-                readerLoading = false,
-                readerError = null,
-                readerToastMessage = null,
-                viewMode = restoredMode,
-            )
-        }
-        repository.syncManager?.triggerDebouncedPush()
-    }
-
-    fun evictReaderImage(url: String) {
-        DesktopImageCache.evict(ImageCacheRole.READER, url)
-    }
-
-    fun toggleFullscreen() {
-        _state.update { it.copy(isFullscreen = !it.isFullscreen) }
-    }
-
-    private suspend fun listingProgress(
-        sourceId: String,
-        lastReadOrder: Int,
-        total: EpisodeListingTotal?,
-        workId: WorkId,
-    ): Pair<String, Int> {
-        val readCount = countIfNeeded(workId)
-        return repository.formatReadProgress(sourceId, lastReadOrder, total, readCount) to readCount
-    }
-
-    private suspend fun countIfNeeded(workId: WorkId): Int {
-        if (!DesktopSourcePrefs.progressDisplayMode(workId.sourceId).requiresReadCount) {
-            return 0
-        }
-        return repository.countReadEpisodes(workId)
-    }
-
-    private suspend fun countIfNeeded(workIds: List<WorkId>, sourceId: String): Map<String, Int> {
-        if (workIds.isEmpty()) return emptyMap()
-        if (!DesktopSourcePrefs.progressDisplayMode(sourceId).requiresReadCount) {
-            return emptyMap()
-        }
-        return repository.countReadEpisodes(workIds)
-    }
-
-    private fun Map<String, Int>.withCount(workId: WorkId, count: Int): Map<String, Int> =
-        this + (workId.storageKey() to count)
-
-    private fun ReadHistoryRecord.toToonItem(): ToonItem = ToonItem(
-        id = toonId,
-        title = toonTitle,
-        thumbUrl = toonThumbUrl,
-        href = toonHref,
-        genre = "",
-        updatedAt = null,
-        sourceId = sourceId,
-        readProgress = repository.formatReadProgress(
-            sourceId = sourceId,
-            lastReadOrder = lastReadOrder,
-            total = _state.value.catalogTotals[workId().storageKey()],
-            readCount = _state.value.readCounts[workId().storageKey()] ?: 0,
-        ),
-    )
-
-    private fun humanError(prefix: String, e: Exception): String {
-        val detail = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
-        return "$prefix\n$detail"
-    }
-
-    private fun clearCatalogCache(sourceId: String) {
-        val stale = catalogCache.keys.filter { browseSourceId(it) == sourceId }
-        stale.forEach {
-            catalogCache.remove(it)
-            catalogPages.remove(it)
-        }
-    }
-
-    private fun browseSourceId(tab: BrowseTab): String = when (tab) {
-        is BrowseTab.Favorite -> tab.sourceId
-        is BrowseTab.Remote -> tab.sourceId
+    override fun putLong(key: String, value: Long) {
+        prefs.putLong(key, value)
     }
 }

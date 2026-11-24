@@ -48,6 +48,8 @@ class DesktopDatabase(dbFile: File? = null) : AutoCloseable {
         }
     }
 
+    fun <T> runInTransaction(block: () -> T): T = withTransaction { block() }
+
     private inline fun <T> withTransaction(block: (Connection) -> T): T =
         withConnection { conn ->
             val previous = conn.autoCommit

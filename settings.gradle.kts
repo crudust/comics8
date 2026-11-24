@@ -18,4 +18,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "Comics8"
 include(":core")
+include(":shared-ui")
 include(":desktop")

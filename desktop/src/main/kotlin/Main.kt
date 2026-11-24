@@ -4,9 +4,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -14,10 +16,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import com.comics8.core.i18n.I18n
-import com.comics8.desktop.ui.theme.LocalStrings
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.input.key.Key
@@ -42,50 +43,51 @@ import com.comics8.core.source.network.NetworkSourceConfig
 import com.comics8.core.source.network.NetworkSourceRuntime
 import com.comics8.core.source.network.loadSources
 import com.comics8.desktop.data.DesktopDatabase
+import java.awt.Desktop
+import java.awt.FileDialog
+import java.awt.Frame
+import java.awt.Toolkit
+import java.awt.datatransfer.StringSelection
 import java.io.File
+import java.net.URI
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import com.comics8.desktop.data.DesktopSourcePrefs
 import com.comics8.desktop.data.DesktopSyncManager
 import com.comics8.desktop.data.DesktopToonRepository
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.DesktopViewModel
 import com.comics8.desktop.ui.Screen
-import com.comics8.desktop.ui.browse.BrowsePane
+import com.comics8.desktop.ui.components.DesktopPullToRefreshIndicator
 import com.comics8.desktop.ui.components.LocalTrackpadPinchDispatcher
 import com.comics8.desktop.ui.components.MacTrackpadPinchBridge
-import com.comics8.desktop.ui.components.PageJumpDialog
-import com.comics8.desktop.ui.components.SyncDialog
-import com.comics8.desktop.ui.components.TopBar
 import com.comics8.desktop.ui.components.TrackpadPinchDispatcher
-import com.comics8.desktop.ui.history.HistoryPane
+import com.comics8.desktop.ui.components.desktopDiscreteScrollPaging
+import com.comics8.desktop.ui.components.pickJsFile
 import com.comics8.desktop.ui.reader.ReaderPane
-import com.comics8.desktop.ui.series.SeriesPane
+import com.comics8.desktop.ui.util.DesktopAsyncImage
+import com.comics8.shared.ui.ComicImageRenderer
+import com.comics8.shared.ui.LocalComicImageRenderer
+import com.comics8.shared.ui.LocalPlatformUiBridge
+import com.comics8.shared.ui.PlatformUiBridge
+import com.comics8.shared.ui.browse.BrowsePane
+import com.comics8.shared.ui.components.ArtistPickDialog
+import com.comics8.shared.ui.components.DownloadOptionsDialog
+import com.comics8.shared.ui.components.NetworkSourceDialog
+import com.comics8.shared.ui.components.PageJumpDialog
+import com.comics8.shared.ui.components.SourceErrorDialog
+import com.comics8.shared.ui.components.SourceRemoveDialog
+import com.comics8.shared.ui.components.TopBar
+import com.comics8.shared.ui.components.UpdateDialog
+import com.comics8.shared.ui.downloads.DownloadsPane
+import com.comics8.shared.ui.history.HistoryPane
+import com.comics8.shared.ui.series.SeriesPane
+import com.comics8.shared.ui.settings.SettingsPane
+import com.comics8.shared.ui.source.SourceManagerPane
+import com.comics8.shared.ui.theme.ComicsTheme
+import com.comics8.shared.ui.theme.LocalStrings
 import org.jetbrains.skia.Image
-
-private val DarkColors = darkColorScheme(
-    primary = Color(0xFFFFFFFF), // White
-    onPrimary = Color(0xFF000000), // Pure Black
-    primaryContainer = Color(0xFF27272A), // Zinc 800
-    onPrimaryContainer = Color(0xFFFFFFFF), // White
-    secondary = Color(0xFFE4E4E7), // Zinc 200
-    onSecondary = Color(0xFF000000), // Pure Black
-    secondaryContainer = Color(0xFF18181B), // Zinc 900
-    onSecondaryContainer = Color(0xFFFAFAFA), // Zinc 50
-    tertiary = Color(0xFFD4D4D8), // Zinc 300
-    onTertiary = Color(0xFF000000), // Pure Black
-    background = Color(0xFF000000), // Pure Black
-    onBackground = Color(0xFFFAFAFA), // Zinc 50
-    surface = Color(0xFF000000), // Pure Black
-    onSurface = Color(0xFFFAFAFA), // Zinc 50
-    surfaceVariant = Color(0xFF18181B), // Zinc 900
-    onSurfaceVariant = Color(0xFFA1A1AA), // Zinc 400
-    surfaceContainer = Color(0xFF09090B), // Zinc 950
-    surfaceContainerHigh = Color(0xFF18181B), // Zinc 900
-    surfaceContainerHighest = Color(0xFF27272A), // Zinc 800
-    outline = Color(0xFF3F3F46), // Zinc 700
-    outlineVariant = Color(0xFF27272A), // Zinc 800
-    error = Color(0xFFEF4444), // Red
-    onError = Color(0xFF000000), // Pure Black
-)
 
 fun main(args: Array<String>) {
     System.setProperty("apple.awt.application.appearance", "system")
@@ -246,7 +248,6 @@ fun main(args: Array<String>) {
             val isViewerPinchActive = state.screen == Screen.Reader &&
                 !state.showDownloadOptions &&
                 !state.showPageJump &&
-                !state.showSyncDialog &&
                 !state.showUpdateDialog
 
             DisposableEffect(window, isViewerPinchActive) {
@@ -261,7 +262,7 @@ fun main(args: Array<String>) {
             }
 
             CompositionLocalProvider(LocalTrackpadPinchDispatcher provides trackpadPinchDispatcher) {
-                MaterialTheme(colorScheme = DarkColors) {
+                ComicsTheme {
                     Surface(
                         modifier = Modifier.fillMaxSize(),
                         color = MaterialTheme.colorScheme.background,
@@ -288,8 +289,45 @@ fun ComicsDesktopApp(
     viewModel: DesktopViewModel,
 ) {
     val strings = remember(state.appLanguage) { I18n.strings(state.appLanguage) }
+    val platformBridge = remember {
+        object : PlatformUiBridge {
+            override fun copyToClipboard(label: String, text: String) {
+                try {
+                    Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)
+                } catch (_: Exception) {
+                }
+            }
 
-    CompositionLocalProvider(LocalStrings provides strings) {
+            override fun showToast(message: String) = Unit
+
+            override fun openUrl(url: String) {
+                try {
+                    if (Desktop.isDesktopSupported()) {
+                        Desktop.getDesktop().browse(URI(url))
+                    }
+                } catch (_: Exception) {
+                }
+            }
+        }
+    }
+    val imageRenderer = remember {
+        ComicImageRenderer { url, cacheRole, contentDescription, modifier, contentScale, refreshEpoch ->
+            DesktopAsyncImage(
+                url = url,
+                cacheRole = cacheRole,
+                contentDescription = contentDescription,
+                contentScale = contentScale,
+                refreshEpoch = refreshEpoch,
+                modifier = modifier,
+            )
+        }
+    }
+
+    CompositionLocalProvider(
+        LocalStrings provides strings,
+        LocalPlatformUiBridge provides platformBridge,
+        LocalComicImageRenderer provides imageRenderer,
+    ) {
         ComicsDesktopAppContent(state = state, viewModel = viewModel)
     }
 }
@@ -302,7 +340,7 @@ private fun ComicsDesktopAppContent(
     LaunchedEffect(state.showAddSourceSheet) {
         if (state.showAddSourceSheet) {
             viewModel.closeAddSourceSheet()
-            com.comics8.desktop.ui.components.pickJsFile()?.let(viewModel::importJsFile)
+            pickJsFile()?.let(viewModel::importJsFile)
         }
     }
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -318,28 +356,138 @@ private fun ComicsDesktopAppContent(
                 modifier = Modifier.fillMaxSize(),
             )
         } else if (state.screen == Screen.Settings) {
-            com.comics8.desktop.ui.settings.SettingsPane(
+            val strings = LocalStrings.current
+            SettingsPane(
                 state = state,
-                viewModel = viewModel,
+                controller = viewModel.controller,
+                appVersion = DesktopVersion.VERSION_NAME,
+                showSplitMode = true,
+                onExportBackup = { onResult ->
+                    try {
+                        val timeTag = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())
+                        val dialog = FileDialog(null as Frame?, strings.titleSaveBackupFile, FileDialog.SAVE)
+                        dialog.file = "comics8_backup_$timeTag.json"
+                        dialog.isVisible = true
+                        val dir = dialog.directory
+                        val file = dialog.file
+                        if (dir != null && file != null) {
+                            viewModel.exportBackup(File(dir, file), onResult)
+                        }
+                    } catch (e: Exception) {
+                        onResult(false, "${strings.msgBackupExportFailed}: ${e.message}")
+                    }
+                },
+                onImportBackup = { onResult ->
+                    try {
+                        val dialog = FileDialog(null as Frame?, strings.titleOpenBackupFile, FileDialog.LOAD)
+                        dialog.setFilenameFilter { _, name -> name.endsWith(".json", ignoreCase = true) }
+                        dialog.isVisible = true
+                        val dir = dialog.directory
+                        val file = dialog.file
+                        if (dir != null && file != null) {
+                            viewModel.importBackup(File(dir, file), onResult)
+                        }
+                    } catch (e: Exception) {
+                        onResult(false, "${strings.msgBackupRestoreFailed}: ${e.message}")
+                    }
+                },
                 modifier = Modifier.fillMaxSize(),
             )
         } else if (state.screen == Screen.SourceManager) {
-            com.comics8.desktop.ui.source.SourceManagerPane(
+            SourceManagerPane(
                 state = state,
-                viewModel = viewModel,
+                controller = viewModel.controller,
+                onPickLocalFolder = viewModel::addLibraryRoot,
+                onRemoveLocalFolder = viewModel::removeLibraryRoot,
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
             Column(modifier = Modifier.fillMaxSize()) {
                 TopBar(
                     state = state,
-                    viewModel = viewModel,
+                    controller = viewModel.controller,
                 )
                 when (state.screen) {
-                    Screen.Browse -> BrowsePane(state = state, viewModel = viewModel, modifier = Modifier.weight(1f))
-                    Screen.Series -> SeriesPane(state = state, viewModel = viewModel, modifier = Modifier.weight(1f))
-                    Screen.History -> HistoryPane(state = state, viewModel = viewModel, modifier = Modifier.weight(1f))
-                    Screen.Downloads -> com.comics8.desktop.ui.downloads.DesktopDownloadsPane(state = state, viewModel = viewModel, modifier = Modifier.weight(1f))
+                    Screen.Browse -> {
+                        val gridState = rememberLazyGridState()
+                        val canSwipePage = state.tab?.paginated == true && !state.loading && !state.isSearch && state.lastPage > 1
+                        val canPullRefresh = state.packsReady && state.activeSourceId != null && !state.loading
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .desktopDiscreteScrollPaging(
+                                    enabled = canSwipePage,
+                                    onAdvance = { if (state.page < state.lastPage) viewModel.nextPage() },
+                                    onRetreat = { if (state.page > 1) viewModel.prevPage() },
+                                    onPullRefresh = if (canPullRefresh) { { viewModel.refresh() } } else null,
+                                    isAtTop = { !gridState.canScrollBackward },
+                                ),
+                        ) {
+                            BrowsePane(
+                                state = state,
+                                controller = viewModel.controller,
+                                gridState = gridState,
+                                onImportJs = { pickJsFile()?.let(viewModel::importJsFile) },
+                                onAddLibraryFolder = viewModel::addLibraryRoot,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                            DesktopPullToRefreshIndicator(
+                                refreshing = state.refreshing,
+                                modifier = Modifier.align(Alignment.TopCenter),
+                            )
+                        }
+                    }
+                    Screen.Series -> {
+                        val listState = rememberLazyListState()
+                        val canSwipePage = !state.episodeLoading
+                        val canPullRefresh = !state.episodeLoading && !state.refreshing
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .desktopDiscreteScrollPaging(
+                                    enabled = canSwipePage,
+                                    onAdvance = {
+                                        if (state.episodePage < state.episodeLastPage) {
+                                            viewModel.nextEpisodePage()
+                                        }
+                                    },
+                                    onRetreat = {
+                                        if (state.episodePage > 1) {
+                                            viewModel.prevEpisodePage()
+                                        } else {
+                                            viewModel.closeSeries()
+                                        }
+                                    },
+                                    onPullRefresh = if (canPullRefresh) { { viewModel.refresh() } } else null,
+                                    isAtTop = { !listState.canScrollBackward },
+                                ),
+                        ) {
+                            SeriesPane(
+                                state = state,
+                                controller = viewModel.controller,
+                                listState = listState,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                            DesktopPullToRefreshIndicator(
+                                refreshing = state.refreshing,
+                                modifier = Modifier.align(Alignment.TopCenter),
+                            )
+                        }
+                    }
+                    Screen.History -> HistoryPane(
+                        state = state,
+                        controller = viewModel.controller,
+                        onImportJs = { pickJsFile()?.let(viewModel::importJsFile) },
+                        modifier = Modifier.weight(1f),
+                    )
+                    Screen.Downloads -> DownloadsPane(
+                        state = state,
+                        controller = viewModel.controller,
+                        onImportJs = { pickJsFile()?.let(viewModel::importJsFile) },
+                        modifier = Modifier.weight(1f),
+                    )
                     else -> {}
                 }
             }
@@ -347,7 +495,7 @@ private fun ComicsDesktopAppContent(
 
         val currentSeries = state.series
         if (state.showDownloadOptions && currentSeries != null) {
-            com.comics8.desktop.ui.components.DesktopDownloadDialog(
+            DownloadOptionsDialog(
                 series = currentSeries,
                 episodes = state.downloadCatalog,
                 catalogLoading = state.downloadCatalogLoading,
@@ -371,24 +519,17 @@ private fun ComicsDesktopAppContent(
             )
         }
 
-        if (state.showSyncDialog) {
-            SyncDialog(
-                state = state,
-                viewModel = viewModel,
-                onDismiss = viewModel::closeSyncDialog,
-            )
-        }
-
         if (state.showUpdateDialog) {
-            com.comics8.desktop.ui.components.DesktopUpdateDialog(
+            UpdateDialog(
                 updateState = state.updateState,
                 onDismiss = viewModel::closeUpdateDialog,
                 onConfirmUpdate = viewModel::startUpdate,
+                confirmActionLabel = LocalStrings.current.actionUpdateAndRestart,
             )
         }
 
         state.networkDraft?.let { draft ->
-            com.comics8.desktop.ui.components.NetworkSourceDialog(
+            NetworkSourceDialog(
                 draft = draft,
                 testing = state.networkTesting,
                 testMessage = state.networkTestMessage,
@@ -402,14 +543,14 @@ private fun ComicsDesktopAppContent(
 
         val artistPick = state.artistPick
         if (artistPick != null) {
-            com.comics8.desktop.ui.components.ArtistPickDialog(
+            ArtistPickDialog(
                 artists = artistPick.item.artistChoices,
                 onPick = viewModel::pickArtist,
                 onDismiss = viewModel::dismissArtistPick,
             )
         }
         if (state.showRemoveSourceSheet) {
-            com.comics8.desktop.ui.components.SourceRemoveDialog(
+            SourceRemoveDialog(
                 sources = state.installedSources,
                 onRemove = viewModel::uninstallSource,
                 onDismiss = viewModel::closeRemoveSourceSheet,
@@ -417,7 +558,7 @@ private fun ComicsDesktopAppContent(
         }
         val sourceError = state.sourceError
         if (sourceError != null) {
-            com.comics8.desktop.ui.components.SourceErrorDialog(
+            SourceErrorDialog(
                 message = sourceError,
                 onDismiss = viewModel::dismissSourceError,
             )

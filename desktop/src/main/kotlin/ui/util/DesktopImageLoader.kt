@@ -41,7 +41,7 @@ import com.comics8.core.network.ImageFallbacks
 import com.comics8.core.network.ImageReferer
 import com.comics8.core.source.LocalImageUri
 import com.comics8.core.source.SourceRegistry
-import com.comics8.desktop.ui.theme.LocalStrings
+import com.comics8.shared.ui.theme.LocalStrings
 import com.comics8.core.source.local.PreviewImageResolver
 import com.comics8.core.source.local.ThumbEncoder
 import com.comics8.core.source.local.CoverThumbCache
