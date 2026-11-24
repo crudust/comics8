@@ -10,6 +10,9 @@ import com.comics8.core.source.WorkId
 import com.comics8.core.source.local.CoverThumbCache
 import com.comics8.core.source.local.LocalSource
 import com.comics8.core.source.local.ThumbEncoder
+import com.comics8.core.storage.DownloadedEpisodeRecord
+import com.comics8.shared.db.RoomComicLocalStore
+import com.comics8.shared.db.openDesktopDatabase
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
@@ -22,40 +25,41 @@ class DesktopDownloadManagerTest {
         val root = createTempDirectory("desk-dl").toFile()
         root.deleteOnExit()
         val downloads = File(root, "downloads").apply { mkdirs() }
-        val db = DesktopDatabase(File(root, "comics8.db")).apply {
-            isSourceEnabled = { true }
-            installedIds = { setOf(WorkId.DEFAULT_SOURCE) }
-        }
+        val db = openDesktopDatabase(File(root, "comics8.db"))
         val workId = WorkId.eleven("123")
         val dir = DownloadLayout.episodeDir(downloads, workId, "999").apply { mkdirs() }
         File(dir, "0001.jpg").writeText("img")
-        db.saveDownloadedEpisode(
-            DownloadedEpisodeRecord(
-                sourceId = workId.sourceId,
-                toonId = workId.toonId,
-                wrId = "999",
-                toonTitle = "원피스",
-                toonThumbUrl = "t",
-                toonHref = "h",
-                episodeTitle = "1화",
-                episodeHref = "e",
-                imageCount = 1,
-                totalBytes = 3,
-                downloadedAt = 1L,
-                localDirPath = dir.absolutePath,
-            ),
-        )
+        try {
+            RoomComicLocalStore(db).upsertDownloadedEpisode(
+                DownloadedEpisodeRecord(
+                    sourceId = workId.sourceId,
+                    toonId = workId.toonId,
+                    wrId = "999",
+                    toonTitle = "원피스",
+                    toonThumbUrl = "t",
+                    toonHref = "h",
+                    episodeTitle = "1화",
+                    episodeHref = "e",
+                    imageCount = 1,
+                    totalBytes = 3,
+                    downloadedAt = 1L,
+                    localDirPath = dir.absolutePath,
+                ),
+            )
 
-        val manager = DesktopDownloadManager(
-            db,
-            ToonClient(isProxyEnabled = false, sources = emptyLocator()),
-            baseDir = downloads,
-            sources = SourceRegistry.forTests(),
-        )
+            val manager = DesktopDownloadManager(
+                db,
+                ToonClient(isProxyEnabled = false, sources = emptyLocator()),
+                baseDir = downloads,
+                sources = SourceRegistry.forTests(),
+            )
 
-        val images = manager.getLocalEpisodeImages(workId, "999")
-        assertThat(images).isNotNull()
-        assertThat(images!!.single()).endsWith("/0001.jpg")
+            val images = manager.getLocalEpisodeImages(workId, "999")
+            assertThat(images).isNotNull()
+            assertThat(images!!.single()).endsWith("/0001.jpg")
+        } finally {
+            db.close()
+        }
     }
 
     @Test
@@ -95,10 +99,7 @@ class DesktopDownloadManagerTest {
     }
 
     private fun enqueueLocal(downloads: File, dbFile: File, registry: SourceRegistry) {
-        val db = DesktopDatabase(dbFile).apply {
-            isSourceEnabled = { true }
-            installedIds = { setOf(WorkId.LOCAL_SOURCE) }
-        }
+        val db = openDesktopDatabase(dbFile)
         val manager = DesktopDownloadManager(
             db,
             ToonClient(isProxyEnabled = false, sources = SourceLocator { registry }),
@@ -107,24 +108,29 @@ class DesktopDownloadManagerTest {
             sources = registry,
             installedIds = { setOf(WorkId.LOCAL_SOURCE) },
         )
-        manager.enqueueEpisodes(
-            ToonItem(
-                id = "zip:/tmp/a.zip",
-                title = "Local",
-                thumbUrl = "",
-                href = "",
-                sourceId = WorkId.LOCAL_SOURCE,
-            ),
-            listOf(
-                EpisodeItem(
-                    wrId = "/tmp/a.zip",
-                    title = "a",
-                    date = null,
-                    thumbUrl = null,
+        try {
+            manager.enqueueEpisodes(
+                ToonItem(
+                    id = "zip:/tmp/a.zip",
+                    title = "Local",
+                    thumbUrl = "",
                     href = "",
+                    sourceId = WorkId.LOCAL_SOURCE,
                 ),
-            ),
-        )
+                listOf(
+                    EpisodeItem(
+                        wrId = "/tmp/a.zip",
+                        title = "a",
+                        date = null,
+                        thumbUrl = null,
+                        href = "",
+                    ),
+                ),
+            )
+        } finally {
+            manager.close()
+            db.close()
+        }
     }
 
     private fun emptyLocator(): SourceLocator = SourceLocator { SourceRegistry() }

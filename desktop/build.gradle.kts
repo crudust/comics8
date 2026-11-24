@@ -14,6 +14,7 @@ plugins {
 
 dependencies {
     implementation(project(":core"))
+    implementation(project(":shared-db"))
     implementation(project(":shared-ui"))
 
     implementation(compose.desktop.currentOs)
@@ -27,7 +28,6 @@ dependencies {
     implementation(libs.compose.multiplatform.icons)
 
     implementation(libs.coroutines.swing)
-    implementation(libs.sqlite)
 
     testImplementation(libs.junit)
     testImplementation(libs.truth)
@@ -49,7 +49,6 @@ compose.desktop {
         }
         nativeDistributions {
             modules(
-                "java.sql",
                 "java.naming",
                 "java.desktop",
                 "java.security.jgss",
@@ -58,7 +57,7 @@ compose.desktop {
                 "jdk.unsupported",
             )
             packageName = "Comics8"
-            packageVersion = "1.2.58"
+            packageVersion = "1.2.59"
             description = "Comics8 Monitor Desktop"
             macOS {
                 bundleID = "com.comics8.desktop"

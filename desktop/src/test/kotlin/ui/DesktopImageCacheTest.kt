@@ -1,6 +1,19 @@
 package com.comics8.desktop.ui
 
+import coil3.ImageLoader
+import coil3.PlatformContext
+import coil3.network.NetworkHeaders
+import coil3.network.httpHeaders
+import coil3.request.CachePolicy
+import coil3.request.ErrorResult
+import coil3.request.ImageRequest
+import coil3.request.SuccessResult
+import coil3.request.maxBitmapSize
+import coil3.size.Precision
+import coil3.size.Scale
+import coil3.size.Size
 import com.comics8.core.image.ImageCacheRole
+import com.comics8.core.image.ImageMemoryPolicy
 import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.EpisodePage
 import com.comics8.core.model.ListingPage
@@ -13,8 +26,15 @@ import com.comics8.core.source.SearchQuery
 import com.comics8.core.source.SourceCatalog
 import com.comics8.core.source.SourceHttp
 import com.comics8.core.source.SourceRegistry
+import com.comics8.core.source.local.CoverThumbCache
 import com.comics8.core.source.local.ZipImageUri
-import com.comics8.desktop.ui.util.DesktopImageCache
+import com.comics8.desktop.ui.util.DesktopCoil
+import com.comics8.shared.image.READER_LONG_EDGE_PX
+import com.comics8.shared.image.READER_SHORT_EDGE_PX
+import com.comics8.shared.image.RolePartitionedMemoryCache
+import com.comics8.shared.image.SkiaThumbEncoder
+import com.comics8.shared.image.imageCacheRole
+import com.comics8.shared.image.readerImageSizing
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.runBlocking
 import okhttp3.MediaType.Companion.toMediaType
@@ -30,23 +50,55 @@ import java.util.zip.ZipOutputStream
 import kotlin.io.path.createTempDirectory
 
 class DesktopImageCacheTest {
+    private fun isolatedLoader(
+        httpClient: OkHttpClient = OkHttpClient(),
+        registry: SourceRegistry = SourceRegistry(),
+    ): Pair<ImageLoader, File> {
+        val tempRoot = createTempDirectory("desk-coil-test").toFile().apply { deleteOnExit() }
+        val thumbs = CoverThumbCache(File(tempRoot, "thumbs"), SkiaThumbEncoder)
+        val memCache = RolePartitionedMemoryCache(ImageMemoryPolicy.partition(32L * 1024L * 1024L))
+        val loader = DesktopCoil.createImageLoader(
+            httpClient = httpClient,
+            registry = registry,
+            readerCacheDir = File(tempRoot, "reader"),
+            diskCacheDir = File(tempRoot, "disk"),
+            diskCacheMaxBytes = 32L * 1024L * 1024L,
+            memoryCache = memCache,
+            coverThumbs = thumbs,
+        )
+        return loader to tempRoot
+    }
+
     @Test
-    fun loadsLocalFileUrlWithColonInPath() {
+    fun loadsLocalFileUrlWithColonInPath() = runBlocking {
         val root = createTempDirectory("desk-img").toFile()
         root.deleteOnExit()
-        val file = File(root, "hitomi/artist:asanagi/0001.jpg")
+        val file = File(root, "hitomi/artist:asanagi/0001.png")
         file.parentFile.mkdirs()
         file.writeBytes(ONE_PIXEL_PNG)
 
-        val encoded = LocalImageUri.fromFile(file)
-        val raw = "file://" + file.absolutePath
-        for (url in listOf(encoded, raw)) {
-            assertThat(DesktopImageCache.readImageBytes(url)).isEqualTo(ONE_PIXEL_PNG)
+        val (loader, _) = isolatedLoader()
+        try {
+            val encoded = LocalImageUri.fromFile(file)
+            val raw = "file://" + file.absolutePath
+            for (url in listOf(encoded, raw)) {
+                val result = loader.execute(
+                    ImageRequest.Builder(PlatformContext.INSTANCE)
+                        .data(url)
+                        .build(),
+                )
+                assertThat(result).isInstanceOf(SuccessResult::class.java)
+                val success = result as SuccessResult
+                assertThat(success.image.width).isEqualTo(1)
+                assertThat(success.image.height).isEqualTo(1)
+            }
+        } finally {
+            loader.shutdown()
         }
     }
 
     @Test
-    fun loadsComics8ZipUri() {
+    fun loadsComics8ZipUri() = runBlocking {
         val root = createTempDirectory("desk-zip-img").toFile()
         root.deleteOnExit()
         val zip = File(root, "book.cbz")
@@ -57,51 +109,51 @@ class DesktopImageCacheTest {
         }
         val url = ZipImageUri.encode(zip, "nested/0001.png")
         assertThat(url).startsWith("${ZipImageUri.SCHEME}:")
-        assertThat(DesktopImageCache.readImageBytes(url)).isEqualTo(ONE_PIXEL_PNG)
-    }
 
-    @Test
-    fun decodesAvifImage() {
-        val file = File("/tmp/test_001.avif")
-        if (file.exists()) {
-            val bytes = file.readBytes()
-            val avif = org.glavo.avif.AvifImage.read(bytes)
-            val frame = avif.firstFrame()
-            assertThat(frame.width()).isEqualTo(2036)
-            assertThat(frame.height()).isEqualTo(2880)
-
-            val w = frame.width()
-            val h = frame.height()
-            val argb = frame.intPixels()
-            val rgba = ByteArray(w * h * 4)
-            var srcIdx = 0
-            var dstIdx = 0
-            while (srcIdx < argb.size) {
-                val pixel = argb[srcIdx++]
-                rgba[dstIdx++] = ((pixel ushr 16) and 0xFF).toByte()
-                rgba[dstIdx++] = ((pixel ushr 8) and 0xFF).toByte()
-                rgba[dstIdx++] = (pixel and 0xFF).toByte()
-                rgba[dstIdx++] = ((pixel ushr 24) and 0xFF).toByte()
-            }
-            val info = org.jetbrains.skia.ImageInfo(
-                width = w,
-                height = h,
-                colorType = org.jetbrains.skia.ColorType.RGBA_8888,
-                alphaType = org.jetbrains.skia.ColorAlphaType.UNPREMUL,
+        val (loader, _) = isolatedLoader()
+        try {
+            val result = loader.execute(
+                ImageRequest.Builder(PlatformContext.INSTANCE)
+                    .data(url)
+                    .build(),
             )
-            val skiaImage = org.jetbrains.skia.Image.makeRaster(info, rgba, w * 4)
-            assertThat(skiaImage).isNotNull()
-            assertThat(skiaImage.width).isEqualTo(2036)
-            assertThat(skiaImage.height).isEqualTo(2880)
-            skiaImage.close()
-
-            val webp = com.comics8.desktop.ui.util.AwtThumbEncoder.webp(bytes, 320, 80)
-            assertThat(webp).isNotEmpty()
+            assertThat(result).isInstanceOf(SuccessResult::class.java)
+            val success = result as SuccessResult
+            assertThat(success.image.width).isEqualTo(1)
+            assertThat(success.image.height).isEqualTo(1)
+        } finally {
+            loader.shutdown()
         }
     }
 
     @Test
-    fun decodesReaderWithShortEdgeRetention() {
+    fun decodesAvifImage() = runBlocking {
+        val file = File("/tmp/test_001.avif")
+        if (file.exists()) {
+            val bytes = file.readBytes()
+            val (loader, _) = isolatedLoader()
+            try {
+                val result = loader.execute(
+                    ImageRequest.Builder(PlatformContext.INSTANCE)
+                        .data(bytes)
+                        .readerImageSizing(Size(READER_SHORT_EDGE_PX, READER_LONG_EDGE_PX))
+                        .build(),
+                )
+                assertThat(result).isInstanceOf(SuccessResult::class.java)
+                val success = result as SuccessResult
+                assertThat(success.image.width).isEqualTo(2036)
+                assertThat(success.image.height).isEqualTo(2880)
+
+                val webp = SkiaThumbEncoder.webp(bytes, 320, 80)
+                assertThat(webp).isNotEmpty()
+            } finally {
+                loader.shutdown()
+            }
+        }
+    }
+
+    @Test
+    fun decodesReaderWithShortEdgeRetention() = runBlocking {
         val surface = org.jetbrains.skia.Surface.makeRasterN32Premul(200, 3000)
         val image = surface.makeImageSnapshot()
         val data = image.encodeToData(org.jetbrains.skia.EncodedImageFormat.PNG, 100)!!
@@ -109,20 +161,35 @@ class DesktopImageCacheTest {
         surface.close()
         image.close()
 
-        val decodedReader = DesktopImageCache.decodeForDisplay(bytes, com.comics8.core.image.ImageCacheRole.READER)
-        assertThat(decodedReader).isNotNull()
-        assertThat(decodedReader!!.width).isEqualTo(200)
-        assertThat(decodedReader.height).isEqualTo(3000)
+        val (loader, _) = isolatedLoader()
+        try {
+            val readerResult = loader.execute(
+                ImageRequest.Builder(PlatformContext.INSTANCE)
+                    .data(bytes)
+                    .readerImageSizing(Size(READER_SHORT_EDGE_PX, READER_LONG_EDGE_PX))
+                    .build(),
+            ) as SuccessResult
+            assertThat(readerResult.image.width).isEqualTo(200)
+            assertThat(readerResult.image.height).isEqualTo(3000)
 
-        val decodedGrid = DesktopImageCache.decodeForDisplay(bytes, com.comics8.core.image.ImageCacheRole.GRID)
-        assertThat(decodedGrid).isNotNull()
-        assertThat(decodedGrid!!.height).isEqualTo(480)
-        assertThat(decodedGrid.width).isEqualTo(32)
+            val gridResult = loader.execute(
+                ImageRequest.Builder(PlatformContext.INSTANCE)
+                    .data(bytes)
+                    .size(Size.ORIGINAL)
+                    .scale(Scale.FIT)
+                    .precision(Precision.EXACT)
+                    .maxBitmapSize(Size(480, 480))
+                    .build(),
+            ) as SuccessResult
+            assertThat(gridResult.image.height).isEqualTo(480)
+            assertThat(gridResult.image.width).isEqualTo(32)
+        } finally {
+            loader.shutdown()
+        }
     }
 
     @Test
     fun corruptImageBytesFallBackToAlternateUrl() = runBlocking {
-        val prevClient = DesktopImageCache.httpClient
         val unique = System.nanoTime()
         val origUrl = "https://host-a.example/corrupt-$unique.png"
         val fbUrl = "https://host-b.example/corrupt-$unique.png"
@@ -137,42 +204,45 @@ class DesktopImageCacheTest {
             ),
         )
         val requested = mutableListOf<String>()
-        DesktopImageCache.registry = reg
-        DesktopImageCache.shareHttpClient(
-            OkHttpClient.Builder()
-                .addInterceptor(ComicImageInterceptor(reg))
-                .addInterceptor { chain ->
-                    val req = chain.request()
-                    val url = req.url.toString()
-                    requested += url
-                    val body = if (url == origUrl) {
-                        "not-a-valid-image".toByteArray().toResponseBody("application/octet-stream".toMediaType())
-                    } else {
-                        ONE_PIXEL_PNG.toResponseBody("image/png".toMediaType())
-                    }
-                    Response.Builder()
-                        .request(req)
-                        .protocol(Protocol.HTTP_1_1)
-                        .code(200)
-                        .message("OK")
-                        .body(body)
-                        .build()
+        val client = OkHttpClient.Builder()
+            .addInterceptor(ComicImageInterceptor(reg))
+            .addInterceptor { chain ->
+                val req = chain.request()
+                val url = req.url.toString()
+                requested += url
+                val body = if (url == origUrl) {
+                    "not-a-valid-image".toByteArray().toResponseBody("application/octet-stream".toMediaType())
+                } else {
+                    ONE_PIXEL_PNG.toResponseBody("image/png".toMediaType())
                 }
-                .build(),
-        )
+                Response.Builder()
+                    .request(req)
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body(body)
+                    .build()
+            }
+            .build()
+
+        val (loader, _) = isolatedLoader(httpClient = client, registry = reg)
         try {
-            val bitmap = DesktopImageCache.loadImage(ImageCacheRole.READER, origUrl, forceRetry = false)
-            assertThat(bitmap).isNotNull()
+            val result = loader.execute(
+                ImageRequest.Builder(PlatformContext.INSTANCE)
+                    .data(origUrl)
+                    .imageCacheRole(ImageCacheRole.READER, origUrl)
+                    .readerImageSizing(Size(READER_SHORT_EDGE_PX, READER_LONG_EDGE_PX))
+                    .build(),
+            )
+            assertThat(result).isInstanceOf(SuccessResult::class.java)
             assertThat(requested).containsExactly(origUrl, fbUrl).inOrder()
         } finally {
-            DesktopImageCache.evict(ImageCacheRole.READER, origUrl)
-            DesktopImageCache.shareHttpClient(prevClient)
+            loader.shutdown()
         }
     }
 
     @Test
     fun forceRetrySendsManualRetryHeaderAndRecoversAfterTimeout() = runBlocking {
-        val prevClient = DesktopImageCache.httpClient
         val unique = System.nanoTime()
         val origUrl = "https://host-a.example/timeout-$unique.png"
         val fb1 = "https://host-b.example/timeout-$unique.png"
@@ -189,49 +259,66 @@ class DesktopImageCacheTest {
             ),
         )
         val requested = mutableListOf<String>()
-        DesktopImageCache.registry = reg
-        DesktopImageCache.shareHttpClient(
-            OkHttpClient.Builder()
-                .addInterceptor(ComicImageInterceptor(reg, maxFallbacks = 2))
-                .addInterceptor { chain ->
-                    val req = chain.request()
-                    val url = req.url.toString()
-                    requested += url
-                    assertThat(req.header(ComicImageInterceptor.HEADER_RETRY_MODE)).isNull()
-                    when (url) {
-                        origUrl -> throw SocketTimeoutException("Read timed out")
-                        fb1, fb2 -> Response.Builder()
-                            .request(req)
-                            .protocol(Protocol.HTTP_1_1)
-                            .code(404)
-                            .message("Not Found")
-                            .body(ByteArray(0).toResponseBody("text/plain".toMediaType()))
-                            .build()
-                        else -> Response.Builder()
-                            .request(req)
-                            .protocol(Protocol.HTTP_1_1)
-                            .code(200)
-                            .message("OK")
-                            .body(ONE_PIXEL_PNG.toResponseBody("image/png".toMediaType()))
-                            .build()
-                    }
+        val client = OkHttpClient.Builder()
+            .addInterceptor(ComicImageInterceptor(reg, maxFallbacks = 2))
+            .addInterceptor { chain ->
+                val req = chain.request()
+                val url = req.url.toString()
+                requested += url
+                assertThat(req.header(ComicImageInterceptor.HEADER_RETRY_MODE)).isNull()
+                when (url) {
+                    origUrl -> throw SocketTimeoutException("Read timed out")
+                    fb1, fb2 -> Response.Builder()
+                        .request(req)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(404)
+                        .message("Not Found")
+                        .body(ByteArray(0).toResponseBody("text/plain".toMediaType()))
+                        .build()
+                    else -> Response.Builder()
+                        .request(req)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .body(ONE_PIXEL_PNG.toResponseBody("image/png".toMediaType()))
+                        .build()
                 }
-                .build(),
-        )
+            }
+            .build()
+
+        val (loader, _) = isolatedLoader(httpClient = client, registry = reg)
         try {
             // Auto mode must fail on SocketTimeoutException without touching fallbacks
-            val autoResult = DesktopImageCache.loadImage(ImageCacheRole.READER, origUrl, forceRetry = false)
-            assertThat(autoResult).isNull()
+            val autoResult = loader.execute(
+                ImageRequest.Builder(PlatformContext.INSTANCE)
+                    .data(origUrl)
+                    .imageCacheRole(ImageCacheRole.READER, origUrl)
+                    .readerImageSizing(Size(READER_SHORT_EDGE_PX, READER_LONG_EDGE_PX))
+                    .build(),
+            )
+            assertThat(autoResult).isInstanceOf(ErrorResult::class.java)
             assertThat(requested).containsExactly(origUrl)
 
-            // Manual retry (forceRetry = true) triggers fallback on timeout and tries >2 fallbacks
+            // Manual retry triggers fallback on timeout and tries >2 fallbacks
             requested.clear()
-            val manualResult = DesktopImageCache.loadImage(ImageCacheRole.READER, origUrl, forceRetry = true)
-            assertThat(manualResult).isNotNull()
+            val manualResult = loader.execute(
+                ImageRequest.Builder(PlatformContext.INSTANCE)
+                    .data(origUrl)
+                    .imageCacheRole(ImageCacheRole.READER, origUrl)
+                    .readerImageSizing(Size(READER_SHORT_EDGE_PX, READER_LONG_EDGE_PX))
+                    .memoryCachePolicy(CachePolicy.WRITE_ONLY)
+                    .diskCachePolicy(CachePolicy.WRITE_ONLY)
+                    .httpHeaders(
+                        NetworkHeaders.Builder()
+                            .set(ComicImageInterceptor.HEADER_RETRY_MODE, ComicImageInterceptor.RETRY_MODE_MANUAL)
+                            .build(),
+                    )
+                    .build(),
+            )
+            assertThat(manualResult).isInstanceOf(SuccessResult::class.java)
             assertThat(requested).containsExactly(origUrl, fb1, fb2, fb3).inOrder()
         } finally {
-            DesktopImageCache.evict(ImageCacheRole.READER, origUrl)
-            DesktopImageCache.shareHttpClient(prevClient)
+            loader.shutdown()
         }
     }
 

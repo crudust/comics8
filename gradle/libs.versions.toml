@@ -16,6 +16,7 @@ room = "2.8.5"
 robolectric = "4.17"
 skiko = "0.150.2"
 sqlite = "3.54.1.0"
+sqlite-bundled = "2.6.2"
 test-core = "1.7.0"
 truth = "1.4.5"
 work = "2.12.0"
@@ -51,13 +52,13 @@ play-app-update = { module = "com.google.android.play:app-update", version = "2.
 rhino = { module = "org.mozilla:rhino-runtime", version = "1.7.15.1" }
 robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
 room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }
-room-ktx = { module = "androidx.room:room-ktx", version.ref = "room" }
 room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
 skiko-macos-arm64 = { module = "org.jetbrains.skiko:skiko-awt-runtime-macos-arm64", version.ref = "skiko" }
 skiko-macos-x64 = { module = "org.jetbrains.skiko:skiko-awt-runtime-macos-x64", version.ref = "skiko" }
 skiko-windows-x64 = { module = "org.jetbrains.skiko:skiko-awt-runtime-windows-x64", version.ref = "skiko" }
 smbj = { module = "com.hierynomus:smbj", version = "0.15.0" }
 sqlite = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite" }
+sqlite-bundled = { module = "androidx.sqlite:sqlite-bundled", version.ref = "sqlite-bundled" }
 test-core-ktx = { module = "androidx.test:core-ktx", version.ref = "test-core" }
 truth = { module = "com.google.truth:truth", version.ref = "truth" }
 work-runtime = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }

@@ -1,13 +1,23 @@
 package com.comics8.shared.ui
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import coil3.compose.AsyncImage
+import coil3.compose.LocalPlatformContext
+import coil3.request.CachePolicy
+import coil3.request.ImageRequest
+import coil3.request.crossfade
+import coil3.request.maxBitmapSize
+import coil3.size.Size
 import com.comics8.core.image.ImageCacheRole
+import com.comics8.shared.image.THUMBNAIL_MAX_EDGE_PX
+import com.comics8.shared.image.imageCacheRole
 
 /**
  * Platform UI actions needed by shared composables (clipboard, toast notifications, external URLs).
@@ -32,34 +42,16 @@ val LocalPlatformBackHandler = staticCompositionLocalOf<@Composable (Boolean, ()
     { _, _ -> }
 }
 
+val LocalImageFallbacksProvider = staticCompositionLocalOf<(String) -> List<String>> {
+    { emptyList() }
+}
+
 @Composable
 fun PlatformBackHandler(
     enabled: Boolean = true,
     onBack: () -> Unit,
 ) {
     LocalPlatformBackHandler.current(enabled, onBack)
-}
-
-/**
- * Composable slot for rendering cover/thumbnail images via platform-specific image loaders
- * (Coil 3 on Android, DesktopImageLoader on Desktop).
- */
-fun interface ComicImageRenderer {
-    @Composable
-    fun Render(
-        url: String,
-        cacheRole: ImageCacheRole,
-        contentDescription: String?,
-        modifier: Modifier,
-        contentScale: ContentScale,
-        refreshEpoch: Long,
-    )
-}
-
-val LocalComicImageRenderer = staticCompositionLocalOf<ComicImageRenderer> {
-    ComicImageRenderer { _, _, _, modifier, _, _ ->
-        Box(modifier.background(MaterialTheme.colorScheme.surfaceVariant))
-    }
 }
 
 @Composable
@@ -71,12 +63,31 @@ fun ComicImage(
     contentScale: ContentScale = ContentScale.Crop,
     refreshEpoch: Long = 0L,
 ) {
-    LocalComicImageRenderer.current.Render(
-        url = url,
-        cacheRole = cacheRole,
+    var isError by remember(url) { mutableStateOf(false) }
+    val retryKey = if (isError) refreshEpoch else 0L
+    val platformContext = LocalPlatformContext.current
+    val imageModel = remember(url, cacheRole, retryKey, platformContext) {
+        ImageRequest.Builder(platformContext)
+            .crossfade(true)
+            .data(url)
+            .imageCacheRole(cacheRole, url)
+            .apply {
+                if (cacheRole != ImageCacheRole.READER) {
+                    maxBitmapSize(Size(THUMBNAIL_MAX_EDGE_PX, THUMBNAIL_MAX_EDGE_PX))
+                }
+                if (retryKey > 0L) {
+                    memoryCachePolicy(CachePolicy.WRITE_ONLY)
+                    diskCachePolicy(CachePolicy.WRITE_ONLY)
+                }
+            }
+            .build()
+    }
+    AsyncImage(
+        model = imageModel,
         contentDescription = contentDescription,
-        modifier = modifier,
         contentScale = contentScale,
-        refreshEpoch = refreshEpoch,
+        onError = { isError = true },
+        onSuccess = { isError = false },
+        modifier = modifier,
     )
 }

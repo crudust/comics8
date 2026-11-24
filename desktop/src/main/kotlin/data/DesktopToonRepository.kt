@@ -4,11 +4,12 @@ import com.comics8.core.data.SharedToonRepository
 import com.comics8.core.network.ToonClient
 import com.comics8.core.source.SourceBindingManager
 import com.comics8.core.source.SourceRegistry
-import com.comics8.core.source.WorkId
+import com.comics8.shared.db.AppDatabase
+import com.comics8.shared.db.RoomComicLocalStore
 
 class DesktopToonRepository(
     client: ToonClient,
-    private val database: DesktopDatabase,
+    database: AppDatabase,
     override val syncManager: DesktopSyncManager? = null,
     override val downloadManager: DesktopDownloadManager? = null,
     now: () -> Long = { System.currentTimeMillis() },
@@ -18,7 +19,7 @@ class DesktopToonRepository(
     bindingManager: SourceBindingManager = SourceBindingManager.desktopGlobal,
 ) : SharedToonRepository(
     client = client,
-    store = DesktopComicLocalStore(database),
+    store = RoomComicLocalStore(database),
     sourceSettings = DesktopSourcePrefs,
     syncManager = syncManager,
     downloadManager = downloadManager,
@@ -29,25 +30,4 @@ class DesktopToonRepository(
     bindingManager = bindingManager,
     seenNotifiedKeyFallback = { item -> "${item.workId().storageKey()}|${item.updatedAt.orEmpty()}" },
     upsertSeenOnSaveHistory = false,
-) {
-    init {
-        database.isSourceEnabled = isSourceEnabled
-        database.installedIds = installedIds
-    }
-
-    fun setSourceWriteAccess(isEnabled: (String) -> Boolean) {
-        database.isSourceEnabled = isEnabled
-    }
-
-    suspend fun getReadEpisode(workId: WorkId, wrId: String): ReadEpisodeRecord? =
-        getReadEpisodeRecord(workId, wrId)
-
-    suspend fun getHistory(sourceId: String): List<ReadHistoryRecord> =
-        getHistoryRecords(sourceId)
-
-    suspend fun getHistory(workId: WorkId): ReadHistoryRecord? =
-        getHistoryRecord(workId)
-
-    suspend fun saveHistory(history: ReadHistoryRecord) =
-        saveHistoryRecord(history)
-}
+)

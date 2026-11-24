@@ -29,12 +29,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 open class BaseSyncManager(
     protected val storage: SyncStorageAdapter,
     protected val toonClient: ToonClient? = null,
-    protected val client: OkHttpClient = OkHttpClient.Builder()
-        .dns(com.comics8.core.network.FallbackDns)
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
-        .build(),
+    protected val client: OkHttpClient = defaultHttpClient(),
 ) : AutoCloseable {
     protected val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var debounceJob: Job? = null
@@ -612,5 +607,14 @@ open class BaseSyncManager(
         } catch (_: Exception) {
             null
         }
+    }
+
+    companion object {
+        fun defaultHttpClient(): OkHttpClient = OkHttpClient.Builder()
+            .dns(com.comics8.core.network.FallbackDns)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .build()
     }
 }

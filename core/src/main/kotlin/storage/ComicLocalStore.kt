@@ -4,7 +4,7 @@ import com.comics8.core.model.EpisodeListingTotal
 import com.comics8.core.source.WorkId
 
 /**
- * Platform-neutral persistence abstraction backed by Room on Android and SQLite JDBC on Desktop.
+ * Platform-neutral persistence abstraction backed by Room KMP (`:shared-db`) on Android and Desktop.
  */
 interface ComicLocalStore {
     suspend fun <T> inTransaction(block: suspend () -> T): T

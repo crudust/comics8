@@ -16,6 +16,12 @@ import com.comics8.core.source.SourceCatalog
 import com.comics8.core.source.SourceHttp
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.WorkId
+import com.comics8.core.storage.ReadHistoryRecord
+import com.comics8.core.storage.ReaderSettingRecord
+import com.comics8.core.storage.ToonCatalogRecord
+import com.comics8.shared.db.AppDatabase
+import com.comics8.shared.db.RoomComicLocalStore
+import com.comics8.shared.db.openDesktopDatabase
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.runBlocking
 import okhttp3.MediaType.Companion.toMediaType
@@ -27,7 +33,8 @@ import java.io.File
 
 class DesktopToonRepositorySyncTest {
     private lateinit var dbFile: File
-    private lateinit var db: DesktopDatabase
+    private lateinit var db: AppDatabase
+    private lateinit var store: RoomComicLocalStore
     private lateinit var repository: DesktopToonRepository
 
     private class FakeSource : ComicSource {
@@ -73,7 +80,8 @@ class DesktopToonRepositorySyncTest {
     @Before
     fun setUp() {
         dbFile = File.createTempFile("desktop-repo-test", ".db")
-        db = DesktopDatabase(dbFile)
+        db = openDesktopDatabase(dbFile)
+        store = RoomComicLocalStore(db)
         val source = FakeSource()
         val registry = SourceRegistry(listOf(source))
         repository = DesktopToonRepository(
@@ -98,7 +106,7 @@ class DesktopToonRepositorySyncTest {
     fun syncEpisodeCountsUpdatesReadHistoryAndCallsCallback() = runBlocking {
         val workId = WorkId("test_source", "toon1")
         // 이미 10화까지 읽은 기록 저장 (총회차 10)
-        db.saveHistory(
+        store.upsertHistory(
             ReadHistoryRecord(
                 sourceId = workId.sourceId,
                 toonId = workId.toonId,
@@ -143,7 +151,7 @@ class DesktopToonRepositorySyncTest {
         assertThat(updatedTotal?.count).isEqualTo(15)
         assertThat(updatedProgress).contains("15")
 
-        val historyInDb = db.getHistory(workId)
+        val historyInDb = store.getHistory(workId)
         assertThat(historyInDb).isNotNull()
         assertThat(historyInDb?.totalEpisodes).isEqualTo(15)
         assertThat(historyInDb?.hasNew).isTrue()
@@ -159,7 +167,7 @@ class DesktopToonRepositorySyncTest {
         DesktopSourcePrefs.setProgressDisplayMode("test_source", com.comics8.core.model.ProgressDisplayMode.READ_COUNT)
 
         // 3 episodes read out of 20
-        db.saveHistory(
+        store.upsertHistory(
             ReadHistoryRecord(
                 sourceId = workId.sourceId,
                 toonId = workId.toonId,
@@ -196,7 +204,7 @@ class DesktopToonRepositorySyncTest {
     @Test
     fun getReaderSettingUsesSharedLegacyFallbacks() = runBlocking {
         val workId = WorkId("test_source", "reader-setting-test")
-        db.saveReaderSetting(
+        store.upsertReaderSetting(
             ReaderSettingRecord(
                 sourceId = workId.sourceId,
                 toonId = workId.toonId,
@@ -220,7 +228,7 @@ class DesktopToonRepositorySyncTest {
         val workId = WorkId("test_source", "toon-sync-test")
 
         // 로컬에 이미 104화 읽음 기록 (order = 104)
-        db.saveHistory(
+        store.upsertHistory(
             ReadHistoryRecord(
                 sourceId = workId.sourceId,
                 toonId = workId.toonId,
@@ -273,7 +281,7 @@ class DesktopToonRepositorySyncTest {
         assertThat(counts.history).isEqualTo(0)
         assertThat(counts.episodes).isEqualTo(1)
 
-        val hist = db.getHistory(workId)
+        val hist = store.getHistory(workId)
         assertThat(hist?.lastReadOrder).isEqualTo(104)
         assertThat(hist?.lastWrId).isEqualTo("104")
     }
@@ -284,7 +292,7 @@ class DesktopToonRepositorySyncTest {
         val workId = WorkId("test_source", "toon-sync-elevate")
 
         // 로컬에 103화 읽음 기록 (order = 103)
-        db.saveHistory(
+        store.upsertHistory(
             ReadHistoryRecord(
                 sourceId = workId.sourceId,
                 toonId = workId.toonId,
@@ -337,7 +345,7 @@ class DesktopToonRepositorySyncTest {
         assertThat(counts.history).isEqualTo(1)
         assertThat(counts.episodes).isEqualTo(1)
 
-        val hist = db.getHistory(workId)
+        val hist = store.getHistory(workId)
         assertThat(hist?.lastReadOrder).isEqualTo(104)
         assertThat(hist?.lastWrId).isEqualTo("104")
         assertThat(hist?.hasNew).isFalse()
@@ -347,8 +355,8 @@ class DesktopToonRepositorySyncTest {
     fun syncEpisodeCountsWithUnreadItemUpdatesCatalogAndProgress() = runBlocking {
         val workId = WorkId("test_source", "unread_toon")
         // No history exists for this toon
-        assertThat(db.getHistory(workId)).isNull()
-        assertThat(db.getCatalog(workId)).isNull()
+        assertThat(store.getHistory(workId)).isNull()
+        assertThat(store.getCatalogEntry(workId)).isNull()
 
         val item = ToonItem(
             id = "unread_toon",
@@ -374,12 +382,12 @@ class DesktopToonRepositorySyncTest {
         assertThat(updatedProgress).isEqualTo("15화")
 
         // Catalog record must be saved in database
-        val catalogRecord = db.getCatalog(workId)
+        val catalogRecord = store.getCatalogEntry(workId)
         assertThat(catalogRecord).isNotNull()
         assertThat(catalogRecord?.totalEpisodes).isEqualTo(15)
 
         // Reading history should NOT have been falsely created
-        assertThat(db.getHistory(workId)).isNull()
+        assertThat(store.getHistory(workId)).isNull()
 
         // Listing refreshProgress should display "15화" using catalog
         val refreshed = repository.refreshProgress(listOf(item))
@@ -391,24 +399,24 @@ class DesktopToonRepositorySyncTest {
         val workId = WorkId("test_source", "toon-counted")
         val counted = EpisodeListingTotal(count = 50, lastPage = 1, pageSize = 100, delta = -50)
 
-        db.recordCatalogTotal(workId, counted, 500L)
-        var record = db.getCatalog(workId)
+        store.recordCatalogTotal(workId, counted, 500L)
+        var record = store.getCatalogEntry(workId)
         assertThat(record?.total()).isEqualTo(counted)
         assertThat(record?.updatedAt).isEqualTo(500L)
 
         // A fresh sweep may lower the count: episodes disappear from listings too.
         val shrunk = EpisodeListingTotal(count = 30, lastPage = 1, pageSize = 100, delta = -70)
-        db.recordCatalogTotal(workId, shrunk, 100L)
-        record = db.getCatalog(workId)
+        store.recordCatalogTotal(workId, shrunk, 100L)
+        record = store.getCatalogEntry(workId)
         assertThat(record?.total()).isEqualTo(shrunk)
 
         // A null observation is "not counted", never "erase the count that was taken".
-        db.recordCatalogTotal(workId, null, 700L)
-        record = db.getCatalog(workId)
+        store.recordCatalogTotal(workId, null, 700L)
+        record = store.getCatalogEntry(workId)
         assertThat(record?.total()).isEqualTo(shrunk)
 
         // Batch save goes through the same single entry point.
-        db.saveAllCatalog(
+        store.upsertCatalogEntries(
             listOf(
                 ToonCatalogRecord.of(
                     WorkId("test_source", "toon-batch-new"),
@@ -417,7 +425,7 @@ class DesktopToonRepositorySyncTest {
                 ),
             ),
         )
-        assertThat(db.getCatalog(WorkId("test_source", "toon-batch-new"))?.total()?.count).isEqualTo(20)
+        assertThat(store.getCatalogEntry(WorkId("test_source", "toon-batch-new"))?.total()?.count).isEqualTo(20)
     }
 
     @Test
@@ -600,7 +608,7 @@ class DesktopToonRepositorySyncTest {
         assertThat(callbackCount.get()).isEqualTo(3)
         assertThat(reported).containsExactly(15 to "15화", 15 to "15화", 15 to "15화")
         for (item in items) {
-            val record = db.getCatalog(item.workId())
+            val record = store.getCatalogEntry(item.workId())
             assertThat(record).isNotNull()
             assertThat(record?.totalEpisodes).isEqualTo(15)
         }
@@ -678,7 +686,7 @@ class DesktopToonRepositorySyncTest {
         // listing was counted instead, and that count is what reaches the callback.
         assertThat(updatedTotal?.count).isEqualTo(15)
         assertThat(updatedProgress).isEqualTo("15화")
-        val inDb = db.getCatalog(item.workId())
+        val inDb = store.getCatalogEntry(item.workId())
         assertThat(inDb).isNotNull()
         assertThat(inDb?.totalEpisodes).isEqualTo(15)
 
@@ -751,7 +759,7 @@ class DesktopToonRepositorySyncTest {
 
         val workId = WorkId("test_source", "toon_higher_local")
         // Local history has 80 episodes read to order 80 (saved in DB directly without catalog record)
-        db.saveHistory(
+        store.upsertHistory(
             ReadHistoryRecord(
                 sourceId = workId.sourceId,
                 toonId = workId.toonId,
@@ -785,7 +793,7 @@ class DesktopToonRepositorySyncTest {
 
         // A shapeless server row (50) is not a total, so the local listing is counted instead: 80.
         assertThat(updatedTotal?.count).isEqualTo(80)
-        val historyInDb = db.getHistory(workId)
+        val historyInDb = store.getHistory(workId)
         assertThat(historyInDb?.totalEpisodes).isEqualTo(80)
 
         // And our higher count 80 should have been reported back to server
@@ -799,23 +807,23 @@ class DesktopToonRepositorySyncTest {
     fun anUncountedRowCannotEraseOrReplaceACountedTotal() = runBlocking {
         val workId = WorkId("test_source", "toon-inflated")
         val counted = EpisodeListingTotal(count = 199, lastPage = 2, pageSize = 100, delta = -1)
-        db.recordCatalogTotal(workId, counted, 1000L)
+        store.recordCatalogTotal(workId, counted, 1000L)
 
         // A row without a shape is not a count, so it neither lowers nor erases what was counted.
-        db.recordCatalogTotal(workId, null, 2000L)
-        assertThat(db.getCatalog(workId)?.total()).isEqualTo(counted)
+        store.recordCatalogTotal(workId, null, 2000L)
+        assertThat(store.getCatalogEntry(workId)?.total()).isEqualTo(counted)
 
         // An older verified count also keeps the newer one intact.
         val older = EpisodeListingTotal(count = 180, lastPage = 2, pageSize = 100, delta = -20)
-        db.recordCatalogTotal(workId, older, 3000L)
-        assertThat(db.getCatalog(workId)?.total()).isEqualTo(older)
+        store.recordCatalogTotal(workId, older, 3000L)
+        assertThat(store.getCatalogEntry(workId)?.total()).isEqualTo(older)
     }
 
     @Test
     fun getHistoryEnrichesTotalEpisodesAndHasNewFromCatalog() = runBlocking {
         val workId = WorkId("test_source", "toon_enrich")
         // History record has older count: read 10 of 10 (hasNew = false)
-        db.saveHistory(
+        store.upsertHistory(
             ReadHistoryRecord(
                 sourceId = workId.sourceId,
                 toonId = workId.toonId,
@@ -833,19 +841,20 @@ class DesktopToonRepositorySyncTest {
         )
 
         // Catalog has discovered new episodes: 25 total
-        db.recordCatalogTotal(
+        store.recordCatalogTotal(
             workId,
             EpisodeListingTotal(count = 25, lastPage = 1, pageSize = 100, delta = -75),
+            System.currentTimeMillis(),
         )
 
-        // getHistory(workId) should reflect 25 and hasNew = true (10 < 25)
-        val single = repository.getHistory(workId)
+        // getHistoryRecord(workId) should reflect 25 and hasNew = true (10 < 25)
+        val single = repository.getHistoryRecord(workId)
         assertThat(single).isNotNull()
         assertThat(single?.totalEpisodes).isEqualTo(25)
         assertThat(single?.hasNew).isTrue()
 
-        // getHistory(sourceId) should also reflect 25 and hasNew = true
-        val list = repository.getHistory(workId.sourceId)
+        // getHistoryRecords(sourceId) should also reflect 25 and hasNew = true
+        val list = repository.getHistoryRecords(workId.sourceId)
         assertThat(list).isNotEmpty()
         val fromList = list.first { it.workId() == workId }
         assertThat(fromList.totalEpisodes).isEqualTo(25)
@@ -859,7 +868,7 @@ class DesktopToonRepositorySyncTest {
     @Test
     fun toggleFavoriteEnrichesThumbnailFromHistoryWhenBlank() = runBlocking {
         val workId = WorkId("test_source", "toon_fav_thumb")
-        db.saveHistory(
+        store.upsertHistory(
             ReadHistoryRecord(
                 sourceId = workId.sourceId,
                 toonId = workId.toonId,
@@ -887,7 +896,7 @@ class DesktopToonRepositorySyncTest {
         val result = repository.toggleFavorite(itemWithBlankThumb)
         assertThat(result).isTrue()
 
-        val saved = db.getFavorite(workId)
+        val saved = store.getFavorite(workId)
         assertThat(saved).isNotNull()
         assertThat(saved?.thumbUrl).isEqualTo("https://example.com/hist-thumb.webp")
     }

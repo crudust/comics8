@@ -47,7 +47,7 @@ object DesktopUpdateManager {
                         return@withContext Result.failure(Exception("다운로드 실패 (HTTP ${response.code})"))
                     }
 
-                    val body = response.body ?: return@withContext Result.failure(Exception("빈 응답 바디"))
+                    val body = response.body
                     val totalBytes = body.contentLength()
                     var downloadedBytes = 0L
 

@@ -35,12 +35,14 @@ kotlin {
             implementation(compose.ui)
             implementation(libs.compose.multiplatform.material3)
             implementation(libs.compose.multiplatform.icons)
+            api(libs.coil.compose)
         }
 
         val commonJvmMain = create("commonJvmMain") {
             dependsOn(commonMain.get())
             dependencies {
                 api(project(":core"))
+                api(libs.coil.network.okhttp)
             }
         }
 
@@ -59,6 +61,7 @@ kotlin {
 
         named("desktopTest") {
             dependencies {
+                implementation(compose.desktop.currentOs)
                 implementation(libs.junit)
                 implementation(libs.truth)
             }

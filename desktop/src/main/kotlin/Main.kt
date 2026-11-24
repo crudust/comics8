@@ -2,11 +2,7 @@ package com.comics8.desktop
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -34,6 +30,7 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import com.comics8.core.network.ImageFallbacks
 import com.comics8.core.network.ToonClient
 import com.comics8.core.source.SourceLocator
 import com.comics8.core.source.SourceRegistry
@@ -42,7 +39,7 @@ import com.comics8.core.source.network.NetworkSourceStore
 import com.comics8.core.source.network.NetworkSourceConfig
 import com.comics8.core.source.network.NetworkSourceRuntime
 import com.comics8.core.source.network.loadSources
-import com.comics8.desktop.data.DesktopDatabase
+import com.comics8.shared.db.openDesktopDatabase
 import java.awt.Desktop
 import java.awt.FileDialog
 import java.awt.Frame
@@ -66,25 +63,11 @@ import com.comics8.desktop.ui.components.TrackpadPinchDispatcher
 import com.comics8.desktop.ui.components.desktopDiscreteScrollPaging
 import com.comics8.desktop.ui.components.pickJsFile
 import com.comics8.desktop.ui.reader.ReaderPane
-import com.comics8.desktop.ui.util.DesktopAsyncImage
-import com.comics8.shared.ui.ComicImageRenderer
-import com.comics8.shared.ui.LocalComicImageRenderer
+import com.comics8.desktop.ui.util.DesktopCoil
+import com.comics8.shared.ui.LocalImageFallbacksProvider
 import com.comics8.shared.ui.LocalPlatformUiBridge
 import com.comics8.shared.ui.PlatformUiBridge
-import com.comics8.shared.ui.browse.BrowsePane
-import com.comics8.shared.ui.components.ArtistPickDialog
-import com.comics8.shared.ui.components.DownloadOptionsDialog
-import com.comics8.shared.ui.components.NetworkSourceDialog
-import com.comics8.shared.ui.components.PageJumpDialog
-import com.comics8.shared.ui.components.SourceErrorDialog
-import com.comics8.shared.ui.components.SourceRemoveDialog
-import com.comics8.shared.ui.components.TopBar
-import com.comics8.shared.ui.components.UpdateDialog
-import com.comics8.shared.ui.downloads.DownloadsPane
-import com.comics8.shared.ui.history.HistoryPane
-import com.comics8.shared.ui.series.SeriesPane
-import com.comics8.shared.ui.settings.SettingsPane
-import com.comics8.shared.ui.source.SourceManagerPane
+import com.comics8.shared.ui.SharedAppShell
 import com.comics8.shared.ui.theme.ComicsTheme
 import com.comics8.shared.ui.theme.LocalStrings
 import org.jetbrains.skia.Image
@@ -128,18 +111,12 @@ fun main(args: Array<String>) {
         val locator = remember { SourceLocator { registry } }
         val sourceEnabled = { id: String -> DesktopSourcePrefs.isEnabled(id) }
         val installedIds = { DesktopSourcePrefs.installedIds() }
-        val database = remember {
-            DesktopDatabase().apply {
-                isSourceEnabled = sourceEnabled
-                this.installedIds = installedIds
-            }
-        }
+        val database = remember { openDesktopDatabase() }
         val cacheDir = File(System.getProperty("user.home"), ".comics8/http-cache")
         val toonClient = remember {
             ToonClient(ToonClient.defaultClient(cacheDir), sources = locator).also { client ->
                 val imageClient = ToonClient.newImageHttpClient(client.httpClient, registry)
-                com.comics8.desktop.ui.util.DesktopImageCache.shareHttpClient(imageClient)
-                com.comics8.desktop.ui.util.DesktopImageCache.registry = registry
+                DesktopCoil.configure(imageClient, registry)
             }
         }
         val syncManager = remember { DesktopSyncManager(database, toonClient) }
@@ -174,7 +151,7 @@ fun main(args: Array<String>) {
                 syncManager.close()
                 database.close()
                 NetworkSourceRuntime.disconnectAll()
-                com.comics8.desktop.ui.util.DesktopImageCache.close()
+                DesktopCoil.close()
             }
         }
         val state by viewModel.state.collectAsState()
@@ -234,7 +211,7 @@ fun main(args: Array<String>) {
                 }
                 val listener = object : java.awt.event.WindowAdapter() {
                     override fun windowIconified(e: java.awt.event.WindowEvent?) {
-                        com.comics8.desktop.ui.util.DesktopImageCache.trimMemory()
+                        DesktopCoil.trimMemory()
                     }
                 }
                 window.addWindowListener(listener)
@@ -267,7 +244,11 @@ fun main(args: Array<String>) {
                         modifier = Modifier.fillMaxSize(),
                         color = MaterialTheme.colorScheme.background,
                     ) {
-                        ComicsDesktopApp(state = state, viewModel = viewModel)
+                        ComicsDesktopApp(
+                            state = state,
+                            viewModel = viewModel,
+                            fallbacksProvider = { url -> ImageFallbacks.forUrl(url, registry) },
+                        )
                     }
                 }
             }
@@ -287,6 +268,7 @@ private fun rememberApplicationIcon(): BitmapPainter = remember {
 fun ComicsDesktopApp(
     state: DesktopUiState,
     viewModel: DesktopViewModel,
+    fallbacksProvider: (String) -> List<String> = { emptyList() },
 ) {
     val strings = remember(state.appLanguage) { I18n.strings(state.appLanguage) }
     val platformBridge = remember {
@@ -310,23 +292,11 @@ fun ComicsDesktopApp(
             }
         }
     }
-    val imageRenderer = remember {
-        ComicImageRenderer { url, cacheRole, contentDescription, modifier, contentScale, refreshEpoch ->
-            DesktopAsyncImage(
-                url = url,
-                cacheRole = cacheRole,
-                contentDescription = contentDescription,
-                contentScale = contentScale,
-                refreshEpoch = refreshEpoch,
-                modifier = modifier,
-            )
-        }
-    }
 
     CompositionLocalProvider(
         LocalStrings provides strings,
         LocalPlatformUiBridge provides platformBridge,
-        LocalComicImageRenderer provides imageRenderer,
+        LocalImageFallbacksProvider provides fallbacksProvider,
     ) {
         ComicsDesktopAppContent(state = state, viewModel = viewModel)
     }
@@ -337,6 +307,7 @@ private fun ComicsDesktopAppContent(
     state: DesktopUiState,
     viewModel: DesktopViewModel,
 ) {
+    val strings = LocalStrings.current
     LaunchedEffect(state.showAddSourceSheet) {
         if (state.showAddSourceSheet) {
             viewModel.closeAddSourceSheet()
@@ -349,219 +320,105 @@ private fun ComicsDesktopAppContent(
         LaunchedEffect(viewportWidthDp, viewportHeightDp) {
             viewModel.updateViewportSize(viewportWidthDp, viewportHeightDp)
         }
-        if (state.screen == Screen.Reader) {
-            ReaderPane(
-                state = state,
-                viewModel = viewModel,
-                modifier = Modifier.fillMaxSize(),
-            )
-        } else if (state.screen == Screen.Settings) {
-            val strings = LocalStrings.current
-            SettingsPane(
-                state = state,
-                controller = viewModel.controller,
-                appVersion = DesktopVersion.VERSION_NAME,
-                showSplitMode = true,
-                onExportBackup = { onResult ->
-                    try {
-                        val timeTag = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())
-                        val dialog = FileDialog(null as Frame?, strings.titleSaveBackupFile, FileDialog.SAVE)
-                        dialog.file = "comics8_backup_$timeTag.json"
-                        dialog.isVisible = true
-                        val dir = dialog.directory
-                        val file = dialog.file
-                        if (dir != null && file != null) {
-                            viewModel.exportBackup(File(dir, file), onResult)
-                        }
-                    } catch (e: Exception) {
-                        onResult(false, "${strings.msgBackupExportFailed}: ${e.message}")
+        SharedAppShell(
+            state = state,
+            controller = viewModel.controller,
+            appVersion = DesktopVersion.VERSION_NAME,
+            compactTopBar = false,
+            showSplitModeInSettings = true,
+            updateConfirmActionLabel = strings.actionUpdateAndRestart,
+            onConfirmUpdate = viewModel::startUpdate,
+            onImportJs = { pickJsFile()?.let(viewModel::importJsFile) },
+            onPickLocalFolder = viewModel::addLibraryRoot,
+            onRemoveLocalFolder = viewModel::removeLibraryRoot,
+            onExportBackup = { onResult ->
+                try {
+                    val timeTag = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())
+                    val dialog = FileDialog(null as Frame?, strings.titleSaveBackupFile, FileDialog.SAVE)
+                    dialog.file = "comics8_backup_$timeTag.json"
+                    dialog.isVisible = true
+                    val dir = dialog.directory
+                    val file = dialog.file
+                    if (dir != null && file != null) {
+                        viewModel.exportBackup(File(dir, file), onResult)
                     }
-                },
-                onImportBackup = { onResult ->
-                    try {
-                        val dialog = FileDialog(null as Frame?, strings.titleOpenBackupFile, FileDialog.LOAD)
-                        dialog.setFilenameFilter { _, name -> name.endsWith(".json", ignoreCase = true) }
-                        dialog.isVisible = true
-                        val dir = dialog.directory
-                        val file = dialog.file
-                        if (dir != null && file != null) {
-                            viewModel.importBackup(File(dir, file), onResult)
-                        }
-                    } catch (e: Exception) {
-                        onResult(false, "${strings.msgBackupRestoreFailed}: ${e.message}")
-                    }
-                },
-                modifier = Modifier.fillMaxSize(),
-            )
-        } else if (state.screen == Screen.SourceManager) {
-            SourceManagerPane(
-                state = state,
-                controller = viewModel.controller,
-                onPickLocalFolder = viewModel::addLibraryRoot,
-                onRemoveLocalFolder = viewModel::removeLibraryRoot,
-                modifier = Modifier.fillMaxSize(),
-            )
-        } else {
-            Column(modifier = Modifier.fillMaxSize()) {
-                TopBar(
-                    state = state,
-                    controller = viewModel.controller,
-                )
-                when (state.screen) {
-                    Screen.Browse -> {
-                        val gridState = rememberLazyGridState()
-                        val canSwipePage = state.tab?.paginated == true && !state.loading && !state.isSearch && state.lastPage > 1
-                        val canPullRefresh = state.packsReady && state.activeSourceId != null && !state.loading
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxWidth()
-                                .desktopDiscreteScrollPaging(
-                                    enabled = canSwipePage,
-                                    onAdvance = { if (state.page < state.lastPage) viewModel.nextPage() },
-                                    onRetreat = { if (state.page > 1) viewModel.prevPage() },
-                                    onPullRefresh = if (canPullRefresh) { { viewModel.refresh() } } else null,
-                                    isAtTop = { !gridState.canScrollBackward },
-                                ),
-                        ) {
-                            BrowsePane(
-                                state = state,
-                                controller = viewModel.controller,
-                                gridState = gridState,
-                                onImportJs = { pickJsFile()?.let(viewModel::importJsFile) },
-                                onAddLibraryFolder = viewModel::addLibraryRoot,
-                                modifier = Modifier.fillMaxSize(),
-                            )
-                            DesktopPullToRefreshIndicator(
-                                refreshing = state.refreshing,
-                                modifier = Modifier.align(Alignment.TopCenter),
-                            )
-                        }
-                    }
-                    Screen.Series -> {
-                        val listState = rememberLazyListState()
-                        val canSwipePage = !state.episodeLoading
-                        val canPullRefresh = !state.episodeLoading && !state.refreshing
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxWidth()
-                                .desktopDiscreteScrollPaging(
-                                    enabled = canSwipePage,
-                                    onAdvance = {
-                                        if (state.episodePage < state.episodeLastPage) {
-                                            viewModel.nextEpisodePage()
-                                        }
-                                    },
-                                    onRetreat = {
-                                        if (state.episodePage > 1) {
-                                            viewModel.prevEpisodePage()
-                                        } else {
-                                            viewModel.closeSeries()
-                                        }
-                                    },
-                                    onPullRefresh = if (canPullRefresh) { { viewModel.refresh() } } else null,
-                                    isAtTop = { !listState.canScrollBackward },
-                                ),
-                        ) {
-                            SeriesPane(
-                                state = state,
-                                controller = viewModel.controller,
-                                listState = listState,
-                                modifier = Modifier.fillMaxSize(),
-                            )
-                            DesktopPullToRefreshIndicator(
-                                refreshing = state.refreshing,
-                                modifier = Modifier.align(Alignment.TopCenter),
-                            )
-                        }
-                    }
-                    Screen.History -> HistoryPane(
-                        state = state,
-                        controller = viewModel.controller,
-                        onImportJs = { pickJsFile()?.let(viewModel::importJsFile) },
-                        modifier = Modifier.weight(1f),
-                    )
-                    Screen.Downloads -> DownloadsPane(
-                        state = state,
-                        controller = viewModel.controller,
-                        onImportJs = { pickJsFile()?.let(viewModel::importJsFile) },
-                        modifier = Modifier.weight(1f),
-                    )
-                    else -> {}
+                } catch (e: Exception) {
+                    onResult(false, "${strings.msgBackupExportFailed}: ${e.message}")
                 }
-            }
-        }
-
-        val currentSeries = state.series
-        if (state.showDownloadOptions && currentSeries != null) {
-            DownloadOptionsDialog(
-                series = currentSeries,
-                episodes = state.downloadCatalog,
-                catalogLoading = state.downloadCatalogLoading,
-                onDismiss = viewModel::closeDownloadOptions,
-                onConfirm = viewModel::startDownloadEpisodes,
-            )
-        }
-
-        if (state.showPageJump) {
-            PageJumpDialog(
-                current = if (state.screen == Screen.Series) state.episodePage else state.page,
-                last = if (state.screen == Screen.Series) state.episodeLastPage else state.lastPage,
-                onDismiss = { viewModel.togglePageJump(false) },
-                onConfirm = { page ->
-                    if (state.screen == Screen.Series) {
-                        viewModel.goToEpisodePage(page)
-                    } else {
-                        viewModel.goToPage(page)
+            },
+            onImportBackup = { onResult ->
+                try {
+                    val dialog = FileDialog(null as Frame?, strings.titleOpenBackupFile, FileDialog.LOAD)
+                    dialog.setFilenameFilter { _, name -> name.endsWith(".json", ignoreCase = true) }
+                    dialog.isVisible = true
+                    val dir = dialog.directory
+                    val file = dialog.file
+                    if (dir != null && file != null) {
+                        viewModel.importBackup(File(dir, file), onResult)
                     }
-                },
-            )
-        }
-
-        if (state.showUpdateDialog) {
-            UpdateDialog(
-                updateState = state.updateState,
-                onDismiss = viewModel::closeUpdateDialog,
-                onConfirmUpdate = viewModel::startUpdate,
-                confirmActionLabel = LocalStrings.current.actionUpdateAndRestart,
-            )
-        }
-
-        state.networkDraft?.let { draft ->
-            NetworkSourceDialog(
-                draft = draft,
-                testing = state.networkTesting,
-                testMessage = state.networkTestMessage,
-                testSucceeded = state.networkTestSucceeded,
-                onChange = viewModel::updateNetworkDraft,
-                onTest = viewModel::testNetworkConnection,
-                onRegister = viewModel::registerNetworkConnection,
-                onDismiss = viewModel::closeNetworkSourceDialog,
-            )
-        }
-
-        val artistPick = state.artistPick
-        if (artistPick != null) {
-            ArtistPickDialog(
-                artists = artistPick.item.artistChoices,
-                onPick = viewModel::pickArtist,
-                onDismiss = viewModel::dismissArtistPick,
-            )
-        }
-        if (state.showRemoveSourceSheet) {
-            SourceRemoveDialog(
-                sources = state.installedSources,
-                onRemove = viewModel::uninstallSource,
-                onDismiss = viewModel::closeRemoveSourceSheet,
-            )
-        }
-        val sourceError = state.sourceError
-        if (sourceError != null) {
-            SourceErrorDialog(
-                message = sourceError,
-                onDismiss = viewModel::dismissSourceError,
-            )
-        }
+                } catch (e: Exception) {
+                    onResult(false, "${strings.msgBackupRestoreFailed}: ${e.message}")
+                }
+            },
+            readerContent = {
+                ReaderPane(
+                    state = state,
+                    viewModel = viewModel,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            },
+            browsePaneWrapper = { gridState, paneContent ->
+                val canSwipePage = state.tab?.paginated == true && !state.loading && !state.isSearch && state.lastPage > 1
+                val canPullRefresh = state.packsReady && state.activeSourceId != null && !state.loading
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .desktopDiscreteScrollPaging(
+                            enabled = canSwipePage,
+                            onAdvance = { if (state.page < state.lastPage) viewModel.nextPage() },
+                            onRetreat = { if (state.page > 1) viewModel.prevPage() },
+                            onPullRefresh = if (canPullRefresh) { { viewModel.refresh() } } else null,
+                            isAtTop = { !gridState.canScrollBackward },
+                        ),
+                ) {
+                    paneContent(Modifier.fillMaxSize())
+                    DesktopPullToRefreshIndicator(
+                        refreshing = state.refreshing,
+                        modifier = Modifier.align(Alignment.TopCenter),
+                    )
+                }
+            },
+            seriesPaneWrapper = { listState, paneContent ->
+                val canSwipePage = !state.episodeLoading
+                val canPullRefresh = !state.episodeLoading && !state.refreshing
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .desktopDiscreteScrollPaging(
+                            enabled = canSwipePage,
+                            onAdvance = {
+                                if (state.episodePage < state.episodeLastPage) {
+                                    viewModel.nextEpisodePage()
+                                }
+                            },
+                            onRetreat = {
+                                if (state.episodePage > 1) {
+                                    viewModel.prevEpisodePage()
+                                } else {
+                                    viewModel.closeSeries()
+                                }
+                            },
+                            onPullRefresh = if (canPullRefresh) { { viewModel.refresh() } } else null,
+                            isAtTop = { !listState.canScrollBackward },
+                        ),
+                ) {
+                    paneContent(Modifier.fillMaxSize())
+                    DesktopPullToRefreshIndicator(
+                        refreshing = state.refreshing,
+                        modifier = Modifier.align(Alignment.TopCenter),
+                    )
+                }
+            },
+        )
     }
 }

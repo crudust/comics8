@@ -5,7 +5,6 @@ import com.comics8.core.app.SharedAppController
 import com.comics8.core.i18n.AppStrings
 import com.comics8.core.image.ImageCacheRole
 import com.comics8.core.model.AppUpdateState
-import com.comics8.core.model.ArtistRef
 import com.comics8.core.model.EpisodeItem
 import com.comics8.core.model.ToonItem
 import com.comics8.core.model.ViewMode
@@ -16,7 +15,6 @@ import com.comics8.core.source.local.ComicArchive
 import com.comics8.core.source.local.LibraryScanner
 import com.comics8.core.source.local.RarArchive
 import com.comics8.core.source.local.ZipImageUri
-import com.comics8.core.source.network.NetworkSourceConfig
 import com.comics8.core.source.network.NetworkSourceStore
 import com.comics8.core.storage.KeyValuePrefs
 import com.comics8.core.sync.AppUpdateChecker
@@ -26,7 +24,7 @@ import com.comics8.desktop.data.DesktopSourcePrefs
 import com.comics8.desktop.data.DesktopToonRepository
 import com.comics8.desktop.data.DesktopUpdateManager
 import com.comics8.desktop.ui.util.DesktopFolderPicker
-import com.comics8.desktop.ui.util.DesktopImageCache
+import com.comics8.desktop.ui.util.DesktopCoil
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -58,32 +56,28 @@ class DesktopViewModel(
             DesktopSourcePrefs.libraryRoots().map { File(it) }
 
         override fun clearImageMemory(role: ImageCacheRole) {
-            DesktopImageCache.clear(role)
+            DesktopCoil.clear(role)
         }
 
         override fun cancelPendingImagePreviews() {
-            DesktopImageCache.cancelPendingPreviews()
+            DesktopCoil.cancelPendingPreviews()
         }
 
         override fun clearImageFailures() {
-            DesktopImageCache.clearFailures()
+            DesktopCoil.clearFailures()
         }
 
         override fun preloadReaderImages(urls: List<String>) {
             scope.launch(Dispatchers.IO) {
-                DesktopImageCache.preload(ImageCacheRole.READER, urls)
+                DesktopCoil.preload(ImageCacheRole.READER, urls)
             }
         }
 
         override fun evictReaderImage(url: String) {
-            DesktopImageCache.evict(ImageCacheRole.READER, url)
+            DesktopCoil.evict(ImageCacheRole.READER, url)
         }
 
         override fun pickLibraryFolder(): File? = this@DesktopViewModel.pickLibraryFolder()
-
-        override fun onSourceWriteAccessChanged() {
-            repository.setSourceWriteAccess(DesktopSourcePrefs::isEnabled)
-        }
 
         override val appVersionName: String = DesktopVersion.VERSION_NAME
         override val appVersionCode: Int = DesktopVersion.VERSION_CODE
@@ -129,16 +123,9 @@ class DesktopViewModel(
     fun goForward(): Boolean = controller.goForward()
     fun onImportedPacksReady() = controller.onImportedPacksReady()
 
-    fun closeUpdateDialog() = controller.dismissUpdateDialog()
     fun startUpdate() = controller.startUpdate()
 
     fun closeAddSourceSheet() = controller.closeAddSourceSheet()
-    fun updateNetworkDraft(draft: NetworkSourceConfig) = controller.updateNetworkDraft(draft)
-    fun closeNetworkSourceDialog() = controller.closeNetworkSourceDialog()
-    fun testNetworkConnection() = controller.testNetworkConnection()
-    fun registerNetworkConnection() = controller.registerNetworkConnection()
-    fun closeRemoveSourceSheet() = controller.closeRemoveSourceSheet()
-    fun dismissSourceError() = controller.dismissSourceError()
 
     fun importJsFile(file: File) {
         scope.launch {
@@ -149,7 +136,7 @@ class DesktopViewModel(
                     }
                     file.inputStream().use { JsPackStore.readCapped(it) }
                 }
-                importJsScript(script, file.name)
+                controller.importJsScript(script, file.name)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -158,31 +145,17 @@ class DesktopViewModel(
         }
     }
 
-    fun importJsScript(script: String, fileName: String = "source.js") = controller.importJsScript(script, fileName)
-    fun uninstallSource(sourceId: String) = controller.uninstallSource(sourceId)
-
     fun addLibraryRoot() = controller.addLibraryRootFromPicker()
     fun removeLibraryRoot(path: String) = controller.removeLibraryRoot(path)
 
-    fun dismissArtistPick() = controller.dismissArtistPick()
-    fun pickArtist(artist: ArtistRef) = controller.pickArtist(artist)
-
-    fun refreshReaderImages() = controller.refreshReaderImages()
     fun refresh() = controller.refresh(force = false)
 
     fun openSeries(item: ToonItem) = controller.openSeries(item)
-    fun goToEpisodePage(page: Int) = controller.goToEpisodePage(page)
-    fun goToPage(page: Int) = controller.goToPage(page)
     fun nextPage() = controller.nextPage()
     fun prevPage() = controller.prevPage()
     fun nextEpisodePage() = controller.nextEpisodePage()
     fun prevEpisodePage() = controller.prevEpisodePage()
-    fun togglePageJump(show: Boolean) = controller.togglePageJump(show)
     fun closeSeries() = controller.closeSeries()
-
-    fun closeDownloadOptions() = controller.closeDownloadOptions()
-    fun startDownloadEpisodes(episodesToDownload: List<EpisodeItem>) =
-        controller.startDownloadEpisodes(episodesToDownload)
 
     fun exportBackup(file: File, onResult: (Boolean, String) -> Unit) =
         controller.exportBackupWithWriter({ json -> file.writeText(json, Charsets.UTF_8) }, onResult)
@@ -267,15 +240,10 @@ class DesktopViewModel(
         }
     }
 
-    fun openNextEpisode() = controller.openNextEpisode()
-    fun openPrevEpisode() = controller.openPrevEpisode()
-    fun savePage(page: Int, seenThroughPage: Int = page) = controller.savePage(page, seenThroughPage)
     fun setViewMode(mode: ViewMode) = controller.setViewMode(mode)
     fun recordImageAspectRatio(index: Int, width: Int, height: Int) =
         controller.recordImageAspectRatio(index, width, height)
     fun updateViewportSize(widthDp: Int, heightDp: Int) = controller.updateViewportSize(widthDp, heightDp)
-    fun closeReader() = controller.closeReader()
-    fun evictReaderImage(url: String) = controller.evictReaderImage(url)
     fun toggleFullscreen() = controller.toggleFullscreen()
 }
 

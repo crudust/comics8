@@ -47,6 +47,7 @@ class SharedAppControllerTest {
     private lateinit var store: InMemoryComicLocalStore
     private lateinit var prefs: InMemoryKeyValuePrefs
     private lateinit var sourceSettings: StoredSourceSettings
+    private lateinit var registry: SourceRegistry
     private lateinit var controller: SharedAppController
 
     @Before
@@ -59,7 +60,7 @@ class SharedAppControllerTest {
         sourceSettings.setInstalledIds(setOf(WorkId.LOCAL_SOURCE, "stub"))
         sourceSettings.setActiveSourceId("stub")
 
-        val registry = SourceRegistry(listOf(StubSource()))
+        registry = SourceRegistry(listOf(StubSource()))
         val repo = SharedToonRepository(
             client = ToonClient(sources = { registry }),
             store = store,
@@ -165,9 +166,162 @@ class SharedAppControllerTest {
         assertThat(saved?.splitMode).isEqualTo(SplitMode.SLICE)
     }
 
-    private class StubSource : ComicSource {
-        override val id = "stub"
-        override val displayName = "Stub"
+    @Test
+    fun favoriteToggleAndHistoryLifecycle() = runBlocking {
+        val loaded = withTimeout(5_000) { controller.state.first { it.items.isNotEmpty() } }
+        val series = loaded.items.first()
+
+        controller.openSeries(series)
+        val withEps = withTimeout(5_000) { controller.state.first { it.episodes.size == 2 } }
+        controller.toggleFavorite()
+        withTimeout(5_000) { controller.state.first { it.seriesFavorited } }
+        assertThat(store.hasFavorite(series.workId())).isTrue()
+
+        controller.openEpisode(withEps.episodes.first())
+        withTimeout(5_000) { controller.state.first { it.readerImages.isNotEmpty() } }
+        withTimeout(5_000) {
+            while (store.history.isEmpty()) delay(20)
+        }
+
+        controller.closeReader()
+        controller.openHistory()
+        val withHist = withTimeout(5_000) { controller.state.first { !it.historyLoading && it.historyItems.isNotEmpty() } }
+        assertThat(withHist.historyItems).hasSize(1)
+
+        controller.deleteHistory(series.workId())
+        withTimeout(5_000) { controller.state.first { it.historyItems.isEmpty() } }
+
+        controller.openEpisode(withEps.episodes.first())
+        withTimeout(5_000) {
+            while (store.history.isEmpty()) delay(20)
+        }
+        controller.openHistory()
+        withTimeout(5_000) { controller.state.first { it.historyItems.isNotEmpty() } }
+        controller.clearAllHistory()
+        withTimeout(5_000) { controller.state.first { it.historyItems.isEmpty() } }
+        assertThat(store.history).isEmpty()
+    }
+
+    @Test
+    fun episodeNavigationPrevAndNext() = runBlocking {
+        val loaded = withTimeout(5_000) { controller.state.first { it.items.isNotEmpty() } }
+        val series = loaded.items.first()
+        controller.openSeries(series)
+        val withEps = withTimeout(5_000) { controller.state.first { it.episodes.size == 2 } }
+        val ep1 = withEps.episodes.first { it.wrId == "ep1" }
+
+        controller.openEpisode(ep1)
+        val ep1Images = withTimeout(5_000) { controller.state.first { it.readerImages.size == 3 } }
+        assertThat(ep1Images.currentEpisode?.wrId).isEqualTo("ep1")
+
+        controller.savePage(1)
+        controller.flushPendingPageSave()
+        withTimeout(5_000) {
+            while (store.getReadEpisode(series.workId(), "ep1")?.lastPage != 1) delay(20)
+        }
+
+        controller.openNextEpisode()
+        val ep2State = withTimeout(5_000) {
+            controller.state.first { it.currentEpisode?.wrId == "ep2" && it.readerImages.size == 1 }
+        }
+        assertThat(ep2State.currentEpisode?.wrId).isEqualTo("ep2")
+
+        controller.openPrevEpisode()
+        val backEp1 = withTimeout(5_000) {
+            controller.state.first { it.currentEpisode?.wrId == "ep1" && it.readerImages.size == 3 }
+        }
+        assertThat(backEp1.currentEpisode?.wrId).isEqualTo("ep1")
+    }
+
+    @Test
+    fun sourceEnableDisableAndReorder() {
+        registry.add(StubSource(sourceId = "stub2"))
+        sourceSettings.setInstalledIds(setOf(WorkId.LOCAL_SOURCE, "stub", "stub2"))
+        controller.setSourceEnabled("stub2", true)
+
+        assertThat(controller.state.value.installedSources.map { it.id })
+            .containsAtLeast(WorkId.LOCAL_SOURCE, "stub", "stub2")
+
+        controller.reorderOnlineSources(0, 1)
+        assertThat(controller.state.value.installedSources.filter { it.id != WorkId.LOCAL_SOURCE }.map { it.id })
+            .containsExactly("stub2", "stub")
+            .inOrder()
+
+        controller.setSourceEnabled("stub", false)
+        assertThat(controller.state.value.activeSourceId).isEqualTo(WorkId.LOCAL_SOURCE)
+        assertThat(controller.state.value.installedSources.map { it.id }).doesNotContain("stub")
+    }
+
+    @Test
+    fun searchSubmitAndBackNavigation() = runBlocking {
+        withTimeout(5_000) { controller.state.first { it.items.isNotEmpty() } }
+
+        controller.toggleSearchBar()
+        assertThat(controller.state.value.searchExpanded).isTrue()
+
+        controller.updateSearchInput("Series")
+        controller.submitSearch()
+
+        val searchDone = withTimeout(5_000) {
+            controller.state.first { it.isSearch && !it.loading && it.items.isNotEmpty() }
+        }
+        assertThat(searchDone.searchQuery).isEqualTo("Series")
+        assertThat(searchDone.items.single().id).isEqualTo("search-s1")
+
+        assertThat(controller.goBack()).isTrue()
+        assertThat(controller.state.value.isSearch).isFalse()
+        assertThat(controller.state.value.screen).isEqualTo(AppScreen.Browse)
+    }
+
+    @Test
+    fun backupExportAndImportRoundTrip() = runBlocking {
+        val loaded = withTimeout(5_000) { controller.state.first { it.items.isNotEmpty() } }
+        val series = loaded.items.first()
+        controller.openSeries(series)
+        controller.toggleFavorite()
+        controller.setViewMode(ViewMode.DUAL)
+        controller.setSplitMode(SplitMode.SLICE)
+
+        withTimeout(5_000) {
+            while (!store.hasFavorite(series.workId()) ||
+                controller.repository.getReaderSetting(series.workId())?.splitMode != SplitMode.SLICE
+            ) {
+                delay(20)
+            }
+        }
+
+        var exportedJson: String? = null
+        controller.exportBackupWithWriter(
+            writeJson = { json -> exportedJson = json },
+            onResult = { ok, _ -> assertThat(ok).isTrue() },
+        )
+        withTimeout(5_000) {
+            while (exportedJson == null) delay(20)
+        }
+
+        store.favorites.clear()
+        store.settings.clear()
+        assertThat(store.hasFavorite(series.workId())).isFalse()
+
+        var importOk: Boolean? = null
+        controller.importBackupWithReader(
+            readJson = { exportedJson!! },
+            onResult = { ok, _ -> importOk = ok },
+        )
+        withTimeout(5_000) {
+            while (importOk == null) delay(20)
+        }
+        assertThat(importOk).isTrue()
+        assertThat(store.hasFavorite(series.workId())).isTrue()
+        assertThat(controller.repository.getReaderSetting(series.workId())?.viewMode).isEqualTo(ViewMode.DUAL)
+        assertThat(controller.repository.getReaderSetting(series.workId())?.splitMode).isEqualTo(SplitMode.SLICE)
+    }
+
+    private class StubSource(
+        private val sourceId: String = "stub",
+    ) : ComicSource {
+        override val id = sourceId
+        override val displayName = sourceId
         override val origin = "https://example.com"
         override val catalogs = listOf(SourceCatalog("LATEST", "Latest", paginated = true))
         override val defaultPolicy = RequestPolicy("test")
@@ -180,14 +334,27 @@ class SharedAppControllerTest {
                         title = "Series 1",
                         thumbUrl = "https://example.com/t.jpg",
                         href = "https://example.com/s1",
-                        sourceId = "stub",
+                        sourceId = sourceId,
                     ),
                 ),
                 currentPage = 1,
                 lastPage = 1,
             )
 
-        override suspend fun search(query: SearchQuery, http: SourceHttp) = emptyList<ToonItem>()
+        override suspend fun search(query: SearchQuery, http: SourceHttp): List<ToonItem> =
+            if (query.text.contains("Series", ignoreCase = true)) {
+                listOf(
+                    ToonItem(
+                        id = "search-s1",
+                        title = "Series 1",
+                        thumbUrl = "https://example.com/t.jpg",
+                        href = "https://example.com/s1",
+                        sourceId = sourceId,
+                    ),
+                )
+            } else {
+                emptyList()
+            }
 
         override suspend fun loadEpisodes(item: ToonItem, page: Int, http: SourceHttp) =
             EpisodePage(
@@ -199,8 +366,16 @@ class SharedAppControllerTest {
                 lastPage = 1,
             )
 
-        override suspend fun resolveImages(episode: EpisodeItem, toon: ToonItem, http: SourceHttp) =
-            listOf("https://example.com/1.jpg")
+        override suspend fun resolveImages(episode: EpisodeItem, item: ToonItem, http: SourceHttp) =
+            if (episode.wrId == "ep1") {
+                listOf(
+                    "https://example.com/1.jpg",
+                    "https://example.com/2.jpg",
+                    "https://example.com/3.jpg",
+                )
+            } else {
+                listOf("https://example.com/1.jpg")
+            }
     }
 
     private class MapSourcePreferenceStore : SourcePreferenceStore {

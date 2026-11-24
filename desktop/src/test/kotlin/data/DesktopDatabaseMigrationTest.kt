@@ -1,31 +1,45 @@
 package com.comics8.desktop.data
 
+import androidx.sqlite.driver.bundled.BundledSQLiteDriver
+import com.comics8.core.data.SharedBackupManager
 import com.comics8.core.source.WorkId
+import com.comics8.core.storage.FavoriteRecord
+import com.comics8.core.storage.ReadHistoryRecord
+import com.comics8.shared.db.RoomComicLocalStore
+import com.comics8.shared.db.openDesktopDatabase
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.runBlocking
 import org.junit.Test
 import java.io.File
 
 class DesktopDatabaseMigrationTest {
     @Test
-    fun databaseInitializesWithVersionOne() {
+    fun databaseInitializesWithRoomV15Schema() = runBlocking {
         val file = File.createTempFile("comics8-init", ".db")
-        file.deleteOnExit()
-        val db = DesktopDatabase(file)
         try {
-            assertThat(db.userVersion()).isEqualTo(1)
+            val db = openDesktopDatabase(file)
+            try {
+                // Force Room open & schema validation.
+                assertThat(RoomComicLocalStore(db).countFavorites()).isEqualTo(0)
+            } finally {
+                db.close()
+            }
+            BundledSQLiteDriver().open(file.absolutePath).use { conn ->
+                conn.prepare("PRAGMA user_version").use { stmt ->
+                    assertThat(stmt.step()).isTrue()
+                    assertThat(stmt.getLong(0)).isEqualTo(15L)
+                }
+            }
         } finally {
-            db.close()
+            file.delete()
         }
     }
 
     @Test
-    fun foreignSourceFavoritesAndHistorySaveWhenSourceEnabled() {
+    fun foreignSourceFavoritesAndHistorySaveThroughLocalStore() = runBlocking {
         val file = File.createTempFile("comics8-hitomi", ".db")
-        file.deleteOnExit()
-        val db = DesktopDatabase(file).apply {
-            isSourceEnabled = { it in setOf("hitomi", "eleven") }
-            installedIds = { setOf("hitomi", "eleven") }
-        }
+        val db = openDesktopDatabase(file)
+        val store = RoomComicLocalStore(db)
         try {
             val hitomiFav = FavoriteRecord(
                 sourceId = "hitomi",
@@ -37,10 +51,10 @@ class DesktopDatabaseMigrationTest {
                 updatedAt = "2026-08-24",
                 savedAt = 1000L,
             )
-            db.saveFavorite(hitomiFav)
-            assertThat(db.isFavorite(WorkId("hitomi", "gallery:12345"))).isTrue()
+            store.upsertFavorite(hitomiFav)
+            assertThat(store.hasFavorite(WorkId("hitomi", "gallery:12345"))).isTrue()
 
-            val favs = db.getAllFavorites()
+            val favs = store.getAllFavorites()
             assertThat(favs).hasSize(1)
             assertThat(favs[0].sourceId).isEqualTo("hitomi")
             assertThat(favs[0].id).isEqualTo("gallery:12345")
@@ -58,24 +72,22 @@ class DesktopDatabaseMigrationTest {
                 totalEpisodes = 1,
                 lastReadAt = 2000L,
             )
-            db.saveHistory(hitomiHist)
-            val history = db.getHistory(WorkId("hitomi", "gallery:12345"))
+            store.upsertHistory(hitomiHist)
+            val history = store.getHistory(WorkId("hitomi", "gallery:12345"))
             assertThat(history).isNotNull()
             assertThat(history!!.toonTitle).isEqualTo("Hitomi Title")
             assertThat(history.sourceId).isEqualTo("hitomi")
         } finally {
             db.close()
+            file.delete()
         }
     }
 
     @Test
-    fun restoreBackupJsonWithNullFieldsAndHitomiSucceeds() {
+    fun restoreBackupJsonWithNullFieldsAndHitomiSucceeds() = runBlocking {
         val file = File.createTempFile("comics8-restore", ".db")
-        file.deleteOnExit()
-        val db = DesktopDatabase(file).apply {
-            isSourceEnabled = { true }
-            installedIds = { setOf("hitomi", "eleven") }
-        }
+        val db = openDesktopDatabase(file)
+        val store = RoomComicLocalStore(db)
         try {
             val json = """
                 {
@@ -113,41 +125,41 @@ class DesktopDatabaseMigrationTest {
                   ]
                 }
             """.trimIndent()
-            val result = DesktopBackupManager.restoreBackupJson(db, json)
+            val result = SharedBackupManager.restoreBackupJson(store, json)
             assertThat(result.success).isTrue()
             assertThat(result.favoriteCount).isEqualTo(1)
             assertThat(result.historyCount).isEqualTo(1)
             assertThat(result.episodeCount).isEqualTo(1)
 
-            val favs = db.getAllFavorites()
+            val favs = store.getAllFavorites()
             assertThat(favs).hasSize(1)
             assertThat(favs[0].sourceId).isEqualTo("hitomi")
 
-            val hist = db.getAllHistory()
+            val hist = store.getAllHistory()
             assertThat(hist).hasSize(1)
             assertThat(hist[0].sourceId).isEqualTo("hitomi")
             assertThat(hist[0].lastEpisodeTitle).isEmpty()
             assertThat(hist[0].lastEpisodeHref).isEmpty()
 
-            val exported = org.json.JSONObject(DesktopBackupManager.createBackupJson(db))
+            val exported = org.json.JSONObject(SharedBackupManager.createBackupJson(store))
             assertThat(exported.getInt("version")).isEqualTo(2)
             assertThat(exported.getJSONArray("favorites").getJSONObject(0).getString("sourceId"))
                 .isEqualTo("hitomi")
             assertThat(exported.getJSONArray("history").getJSONObject(0).isNull("nextWrId")).isTrue()
         } finally {
             db.close()
+            file.delete()
         }
     }
 
     @Test
-    fun updateFavoriteThumbnailPopulatesEmptyThumbnail() {
+    fun updateFavoriteThumbnailPopulatesEmptyThumbnail() = runBlocking {
         val file = File.createTempFile("comics8-fav-thumb", ".db")
-        val db = DesktopDatabase(file)
+        val db = openDesktopDatabase(file)
+        val store = RoomComicLocalStore(db)
         try {
-            db.isSourceEnabled = { true }
-            db.installedIds = { setOf("hitomi") }
             val workId = WorkId("hitomi", "artist:samidare_setsuna")
-            db.saveFavorite(
+            store.upsertFavorite(
                 FavoriteRecord(
                     sourceId = "hitomi",
                     id = "artist:samidare_setsuna",
@@ -159,16 +171,16 @@ class DesktopDatabaseMigrationTest {
                     savedAt = 1000L,
                 ),
             )
-            assertThat(db.getFavorite(workId)?.thumbUrl).isEmpty()
+            assertThat(store.getFavorite(workId)?.thumbUrl).isEmpty()
 
             // Backfill thumbnail
             val thumb = "https://tn.gold-usergeneratedcontent.net/webpsmalltn/1.webp"
-            db.updateFavoriteThumbnail(workId, thumb)
-            assertThat(db.getFavorite(workId)?.thumbUrl).isEqualTo(thumb)
+            store.updateFavoriteThumbUrlIfBlank(workId, thumb)
+            assertThat(store.getFavorite(workId)?.thumbUrl).isEqualTo(thumb)
 
-            // Calling again with another thumb when onlyIfBlank=true (default) should not overwrite
-            db.updateFavoriteThumbnail(workId, "https://tn.gold-usergeneratedcontent.net/webpsmalltn/2.webp")
-            assertThat(db.getFavorite(workId)?.thumbUrl).isEqualTo(thumb)
+            // Calling again when already populated should not overwrite
+            store.updateFavoriteThumbUrlIfBlank(workId, "https://tn.gold-usergeneratedcontent.net/webpsmalltn/2.webp")
+            assertThat(store.getFavorite(workId)?.thumbUrl).isEqualTo(thumb)
         } finally {
             db.close()
             file.delete()

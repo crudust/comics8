@@ -14,9 +14,10 @@ import com.comics8.core.source.SourceHttp
 import com.comics8.core.source.SourceRegistry
 import com.comics8.core.source.js.JsPackStore
 import com.comics8.core.source.network.NetworkSourceStore
-import com.comics8.desktop.data.DesktopDatabase
 import com.comics8.desktop.data.DesktopSourcePrefs
 import com.comics8.desktop.data.DesktopToonRepository
+import com.comics8.shared.db.AppDatabase
+import com.comics8.shared.db.openDesktopDatabase
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -28,7 +29,7 @@ import kotlin.io.path.createTempDirectory
 
 class DesktopAutoScrollTest {
     private lateinit var tempDir: File
-    private lateinit var db: DesktopDatabase
+    private lateinit var db: AppDatabase
     private lateinit var repository: DesktopToonRepository
     private lateinit var viewModel: DesktopViewModel
 
@@ -52,7 +53,7 @@ class DesktopAutoScrollTest {
     fun setUp() {
         tempDir = createTempDirectory("desk-autoscroll").toFile()
         val dbFile = File(tempDir, "test.db")
-        db = DesktopDatabase(dbFile)
+        db = openDesktopDatabase(dbFile)
         val registry = SourceRegistry(listOf(FakeSource()))
         DesktopSourcePrefs.registry = registry
         repository = DesktopToonRepository(

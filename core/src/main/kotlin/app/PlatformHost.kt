@@ -24,7 +24,6 @@ interface PlatformHost {
     fun pickLibraryFolder(): File? = null
     fun onLocalFolderAdded(path: String) {}
     fun onLocalFolderRemoved(path: String) {}
-    fun onSourceWriteAccessChanged() {}
 
     val appVersionName: String
     val appVersionCode: Int

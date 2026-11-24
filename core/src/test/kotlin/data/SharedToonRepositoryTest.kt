@@ -142,7 +142,7 @@ class SharedToonRepositoryTest {
         override suspend fun search(query: SearchQuery, http: SourceHttp) = emptyList<ToonItem>()
         override suspend fun loadEpisodes(item: ToonItem, page: Int, http: SourceHttp) =
             EpisodePage(emptyList(), 1, 1)
-        override suspend fun resolveImages(episode: EpisodeItem, toon: ToonItem, http: SourceHttp) =
+        override suspend fun resolveImages(episode: EpisodeItem, item: ToonItem, http: SourceHttp) =
             emptyList<String>()
     }
 }
