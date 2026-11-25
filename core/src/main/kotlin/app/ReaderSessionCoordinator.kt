@@ -31,6 +31,10 @@ private data class ExternalReaderSession(
 
 internal class ReaderSessionCoordinator(
     private val controller: SharedAppController,
+    private val pageSaveDebounceMs: Long = DEFAULT_PAGE_SAVE_DEBOUNCE_MS,
+    private val pageDwellSyncDelayMs: Long = DEFAULT_PAGE_DWELL_SYNC_DELAY_MS,
+    private val pageDwellSyncCooldownMs: Long = DEFAULT_PAGE_DWELL_SYNC_COOLDOWN_MS,
+    private val nowMs: () -> Long = System::currentTimeMillis,
 ) {
     private val state get() = controller._state
     private val repository get() = controller.repository
@@ -40,7 +44,10 @@ internal class ReaderSessionCoordinator(
     private var readerJob: Job? = null
     private var readerSettingSaveJob: Job? = null
     private var pageSaveJob: Job? = null
+    private var pageDwellSyncJob: Job? = null
     private var pendingPageSave: Triple<WorkId, String, Int>? = null
+    private var lastDwellSyncAtMs: Long = 0L
+    private var lastSyncedPage: Triple<WorkId, String, Int>? = null
     private var externalReaderSession: ExternalReaderSession? = null
     private var autoSwitchedEpisodeId: String? = null
     private var preAutoSwitchViewMode: ViewMode? = null
@@ -57,7 +64,10 @@ internal class ReaderSessionCoordinator(
         readerJob?.cancel()
         readerSettingSaveJob?.cancel()
         readerToastJob?.cancel()
+        pageDwellSyncJob?.cancel()
+        pageDwellSyncJob = null
         pageSaveJob?.cancel()
+        pageSaveJob = null
         val pending = pendingPageSave
         pendingPageSave = null
         if (pending != null) {
@@ -68,6 +78,8 @@ internal class ReaderSessionCoordinator(
     }
 
     fun openEpisode(episode: EpisodeItem) {
+        pageDwellSyncJob?.cancel()
+        pageDwellSyncJob = null
         controller.browseSearch.cancelEpisodeJob()
         platform.cancelPendingImagePreviews()
         platform.clearImageMemory(ImageCacheRole.READER)
@@ -78,7 +90,7 @@ internal class ReaderSessionCoordinator(
             controller.browseSearch.lastViewedEpisodePage = current.episodePage
         }
         lastViewedEpisode = episode
-        val nowMs = System.currentTimeMillis()
+        val openedAtMs = nowMs()
         val rawEpisodes = current.rawEpisodes.ifEmpty { current.episodes }
         val seriesKey = series?.workId()?.storageKey().orEmpty()
         val position = ReaderDomain.episodePosition(
@@ -93,16 +105,22 @@ internal class ReaderSessionCoordinator(
         val restoredMode = if (platform.autoSwitchWebtoonInReader) restoreAutoSwitchedViewMode() else current.viewMode
 
         val startPage = ReaderProgress.startPageOnOpen(episode.lastReadPage)
+        if (series != null) {
+            lastDwellSyncAtMs = openedAtMs
+            lastSyncedPage = Triple(series.workId(), episode.wrId, episode.lastReadPage)
+        } else {
+            lastSyncedPage = null
+        }
         state.update { curr ->
             val updatedRaw = curr.rawEpisodes.map {
-                if (it.wrId == episode.wrId) it.copy(isRead = true, readAt = nowMs) else it
+                if (it.wrId == episode.wrId) it.copy(isRead = true, readAt = openedAtMs) else it
             }
             val updatedEpisodes = curr.episodes.map {
-                if (it.wrId == episode.wrId) it.copy(isRead = true, readAt = nowMs) else it
+                if (it.wrId == episode.wrId) it.copy(isRead = true, readAt = openedAtMs) else it
             }
             curr.copy(
                 screen = AppScreen.Reader,
-                currentEpisode = episode.copy(isRead = true, readAt = nowMs, lastReadPage = startPage),
+                currentEpisode = episode.copy(isRead = true, readAt = openedAtMs, lastReadPage = startPage),
                 rawEpisodes = updatedRaw,
                 episodes = updatedEpisodes,
                 readerImages = emptyList(),
@@ -155,7 +173,7 @@ internal class ReaderSessionCoordinator(
                     lastEpisodeHref = episode.href,
                     lastReadOrder = finalOrder,
                     totalEpisodes = finalTotal,
-                    lastReadAt = nowMs,
+                    lastReadAt = openedAtMs,
                     nextWrId = nextEp?.wrId ?: existingHistory?.nextWrId,
                     nextEpisodeTitle = nextEp?.title ?: existingHistory?.nextEpisodeTitle,
                     nextEpisodeHref = nextEp?.href ?: existingHistory?.nextEpisodeHref,
@@ -183,8 +201,7 @@ internal class ReaderSessionCoordinator(
         val current = state.value
         if (externalReaderSession == null) {
             if (current.screen == AppScreen.Reader) {
-                flushPendingPageSave()
-                repository.syncManager?.triggerDebouncedPush()
+                flushPendingPageSave(triggerPushAfterSave = true)
             }
             externalReaderSession = ExternalReaderSession(
                 returnScreen = if (current.screen == AppScreen.Reader) AppScreen.Series else current.screen,
@@ -227,25 +244,62 @@ internal class ReaderSessionCoordinator(
             totalImages = totalImages,
             seenThroughPage = seenThroughPage,
         )
-        if (episode.lastReadPage == page && pendingPageSave?.third == targetPage) return
-
-        state.update { curr ->
-            curr.copy(currentEpisode = curr.currentEpisode?.copy(lastReadPage = page))
-        }
         val workId = series.workId()
         val wrId = episode.wrId
-        pendingPageSave = Triple(workId, wrId, targetPage)
+        val key = Triple(workId, wrId, targetPage)
+        if (episode.lastReadPage == page && pendingPageSave == key) return
+
+        state.update { curr ->
+            updateEpisodePageState(curr, wrId, currentPage = page, persistedPage = targetPage)
+        }
+        pendingPageSave = key
         pageSaveJob?.cancel()
         pageSaveJob = scope.launch {
-            delay(400)
+            delay(pageSaveDebounceMs)
             repository.saveEpisodePage(workId, wrId, targetPage)
-            if (pendingPageSave == Triple(workId, wrId, targetPage)) {
+            if (pendingPageSave == key) {
                 pendingPageSave = null
+            }
+        }
+        schedulePageDwellSync(key)
+    }
+
+    private fun schedulePageDwellSync(target: Triple<WorkId, String, Int>) {
+        pageDwellSyncJob?.cancel()
+        if (repository.syncManager == null || lastSyncedPage == target) {
+            pageDwellSyncJob = null
+            return
+        }
+        pageDwellSyncJob = scope.launch {
+            val elapsedSinceLastSync = (nowMs() - lastDwellSyncAtMs).coerceAtLeast(0L)
+            val cooldownRemaining = (pageDwellSyncCooldownMs - elapsedSinceLastSync).coerceAtLeast(0L)
+            val waitMs = maxOf(pageDwellSyncDelayMs, cooldownRemaining)
+            delay(waitMs)
+            pageSaveJob?.join()
+            flushPendingPageSaveNow()
+            val sm = repository.syncManager ?: return@launch
+            val res = sm.syncDeltaIfAutoEnabled()
+            if (res?.success == true) {
+                lastDwellSyncAtMs = nowMs()
+                lastSyncedPage = target
             }
         }
     }
 
-    fun flushPendingPageSave() {
+    private suspend fun flushPendingPageSaveNow(): Triple<WorkId, String, Int>? {
+        pageSaveJob?.cancel()
+        pageSaveJob = null
+        val pending = pendingPageSave
+        pendingPageSave = null
+        if (pending != null) {
+            repository.saveEpisodePage(pending.first, pending.second, pending.third)
+        }
+        return pending
+    }
+
+    fun flushPendingPageSave(triggerPushAfterSave: Boolean = false) {
+        pageDwellSyncJob?.cancel()
+        pageDwellSyncJob = null
         pageSaveJob?.cancel()
         pageSaveJob = null
         val pending = pendingPageSave
@@ -253,6 +307,33 @@ internal class ReaderSessionCoordinator(
         if (pending != null) {
             scope.launch {
                 repository.saveEpisodePage(pending.first, pending.second, pending.third)
+                if (triggerPushAfterSave) {
+                    lastSyncedPage = pending
+                    repository.syncManager?.triggerDebouncedPush()
+                }
+            }
+        } else if (triggerPushAfterSave) {
+            repository.syncManager?.triggerDebouncedPush()
+        }
+    }
+
+    fun flushAndSyncOnBackground() {
+        pageDwellSyncJob?.cancel()
+        pageDwellSyncJob = null
+        pageSaveJob?.cancel()
+        pageSaveJob = null
+        val pending = pendingPageSave
+        pendingPageSave = null
+        scope.launch {
+            if (pending != null) {
+                repository.saveEpisodePage(pending.first, pending.second, pending.third)
+            }
+            val res = repository.syncManager?.syncDeltaIfAutoEnabled()
+            if (res?.success == true) {
+                lastDwellSyncAtMs = nowMs()
+                if (pending != null) {
+                    lastSyncedPage = pending
+                }
             }
         }
     }
@@ -282,7 +363,7 @@ internal class ReaderSessionCoordinator(
             }
             return
         }
-        flushPendingPageSave()
+        flushPendingPageSave(triggerPushAfterSave = true)
         readerJob?.cancel()
         state.value.series?.sourceId?.let { NetworkSourceRuntime.disconnect(it) }
         platform.clearImageMemory(ImageCacheRole.READER)
@@ -302,7 +383,6 @@ internal class ReaderSessionCoordinator(
                 viewMode = restoredMode,
             )
         }
-        repository.syncManager?.triggerDebouncedPush()
     }
 
     fun evictReaderImage(url: String) {
@@ -321,6 +401,9 @@ internal class ReaderSessionCoordinator(
             val totalImages = current.readerImages.size
             val lastPage = if (totalImages > 0) totalImages - 1 else currentEp.lastReadPage
             val completedPage = ReaderProgress.encodePage(lastPage, completed = true)
+            state.update { curr ->
+                updateEpisodePageState(curr, currentEp.wrId, currentPage = lastPage, persistedPage = completedPage)
+            }
             scope.launch {
                 repository.saveEpisodePage(series.workId(), currentEp.wrId, completedPage)
             }
@@ -547,5 +630,32 @@ internal class ReaderSessionCoordinator(
         autoSwitchedEpisodeId = null
         readerToastJob?.cancel()
         return mode
+    }
+
+    private fun updateEpisodePageState(
+        curr: AppUiState,
+        wrId: String,
+        currentPage: Int,
+        persistedPage: Int,
+    ): AppUiState {
+        val updatedRaw = curr.rawEpisodes.map {
+            if (it.wrId == wrId) it.copy(lastReadPage = persistedPage) else it
+        }
+        val updatedEpisodes = curr.episodes.map {
+            if (it.wrId == wrId) it.copy(lastReadPage = persistedPage) else it
+        }
+        return curr.copy(
+            currentEpisode = curr.currentEpisode?.let {
+                if (it.wrId == wrId) it.copy(lastReadPage = currentPage) else it
+            },
+            rawEpisodes = updatedRaw,
+            episodes = updatedEpisodes,
+        )
+    }
+
+    companion object {
+        const val DEFAULT_PAGE_SAVE_DEBOUNCE_MS = 400L
+        const val DEFAULT_PAGE_DWELL_SYNC_DELAY_MS = 20_000L
+        const val DEFAULT_PAGE_DWELL_SYNC_COOLDOWN_MS = 60_000L
     }
 }

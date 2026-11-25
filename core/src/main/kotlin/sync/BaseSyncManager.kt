@@ -93,6 +93,7 @@ open class BaseSyncManager(
         val newKey = SyncConstants.generateSyncKey()
         storage.setPreference(SyncConstants.KEY_SYNC_KEY, newKey)
         storage.setPreference(SyncConstants.KEY_LAST_SYNCED_AT, "0")
+        storage.setPreference(SyncConstants.KEY_LAST_LOCAL_SYNC_AT, "0")
         _syncState.value = _syncState.value.copy(
             syncKey = newKey,
             lastSyncedAt = 0L,
@@ -108,6 +109,7 @@ open class BaseSyncManager(
         if (trimmed.isNotBlank()) {
             storage.setPreference(SyncConstants.KEY_SYNC_KEY, trimmed)
             storage.setPreference(SyncConstants.KEY_LAST_SYNCED_AT, "0")
+            storage.setPreference(SyncConstants.KEY_LAST_LOCAL_SYNC_AT, "0")
             _syncState.value = _syncState.value.copy(
                 syncKey = trimmed,
                 lastSyncedAt = 0L,
@@ -123,6 +125,7 @@ open class BaseSyncManager(
         if (trimmed.isBlank()) return@exclusiveSync SyncResult(false, "동기화 키가 올바르지 않습니다.")
         storage.setPreference(SyncConstants.KEY_SYNC_KEY, trimmed)
         storage.setPreference(SyncConstants.KEY_LAST_SYNCED_AT, "0")
+        storage.setPreference(SyncConstants.KEY_LAST_LOCAL_SYNC_AT, "0")
         _syncState.value = _syncState.value.copy(
             syncKey = trimmed,
             lastSyncedAt = 0L,
@@ -244,6 +247,7 @@ open class BaseSyncManager(
             }
             storage.setPreference(SyncConstants.KEY_SYNC_KEY, syncKey)
             storage.setPreference(SyncConstants.KEY_LAST_SYNCED_AT, "0")
+            storage.setPreference(SyncConstants.KEY_LAST_LOCAL_SYNC_AT, "0")
             _syncState.value = _syncState.value.copy(syncKey = syncKey, lastSyncedAt = 0L, syncMessage = "기기 연결 중...")
             toonClient?.serverProxySyncKey = syncKey
             val pullRes = syncPullInternal(isSilent = false)
@@ -255,28 +259,58 @@ open class BaseSyncManager(
         }
     }
 
-    suspend fun syncPush(): SyncResult = exclusiveSync(SyncResult(false, "이미 동기화 진행 중입니다.")) {
-        syncPushInternal()
+    suspend fun syncPush(): SyncResult {
+        debounceJob?.cancel()
+        return exclusiveSync(SyncResult(false, "이미 동기화 진행 중입니다.")) {
+            syncPushInternal()
+        }
     }
 
     suspend fun syncPull(): SyncResult = exclusiveSync(SyncResult(false, "이미 동기화 진행 중입니다.")) {
         syncPullInternal(isSilent = false)
     }
 
-    suspend fun syncDelta(): SyncResult = exclusiveSync(SyncResult(false, "이미 동기화 진행 중입니다.")) {
-        syncDeltaInternal(isSilent = false)
+    suspend fun syncDelta(): SyncResult {
+        debounceJob?.cancel()
+        return exclusiveSync(SyncResult(false, "이미 동기화 진행 중입니다.")) {
+            syncDeltaInternal(isSilent = false)
+        }
     }
 
-    suspend fun syncFull(): SyncResult = exclusiveSync(SyncResult(false, "이미 동기화 진행 중입니다.")) {
-        val pullRes = syncPullInternal(isSilent = false)
-        if (!pullRes.success && !pullRes.message.contains("데이터가 없습니다")) {
-            return@exclusiveSync pullRes
+    suspend fun syncFull(): SyncResult {
+        debounceJob?.cancel()
+        return exclusiveSync(SyncResult(false, "이미 동기화 진행 중입니다.")) {
+            val pullRes = syncPullInternal(isSilent = false)
+            if (!pullRes.success && !pullRes.message.contains("데이터가 없습니다")) {
+                return@exclusiveSync pullRes
+            }
+            syncPushInternal()
         }
-        syncPushInternal()
+    }
+
+    /**
+     * Runs delta sync when the device already has a sync cursor so unpushed local changes
+     * (e.g. from an abrupt desktop exit) are preserved and uploaded; falls back to full pull on first sync.
+     */
+    suspend fun syncOnLaunch(): SyncResult = exclusiveSync(SyncResult(false, "이미 동기화 진행 중입니다.")) {
+        if (_syncState.value.lastSyncedAt > 0L) {
+            syncDeltaInternal(isSilent = false)
+        } else {
+            syncPullInternal(isSilent = false)
+        }
     }
 
     /** Silent delta if no other sync is running; null when skipped. */
     suspend fun syncIfIdle(): SyncResult? = withContext(Dispatchers.IO) {
+        exclusiveSync(null) {
+            syncDeltaInternal(isSilent = true)
+        }
+    }
+
+    /** Silent delta only when auto-sync is enabled, cancelling any pending debounced push. */
+    suspend fun syncDeltaIfAutoEnabled(): SyncResult? = withContext(Dispatchers.IO) {
+        if (!_syncState.value.autoSyncEnabled) return@withContext null
+        debounceJob?.cancel()
         exclusiveSync(null) {
             syncDeltaInternal(isSilent = true)
         }
@@ -293,12 +327,14 @@ open class BaseSyncManager(
         }
 
         try {
-            val since = state.lastSyncedAt
-            val localChanges = storage.getLocalChangesSince(since)
+            val serverSince = state.lastSyncedAt
+            val localSince = storage.getPreference(SyncConstants.KEY_LAST_LOCAL_SYNC_AT, null)?.toLongOrNull() ?: serverSince
+            val localPushStartedAt = System.currentTimeMillis()
+            val localChanges = storage.getLocalChangesSince(localSince)
 
             val payload = JSONObject().apply {
-                put("since", since)
-                put("clientTime", System.currentTimeMillis())
+                put("since", serverSince)
+                put("clientTime", localPushStartedAt)
                 put("version", 2)
                 put("changes", localChanges)
             }
@@ -335,8 +371,9 @@ open class BaseSyncManager(
             val thirtyDaysAgo = System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000
             storage.deleteOldTombstones(thirtyDaysAgo)
 
-            // Update sync timestamp
+            // Store server cursor separately from local client-clock cursor to prevent clock-skew drops.
             storage.setPreference(SyncConstants.KEY_LAST_SYNCED_AT, serverTime.toString())
+            storage.setPreference(SyncConstants.KEY_LAST_LOCAL_SYNC_AT, localPushStartedAt.toString())
 
             val msg = "증분 동기화 완료 (즐겨찾기 $favCount, 기록 $histCount, 회차 $epCount)"
             _syncState.value = _syncState.value.copy(
@@ -369,6 +406,7 @@ open class BaseSyncManager(
         }
 
         try {
+            val localPullStartedAt = System.currentTimeMillis()
             val req = Request.Builder()
                 .url(url)
                 .addComics8SyncHeaders(key)
@@ -391,8 +429,9 @@ open class BaseSyncManager(
 
             val (favCount, histCount, epCount) = storage.applyFullSnapshot(json, serverTime)
 
-            // Update sync timestamp
+            // Update sync cursors
             storage.setPreference(SyncConstants.KEY_LAST_SYNCED_AT, serverTime.toString())
+            storage.setPreference(SyncConstants.KEY_LAST_LOCAL_SYNC_AT, localPullStartedAt.toString())
 
             val msg = "가져오기 완료 (즐겨찾기 $favCount, 기록 $histCount, 회차 $epCount)"
             _syncState.value = _syncState.value.copy(
@@ -423,6 +462,7 @@ open class BaseSyncManager(
         _syncState.value = _syncState.value.copy(isSyncing = true, syncMessage = null)
 
         try {
+            val localPushStartedAt = System.currentTimeMillis()
             val payload = storage.getFullSnapshot()
             val reqBody = payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
             val req = Request.Builder()
@@ -447,6 +487,7 @@ open class BaseSyncManager(
             val serverTime = System.currentTimeMillis()
 
             storage.setPreference(SyncConstants.KEY_LAST_SYNCED_AT, serverTime.toString())
+            storage.setPreference(SyncConstants.KEY_LAST_LOCAL_SYNC_AT, localPushStartedAt.toString())
 
             val msg = "올리기 완료 (즐겨찾기 $favCount, 기록 $histCount, 회차 $epCount)"
             _syncState.value = _syncState.value.copy(

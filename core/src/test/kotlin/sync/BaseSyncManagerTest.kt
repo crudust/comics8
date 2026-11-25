@@ -19,8 +19,12 @@ class BaseSyncManagerTest {
         var fullSnapshotJson = JSONObject().put("favorites", org.json.JSONArray()).put("history", org.json.JSONArray())
         var appliedFullSnapshotCount = SyncApplyCounts(0, 0, 0)
         var appliedRemoteChangesCount = SyncApplyCounts(0, 0, 0)
+        var lastRequestedLocalSince: Long? = null
 
-        override suspend fun getLocalChangesSince(since: Long): JSONObject = JSONObject().put("favorites", org.json.JSONArray())
+        override suspend fun getLocalChangesSince(since: Long): JSONObject {
+            lastRequestedLocalSince = since
+            return JSONObject().put("favorites", org.json.JSONArray())
+        }
         override suspend fun getFullSnapshot(): JSONObject = fullSnapshotJson
         override suspend fun applyRemoteChanges(serverChanges: JSONObject, serverTime: Long): SyncApplyCounts = appliedRemoteChangesCount
         override suspend fun applyFullSnapshot(snapshot: JSONObject, serverTime: Long): SyncApplyCounts = appliedFullSnapshotCount
@@ -249,5 +253,79 @@ class BaseSyncManagerTest {
         assertThat(requestedBody).contains("test_source")
         assertThat(requestedBody).contains("toon1")
         assertThat(requestedBody).contains("50")
+    }
+
+    @Test
+    fun syncOnLaunchUsesDeltaWithSeparateLocalCursorWhenAlreadySynced() = runBlocking {
+        storage.setPreference(SyncConstants.KEY_LAST_SYNCED_AT, "1700000001000")
+        storage.setPreference(SyncConstants.KEY_LAST_LOCAL_SYNC_AT, "1700000000500")
+        storage.appliedRemoteChangesCount = SyncApplyCounts(0, 0, 1)
+
+        var requestedPath: String? = null
+        var sentServerSince: Long? = null
+        val okClient = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val req = chain.request()
+                requestedPath = req.url.encodedPath
+                val buffer = okio.Buffer()
+                req.body?.writeTo(buffer)
+                val reqJson = JSONObject(buffer.readUtf8())
+                sentServerSince = reqJson.optLong("since", -1L)
+                val respJson = JSONObject()
+                    .put("status", "success")
+                    .put("serverTime", 1700000005000L)
+                    .put("changes", JSONObject())
+                Response.Builder()
+                    .request(req)
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body(respJson.toString().toResponseBody("application/json".toMediaType()))
+                    .build()
+            }
+            .build()
+
+        val manager = BaseSyncManager(storage = storage, client = okClient)
+        val result = manager.syncOnLaunch()
+
+        assertThat(result.success).isTrue()
+        assertThat(requestedPath).endsWith("/sync/delta")
+        assertThat(sentServerSince).isEqualTo(1700000001000L)
+        assertThat(storage.lastRequestedLocalSince).isEqualTo(1700000000500L)
+        assertThat(manager.syncState.value.lastSyncedAt).isEqualTo(1700000005000L)
+        val newLocalCursor = storage.getPreference(SyncConstants.KEY_LAST_LOCAL_SYNC_AT, null)?.toLongOrNull()
+        assertThat(newLocalCursor).isNotNull()
+        assertThat(newLocalCursor).isNotEqualTo(1700000005000L)
+    }
+
+    @Test
+    fun syncDeltaIfAutoEnabledRespectsAutoSyncSetting() = runBlocking {
+        var requestCount = 0
+        val okClient = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                requestCount += 1
+                val respJson = JSONObject()
+                    .put("status", "success")
+                    .put("serverTime", 1700000009000L)
+                    .put("changes", JSONObject())
+                Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body(respJson.toString().toResponseBody("application/json".toMediaType()))
+                    .build()
+            }
+            .build()
+
+        val manager = BaseSyncManager(storage = storage, client = okClient)
+        manager.setAutoSyncEnabled(false)
+        assertThat(manager.syncDeltaIfAutoEnabled()).isNull()
+        assertThat(requestCount).isEqualTo(0)
+
+        manager.setAutoSyncEnabled(true)
+        val res = manager.syncDeltaIfAutoEnabled()
+        assertThat(res?.success).isTrue()
+        assertThat(requestCount).isEqualTo(1)
     }
 }

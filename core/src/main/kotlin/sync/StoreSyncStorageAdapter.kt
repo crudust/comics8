@@ -198,6 +198,7 @@ class StoreSyncStorageAdapter(
         }
 
         var savedHistoryCount = 0
+        var savedEpisodeCount = 0
         store.inTransaction {
             if (applyTombstones) {
                 payload.tombstones.forEach { tombstone ->
@@ -226,7 +227,23 @@ class StoreSyncStorageAdapter(
                 }
                 savedHistoryCount = historyToSave.size
             }
-            if (episodes.isNotEmpty()) store.upsertReadEpisodes(episodes)
+            if (episodes.isNotEmpty()) {
+                val distinctWorks = episodes.map { it.workId() }.distinctBy { it.storageKey() }
+                val existingRows = if (distinctWorks.size <= 16) {
+                    distinctWorks.flatMap { store.getReadEpisodes(it) }
+                } else {
+                    store.getAllReadEpisodes()
+                }
+                val existingEpMap = existingRows.associateBy { "${it.workId().storageKey()}|${it.wrId}" }
+                val episodesToSave = episodes.filter { incoming ->
+                    val local = existingEpMap["${incoming.workId().storageKey()}|${incoming.wrId}"]
+                    local == null || incoming.readAt >= local.readAt
+                }
+                if (episodesToSave.isNotEmpty()) {
+                    store.upsertReadEpisodes(episodesToSave)
+                }
+                savedEpisodeCount = episodesToSave.size
+            }
             if (settings.isNotEmpty()) store.upsertReaderSettings(settings)
 
             // Totals only ever come from counting a listing, so history rows (which merely echo a
@@ -245,6 +262,6 @@ class StoreSyncStorageAdapter(
                 store.upsertCatalogEntries(directCatalog)
             }
         }
-        return SyncApplyCounts(favorites = favorites.size, history = savedHistoryCount, episodes = episodes.size)
+        return SyncApplyCounts(favorites = favorites.size, history = savedHistoryCount, episodes = savedEpisodeCount)
     }
 }

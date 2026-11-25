@@ -26,6 +26,9 @@ import com.comics8.core.source.StoredSourceSettings
 import com.comics8.core.source.WorkId
 import com.comics8.core.source.js.JsPackStore
 import com.comics8.core.source.network.NetworkSourceStore
+import com.comics8.core.sync.BaseSyncManager
+import com.comics8.core.sync.StoreSyncStorageAdapter
+import com.comics8.core.sync.SyncConstants
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -35,10 +38,17 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
+import org.json.JSONObject
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import java.io.File
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.io.path.createTempDirectory
 
 class SharedAppControllerTest {
@@ -315,6 +325,173 @@ class SharedAppControllerTest {
         assertThat(store.hasFavorite(series.workId())).isTrue()
         assertThat(controller.repository.getReaderSetting(series.workId())?.viewMode).isEqualTo(ViewMode.DUAL)
         assertThat(controller.repository.getReaderSetting(series.workId())?.splitMode).isEqualTo(SplitMode.SLICE)
+    }
+
+    @Test
+    fun closeReaderUpdatesEpisodeListLastReadPageForReopen() = runBlocking {
+        val loaded = withTimeout(5_000) { controller.state.first { it.items.isNotEmpty() } }
+        val series = loaded.items.first()
+        controller.openSeries(series)
+        val withEps = withTimeout(5_000) { controller.state.first { it.episodes.size == 2 } }
+        val ep1 = withEps.episodes.first { it.wrId == "ep1" }
+
+        controller.openEpisode(ep1)
+        withTimeout(5_000) { controller.state.first { it.readerImages.size == 3 } }
+
+        controller.savePage(1)
+        controller.closeReader()
+
+        withTimeout(5_000) {
+            while (store.getReadEpisode(series.workId(), "ep1")?.lastPage != 1) delay(20)
+        }
+        val updatedEp1 = controller.state.value.episodes.first { it.wrId == "ep1" }
+        assertThat(updatedEp1.lastReadPage).isEqualTo(1)
+
+        // Re-opening from the in-memory series episode list preserves page 1 in state and DB
+        controller.openEpisode(updatedEp1)
+        withTimeout(5_000) { controller.state.first { it.readerImages.size == 3 } }
+        assertThat(controller.state.value.currentEpisode?.lastReadPage).isEqualTo(1)
+        assertThat(store.getReadEpisode(series.workId(), "ep1")?.lastPage).isEqualTo(1)
+    }
+
+    @Test
+    fun readerDwellSyncRespectsDwellCooldownAndBackgroundFlush() = runBlocking {
+        val deltaPayloads = CopyOnWriteArrayList<JSONObject>()
+        val okClient = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val req = chain.request()
+                val path = req.url.encodedPath
+                val bodyJson = if (req.method == "POST") {
+                    val buf = okio.Buffer()
+                    req.body?.writeTo(buf)
+                    JSONObject(buf.readUtf8())
+                } else {
+                    JSONObject()
+                }
+                if (path.endsWith("/sync/delta")) {
+                    deltaPayloads.add(bodyJson)
+                    val resp = JSONObject()
+                        .put("status", "success")
+                        .put("serverTime", System.currentTimeMillis())
+                        .put("changes", JSONObject())
+                    Response.Builder()
+                        .request(req)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .body(resp.toString().toResponseBody("application/json".toMediaType()))
+                        .build()
+                } else {
+                    val resp = JSONObject()
+                        .put("version", 2)
+                        .put("exportedAt", System.currentTimeMillis())
+                        .put("favorites", org.json.JSONArray())
+                        .put("history", org.json.JSONArray())
+                        .put("readEpisodes", org.json.JSONArray())
+                    Response.Builder()
+                        .request(req)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .body(resp.toString().toResponseBody("application/json".toMediaType()))
+                        .build()
+                }
+            }
+            .build()
+
+        val syncPrefs = InMemoryKeyValuePrefs().apply {
+            putString(SyncConstants.KEY_SERVER_URL, "https://sync.example.com")
+            putString(SyncConstants.KEY_AUTO_SYNC, "true")
+            putString(SyncConstants.KEY_LAST_SYNCED_AT, "1")
+            putString(SyncConstants.KEY_LAST_LOCAL_SYNC_AT, "1")
+        }
+        val syncManager = BaseSyncManager(
+            storage = StoreSyncStorageAdapter(store, syncPrefs),
+            client = okClient,
+        )
+        val syncRepo = SharedToonRepository(
+            client = ToonClient(sources = { registry }),
+            store = store,
+            sourceSettings = sourceSettings,
+            sources = registry,
+            syncManager = syncManager,
+            isSourceEnabled = { sourceSettings.isEnabled(it) },
+            installedIds = { sourceSettings.installedIds() },
+        )
+        val syncPlatform = object : PlatformHost {
+            override val prefs = this@SharedAppControllerTest.prefs
+            override val sourceSettings = this@SharedAppControllerTest.sourceSettings
+            override val localLibraryIndexFile = File(tempDir, "local-sync.json")
+            override fun materializeLocalRoots() = emptyList<File>()
+            override fun clearImageMemory(role: ImageCacheRole) {}
+            override fun evictReaderImage(url: String) {}
+            override val appVersionName = "1.0.0"
+            override val appVersionCode = 1
+            override suspend fun checkForAppUpdate(serverUrl: String, strings: AppStrings) =
+                AppUpdateState(currentVersion = "1.0.0", latestVersion = "1.0.0")
+            override suspend fun downloadAndInstallUpdate(downloadUrl: String, onProgress: (Float) -> Unit) =
+                Result.success(Unit)
+        }
+        val syncController = SharedAppController(
+            scope = scope,
+            repository = syncRepo,
+            jsPackStore = JsPackStore(File(tempDir, "js-sync")),
+            networkSourceStore = NetworkSourceStore(File(tempDir, "net-sync.json")),
+            platform = syncPlatform,
+        )
+        try {
+            var fakeNow = 1_000_000L
+            val coordinator = ReaderSessionCoordinator(
+                controller = syncController,
+                pageSaveDebounceMs = 20L,
+                pageDwellSyncDelayMs = 80L,
+                pageDwellSyncCooldownMs = 300L,
+                nowMs = { fakeNow },
+            )
+            val loaded = withTimeout(5_000) { syncController.state.first { it.items.isNotEmpty() } }
+            val series = loaded.items.first()
+            syncController.openSeries(series)
+            val withEps = withTimeout(5_000) { syncController.state.first { it.episodes.size == 2 } }
+            val ep1 = withEps.episodes.first { it.wrId == "ep1" }
+
+            // Wait for initial launch delta sync to settle, then clear recorded payloads
+            withTimeout(5_000) { while (deltaPayloads.isEmpty()) delay(20) }
+            deltaPayloads.clear()
+
+            // Avoid openEpisode's 2.5s debounced push racing the short dwell window in this test
+            syncManager.setAutoSyncEnabled(false)
+            coordinator.openEpisode(ep1)
+            withTimeout(5_000) { syncController.state.first { it.readerImages.size == 3 } }
+            fakeNow += 500L
+            syncManager.setAutoSyncEnabled(true)
+            deltaPayloads.clear()
+
+            // Rapid page flip within dwell delay: page 0 -> page 1 immediately, no dwell sync before 80ms
+            coordinator.savePage(0)
+            delay(30)
+            coordinator.savePage(1)
+            delay(30)
+            assertThat(deltaPayloads).isEmpty()
+
+            // Stay on page 1 past dwell delay (80ms) -> 1 dwell sync with lastPage == 1
+            withTimeout(5_000) { while (deltaPayloads.isEmpty()) delay(20) }
+            assertThat(deltaPayloads).hasSize(1)
+            val firstEpisodes = deltaPayloads.last().getJSONObject("changes").getJSONArray("readEpisodes")
+            assertThat(firstEpisodes.getJSONObject(0).getInt("lastPage")).isEqualTo(1)
+
+            // Immediate background flush on page 2 saves locally and syncs immediately
+            deltaPayloads.clear()
+            coordinator.savePage(2)
+            coordinator.flushAndSyncOnBackground()
+            withTimeout(5_000) { while (deltaPayloads.isEmpty()) delay(20) }
+            val bgEpisodes = deltaPayloads.last().getJSONObject("changes").getJSONArray("readEpisodes")
+            assertThat(bgEpisodes.getJSONObject(0).getInt("lastPage")).isEqualTo(-3)
+
+            coordinator.close()
+        } finally {
+            syncController.close()
+            syncManager.close()
+        }
     }
 
     private class StubSource(

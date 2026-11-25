@@ -62,7 +62,10 @@ import com.comics8.desktop.ui.components.MacTrackpadPinchBridge
 import com.comics8.desktop.ui.components.TrackpadPinchDispatcher
 import com.comics8.desktop.ui.components.desktopDiscreteScrollPaging
 import com.comics8.desktop.ui.components.pickJsFile
+import com.comics8.desktop.ui.reader.LocalReaderKeyDispatcher
+import com.comics8.desktop.ui.reader.ReaderKeyDispatcher
 import com.comics8.desktop.ui.reader.ReaderPane
+import com.comics8.desktop.ui.reader.isReaderKeyDispatchActive
 import com.comics8.desktop.ui.util.DesktopCoil
 import com.comics8.shared.ui.LocalImageFallbacksProvider
 import com.comics8.shared.ui.LocalPlatformUiBridge
@@ -159,6 +162,8 @@ fun main(args: Array<String>) {
             viewModel.onImportedPacksReady()
         }
 
+        val readerKeyDispatcher = remember { ReaderKeyDispatcher() }
+
         val windowState = rememberWindowState(
             width = 1280.dp,
             height = 900.dp,
@@ -195,6 +200,7 @@ fun main(args: Array<String>) {
                             viewModel.goBack()
                             true
                         }
+                        viewModel.state.value.isReaderKeyDispatchActive() -> readerKeyDispatcher.dispatch(event)
                         else -> false
                     }
                 } else false
@@ -238,7 +244,10 @@ fun main(args: Array<String>) {
                 }
             }
 
-            CompositionLocalProvider(LocalTrackpadPinchDispatcher provides trackpadPinchDispatcher) {
+            CompositionLocalProvider(
+                LocalTrackpadPinchDispatcher provides trackpadPinchDispatcher,
+                LocalReaderKeyDispatcher provides readerKeyDispatcher,
+            ) {
                 ComicsTheme {
                     Surface(
                         modifier = Modifier.fillMaxSize(),

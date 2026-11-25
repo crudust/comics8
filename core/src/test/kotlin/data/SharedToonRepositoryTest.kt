@@ -131,6 +131,62 @@ class SharedToonRepositoryTest {
         assertThat(store.getHistory(workId)?.lastReadOrder).isEqualTo(10)
     }
 
+    @Test
+    fun syncAdapterAppliesReadEpisodesLwwByReadAt() = runBlocking {
+        val store = InMemoryComicLocalStore()
+        val prefs = InMemoryKeyValuePrefs()
+        val adapter = StoreSyncStorageAdapter(store, prefs)
+        val workId = WorkId("stub", "w1")
+
+        store.upsertReadEpisodes(
+            listOf(
+                ReadEpisodeRecord("stub", "w1", "ep1", readAt = 2000L, lastPage = 7),
+                ReadEpisodeRecord("stub", "w1", "ep2", readAt = 1000L, lastPage = 1),
+            ),
+        )
+
+        val incoming = org.json.JSONObject().apply {
+            put(
+                "readEpisodes",
+                org.json.JSONArray()
+                    .put(
+                        org.json.JSONObject().apply {
+                            put("sourceId", "stub")
+                            put("toonId", "w1")
+                            put("wrId", "ep1")
+                            put("readAt", 1500L) // stale compared to local 2000L
+                            put("lastPage", 2)
+                        },
+                    )
+                    .put(
+                        org.json.JSONObject().apply {
+                            put("sourceId", "stub")
+                            put("toonId", "w1")
+                            put("wrId", "ep2")
+                            put("readAt", 3000L) // newer than local 1000L
+                            put("lastPage", 5)
+                        },
+                    )
+                    .put(
+                        org.json.JSONObject().apply {
+                            put("sourceId", "stub")
+                            put("toonId", "w1")
+                            put("wrId", "ep3")
+                            put("readAt", 1000L) // new episode
+                            put("lastPage", 3)
+                        },
+                    ),
+            )
+        }
+
+        val counts = adapter.applyRemoteChanges(incoming, 9999L)
+        assertThat(counts.episodes).isEqualTo(2)
+        assertThat(store.getReadEpisode(workId, "ep1")?.lastPage).isEqualTo(7)
+        assertThat(store.getReadEpisode(workId, "ep1")?.readAt).isEqualTo(2000L)
+        assertThat(store.getReadEpisode(workId, "ep2")?.lastPage).isEqualTo(5)
+        assertThat(store.getReadEpisode(workId, "ep3")?.lastPage).isEqualTo(3)
+    }
+
     private class StubSource : ComicSource {
         override val id = "stub"
         override val displayName = "Stub"

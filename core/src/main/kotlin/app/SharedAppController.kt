@@ -159,7 +159,7 @@ class SharedAppController(
                 }
             }
             scope.launch {
-                val res = sm.syncPull()
+                val res = sm.syncOnLaunch()
                 if (res.success && (res.favoritesCount > 0 || res.historyCount > 0 || res.episodesCount > 0)) {
                     syncBackupUpdate.applySyncRefresh()
                 }
@@ -599,6 +599,7 @@ class SharedAppController(
         readerSession.openExternalReaderSession(episode, resolveImages)
     fun savePage(page: Int, seenThroughPage: Int = page) = readerSession.savePage(page, seenThroughPage)
     fun flushPendingPageSave() = readerSession.flushPendingPageSave()
+    fun flushAndSyncOnBackground() = readerSession.flushAndSyncOnBackground()
     fun closeReader() = readerSession.closeReader()
     fun evictReaderImage(url: String) = readerSession.evictReaderImage(url)
     fun toggleFullscreen() = readerSession.toggleFullscreen()

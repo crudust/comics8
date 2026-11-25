@@ -1,26 +1,24 @@
 package com.comics8.desktop.ui.reader
 
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isAltPressed
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.input.key.utf16CodePoint
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
 import com.comics8.core.model.ReadDirection
 import com.comics8.desktop.ui.DesktopUiState
@@ -55,15 +53,60 @@ fun ReaderPane(
     viewModel: DesktopViewModel,
     modifier: Modifier = Modifier,
 ) {
-    val focusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    val keyDispatcher = LocalReaderKeyDispatcher.current
     var onAdvanceAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     var onRetreatAction by remember { mutableStateOf<(() -> Unit)?>(null) }
-    val isR2L = state.readDirection == ReadDirection.RIGHT_TO_LEFT
+    val currentIsR2L by rememberUpdatedState(state.readDirection == ReadDirection.RIGHT_TO_LEFT)
+    val currentHasReaderContent by rememberUpdatedState(state.readerImages.isNotEmpty())
+    val currentOnAdvance by rememberUpdatedState(onAdvanceAction)
+    val currentOnRetreat by rememberUpdatedState(onRetreatAction)
 
-    LaunchedEffect(Unit, state.currentEpisode?.wrId) {
-        try {
-            focusRequester.requestFocus()
-        } catch (_: Exception) {
+    // Clear focus left on clicked overlay chips/buttons or retry controls so Spacebar never re-triggers them.
+    LaunchedEffect(
+        state.currentEpisode?.wrId,
+        state.effectiveViewMode,
+        state.readDirection,
+        state.splitMode,
+        state.seriesFavorited,
+        state.readerImages.isEmpty(),
+        state.readerLoading,
+    ) {
+        focusManager.clearFocus(force = true)
+    }
+
+    val keyHandler = remember {
+        { event: KeyEvent ->
+            val command = resolveReaderKeyCommand(
+                key = event.key,
+                isKeyDown = event.type == KeyEventType.KeyDown,
+                isModifierPressed = event.isMetaPressed || event.isCtrlPressed || event.isAltPressed,
+                isR2L = currentIsR2L,
+            )
+            when (command) {
+                ReaderKeyCommand.TOGGLE_FULLSCREEN -> {
+                    viewModel.toggleFullscreen()
+                    true
+                }
+                ReaderKeyCommand.ADVANCE -> {
+                    if (currentHasReaderContent) currentOnAdvance?.invoke()
+                    true
+                }
+                ReaderKeyCommand.RETREAT -> {
+                    if (currentHasReaderContent) currentOnRetreat?.invoke()
+                    true
+                }
+                null -> false
+            }
+        }
+    }
+
+    DisposableEffect(keyDispatcher) {
+        if (keyDispatcher != null) {
+            keyDispatcher.register(keyHandler)
+            onDispose { keyDispatcher.unregister(keyHandler) }
+        } else {
+            onDispose {}
         }
     }
 
@@ -95,57 +138,6 @@ fun ReaderPane(
             onAdvanceAction = adv
             onRetreatAction = ret
         },
-        modifier = modifier
-            .fillMaxSize()
-            .focusRequester(focusRequester)
-            .focusable()
-            .onKeyEvent { event ->
-                if (event.type == KeyEventType.KeyDown) {
-                    val key = event.key
-                    val isCmd = event.isMetaPressed || event.isCtrlPressed
-                    val isAlt = event.isAltPressed
-                    val isCmdOrAlt = isCmd || isAlt
-                    val isBack =
-                        (isCmd && (key == Key.DirectionLeft || key == Key.LeftBracket || event.utf16CodePoint == '['.code)) ||
-                        (isAlt && (key == Key.DirectionLeft || key == Key.LeftBracket || event.utf16CodePoint == '['.code))
-                    val isForward =
-                        (isCmd && (key == Key.DirectionRight || key == Key.RightBracket || event.utf16CodePoint == ']'.code)) ||
-                        (isAlt && (key == Key.DirectionRight || key == Key.RightBracket || event.utf16CodePoint == ']'.code))
-
-                    when {
-                        key == Key.Escape || isBack -> {
-                            viewModel.goBack()
-                            true
-                        }
-                        isForward -> {
-                            viewModel.goForward()
-                            true
-                        }
-                        key == Key.F && !isCmdOrAlt -> {
-                            viewModel.toggleFullscreen()
-                            true
-                        }
-                        !isCmdOrAlt && key == Key.DirectionRight -> {
-                            if (isR2L) onRetreatAction?.invoke() else onAdvanceAction?.invoke()
-                            true
-                        }
-                        !isCmdOrAlt && key == Key.DirectionLeft -> {
-                            if (isR2L) onAdvanceAction?.invoke() else onRetreatAction?.invoke()
-                            true
-                        }
-                        !isCmdOrAlt && (key == Key.Spacebar || key == Key.PageDown) -> {
-                            onAdvanceAction?.invoke()
-                            true
-                        }
-                        !isCmdOrAlt && key == Key.PageUp -> {
-                            onRetreatAction?.invoke()
-                            true
-                        }
-                        else -> false
-                    }
-                } else {
-                    false
-                }
-            },
+        modifier = modifier.fillMaxSize(),
     )
 }

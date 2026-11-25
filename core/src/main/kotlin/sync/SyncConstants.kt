@@ -7,6 +7,7 @@ object SyncConstants {
     const val KEY_SERVER_URL = "sync_server_url"
     const val KEY_AUTO_SYNC = "sync_auto_enabled"
     const val KEY_LAST_SYNCED_AT = "sync_last_at"
+    const val KEY_LAST_LOCAL_SYNC_AT = "sync_last_local_at"
     const val KEY_USE_SERVER_PROXY = "sync_use_server_proxy"
 
     const val REMOTE_DISCOVERY_URL = "https://raw.githubusercontent.com/crudust/comics8/main/server.json"
