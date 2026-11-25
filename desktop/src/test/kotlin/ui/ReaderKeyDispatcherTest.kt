@@ -1,11 +1,15 @@
 package com.comics8.desktop.ui
 
+import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.KeyEventType
 import com.comics8.core.model.ToonItem
 import com.comics8.core.source.network.NetworkProtocol
 import com.comics8.core.source.network.NetworkSourceConfig
 import com.comics8.desktop.ui.reader.ReaderKeyCommand
-import com.comics8.desktop.ui.reader.StackedEventDispatcher
+import com.comics8.desktop.ui.reader.ReaderKeyDispatcher
+import com.comics8.desktop.ui.reader.ReaderKeyInput
 import com.comics8.desktop.ui.reader.isReaderKeyDispatchActive
 import com.comics8.desktop.ui.reader.resolveReaderKeyCommand
 import com.google.common.truth.Truth.assertThat
@@ -47,32 +51,50 @@ class ReaderKeyDispatcherTest {
             .isNull()
     }
 
+    @OptIn(InternalComposeUiApi::class)
     @Test
-    fun dispatcherRoutesToMostRecentlyRegisteredHandler() {
-        val dispatcher = StackedEventDispatcher<Key>()
+    fun dispatcherRoutesComposeKeyEventsToMostRecentlyRegisteredHandler() {
+        val dispatcher = ReaderKeyDispatcher()
+        // Exercise the exact Window(onKeyEvent = { event -> dispatcher.dispatch(event) }) lambda shape
+        // that previously triggered InternalKeyEvent -> KeyEvent ClassCastException.
+        val windowKeyCallback: (KeyEvent) -> Boolean = { event -> dispatcher.dispatch(event) }
 
-        assertThat(dispatcher.dispatch(Key.DirectionRight)).isFalse()
+        val spaceDown = KeyEvent(key = Key.Spacebar, type = KeyEventType.KeyDown)
+        val rightDown = KeyEvent(key = Key.DirectionRight, type = KeyEventType.KeyDown)
+        val leftCtrlDown = KeyEvent(key = Key.DirectionLeft, type = KeyEventType.KeyDown, isCtrlPressed = true)
+        val spaceUpShift = KeyEvent(key = Key.Spacebar, type = KeyEventType.KeyUp, isShiftPressed = true)
 
-        val firstEvents = mutableListOf<Key>()
-        val secondEvents = mutableListOf<Key>()
-        val first: (Key) -> Boolean = { firstEvents += it; true }
-        val second: (Key) -> Boolean = { secondEvents += it; true }
+        assertThat(windowKeyCallback(spaceDown)).isFalse()
+
+        val firstInputs = mutableListOf<ReaderKeyInput>()
+        val secondInputs = mutableListOf<ReaderKeyInput>()
+        val first: (ReaderKeyInput) -> Boolean = { firstInputs += it; true }
+        val second: (ReaderKeyInput) -> Boolean = { secondInputs += it; true }
 
         dispatcher.register(first)
-        assertThat(dispatcher.dispatch(Key.DirectionRight)).isTrue()
-        assertThat(firstEvents).containsExactly(Key.DirectionRight)
+        assertThat(windowKeyCallback(rightDown)).isTrue()
+        assertThat(firstInputs).containsExactly(
+            ReaderKeyInput(key = Key.DirectionRight, isKeyDown = true, isModifierPressed = false),
+        )
 
         dispatcher.register(second)
-        assertThat(dispatcher.dispatch(Key.DirectionLeft)).isTrue()
-        assertThat(firstEvents).containsExactly(Key.DirectionRight)
-        assertThat(secondEvents).containsExactly(Key.DirectionLeft)
+        assertThat(windowKeyCallback(leftCtrlDown)).isTrue()
+        assertThat(firstInputs).hasSize(1)
+        assertThat(secondInputs).containsExactly(
+            ReaderKeyInput(key = Key.DirectionLeft, isKeyDown = true, isModifierPressed = true),
+        )
 
         dispatcher.unregister(second)
-        assertThat(dispatcher.dispatch(Key.Spacebar)).isTrue()
-        assertThat(firstEvents).containsExactly(Key.DirectionRight, Key.Spacebar)
+        assertThat(windowKeyCallback(spaceDown)).isTrue()
+        assertThat(windowKeyCallback(spaceUpShift)).isTrue()
+        assertThat(firstInputs).containsExactly(
+            ReaderKeyInput(key = Key.DirectionRight, isKeyDown = true, isModifierPressed = false),
+            ReaderKeyInput(key = Key.Spacebar, isKeyDown = true, isModifierPressed = false),
+            ReaderKeyInput(key = Key.Spacebar, isKeyDown = false, isModifierPressed = false),
+        ).inOrder()
 
         dispatcher.unregister(first)
-        assertThat(dispatcher.dispatch(Key.Spacebar)).isFalse()
+        assertThat(windowKeyCallback(spaceDown)).isFalse()
     }
 
     @Test

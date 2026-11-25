@@ -3,6 +3,12 @@ package com.comics8.desktop.ui.reader
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
 import com.comics8.desktop.ui.DesktopUiState
 import com.comics8.desktop.ui.Screen
 
@@ -43,29 +49,40 @@ internal fun DesktopUiState.isReaderKeyDispatchActive(): Boolean =
         !showRemoveSourceSheet &&
         sourceError == null
 
-/**
- * Stack-ordered event dispatcher that routes events to the most recently registered active handler.
- */
-internal open class StackedEventDispatcher<T> {
-    private val handlers = LinkedHashSet<(T) -> Boolean>()
-
-    fun register(handler: (T) -> Boolean) {
-        handlers.remove(handler)
-        handlers.add(handler)
-    }
-
-    fun unregister(handler: (T) -> Boolean) {
-        handlers.remove(handler)
-    }
-
-    fun dispatch(event: T): Boolean {
-        val active = handlers.lastOrNull() ?: return false
-        return active(event)
-    }
-}
+/** Normalized key input dispatched from window-level key events without boxing [KeyEvent] through generics. */
+internal data class ReaderKeyInput(
+    val key: Key,
+    val isKeyDown: Boolean,
+    val isModifierPressed: Boolean,
+)
 
 /**
  * Routes window-level viewer key events to the active [ReaderPane] handler without depending on
  * Compose focus retention across mode transitions or overlay button clicks.
  */
-internal class ReaderKeyDispatcher : StackedEventDispatcher<KeyEvent>()
+internal class ReaderKeyDispatcher {
+    private val handlers = LinkedHashSet<(ReaderKeyInput) -> Boolean>()
+
+    fun register(handler: (ReaderKeyInput) -> Boolean) {
+        handlers.remove(handler)
+        handlers.add(handler)
+    }
+
+    fun unregister(handler: (ReaderKeyInput) -> Boolean) {
+        handlers.remove(handler)
+    }
+
+    fun dispatch(input: ReaderKeyInput): Boolean {
+        val active = handlers.lastOrNull() ?: return false
+        return active(input)
+    }
+
+    fun dispatch(event: KeyEvent): Boolean =
+        dispatch(
+            ReaderKeyInput(
+                key = event.key,
+                isKeyDown = event.type == KeyEventType.KeyDown,
+                isModifierPressed = event.isMetaPressed || event.isCtrlPressed || event.isAltPressed,
+            ),
+        )
+}

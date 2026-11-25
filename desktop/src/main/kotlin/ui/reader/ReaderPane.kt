@@ -11,13 +11,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.key.KeyEvent
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.isAltPressed
-import androidx.compose.ui.input.key.isCtrlPressed
-import androidx.compose.ui.input.key.isMetaPressed
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
 import com.comics8.core.model.ReadDirection
@@ -76,11 +69,11 @@ fun ReaderPane(
     }
 
     val keyHandler = remember {
-        { event: KeyEvent ->
+        { input: ReaderKeyInput ->
             val command = resolveReaderKeyCommand(
-                key = event.key,
-                isKeyDown = event.type == KeyEventType.KeyDown,
-                isModifierPressed = event.isMetaPressed || event.isCtrlPressed || event.isAltPressed,
+                key = input.key,
+                isKeyDown = input.isKeyDown,
+                isModifierPressed = input.isModifierPressed,
                 isR2L = currentIsR2L,
             )
             when (command) {
