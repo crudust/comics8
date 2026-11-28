@@ -42,7 +42,6 @@ fun SettingsPane(
     onExportBackup: (onResult: (Boolean, String) -> Unit) -> Unit,
     onImportBackup: (onResult: (Boolean, String) -> Unit) -> Unit,
     modifier: Modifier = Modifier,
-    showSplitMode: Boolean = false,
     showTapZoneAndVolume: Boolean = false,
     notificationSummary: String? = null,
     notificationSettingsContent: (@Composable () -> Unit)? = null,
@@ -178,7 +177,6 @@ fun SettingsPane(
                         SettingsCategory.READER -> ReaderSettingsPane(
                             state = state,
                             controller = controller,
-                            showSplitMode = showSplitMode,
                             showTapZoneAndVolume = showTapZoneAndVolume,
                         )
                         SettingsCategory.NOTIFICATION -> notificationSettingsContent?.invoke()

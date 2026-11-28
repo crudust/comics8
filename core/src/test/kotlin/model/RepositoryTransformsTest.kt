@@ -226,6 +226,12 @@ class RepositoryTransformsTest {
         )
         assertThat(RepositoryTransforms.parseReaderSetting("AUTO", "RIGHT_TO_LEFT", "FIT").viewMode)
             .isEqualTo(ViewMode.AUTO)
+        assertThat(RepositoryTransforms.parseReaderSetting("SPLIT", "RIGHT_TO_LEFT", "SLICE").viewMode)
+            .isEqualTo(ViewMode.SPLIT)
+        assertThat(RepositoryTransforms.parseReaderSetting("PAGE", "RIGHT_TO_LEFT", "SLICE").viewMode)
+            .isEqualTo(ViewMode.SPLIT)
+        assertThat(RepositoryTransforms.parseReaderSetting("SINGLE", "RIGHT_TO_LEFT", "SLICE").viewMode)
+            .isEqualTo(ViewMode.SPLIT)
 
         val fallback = RepositoryTransforms.parseReaderSetting("SINGLE", "bad", "bad")
         assertThat(fallback.viewMode).isEqualTo(ViewMode.PAGE)

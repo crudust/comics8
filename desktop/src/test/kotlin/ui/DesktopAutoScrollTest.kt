@@ -202,4 +202,39 @@ class DesktopAutoScrollTest {
         assertThat(viewModel.state.value.viewMode).isEqualTo(ViewMode.AUTO)
         assertThat(viewModel.state.value.readerToastMessage).isNull()
     }
+
+    @Test
+    fun autoModeResolvesWideSpreadSeriesToSplitOnPortraitAndPageOnLandscape() = runBlocking(Dispatchers.Main) {
+        val ep1 = EpisodeItem(wrId = "ep1", title = "1화", date = "2026-01-01", thumbUrl = null, href = "href1")
+
+        viewModel.openSeries(series("auto_wide_spread"))
+        viewModel.updateViewportSize(400, 900)
+        viewModel.setViewMode(ViewMode.AUTO)
+        viewModel.openEpisode(ep1)
+
+        // Cover (portrait) + 2 wide 2-page spread scans
+        viewModel.recordImageAspectRatio(0, 1000, 1400)
+        viewModel.recordImageAspectRatio(1, 2000, 1400)
+        viewModel.recordImageAspectRatio(2, 2000, 1400)
+
+        assertThat(viewModel.state.value.viewMode).isEqualTo(ViewMode.AUTO)
+        assertThat(viewModel.state.value.effectiveViewMode).isEqualTo(ViewMode.SPLIT)
+
+        // Rotating / resizing to landscape keeps the full spread as a single PAGE
+        viewModel.updateViewportSize(1280, 800)
+        assertThat(viewModel.state.value.effectiveViewMode).isEqualTo(ViewMode.PAGE)
+    }
+
+    @Test
+    fun autoModeResolvesDualOnPhoneSizedLandscapeViewport() = runBlocking(Dispatchers.Main) {
+        val ep1 = EpisodeItem(wrId = "ep1", title = "1화", date = "2026-01-01", thumbUrl = null, href = "href1")
+
+        viewModel.openSeries(series("auto_phone_landscape"))
+        viewModel.updateViewportSize(750, 400)
+        viewModel.setViewMode(ViewMode.AUTO)
+        viewModel.openEpisode(ep1)
+
+        viewModel.recordImageAspectRatio(0, 920, 1000)
+        assertThat(viewModel.state.value.effectiveViewMode).isEqualTo(ViewMode.DUAL)
+    }
 }

@@ -113,6 +113,10 @@ interface AppStrings {
     val viewModeSingleLong: String
     val viewModeSingleShort: String
     val viewModeSingleDesc: String
+    val viewModeSplit: String
+    val viewModeSplitLong: String
+    val viewModeSplitShort: String
+    val viewModeSplitDesc: String
     val viewModeDual: String
     val viewModeDualLong: String
     val viewModeDualShort: String

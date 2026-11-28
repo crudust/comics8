@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Download
@@ -83,7 +84,6 @@ import com.comics8.core.i18n.displayLabel
 import com.comics8.core.i18n.getSourceOrNull
 import com.comics8.core.model.EpisodeSortOrder
 import com.comics8.core.model.ReadDirection
-import com.comics8.core.model.SplitMode
 import com.comics8.core.model.ViewMode
 import com.comics8.core.source.ComicSource
 import com.comics8.core.source.SourceType
@@ -364,6 +364,7 @@ fun TopBar(
                         Triple(ViewMode.AUTO, Icons.Default.AutoAwesome, strings.viewModeAuto to strings.viewModeAutoShort),
                         Triple(ViewMode.SCROLL, Icons.Default.SwapVert, strings.viewModeScroll to strings.viewModeScrollShort),
                         Triple(ViewMode.PAGE, Icons.Default.Description, strings.viewModeSingle to strings.viewModeSingleShort),
+                        Triple(ViewMode.SPLIT, Icons.Default.ContentCut, strings.viewModeSplit to strings.viewModeSplitShort),
                         Triple(ViewMode.DUAL, Icons.AutoMirrored.Filled.MenuBook, strings.viewModeDual to strings.viewModeDualShort),
                     )
                     viewModeEntries.forEach { (mode, icon, labels) ->
@@ -416,34 +417,6 @@ fun TopBar(
                             label = ltrLabel,
                             selectedContainer = if (compactMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
                             selectedContent = if (compactMode) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondary,
-                            compact = compactMode,
-                        )
-                    }
-                }
-
-                if (state.effectiveViewMode == ViewMode.PAGE) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
-                            .padding(2.dp),
-                    ) {
-                        ReaderOptionChip(
-                            selected = state.splitMode == SplitMode.FIT,
-                            onClick = { controller.setSplitMode(SplitMode.FIT) },
-                            label = "Fit",
-                            selectedContainer = if (compactMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary,
-                            selectedContent = if (compactMode) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onTertiary,
-                            compact = compactMode,
-                        )
-                        ReaderOptionChip(
-                            selected = state.splitMode == SplitMode.SLICE,
-                            onClick = { controller.setSplitMode(SplitMode.SLICE) },
-                            label = "Slice",
-                            selectedContainer = if (compactMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary,
-                            selectedContent = if (compactMode) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onTertiary,
                             compact = compactMode,
                         )
                     }

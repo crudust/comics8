@@ -27,7 +27,6 @@ import com.comics8.core.i18n.displayDescription
 import com.comics8.core.i18n.displayLabel
 import com.comics8.core.model.PageTapZone
 import com.comics8.core.model.ReadDirection
-import com.comics8.core.model.SplitMode
 import com.comics8.core.model.ViewMode
 import com.comics8.shared.ui.theme.LocalStrings
 
@@ -36,7 +35,6 @@ fun ReaderSettingsPane(
     state: AppUiState,
     controller: SharedAppController,
     modifier: Modifier = Modifier,
-    showSplitMode: Boolean = false,
     showTapZoneAndVolume: Boolean = false,
 ) {
     val strings = LocalStrings.current
@@ -56,7 +54,7 @@ fun ReaderSettingsPane(
             )
             Spacer(Modifier.height(8.dp))
 
-            val viewModes = listOf(ViewMode.AUTO, ViewMode.SCROLL, ViewMode.PAGE, ViewMode.DUAL)
+            val viewModes = listOf(ViewMode.AUTO, ViewMode.SCROLL, ViewMode.PAGE, ViewMode.SPLIT, ViewMode.DUAL)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 viewModes.forEachIndexed { index, mode ->
                     val isSelected = state.viewMode == mode
@@ -136,60 +134,6 @@ fun ReaderSettingsPane(
                     }
                     if (index < readDirections.lastIndex) {
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-                    }
-                }
-            }
-
-            if (showSplitMode) {
-                Spacer(Modifier.height(16.dp))
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
-                Spacer(Modifier.height(16.dp))
-
-                Text(
-                    text = "와이드 분할 모드 (단면 보기)",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Spacer(Modifier.height(8.dp))
-
-                val splitModes = listOf(SplitMode.FIT, SplitMode.SLICE)
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    splitModes.forEachIndexed { index, mode ->
-                        val isSelected = state.splitMode == mode
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { controller.setSplitMode(mode) }
-                                .padding(vertical = 4.dp),
-                        ) {
-                            RadioButton(
-                                selected = isSelected,
-                                onClick = { controller.setSplitMode(mode) },
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = if (mode == SplitMode.FIT) "화면 맞춤 (Fit)" else "2장 분할 (Slice)",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                )
-                                Text(
-                                    text = if (mode == SplitMode.FIT) {
-                                        "와이드 2페이지 펼침 이미지를 화면 비율에 맞춰 한 번에 표시합니다."
-                                    } else {
-                                        "와이드 2페이지 펼침 이미지를 좌/우 페이지로 분할하여 순서대로 표시합니다."
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                        if (index < splitModes.lastIndex) {
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-                        }
                     }
                 }
             }

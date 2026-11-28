@@ -334,7 +334,6 @@ private fun ComicsDesktopAppContent(
             controller = viewModel.controller,
             appVersion = DesktopVersion.VERSION_NAME,
             compactTopBar = false,
-            showSplitModeInSettings = true,
             updateConfirmActionLabel = strings.actionUpdateAndRestart,
             onConfirmUpdate = viewModel::startUpdate,
             onImportJs = { pickJsFile()?.let(viewModel::importJsFile) },

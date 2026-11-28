@@ -490,14 +490,19 @@ internal class ReaderSessionCoordinator(
     }
 
     fun setViewMode(mode: ViewMode) {
-        if (platform.persistGlobalReaderDefaults &&
-            (mode == ViewMode.AUTO || mode == ViewMode.SCROLL || mode == ViewMode.PAGE)
-        ) {
+        if (platform.persistGlobalReaderDefaults) {
             controller.singleViewPreference = mode
         }
         preAutoSwitchViewMode = null
         if (mode == ViewMode.AUTO) autoSwitchedEpisodeId = null
-        state.update { it.copy(viewMode = mode) }
+        state.update {
+            val syncedSplitMode = when (mode) {
+                ViewMode.SPLIT -> SplitMode.SLICE
+                ViewMode.PAGE -> SplitMode.FIT
+                else -> it.splitMode
+            }
+            it.copy(viewMode = mode, splitMode = syncedSplitMode)
+        }
         persistCurrentReaderSetting()
     }
 

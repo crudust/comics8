@@ -118,7 +118,13 @@ data class AppUiState(
 
     /** Mode that actually renders the reader; [ViewMode.AUTO] resolves from viewport and page shapes. */
     val effectiveViewMode: ViewMode
-        get() = ReaderDomain.resolveEffectiveViewMode(viewMode, viewportWidthDp, viewportHeightDp, imageAspectRatios)
+        get() = ReaderDomain.resolveEffectiveViewMode(
+            viewMode = viewMode,
+            widthDp = viewportWidthDp,
+            heightDp = viewportHeightDp,
+            imageAspectRatios = imageAspectRatios,
+            totalImages = readerImages.size,
+        )
 
     val writesDownloads: Boolean
         get() {

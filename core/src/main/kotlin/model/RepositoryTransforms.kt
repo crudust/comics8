@@ -207,16 +207,21 @@ object RepositoryTransforms {
         viewMode: String,
         readDirection: String,
         splitMode: String,
-    ): ReaderSettingValues = ReaderSettingValues(
-        viewMode = when (viewMode.uppercase()) {
+    ): ReaderSettingValues {
+        val parsedSplitMode = enumValueOrDefault(splitMode, SplitMode.FIT)
+        val parsedViewMode = when (viewMode.uppercase()) {
             "AUTO" -> ViewMode.AUTO
             "SCROLL" -> ViewMode.SCROLL
+            "SPLIT" -> ViewMode.SPLIT
             "DUAL" -> ViewMode.DUAL
-            else -> ViewMode.PAGE
-        },
-        readDirection = enumValueOrDefault(readDirection, ReadDirection.RIGHT_TO_LEFT),
-        splitMode = enumValueOrDefault(splitMode, SplitMode.FIT),
-    )
+            else -> if (parsedSplitMode == SplitMode.SLICE) ViewMode.SPLIT else ViewMode.PAGE
+        }
+        return ReaderSettingValues(
+            viewMode = parsedViewMode,
+            readDirection = enumValueOrDefault(readDirection, ReadDirection.RIGHT_TO_LEFT),
+            splitMode = parsedSplitMode,
+        )
+    }
 
     private inline fun <reified T : Enum<T>> enumValueOrDefault(value: String, default: T): T =
         try {

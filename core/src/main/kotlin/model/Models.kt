@@ -73,6 +73,7 @@ enum class ViewMode(val label: String) {
     AUTO("자동"),
     SCROLL("세로 스크롤"),
     PAGE("단면 페이지"),
+    SPLIT("분할 보기"),
     DUAL("양쪽보기"),
 }
 
@@ -249,7 +250,7 @@ fun buildSinglePageSlices(
     val slices = mutableListOf<SinglePageSlice>()
     for (i in 0 until imageCount) {
         val ratio = aspectRatios[i]
-        val isWide = ratio != null && ratio >= 1.0f
+        val isWide = ReaderDomain.isWideSpreadRatio(ratio)
         if (isWide) {
             if (readDirection == ReadDirection.RIGHT_TO_LEFT) {
                 slices.add(SinglePageSlice(i, ImageHalf.RIGHT))
@@ -279,7 +280,7 @@ fun buildDualSpreads(
     var i = 0
     while (i < imageCount) {
         val ratio = aspectRatios[i]
-        val isWide = ratio != null && ratio >= 1.0f
+        val isWide = ReaderDomain.isWideSpreadRatio(ratio)
 
         if (isWide) {
             spreads.add(DualSpread.Single(i))
@@ -287,7 +288,7 @@ fun buildDualSpreads(
         } else {
             if (i + 1 < imageCount) {
                 val nextRatio = aspectRatios[i + 1]
-                val nextIsWide = nextRatio != null && nextRatio >= 1.0f
+                val nextIsWide = ReaderDomain.isWideSpreadRatio(nextRatio)
                 if (nextIsWide) {
                     spreads.add(DualSpread.Single(i))
                     i += 1

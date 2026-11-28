@@ -494,6 +494,69 @@ class SharedAppControllerTest {
         }
     }
 
+    @Test
+    fun setViewModeSplitPersistsSplitAndSyncsSlice() = runBlocking {
+        val loaded = withTimeout(5_000) { controller.state.first { it.items.isNotEmpty() } }
+        val series = loaded.items.first()
+        controller.openSeries(series)
+        controller.setViewMode(ViewMode.SPLIT)
+
+        withTimeout(5_000) {
+            while (controller.repository.getReaderSetting(series.workId())?.viewMode != ViewMode.SPLIT) {
+                delay(20)
+            }
+        }
+        val saved = controller.repository.getReaderSetting(series.workId())
+        assertThat(saved?.viewMode).isEqualTo(ViewMode.SPLIT)
+        assertThat(saved?.splitMode).isEqualTo(SplitMode.SLICE)
+    }
+
+    @Test
+    fun updateViewportSizeDoesNotClobberExplicitViewModeWhenPersistingGlobalDefaults() = runBlocking {
+        val repo = SharedToonRepository(
+            client = ToonClient(sources = { registry }),
+            store = store,
+            sourceSettings = sourceSettings,
+            sources = registry,
+            isSourceEnabled = { sourceSettings.isEnabled(it) },
+            installedIds = { sourceSettings.installedIds() },
+        )
+        val persistentPlatform = object : PlatformHost {
+            override val prefs = this@SharedAppControllerTest.prefs
+            override val sourceSettings = this@SharedAppControllerTest.sourceSettings
+            override val localLibraryIndexFile = File(tempDir, "local-persist.json")
+            override fun materializeLocalRoots() = emptyList<File>()
+            override fun clearImageMemory(role: ImageCacheRole) {}
+            override fun evictReaderImage(url: String) {}
+            override val persistGlobalReaderDefaults = true
+            override val appVersionName = "1.0.0"
+            override val appVersionCode = 1
+            override suspend fun checkForAppUpdate(serverUrl: String, strings: AppStrings) =
+                AppUpdateState(currentVersion = "1.0.0", latestVersion = "1.0.0")
+            override suspend fun downloadAndInstallUpdate(downloadUrl: String, onProgress: (Float) -> Unit) =
+                Result.success(Unit)
+        }
+        val persistentController = SharedAppController(
+            scope = scope,
+            repository = repo,
+            jsPackStore = JsPackStore(File(tempDir, "js-persist")),
+            networkSourceStore = NetworkSourceStore(File(tempDir, "net-persist.json")),
+            platform = persistentPlatform,
+        )
+        try {
+            val loaded = withTimeout(5_000) { persistentController.state.first { it.items.isNotEmpty() } }
+            persistentController.openSeries(loaded.items.first())
+            persistentController.setViewMode(ViewMode.SPLIT)
+            persistentController.updateViewportSize(800, 420)
+
+            assertThat(persistentController.state.value.viewMode).isEqualTo(ViewMode.SPLIT)
+            assertThat(persistentController.state.value.viewportWidthDp).isEqualTo(800)
+            assertThat(persistentController.state.value.viewportHeightDp).isEqualTo(420)
+        } finally {
+            persistentController.close()
+        }
+    }
+
     private class StubSource(
         private val sourceId: String = "stub",
     ) : ComicSource {

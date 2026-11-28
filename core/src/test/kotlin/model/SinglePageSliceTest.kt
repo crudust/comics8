@@ -52,16 +52,32 @@ class SinglePageSliceTest {
     }
 
     @Test
-    fun sliceModeKeepsNormalPortraitsIntact() {
+    fun sliceModeKeepsNormalPortraitsAndNearSquarePagesIntact() {
         val slices = buildSinglePageSlices(
-            imageCount = 2,
-            aspectRatios = mapOf(0 to 0.7f, 1 to 0.75f),
+            imageCount = 4,
+            aspectRatios = mapOf(0 to 0.7f, 1 to 0.75f, 2 to 1.0f, 3 to 1.14f),
             splitMode = SplitMode.SLICE,
             readDirection = ReadDirection.RIGHT_TO_LEFT,
         )
         assertThat(slices).containsExactly(
             SinglePageSlice(0, ImageHalf.FULL),
             SinglePageSlice(1, ImageHalf.FULL),
+            SinglePageSlice(2, ImageHalf.FULL),
+            SinglePageSlice(3, ImageHalf.FULL),
+        ).inOrder()
+    }
+
+    @Test
+    fun sliceModeSplitsAtWideThresholdBoundary() {
+        val slices = buildSinglePageSlices(
+            imageCount = 1,
+            aspectRatios = mapOf(0 to 1.15f),
+            splitMode = SplitMode.SLICE,
+            readDirection = ReadDirection.LEFT_TO_RIGHT,
+        )
+        assertThat(slices).containsExactly(
+            SinglePageSlice(0, ImageHalf.LEFT),
+            SinglePageSlice(0, ImageHalf.RIGHT),
         ).inOrder()
     }
 

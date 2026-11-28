@@ -135,6 +135,11 @@ class I18nTest {
         assertThat(com.comics8.core.model.ViewMode.SCROLL.displayLabel(ja)).isEqualTo("縦スクロール (Webtoon)")
         assertThat(com.comics8.core.model.ViewMode.SCROLL.displayShortLabel(ko)).isEqualTo("스크롤")
         assertThat(com.comics8.core.model.ViewMode.SCROLL.displayShortLabel(en)).isEqualTo("Scroll")
+        assertThat(com.comics8.core.model.ViewMode.SPLIT.displayLabel(ko)).isEqualTo("분할 보기")
+        assertThat(com.comics8.core.model.ViewMode.SPLIT.displayLabel(en)).isEqualTo("Split View")
+        assertThat(com.comics8.core.model.ViewMode.SPLIT.displayShortLabel(ko)).isEqualTo("분할")
+        assertThat(com.comics8.core.model.ViewMode.SPLIT.displayShortLabel(en)).isEqualTo("Split")
+        assertThat(com.comics8.core.model.ViewMode.SPLIT.displayDescription(en)).isNotEmpty()
 
         // ReadDirection
         assertThat(com.comics8.core.model.ReadDirection.RIGHT_TO_LEFT.displayLabel(ko)).isEqualTo("오른쪽 → 왼쪽 (만화)")

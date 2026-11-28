@@ -60,6 +60,8 @@ class SharedAppController(
             when (prefs.getString("single_view_mode", ViewMode.AUTO.name)) {
                 ViewMode.AUTO.name -> ViewMode.AUTO
                 ViewMode.PAGE.name -> ViewMode.PAGE
+                ViewMode.SPLIT.name -> ViewMode.SPLIT
+                ViewMode.DUAL.name -> ViewMode.DUAL
                 else -> ViewMode.SCROLL
             }
         } catch (_: Exception) {
@@ -435,23 +437,11 @@ class SharedAppController(
     fun updateViewportSize(widthDp: Int, heightDp: Int) {
         currentScreenWidthDp = widthDp
         currentScreenHeightDp = heightDp
-        if (platform.persistGlobalReaderDefaults) {
-            val targetMode = resolveTargetViewMode(widthDp, heightDp)
-            _state.update {
-                it.copy(
-                    viewportWidthDp = widthDp,
-                    viewportHeightDp = heightDp,
-                    viewMode = targetMode,
-                    readDirection = globalReadDirection,
-                )
-            }
-        } else {
-            _state.update {
-                if (it.viewportWidthDp == widthDp && it.viewportHeightDp == heightDp) {
-                    it
-                } else {
-                    it.copy(viewportWidthDp = widthDp, viewportHeightDp = heightDp)
-                }
+        _state.update {
+            if (it.viewportWidthDp == widthDp && it.viewportHeightDp == heightDp) {
+                it
+            } else {
+                it.copy(viewportWidthDp = widthDp, viewportHeightDp = heightDp)
             }
         }
     }

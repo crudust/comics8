@@ -69,6 +69,7 @@ import androidx.compose.ui.unit.dp
 import coil3.SingletonImageLoader
 import coil3.compose.LocalPlatformContext
 import coil3.request.ImageRequest
+import coil3.request.SuccessResult
 import coil3.size.Size as CoilSize
 import com.comics8.core.app.AppUiState
 import com.comics8.core.app.SharedAppController
@@ -79,6 +80,7 @@ import com.comics8.core.model.PageTapZone
 import com.comics8.core.model.ReadDirection
 import com.comics8.core.model.ReaderDomain
 import com.comics8.core.model.ReaderTiles
+import com.comics8.core.model.SplitMode
 import com.comics8.core.model.ViewMode
 import com.comics8.core.model.buildDualSpreads
 import com.comics8.core.model.buildSinglePageSlices
@@ -181,11 +183,14 @@ fun SharedReaderPane(
                     modifier = Modifier.fillMaxSize(),
                 )
             }
-            state.effectiveViewMode == ViewMode.PAGE || state.effectiveViewMode == ViewMode.AUTO -> {
+            state.effectiveViewMode == ViewMode.PAGE ||
+                state.effectiveViewMode == ViewMode.SPLIT ||
+                state.effectiveViewMode == ViewMode.AUTO -> {
                 SharedReaderSinglePagePane(
                     state = state,
                     controller = controller,
                     config = config,
+                    splitWidePages = state.effectiveViewMode == ViewMode.SPLIT,
                     zoomContainer = zoomContainer,
                     pagedModifier = pagedModifier,
                     onRegisterNavActions = onRegisterNavActions,
@@ -669,6 +674,7 @@ private fun SharedReaderSinglePagePane(
     state: AppUiState,
     controller: SharedAppController,
     config: ReaderPlatformConfig,
+    splitWidePages: Boolean,
     zoomContainer: @Composable (
         resetKey: Any?,
         isActivePage: Boolean,
@@ -688,8 +694,9 @@ private fun SharedReaderSinglePagePane(
 ) {
     val strings = LocalStrings.current
     val isR2L = state.readDirection == ReadDirection.RIGHT_TO_LEFT
-    val slices = remember(state.readerImages.size, state.imageAspectRatios, state.splitMode, state.readDirection) {
-        buildSinglePageSlices(state.readerImages.size, state.imageAspectRatios, state.splitMode, state.readDirection)
+    val effectiveSplitMode = if (splitWidePages) SplitMode.SLICE else SplitMode.FIT
+    val slices = remember(state.readerImages.size, state.imageAspectRatios, effectiveSplitMode, state.readDirection) {
+        buildSinglePageSlices(state.readerImages.size, state.imageAspectRatios, effectiveSplitMode, state.readDirection)
     }
     val initialPage = remember(state.currentEpisode?.wrId) {
         val targetPage = state.currentEpisode?.lastReadPage ?: 0
@@ -749,17 +756,21 @@ private fun SharedReaderSinglePagePane(
         }
         LaunchedEffect(pagerState.currentPage, state.readerImages) {
             val imageLoader = SingletonImageLoader.get(platformContext)
-            val targetUrls = config.singlePreloadOffsets.mapNotNull { offset ->
+            val targets = config.singlePreloadOffsets.mapNotNull { offset ->
                 val nextSlice = currentSlices.getOrNull(pagerState.currentPage + offset) ?: return@mapNotNull null
-                state.readerImages.getOrNull(nextSlice.imageIndex)
-            }.distinct()
-            for (targetUrl in targetUrls) {
+                val url = state.readerImages.getOrNull(nextSlice.imageIndex) ?: return@mapNotNull null
+                nextSlice.imageIndex to url
+            }.distinctBy { it.second }
+            for ((imageIndex, targetUrl) in targets) {
                 val request = ImageRequest.Builder(platformContext)
                     .data(targetUrl)
                     .imageCacheRole(ImageCacheRole.READER, targetUrl)
                     .readerImageSizing(readerMaxBitmapSize)
                     .build()
-                imageLoader.execute(request)
+                val result = imageLoader.execute(request)
+                if (result is SuccessResult && result.image.width > 0 && result.image.height > 0) {
+                    controller.recordImageAspectRatio(imageIndex, result.image.width, result.image.height)
+                }
             }
         }
 
@@ -914,24 +925,29 @@ private fun SharedReaderDualPagePane(
         }
         LaunchedEffect(pagerState.currentPage, state.readerImages) {
             val imageLoader = SingletonImageLoader.get(platformContext)
-            val urls = config.dualPreloadOffsets.flatMap { offset ->
+            val targets = config.dualPreloadOffsets.flatMap { offset ->
                 when (val nextSpread = currentSpreads.getOrNull(pagerState.currentPage + offset)) {
-                    is DualSpread.Single -> listOfNotNull(state.readerImages.getOrNull(nextSpread.index))
+                    is DualSpread.Single -> listOfNotNull(
+                        state.readerImages.getOrNull(nextSpread.index)?.let { nextSpread.index to it },
+                    )
                     is DualSpread.Dual -> listOfNotNull(
-                        state.readerImages.getOrNull(nextSpread.firstIndex),
-                        state.readerImages.getOrNull(nextSpread.secondIndex),
+                        state.readerImages.getOrNull(nextSpread.firstIndex)?.let { nextSpread.firstIndex to it },
+                        state.readerImages.getOrNull(nextSpread.secondIndex)?.let { nextSpread.secondIndex to it },
                     )
                     null -> emptyList()
                 }
-            }.distinct()
-            for (url in urls) {
-                imageLoader.execute(
+            }.distinctBy { it.second }
+            for ((imageIndex, url) in targets) {
+                val result = imageLoader.execute(
                     ImageRequest.Builder(platformContext)
                         .data(url)
                         .imageCacheRole(ImageCacheRole.READER, url)
                         .readerImageSizing(readerMaxBitmapSize)
                         .build(),
                 )
+                if (result is SuccessResult && result.image.width > 0 && result.image.height > 0) {
+                    controller.recordImageAspectRatio(imageIndex, result.image.width, result.image.height)
+                }
             }
         }
 
@@ -968,7 +984,7 @@ private fun SharedReaderDualPagePane(
                 when (val spread = spreads.getOrNull(spreadIdx)) {
                     is DualSpread.Single -> {
                         val ratio = state.imageAspectRatios[spread.index]
-                        val isWide = ratio != null && ratio >= 1.0f
+                        val isWide = ReaderDomain.isWideSpreadRatio(ratio)
                         val url = state.readerImages.getOrNull(spread.index)
                         if (isWide) {
                             if (url != null) {

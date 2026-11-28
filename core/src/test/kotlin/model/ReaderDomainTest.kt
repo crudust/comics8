@@ -36,6 +36,8 @@ class ReaderDomainTest {
         val webtoonRatios = mapOf(0 to 0.2f)
         assertThat(ReaderDomain.resolveEffectiveViewMode(ViewMode.PAGE, 1200, 800, webtoonRatios))
             .isEqualTo(ViewMode.PAGE)
+        assertThat(ReaderDomain.resolveEffectiveViewMode(ViewMode.SPLIT, 1200, 800, webtoonRatios))
+            .isEqualTo(ViewMode.SPLIT)
         assertThat(ReaderDomain.resolveEffectiveViewMode(ViewMode.DUAL, 400, 900, webtoonRatios))
             .isEqualTo(ViewMode.DUAL)
         assertThat(ReaderDomain.resolveEffectiveViewMode(ViewMode.SCROLL, 400, 900, webtoonRatios))
@@ -60,9 +62,72 @@ class ReaderDomainTest {
             .isEqualTo(ViewMode.DUAL)
         assertThat(ReaderDomain.resolveEffectiveViewMode(ViewMode.AUTO, 400, 900, comicRatios))
             .isEqualTo(ViewMode.PAGE)
-        // Narrow landscape does not qualify for a spread.
+        // Landscape phone (750x400) and compact 700x600 window qualify for dual spread.
+        assertThat(ReaderDomain.resolveEffectiveViewMode(ViewMode.AUTO, 750, 400, comicRatios))
+            .isEqualTo(ViewMode.DUAL)
         assertThat(ReaderDomain.resolveEffectiveViewMode(ViewMode.AUTO, 700, 600, comicRatios))
+            .isEqualTo(ViewMode.DUAL)
+        // Narrow split-screen (390x370) or near-square (700x680) stays single page.
+        assertThat(ReaderDomain.resolveEffectiveViewMode(ViewMode.AUTO, 390, 370, comicRatios))
             .isEqualTo(ViewMode.PAGE)
+        assertThat(ReaderDomain.resolveEffectiveViewMode(ViewMode.AUTO, 700, 680, comicRatios))
+            .isEqualTo(ViewMode.PAGE)
+    }
+
+    @Test
+    fun wideSpreadRatioAndViewportContracts() {
+        assertThat(ReaderDomain.isWideSpreadRatio(null)).isFalse()
+        assertThat(ReaderDomain.isWideSpreadRatio(0.95f)).isFalse()
+        assertThat(ReaderDomain.isWideSpreadRatio(1.0f)).isFalse()
+        assertThat(ReaderDomain.isWideSpreadRatio(1.14f)).isFalse()
+        assertThat(ReaderDomain.isWideSpreadRatio(1.15f)).isTrue()
+        assertThat(ReaderDomain.isWideSpreadRatio(1.45f)).isTrue()
+
+        assertThat(ReaderDomain.isLandscapeViewport(750, 360)).isTrue()
+        assertThat(ReaderDomain.isLandscapeViewport(841, 673)).isTrue()
+        assertThat(ReaderDomain.isLandscapeViewport(390, 370)).isFalse()
+        assertThat(ReaderDomain.isLandscapeViewport(700, 680)).isFalse()
+        assertThat(ReaderDomain.isLandscapeViewport(400, 900)).isFalse()
+    }
+
+    @Test
+    fun detectContentFormatAndWideSpreadResolutionMatrix() {
+        // Cover (portrait) + wide spreads -> WIDE_SPREAD_SERIES
+        val coverAndWideSpreads = mapOf(0 to 0.72f, 1 to 1.42f, 2 to 1.40f)
+        assertThat(ReaderDomain.detectContentFormat(coverAndWideSpreads, totalImages = 20))
+            .isEqualTo(ReaderDomain.ReaderContentFormat.WIDE_SPREAD_SERIES)
+        assertThat(ReaderDomain.resolveEffectiveViewMode(ViewMode.AUTO, 400, 900, coverAndWideSpreads, totalImages = 20))
+            .isEqualTo(ViewMode.SPLIT)
+        assertThat(ReaderDomain.resolveEffectiveViewMode(ViewMode.AUTO, 1200, 800, coverAndWideSpreads, totalImages = 20))
+            .isEqualTo(ViewMode.PAGE)
+
+        // Pure wide spreads
+        val pureWideSpreads = mapOf(0 to 1.38f, 1 to 1.40f)
+        assertThat(ReaderDomain.resolveEffectiveViewMode(ViewMode.AUTO, 400, 900, pureWideSpreads, totalImages = 15))
+            .isEqualTo(ViewMode.SPLIT)
+        assertThat(ReaderDomain.resolveEffectiveViewMode(ViewMode.AUTO, 841, 673, pureWideSpreads, totalImages = 15))
+            .isEqualTo(ViewMode.PAGE)
+
+        // Short 1-2 page episode with wide image
+        val shortWide = mapOf(0 to 1.4f)
+        assertThat(ReaderDomain.detectContentFormat(shortWide, totalImages = 2))
+            .isEqualTo(ReaderDomain.ReaderContentFormat.WIDE_SPREAD_SERIES)
+        assertThat(ReaderDomain.resolveEffectiveViewMode(ViewMode.AUTO, 400, 900, shortWide, totalImages = 2))
+            .isEqualTo(ViewMode.SPLIT)
+
+        // Portrait manga with one occasional wide spread stays STANDARD_COMIC -> DUAL in landscape
+        val portraitWithOneSpread = mapOf(0 to 0.72f, 1 to 1.42f, 2 to 0.72f, 3 to 0.72f)
+        assertThat(ReaderDomain.detectContentFormat(portraitWithOneSpread, totalImages = 20))
+            .isEqualTo(ReaderDomain.ReaderContentFormat.STANDARD_COMIC)
+        assertThat(ReaderDomain.resolveEffectiveViewMode(ViewMode.AUTO, 1200, 800, portraitWithOneSpread, totalImages = 20))
+            .isEqualTo(ViewMode.DUAL)
+
+        // Wide-ish portrait pages (0.92f, 0.95f) stay STANDARD_COMIC -> DUAL in landscape
+        val widerPortraits = mapOf(0 to 0.92f, 1 to 0.95f, 2 to 0.90f)
+        assertThat(ReaderDomain.detectContentFormat(widerPortraits, totalImages = 12))
+            .isEqualTo(ReaderDomain.ReaderContentFormat.STANDARD_COMIC)
+        assertThat(ReaderDomain.resolveEffectiveViewMode(ViewMode.AUTO, 750, 400, widerPortraits, totalImages = 12))
+            .isEqualTo(ViewMode.DUAL)
     }
 
     @Test

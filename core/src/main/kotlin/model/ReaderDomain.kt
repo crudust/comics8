@@ -155,24 +155,69 @@ object ReaderDomain {
     ): ViewMode =
         if (widthDp >= dualMinWidthDp && widthDp > heightDp) ViewMode.DUAL else singlePagePreference
 
-    private const val AUTO_DUAL_MIN_WIDTH_DP = 800
+    const val WIDE_SPREAD_RATIO_THRESHOLD = 1.15f
+    const val LANDSCAPE_DUAL_MIN_WIDTH_DP = 520
+    const val LANDSCAPE_MIN_ASPECT_RATIO = 1.05f
+
+    enum class ReaderContentFormat {
+        WEBTOON,
+        WIDE_SPREAD_SERIES,
+        STANDARD_COMIC,
+    }
+
+    fun isWideSpreadRatio(aspectRatio: Float?): Boolean =
+        aspectRatio != null && aspectRatio >= WIDE_SPREAD_RATIO_THRESHOLD
+
+    fun isLandscapeViewport(
+        widthDp: Int,
+        heightDp: Int,
+        minWidthDp: Int = LANDSCAPE_DUAL_MIN_WIDTH_DP,
+        minAspectRatio: Float = LANDSCAPE_MIN_ASPECT_RATIO,
+    ): Boolean = widthDp >= minWidthDp && heightDp > 0 && (widthDp.toFloat() / heightDp.toFloat()) >= minAspectRatio
+
+    fun isWideSpreadSeries(
+        imageAspectRatios: Map<Int, Float>,
+        totalImages: Int = 0,
+    ): Boolean {
+        if (imageAspectRatios.isEmpty()) return false
+        val wideCount = imageAspectRatios.values.count { isWideSpreadRatio(it) }
+        if (wideCount == 0) return false
+        if (totalImages in 1..2) return true
+        return wideCount >= 2 && wideCount * 2 >= imageAspectRatios.size
+    }
+
+    fun detectContentFormat(
+        imageAspectRatios: Map<Int, Float>,
+        totalImages: Int = 0,
+    ): ReaderContentFormat = when {
+        hasWebtoonStrip(imageAspectRatios) -> ReaderContentFormat.WEBTOON
+        isWideSpreadSeries(imageAspectRatios, totalImages) -> ReaderContentFormat.WIDE_SPREAD_SERIES
+        else -> ReaderContentFormat.STANDARD_COMIC
+    }
 
     /**
-     * Resolves the mode that actually renders the reader. [ViewMode.AUTO] detects a webtoon strip
-     * from the first observed pages, falls back to a dual spread on wide landscape viewports and to
-     * a single page elsewhere. Any explicit mode is returned untouched, so a user's own choice is
-     * never overridden by the detection.
+     * Resolves the mode that actually renders the reader. [ViewMode.AUTO] selects the layout from
+     * the detected content format and viewport orientation:
+     * - [ReaderContentFormat.WEBTOON] -> [ViewMode.SCROLL]
+     * - [ReaderContentFormat.WIDE_SPREAD_SERIES] -> [ViewMode.PAGE] (landscape) / [ViewMode.SPLIT] (portrait)
+     * - [ReaderContentFormat.STANDARD_COMIC] -> [ViewMode.DUAL] (landscape) / [ViewMode.PAGE] (portrait)
+     * Any explicit mode is returned untouched, so a user's own choice is never overridden.
      */
     fun resolveEffectiveViewMode(
         viewMode: ViewMode,
         widthDp: Int,
         heightDp: Int,
         imageAspectRatios: Map<Int, Float> = emptyMap(),
-        dualMinWidthDp: Int = AUTO_DUAL_MIN_WIDTH_DP,
+        totalImages: Int = 0,
+        dualMinWidthDp: Int = LANDSCAPE_DUAL_MIN_WIDTH_DP,
     ): ViewMode {
         if (viewMode != ViewMode.AUTO) return viewMode
-        if (hasWebtoonStrip(imageAspectRatios)) return ViewMode.SCROLL
-        return if (widthDp >= dualMinWidthDp && widthDp > heightDp) ViewMode.DUAL else ViewMode.PAGE
+        val isLandscape = isLandscapeViewport(widthDp, heightDp, minWidthDp = dualMinWidthDp)
+        return when (detectContentFormat(imageAspectRatios, totalImages)) {
+            ReaderContentFormat.WEBTOON -> ViewMode.SCROLL
+            ReaderContentFormat.WIDE_SPREAD_SERIES -> if (isLandscape) ViewMode.PAGE else ViewMode.SPLIT
+            ReaderContentFormat.STANDARD_COMIC -> if (isLandscape) ViewMode.DUAL else ViewMode.PAGE
+        }
     }
 
     /** Webtoon detection only inspects the same leading pages the auto-switch watches. */
